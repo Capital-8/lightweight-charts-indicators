@@ -199,11 +199,34 @@ function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; latest: number[] 
   const closes = bars.map((b) => ({ time: b.time + interval }));
   const calendar = bars.some((b) => weekend(b.time)) && closes.some((b) => weekend(b.time));
   const closeStarts = calendar ? periodStarts(closes, tf) : [];
+  // The last bar of a symbol that does not trade every day: its period is complete when the next possible bar is in
+  // another period. The next bar is on the same day while the bar is earlier in the day than the last bar of the
+  // trading day before; else it is on the next weekday.
+  let lastEnds = true;
+  if (!calendar && n > 1) {
+    const DAY = 86400000;
+    const toMs = (t: number) => (ms ? t : t * 1000);
+    const lastMs = toMs(bars[n - 1].time);
+    const day = Math.floor(lastMs / DAY) * DAY;
+    let next = lastMs + toMs(interval);
+    let sessionOver = true;
+    if (toMs(interval) < DAY) {
+      let j = n - 2;
+      while (j >= 0 && toMs(bars[j].time) >= day) j--;
+      sessionOver = j < 0 || lastMs - day >= toMs(bars[j].time) % DAY;
+    }
+    if (sessionOver) {
+      next = day + DAY;
+      while (weekend(ms ? next : next / 1000)) next += DAY;
+    }
+    const withNext = periodStarts([...bars, { time: ms ? next : next / 1000 }], tf);
+    lastEnds = withNext[n] !== withNext[n - 1];
+  }
   const latest: number[] = [];
   for (let i = 0; i < n; i++) {
     let done = i === 0 ? -1 : latest[i - 1];
     if (i > 0 && group[i] !== group[i - 1]) done = Math.max(done, group[i] - 1);
-    const ends = i === n - 1 || starts[i + 1] !== starts[i];
+    const ends = i === n - 1 ? lastEnds : starts[i + 1] !== starts[i];
     const reaches = !calendar || closeStarts[i] !== starts[i];
     if (ends && reaches) done = Math.max(done, group[i]);
     latest.push(done);

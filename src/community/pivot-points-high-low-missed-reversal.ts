@@ -70,6 +70,8 @@ export const metadata = {
 /** Pine: indicator(max_labels_count = 500, max_lines_count = 500) */
 const MAX_LABELS = 500;
 const MAX_LINES = 500;
+/** Text colour of a label created without `textcolor` by a version 5 script */
+const DEFAULT_TEXT = '#363A45';
 
 /** A line or label as Pine keeps it: x coordinates are bar indexes */
 interface Ln { x1: number; y1: number; x2: number; y2: number; color: string; style?: 'dashed' | 'solid'; width?: number }
@@ -99,7 +101,8 @@ export function calculate(
     if (lines.length > MAX_LINES + 5) lines = lines.slice(lines.length - MAX_LINES);
     return l;
   };
-  const newLabel = (x: number, y: number, text: string, labelColor: string, style: 'label_up' | 'label_down', tooltip: number, textColor?: string) => {
+  // A label made without a text colour (the ghost labels) has the default text colour of a version 5 script
+  const newLabel = (x: number, y: number, text: string, labelColor: string, style: 'label_up' | 'label_down', tooltip: number, textColor = DEFAULT_TEXT) => {
     labels.push({ x, y, text, color: labelColor, style, tooltip: str.tostring(tooltip, '#.####'), textColor });
     if (labels.length > MAX_LABELS + 5) labels = labels.slice(labels.length - MAX_LABELS);
   };
