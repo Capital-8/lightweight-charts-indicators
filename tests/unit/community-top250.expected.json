@@ -1,0 +1,1679 @@
+{
+ "weis-wave-volume-lazybear": {
+  "daily": {
+   "plots": {
+    "plot0": 3200,
+    "plot1": 3200
+   }
+  },
+  "m15": {
+   "plots": {
+    "plot0": 4000,
+    "plot1": 4000
+   }
+  }
+ },
+ "ichimoku-hpotter": {
+  "daily": {
+   "plots": {
+    "plot0": 3192,
+    "plot1": 3175,
+    "plot2": 3174,
+    "plot3": 3123,
+    "plot4": 3149
+   },
+   "fills": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3992,
+    "plot1": 3975,
+    "plot2": 3974,
+    "plot3": 3923,
+    "plot4": 3949
+   },
+   "fills": 1
+  }
+ },
+ "self-aware-trend-system": {
+  "daily": {
+   "plots": {
+    "plot0": 3081
+   },
+   "lines": 5,
+   "labels": 175,
+   "tables": 3
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3888
+   },
+   "lines": 5,
+   "labels": 243,
+   "tables": 3
+  }
+ },
+ "vdub-binary-pro-3-v2": {
+  "daily": {
+   "error": "The timeframe \"30\" is lower than the chart timeframe \"1D\": the bars do not carry that data."
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3900,
+    "plot1": 3900,
+    "plot2": 3900,
+    "plot3": 3900,
+    "plot4": 3980,
+    "plot5": 3980,
+    "plot6": 3980,
+    "plot7": 3998,
+    "plot8": 3988,
+    "plot9": 397,
+    "plot10": 4000,
+    "plot11": 4000,
+    "plot12": 4000,
+    "plot13": 4000,
+    "plot14": 618,
+    "plot15": 0
+   },
+   "markers": 4002,
+   "bgColors": 4000,
+   "fills": 4
+  }
+ },
+ "ict-turtle-soup-flux-charts": {
+  "daily": {
+   "error": "Higher timeframe must be higher than current timeframe."
+  },
+  "m15": {
+   "plots": {},
+   "tables": 1
+  }
+ },
+ "cm-macd-custom-mtf-v5": {
+  "daily": {
+   "plots": {
+    "plot0": 3167,
+    "plot1": 3167,
+    "plot2": 3175,
+    "plot3": 150,
+    "plot4": 150
+   },
+   "hlines": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3967,
+    "plot1": 3967,
+    "plot2": 3975,
+    "plot3": 186,
+    "plot4": 187
+   },
+   "hlines": 1
+  }
+ },
+ "elliott-wave": {
+  "daily": {
+   "plots": {},
+   "lines": 220,
+   "boxes": 8,
+   "labels": 207,
+   "linefills": 3
+  },
+  "m15": {
+   "plots": {},
+   "lines": 272,
+   "boxes": 11,
+   "labels": 272,
+   "linefills": 2
+  }
+ },
+ "divergence-for-many-indicator-v3": {
+  "daily": {
+   "plots": {},
+   "lines": 52,
+   "labels": 52
+  },
+  "m15": {
+   "plots": {},
+   "lines": 54,
+   "labels": 54
+  }
+ },
+ "pure-price-action-ict-tools": {
+  "daily": {
+   "plots": {},
+   "lines": 133,
+   "boxes": 224,
+   "labels": 504
+  },
+  "m15": {
+   "plots": {},
+   "lines": 134,
+   "boxes": 226,
+   "labels": 500
+  }
+ },
+ "fibonacci-extension-retracement-pivot-points": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0,
+    "plot8": 0,
+    "plot9": 0,
+    "plot10": 0,
+    "plot11": 0,
+    "plot12": 0,
+    "plot13": 0,
+    "plot14": 0,
+    "plot15": 0,
+    "plot16": 0,
+    "plot17": 0,
+    "plot18": 0,
+    "plot19": 0,
+    "plot20": 0,
+    "plot21": 0,
+    "plot22": 0,
+    "plot23": 0,
+    "plot24": 0,
+    "plot25": 0,
+    "plot26": 0,
+    "plot27": 0,
+    "plot28": 0
+   },
+   "markers": 178,
+   "barColors": 2609,
+   "lines": 98,
+   "labels": 202,
+   "tables": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0,
+    "plot8": 0,
+    "plot9": 0,
+    "plot10": 0,
+    "plot11": 0,
+    "plot12": 0,
+    "plot13": 0,
+    "plot14": 0,
+    "plot15": 0,
+    "plot16": 0,
+    "plot17": 0,
+    "plot18": 0,
+    "plot19": 0,
+    "plot20": 0,
+    "plot21": 0,
+    "plot22": 0,
+    "plot23": 0,
+    "plot24": 0,
+    "plot25": 0,
+    "plot26": 0,
+    "plot27": 0,
+    "plot28": 0
+   },
+   "markers": 224,
+   "barColors": 3272,
+   "lines": 93,
+   "labels": 232,
+   "tables": 1
+  }
+ },
+ "support-resistance-interactive": {
+  "daily": {
+   "plots": {},
+   "boxes": 5,
+   "labels": 5
+  },
+  "m15": {
+   "plots": {},
+   "boxes": 5,
+   "labels": 5
+  }
+ },
+ "ssl-hybrid": {
+  "daily": {
+   "plots": {
+    "plot0": 3134,
+    "plot1": 3134,
+    "plot2": 3134,
+    "plot3": 3134,
+    "plot4": 3200,
+    "plot5": 0,
+    "plot6": 0
+   },
+   "markers": 375,
+   "barColors": 3200,
+   "tables": 1,
+   "fills": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3934,
+    "plot1": 3934,
+    "plot2": 3934,
+    "plot3": 3934,
+    "plot4": 4000,
+    "plot5": 0,
+    "plot6": 0
+   },
+   "markers": 470,
+   "barColors": 4000,
+   "tables": 1,
+   "fills": 1
+  }
+ },
+ "zero-lag-trend-signals": {
+  "daily": {
+   "error": "The timeframe \"5\" is lower than the chart timeframe \"1D\": the chart bars do not have that data"
+  },
+  "m15": {
+   "error": "The timeframe \"5\" is lower than the chart timeframe \"15\": the chart bars do not have that data"
+  }
+ },
+ "fx-market-sessions": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0
+   },
+   "labels": 1,
+   "tables": 2,
+   "plotCandles": 3200
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0
+   },
+   "lines": 60,
+   "boxes": 30,
+   "labels": 88,
+   "linefills": 30,
+   "tables": 2,
+   "plotCandles": 4000
+  }
+ },
+ "reversal-signals": {
+  "daily": {
+   "plots": {
+    "plot0": 1016,
+    "plot1": 0,
+    "plot2": 1745,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0
+   },
+   "markers": 299
+  },
+  "m15": {
+   "plots": {
+    "plot0": 1233,
+    "plot1": 0,
+    "plot2": 2060,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0
+   },
+   "markers": 361
+  }
+ },
+ "trend-direction-helper": {
+  "daily": {
+   "plots": {
+    "plot0": 1,
+    "plot1": 1,
+    "plot2": 1,
+    "plot3": 1,
+    "plot4": 1,
+    "plot5": 1,
+    "plot6": 1,
+    "plot7": 1
+   },
+   "lines": 8,
+   "labels": 50
+  },
+  "m15": {
+   "plots": {
+    "plot0": 1,
+    "plot1": 1,
+    "plot2": 1,
+    "plot3": 1,
+    "plot4": 1,
+    "plot5": 1,
+    "plot6": 1,
+    "plot7": 1
+   },
+   "lines": 8,
+   "labels": 50
+  }
+ },
+ "breaker-blocks-with-signals": {
+  "daily": {
+   "plots": {},
+   "lines": 5,
+   "boxes": 4,
+   "labels": 5
+  },
+  "m15": {
+   "plots": {},
+   "lines": 5,
+   "boxes": 4,
+   "labels": 5
+  }
+ },
+ "precision-sniper": {
+  "daily": {
+   "plots": {
+    "plot0": 3188,
+    "plot1": 3167,
+    "plot2": 3112,
+    "plot3": 2758,
+    "plot4": 2592
+   },
+   "tables": 2,
+   "fills": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3992,
+    "plot1": 3980,
+    "plot2": 3946,
+    "plot3": 4000,
+    "plot4": 4000
+   },
+   "tables": 2,
+   "fills": 1
+  }
+ },
+ "orb-algo-flux-charts": {
+  "daily": {
+   "error": "ORB Algo only works on timeframes lower than 15 min."
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0
+   },
+   "markers": 64,
+   "lines": 84,
+   "labels": 37,
+   "tables": 2
+  }
+ },
+ "market-structure-choch-bos": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0
+   },
+   "lines": 163,
+   "labels": 163,
+   "tables": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0
+   },
+   "lines": 195,
+   "labels": 195,
+   "tables": 1
+  }
+ },
+ "adaptive-trend-finder": {
+  "daily": {
+   "plots": {},
+   "lines": 3,
+   "linefills": 2,
+   "tables": 1
+  },
+  "m15": {
+   "plots": {},
+   "lines": 3,
+   "linefills": 2,
+   "tables": 1
+  }
+ },
+ "fxn-asian-session-range": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0
+   },
+   "lines": 8,
+   "fills": 3
+  },
+  "m15": {
+   "plots": {
+    "plot0": 726,
+    "plot1": 726,
+    "plot2": 505,
+    "plot3": 505,
+    "plot4": 510,
+    "plot5": 510
+   },
+   "bgColors": 1712,
+   "lines": 22,
+   "labels": 49,
+   "fills": 3
+  }
+ },
+ "supply-demand-flux-charts": {
+  "daily": {
+   "plots": {},
+   "lines": 10,
+   "boxes": 20,
+   "labels": 8
+  },
+  "m15": {
+   "plots": {},
+   "lines": 7,
+   "boxes": 14,
+   "labels": 13
+  }
+ },
+ "cm-parabolic-sar": {
+  "daily": {
+   "plots": {
+    "plot0": 3199,
+    "plot1": 3199
+   }
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3999,
+    "plot1": 3999
+   }
+  }
+ },
+ "money-flow-profile": {
+  "daily": {
+   "plots": {},
+   "boxes": 76,
+   "polylines": 1
+  },
+  "m15": {
+   "plots": {},
+   "boxes": 76,
+   "polylines": 1
+  }
+ },
+ "trend-targets": {
+  "daily": {
+   "plots": {
+    "plot0": 3060
+   },
+   "markers": 42,
+   "barColors": 3200,
+   "lines": 5,
+   "labels": 5,
+   "linefills": 2
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3860
+   },
+   "markers": 64,
+   "barColors": 4000,
+   "lines": 5,
+   "labels": 5,
+   "linefills": 2
+  }
+ },
+ "ict-unicorn-model": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0
+   },
+   "lines": 4,
+   "boxes": 10,
+   "labels": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0
+   },
+   "lines": 11,
+   "boxes": 19,
+   "labels": 3
+  }
+ },
+ "dynamic-swing-anchored-vwap": {
+  "daily": {
+   "plots": {},
+   "labels": 25,
+   "polylines": 26
+  },
+  "m15": {
+   "plots": {},
+   "labels": 33,
+   "polylines": 34
+  }
+ },
+ "rsi-cyclic-smoothed-v2": {
+  "daily": {
+   "plots": {
+    "plot0": 3200,
+    "plot1": 3200,
+    "plot2": 3186
+   },
+   "fills": 2,
+   "hlines": 2
+  },
+  "m15": {
+   "plots": {
+    "plot0": 4000,
+    "plot1": 4000,
+    "plot2": 3986
+   },
+   "fills": 2,
+   "hlines": 2
+  }
+ },
+ "obv-oscillator-lazybear": {
+  "daily": {
+   "plots": {
+    "plot0": 3181,
+    "plot1": 3181
+   },
+   "hlines": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3981,
+    "plot1": 3981
+   },
+   "hlines": 1
+  }
+ },
+ "buy-sell-signal-kelfry98": {
+  "daily": {
+   "plots": {
+    "plot0": 3196,
+    "plot1": 3188
+   },
+   "markers": 431,
+   "lines": 5,
+   "labels": 51,
+   "tables": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3996,
+    "plot1": 3988
+   },
+   "markers": 514,
+   "labels": 53,
+   "tables": 1
+  }
+ },
+ "inversion-fair-value-gaps": {
+  "daily": {
+   "plots": {}
+  },
+  "m15": {
+   "plots": {},
+   "lines": 2,
+   "boxes": 3
+  }
+ },
+ "key-levels-spacemanbtc-idwm": {
+  "daily": {
+   "plots": {},
+   "lines": 16,
+   "labels": 16
+  },
+  "m15": {
+   "plots": {},
+   "lines": 16,
+   "labels": 16
+  }
+ },
+ "dtfx-algo-zones": {
+  "daily": {
+   "plots": {},
+   "markers": 219,
+   "lines": 288,
+   "boxes": 96
+  },
+  "m15": {
+   "plots": {},
+   "markers": 269,
+   "lines": 301,
+   "boxes": 122
+  }
+ },
+ "candlestick-trend-indicator": {
+  "daily": {
+   "plots": {
+    "plot0": 3178,
+    "plot1": 3191,
+    "plot2": 3196
+   },
+   "markers": 2025,
+   "barColors": 322
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3978,
+    "plot1": 3991,
+    "plot2": 3996
+   },
+   "markers": 2517,
+   "barColors": 401
+  }
+ },
+ "ict-silver-bullet": {
+  "daily": {
+   "plots": {},
+   "tables": 1
+  },
+  "m15": {
+   "plots": {},
+   "markers": 133,
+   "lines": 116,
+   "boxes": 22,
+   "tables": 1
+  }
+ },
+ "smart-money-concepts-probability": {
+  "daily": {
+   "plots": {},
+   "lines": 107,
+   "boxes": 3,
+   "labels": 107,
+   "linefills": 1,
+   "tables": 1
+  },
+  "m15": {
+   "plots": {},
+   "lines": 131,
+   "boxes": 3,
+   "labels": 131,
+   "linefills": 1,
+   "tables": 1
+  }
+ },
+ "volumatic-variable-index-dynamic-average": {
+  "daily": {
+   "plots": {
+    "plot0": 2974,
+    "plot1": 3200
+   },
+   "markers": 27,
+   "lines": 259,
+   "labels": 234,
+   "fills": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3768,
+    "plot1": 4000
+   },
+   "markers": 33,
+   "lines": 330,
+   "labels": 306,
+   "fills": 1
+  }
+ },
+ "fibonacci-confluence-toolkit": {
+  "daily": {
+   "plots": {},
+   "lines": 65,
+   "boxes": 16,
+   "labels": 501
+  },
+  "m15": {
+   "plots": {},
+   "lines": 123,
+   "boxes": 32,
+   "labels": 504
+  }
+ },
+ "linear-regression-oscillator": {
+  "daily": {
+   "plots": {
+    "plot0": 3082,
+    "plot1": 3200,
+    "plot2": 3200,
+    "plot3": 3200,
+    "plot4": 3200,
+    "plot5": 3200,
+    "plot6": 2910
+   },
+   "markers": 247,
+   "labels": 402,
+   "fills": 2,
+   "plotCandles": 3200
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3882,
+    "plot1": 4000,
+    "plot2": 4000,
+    "plot3": 4000,
+    "plot4": 4000,
+    "plot5": 4000,
+    "plot6": 3661
+   },
+   "markers": 312,
+   "labels": 504,
+   "fills": 2,
+   "plotCandles": 4000
+  }
+ },
+ "market-sessions-by-leviathan": {
+  "daily": {
+   "plots": {}
+  },
+  "m15": {
+   "plots": {},
+   "lines": 109,
+   "boxes": 109,
+   "labels": 109
+  }
+ },
+ "range-filter-buy-sell-5min": {
+  "daily": {
+   "plots": {
+    "plot0": 2902,
+    "plot1": 2902,
+    "plot2": 2902
+   },
+   "markers": 139,
+   "barColors": 3200,
+   "fills": 2
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3702,
+    "plot1": 3702,
+    "plot2": 3702
+   },
+   "markers": 177,
+   "barColors": 4000,
+   "fills": 2
+  }
+ },
+ "pivot-points-high-low-multi-time-frame": {
+  "daily": {
+   "error": "The timeframe \"240\" is lower than the chart timeframe \"1D\": the chart bars do not have that data"
+  },
+  "m15": {
+   "plots": {},
+   "lines": 143,
+   "labels": 47
+  }
+ },
+ "smc-structures-and-fvg": {
+  "daily": {
+   "plots": {
+    "plot0": 0
+   },
+   "lines": 17,
+   "boxes": 6,
+   "labels": 21
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0
+   },
+   "lines": 17,
+   "boxes": 5,
+   "labels": 20
+  }
+ },
+ "vwap-stdev-bands-v2-mod": {
+  "daily": {
+   "plots": {
+    "plot0": 3199,
+    "plot1": 3199,
+    "plot2": 3199,
+    "plot3": 3199,
+    "plot4": 3199,
+    "plot5": 3199,
+    "plot6": 3199,
+    "plot7": 0,
+    "plot8": 0,
+    "plot9": 0,
+    "plot10": 0,
+    "plot11": 0
+   },
+   "fills": 10
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3937,
+    "plot1": 3937,
+    "plot2": 3937,
+    "plot3": 3937,
+    "plot4": 3937,
+    "plot5": 3937,
+    "plot6": 3937,
+    "plot7": 0,
+    "plot8": 0,
+    "plot9": 0,
+    "plot10": 0,
+    "plot11": 0
+   },
+   "fills": 10
+  }
+ },
+ "zig-zag-channels": {
+  "daily": {
+   "plots": {
+    "plot0": 8
+   },
+   "lines": 24,
+   "labels": 8
+  },
+  "m15": {
+   "plots": {
+    "plot0": 10
+   },
+   "lines": 30,
+   "labels": 10
+  }
+ },
+ "volume-profile": {
+  "daily": {
+   "plots": {
+    "plot0": 0
+   },
+   "lines": 201
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0
+   },
+   "lines": 201
+  }
+ },
+ "rsi-flux-charts": {
+  "daily": {
+   "plots": {},
+   "markers": 729,
+   "labels": 84,
+   "tables": 1
+  },
+  "m15": {
+   "plots": {},
+   "markers": 922,
+   "labels": 104,
+   "tables": 1
+  }
+ },
+ "support-and-resistance-flux-charts": {
+  "daily": {
+   "plots": {},
+   "lines": 21,
+   "labels": 61
+  },
+  "m15": {
+   "plots": {},
+   "lines": 18,
+   "labels": 49
+  }
+ },
+ "volume-orderbook": {
+  "daily": {
+   "plots": {},
+   "boxes": 21
+  },
+  "m15": {
+   "plots": {},
+   "boxes": 21
+  }
+ },
+ "auto-fib-theyangguizi": {
+  "daily": {
+   "plots": {
+    "plot0": 2936,
+    "plot1": 2936,
+    "plot2": 2936,
+    "plot3": 2936,
+    "plot4": 2936,
+    "plot5": 2936,
+    "plot6": 2936
+   },
+   "fills": 6
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3736,
+    "plot1": 3736,
+    "plot2": 3736,
+    "plot3": 3736,
+    "plot4": 3736,
+    "plot5": 3736,
+    "plot6": 3736
+   },
+   "fills": 6
+  }
+ },
+ "support-resistance-dynamic": {
+  "daily": {
+   "plots": {
+    "plot0": 200
+   },
+   "lines": 8,
+   "labels": 8
+  },
+  "m15": {
+   "plots": {
+    "plot0": 251
+   },
+   "lines": 5,
+   "labels": 5
+  }
+ },
+ "trend-type-indicator-by-bobrivera990": {
+  "daily": {
+   "plots": {
+    "plot0": 3200,
+    "plot1": 3200,
+    "plot2": 3200,
+    "plot3": 3200,
+    "plot4": 3171
+   },
+   "labels": 4,
+   "fills": 3
+  },
+  "m15": {
+   "plots": {
+    "plot0": 4000,
+    "plot1": 4000,
+    "plot2": 4000,
+    "plot3": 4000,
+    "plot4": 3971
+   },
+   "labels": 4,
+   "fills": 3
+  }
+ },
+ "fibonacci-trend": {
+  "daily": {
+   "plots": {
+    "plot0": 3177,
+    "plot1": 3200
+   },
+   "lines": 8,
+   "labels": 8,
+   "linefills": 2,
+   "fills": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3977,
+    "plot1": 4000
+   },
+   "lines": 8,
+   "labels": 8,
+   "linefills": 2,
+   "fills": 1
+  }
+ },
+ "fvg-instantaneous-mitigation-signals": {
+  "daily": {
+   "plots": {
+    "plot0": 3186
+   },
+   "barColors": 593,
+   "lines": 35,
+   "boxes": 35,
+   "labels": 35
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3986
+   },
+   "barColors": 752,
+   "lines": 42,
+   "boxes": 42,
+   "labels": 42
+  }
+ },
+ "qqe-kivanc": {
+  "daily": {
+   "plots": {
+    "plot0": 3182,
+    "plot1": 3200,
+    "plot2": 3200
+   },
+   "markers": 214,
+   "fills": 2
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3982,
+    "plot1": 4000,
+    "plot2": 4000
+   },
+   "markers": 271,
+   "fills": 2
+  }
+ },
+ "swing-profile": {
+  "daily": {
+   "plots": {
+    "plot0": 0
+   },
+   "lines": 41,
+   "boxes": 420,
+   "labels": 18,
+   "polylines": 17
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0
+   },
+   "lines": 38,
+   "boxes": 398,
+   "labels": 16,
+   "polylines": 16
+  }
+ },
+ "auto-pitchfork-fib-retracement-zig-zag": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0
+   },
+   "lines": 70,
+   "labels": 26,
+   "linefills": 4,
+   "tables": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0
+   },
+   "lines": 70,
+   "labels": 26,
+   "linefills": 4,
+   "tables": 1
+  }
+ },
+ "deviation-trend-profile": {
+  "daily": {
+   "plots": {
+    "plot0": 3151
+   },
+   "markers": 42,
+   "lines": 7,
+   "boxes": 50,
+   "labels": 7
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3951
+   },
+   "markers": 58,
+   "lines": 7,
+   "boxes": 50,
+   "labels": 7
+  }
+ },
+ "support-resistance-v2-indicator": {
+  "daily": {
+   "plots": {},
+   "lines": 222
+  },
+  "m15": {
+   "plots": {},
+   "lines": 278
+  }
+ },
+ "market-sentiment-technicals": {
+  "daily": {
+   "plots": {
+    "plot0": 3089,
+    "plot1": 3200,
+    "plot2": 3200,
+    "plot3": 3200,
+    "plot4": 184,
+    "plot5": 184,
+    "plot6": 200,
+    "plot7": 200,
+    "plot8": 3200
+   },
+   "lines": 23,
+   "boxes": 17,
+   "labels": 24,
+   "polylines": 1,
+   "fills": 2
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3889,
+    "plot1": 4000,
+    "plot2": 4000,
+    "plot3": 4000,
+    "plot4": 236,
+    "plot5": 236,
+    "plot6": 255,
+    "plot7": 255,
+    "plot8": 4000
+   },
+   "lines": 18,
+   "boxes": 17,
+   "labels": 24,
+   "polylines": 1,
+   "fills": 2
+  }
+ },
+ "pivot-point-hpotter": {
+  "daily": {
+   "plots": {
+    "plot0": 3199,
+    "plot1": 3199,
+    "plot2": 3199,
+    "plot3": 3199,
+    "plot4": 3199,
+    "plot5": 3199
+   }
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3937,
+    "plot1": 3937,
+    "plot2": 3937,
+    "plot3": 3937,
+    "plot4": 3937,
+    "plot5": 3937
+   }
+  }
+ },
+ "saty-atr-levels": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0,
+    "plot8": 0,
+    "plot9": 3186,
+    "plot10": 3186,
+    "plot11": 3186,
+    "plot12": 3186,
+    "plot13": 3186,
+    "plot14": 3186,
+    "plot15": 3199,
+    "plot16": 3186,
+    "plot17": 3186,
+    "plot18": 3186,
+    "plot19": 3186,
+    "plot20": 3186,
+    "plot21": 3186,
+    "plot22": 0,
+    "plot23": 0,
+    "plot24": 0,
+    "plot25": 0,
+    "plot26": 0,
+    "plot27": 0,
+    "plot28": 0,
+    "plot29": 0,
+    "plot30": 0
+   },
+   "tables": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0,
+    "plot8": 0,
+    "plot9": 2689,
+    "plot10": 2689,
+    "plot11": 2689,
+    "plot12": 2689,
+    "plot13": 2689,
+    "plot14": 2689,
+    "plot15": 3937,
+    "plot16": 2689,
+    "plot17": 2689,
+    "plot18": 2689,
+    "plot19": 2689,
+    "plot20": 2689,
+    "plot21": 2689,
+    "plot22": 0,
+    "plot23": 0,
+    "plot24": 0,
+    "plot25": 0,
+    "plot26": 0,
+    "plot27": 0,
+    "plot28": 0,
+    "plot29": 0,
+    "plot30": 0
+   },
+   "tables": 1
+  }
+ },
+ "bjorgum-superscript": {
+  "daily": {
+   "plots": {
+    "plot0": 3176,
+    "plot1": 3158,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 3200,
+    "plot6": 0,
+    "plot7": 0
+   },
+   "barColors": 3158,
+   "tables": 1,
+   "fills": 4,
+   "plotCandles": 3200,
+   "plotBars": 3200
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3976,
+    "plot1": 3958,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 4000,
+    "plot6": 0,
+    "plot7": 0
+   },
+   "barColors": 3958,
+   "tables": 1,
+   "fills": 4,
+   "plotCandles": 4000,
+   "plotBars": 4000
+  }
+ },
+ "atr-stop-loss-finder": {
+  "daily": {
+   "plots": {
+    "plot0": 3187,
+    "plot1": 3187
+   },
+   "tables": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3987,
+    "plot1": 3987
+   },
+   "tables": 1
+  }
+ },
+ "market-structure-by-leviathan": {
+  "daily": {
+   "plots": {},
+   "lines": 50,
+   "labels": 159
+  },
+  "m15": {
+   "plots": {},
+   "lines": 62,
+   "labels": 196
+  }
+ },
+ "cumulative-delta-volume": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0
+   },
+   "plotCandles": 3199
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0
+   },
+   "plotCandles": 3999
+  }
+ },
+ "sessions-on-chart": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 2112,
+    "plot5": 2112,
+    "plot6": 3200,
+    "plot7": 3200
+   },
+   "bgColors": 2112,
+   "fills": 4
+  },
+  "m15": {
+   "plots": {
+    "plot0": 1507,
+    "plot1": 1507,
+    "plot2": 1512,
+    "plot3": 1512,
+    "plot4": 1313,
+    "plot5": 1313,
+    "plot6": 1489,
+    "plot7": 1489
+   },
+   "bgColors": 4332,
+   "fills": 4
+  }
+ },
+ "market-structure-break-ob-probability-toolkit": {
+  "daily": {
+   "plots": {},
+   "lines": 103,
+   "boxes": 10,
+   "labels": 103,
+   "tables": 1
+  },
+  "m15": {
+   "plots": {},
+   "lines": 125,
+   "boxes": 10,
+   "labels": 125,
+   "tables": 1
+  }
+ },
+ "supertrend-relative-volume-kernel": {
+  "daily": {
+   "plots": {
+    "plot0": 2177,
+    "plot1": 1015,
+    "plot2": 3199
+   },
+   "markers": 64,
+   "labels": 64,
+   "tables": 1,
+   "fills": 2
+  },
+  "m15": {
+   "plots": {
+    "plot0": 2673,
+    "plot1": 1319,
+    "plot2": 3999
+   },
+   "markers": 84,
+   "labels": 84,
+   "tables": 1,
+   "fills": 2
+  }
+ },
+ "breakouts-with-tests-retests": {
+  "daily": {
+   "plots": {},
+   "boxes": 46,
+   "labels": 41
+  },
+  "m15": {
+   "plots": {},
+   "boxes": 56,
+   "labels": 49
+  }
+ },
+ "orb-opening-range-breakout": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0
+   }
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0
+   }
+  }
+ },
+ "swing-levels-and-liquidity-by-leviathan": {
+  "daily": {
+   "plots": {},
+   "markers": 173,
+   "lines": 173,
+   "boxes": 173
+  },
+  "m15": {
+   "plots": {},
+   "markers": 215,
+   "lines": 215,
+   "boxes": 215
+  }
+ },
+ "elliott-wave-oscillator-lazybear": {
+  "daily": {
+   "plots": {
+    "plot0": 3166
+   }
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3966
+   }
+  }
+ },
+ "smart-money-breakouts": {
+  "daily": {
+   "plots": {},
+   "barColors": 3200,
+   "bgColors": 1202,
+   "lines": 105,
+   "labels": 105,
+   "tables": 1,
+   "plotCandles": 3200
+  },
+  "m15": {
+   "plots": {},
+   "barColors": 4000,
+   "bgColors": 1472,
+   "lines": 123,
+   "labels": 123,
+   "tables": 1,
+   "plotCandles": 4000
+  }
+ },
+ "target-trend": {
+  "daily": {
+   "plots": {
+    "plot0": 2246,
+    "plot1": 556,
+    "plot2": 3200
+   },
+   "markers": 100,
+   "lines": 5,
+   "labels": 5,
+   "linefills": 2,
+   "fills": 2,
+   "plotCandles": 3200
+  },
+  "m15": {
+   "plots": {
+    "plot0": 2920,
+    "plot1": 682,
+    "plot2": 4000
+   },
+   "markers": 120,
+   "lines": 5,
+   "labels": 5,
+   "linefills": 2,
+   "fills": 2,
+   "plotCandles": 4000
+  }
+ },
+ "fvg-sessions": {
+  "daily": {
+   "plots": {},
+   "lines": 500,
+   "boxes": 395
+  },
+  "m15": {
+   "plots": {},
+   "lines": 195,
+   "boxes": 69
+  }
+ },
+ "market-profile": {
+  "daily": {
+   "plots": {},
+   "lines": 294
+  },
+  "m15": {
+   "plots": {},
+   "lines": 210
+  }
+ },
+ "trendline-breakout-navigator": {
+  "daily": {
+   "plots": {
+    "plot0": 2154,
+    "plot1": 3119,
+    "plot2": 3146,
+    "plot3": 3200
+   },
+   "lines": 111,
+   "labels": 24
+  },
+  "m15": {
+   "plots": {
+    "plot0": 2954,
+    "plot1": 3919,
+    "plot2": 3946,
+    "plot3": 4000
+   },
+   "lines": 142,
+   "labels": 29
+  }
+ },
+ "fibonacci-structure-engine": {
+  "daily": {
+   "plots": {
+    "plot0": 3200,
+    "plot1": 3200,
+    "plot2": 3200,
+    "plot3": 3200,
+    "plot4": 3088,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0,
+    "plot8": 0
+   },
+   "lines": 99,
+   "boxes": 2,
+   "labels": 157,
+   "tables": 2
+  },
+  "m15": {
+   "plots": {
+    "plot0": 4000,
+    "plot1": 4000,
+    "plot2": 4000,
+    "plot3": 4000,
+    "plot4": 3888,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0,
+    "plot8": 0
+   },
+   "lines": 117,
+   "boxes": 2,
+   "labels": 156,
+   "tables": 2
+  }
+ },
+ "three-bar-reversal-pattern": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0
+   },
+   "lines": 468,
+   "boxes": 82,
+   "labels": 172,
+   "linefills": 117,
+   "fills": 4
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0
+   },
+   "lines": 500,
+   "boxes": 96,
+   "labels": 203,
+   "linefills": 125,
+   "fills": 4
+  }
+ }
+}

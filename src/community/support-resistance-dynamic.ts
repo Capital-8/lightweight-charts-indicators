@@ -1,0 +1,261 @@
+/**
+ * Support Resistance - Dynamic
+ *
+ * On each new pivot high / low the script reads the pivots of the last `prd` bars, newest first (at most 40). For
+ * each pivot that is not yet part of a channel it builds a channel of +- `ChannelW` percent of the high-low range of
+ * the period around the pivot price and counts the free pivots inside it. A channel with at least `nump` pivots
+ * makes its pivot price a support / resistance level and takes its pivots. Each level is a line across the chart
+ * with a price label next to the last bar; two more lines and labels mark the highest and the lowest pivot of the
+ * period. The plot `RS_level` (not displayed) is the level that the close has just crossed.
+ *
+ * The original rounds the label prices with the symbol price tick (syminfo.mintick). Bars carry no symbol info:
+ * the port uses a tick of 0.01.
+ *
+ * Reference: "Support Resistance - Dynamic" by LonesomeTheBlue
+ * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
+ * Original notice: (c) LonesomeTheBlue
+ */
+
+import { ta, str, math, compare, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import type { MarkerData, LabelData, LineDrawingData } from '../types';
+import { barInterval, barTime } from '../bar-time';
+
+export interface SupportResistanceDynamicInputs {
+  /** Period for Pivot Points */
+  rb: number;
+  /** Loopback Period */
+  prd: number;
+  /** S/R strength: pivots needed in a channel */
+  nump: number;
+  /** Channel Width % */
+  channelW: number;
+  /** Label Location +- (0: the last bar, negative: bars before it, positive: bars after it) */
+  labelLocation: number;
+  /** Line Style */
+  linestyle: 'Solid' | 'Dotted' | 'Dashed';
+  /** Line Color */
+  lineColor: string;
+  /** Draw Highest/Lowest Pivots in Period */
+  drawhl: boolean;
+  /** Show Point Points */
+  showpp: boolean;
+}
+
+// Colours of the original Pine version
+const BLUE = '#2196F3';
+const RED = '#FF5252';
+const LIME = '#00E676';
+const BLACK = '#363A45';
+const SILVER = '#B2B5BE';
+/** syminfo.mintick is not available to the port (Bar has no symbol info) */
+const MINTICK = 0.01;
+
+export const defaultInputs: SupportResistanceDynamicInputs = {
+  rb: 10,
+  prd: 284,
+  nump: 2,
+  channelW: 10,
+  labelLocation: 10,
+  linestyle: 'Dashed',
+  lineColor: BLUE,
+  drawhl: true,
+  showpp: false,
+};
+
+export const inputConfig: InputConfig[] = [
+  { id: 'rb', type: 'int', title: 'Period for Pivot Points', defval: 10, min: 10 },
+  { id: 'prd', type: 'int', title: 'Loopback Period', defval: 284, min: 100, max: 500 },
+  { id: 'nump', type: 'int', title: 'S/R strength', defval: 2, min: 1 },
+  { id: 'channelW', type: 'int', title: 'Channel Width %', defval: 10, min: 5 },
+  {
+    id: 'labelLocation', type: 'int', title: 'Label Location +-', defval: 10,
+    tooltip: '0 means last bar. for example if you set it -5 then label is shown on last 5. bar. + means future bars',
+  },
+  { id: 'linestyle', type: 'string', title: 'Line Style', defval: 'Dashed', options: ['Solid', 'Dotted', 'Dashed'] },
+  { id: 'lineColor', type: 'color', title: 'Line Color', defval: BLUE },
+  { id: 'drawhl', type: 'bool', title: 'Draw Highest/Lowest Pivots in Period', defval: true },
+  { id: 'showpp', type: 'bool', title: 'Show Point Points', defval: false },
+];
+
+export const plotConfig: PlotConfig[] = [
+  { id: 'plot0', title: 'RS_level', color: BLUE, lineWidth: 1, display: 'none' },
+];
+
+export const metadata = {
+  title: 'Support Resistance - Dynamic',
+  shortTitle: 'Support Resistance - Dynamic',
+  overlay: true,
+};
+
+const { le, ge, gt, lt } = compare;
+/** Pine bool(x) of a number: false for na and 0 */
+const truthy = (v: number) => !Number.isNaN(v) && v !== 0;
+
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<SupportResistanceDynamicInputs> = {},
+): IndicatorResult & { markers: MarkerData[]; labels: LabelData[]; lines: LineDrawingData[] } {
+  const { rb, prd, nump, channelW, labelLocation, linestyle, lineColor, drawhl, showpp } = { ...defaultInputs, ...inputs };
+  const n = bars.length;
+  const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
+  const highSeries = new Series(bars, (b) => b.high);
+  const lowSeries = new Series(bars, (b) => b.low);
+  const ph = A(ta.pivothigh(highSeries, rb, rb));
+  const pl = A(ta.pivotlow(lowSeries, rb, rb));
+  // na until `prd` bars exist: no level before that
+  const prdhighest = A(ta.highest(highSeries, prd));
+  const prdlowest = A(ta.lowest(lowSeries, prd));
+  const H = (i: number) => (i >= 0 ? bars[i].high : NaN);
+  const L = (i: number) => (i >= 0 ? bars[i].low : NaN);
+
+  const markers: MarkerData[] = [];
+  const rsLevel: number[] = new Array(n).fill(NaN);
+  let highestph = NaN;
+  let lowestpl = NaN;
+  // var sr_levs: the levels of the last pivot bar (21 slots)
+  let srLevs: number[] = new Array(21).fill(NaN);
+  // State of the lines: they are drawn again on each pivot bar
+  let linesBar = -1;
+  let lineHighest = NaN;
+  let lineLowest = NaN;
+
+  for (let i = 0; i < n; i++) {
+    const isPh = truthy(ph[i]);
+    const isPl = truthy(pl[i]);
+
+    // plotshape(ph and showpp, text = "PH", style = shape.labeldown, color = color.new(color.white, 100),
+    //   textcolor = color.red, location = location.abovebar, offset = -rb) and the same with "PL" below the bar
+    if (showpp && i - rb >= 0) {
+      if (isPh) {
+        markers.push({ time: bars[i - rb].time, position: 'aboveBar', shape: 'labelDown', color: 'rgba(255, 255, 255, 0)', text: 'PH', textColor: RED });
+      }
+      if (isPl) {
+        markers.push({ time: bars[i - rb].time, position: 'belowBar', shape: 'labelUp', color: 'rgba(255, 255, 255, 0)', text: 'PL', textColor: LIME });
+      }
+    }
+
+    if (isPh || isPl) {
+      const cwidth = ((prdhighest[i] - prdlowest[i]) * channelW) / 100;
+      const srLevels: number[] = new Array(21).fill(NaN);
+      // availability of the pivots (false: used in a channel)
+      const aas: boolean[] = new Array(41).fill(true);
+      highestph = prdlowest[i];
+      lowestpl = prdhighest[i];
+      const nzv = (v: number, d: number) => (Number.isNaN(v) ? d : v);
+      let countpp = 0;
+      // the last pivots have more priority: newest first
+      for (let x = 0; x <= prd; x++) {
+        if (i - x < 0) break;
+        const phx = ph[i - x];
+        const plx = pl[i - x];
+        if (Number.isNaN(phx) && Number.isNaN(plx)) continue;
+        highestph = Math.max(highestph, nzv(phx, prdlowest[i]), nzv(plx, prdlowest[i]));
+        lowestpl = Math.min(lowestpl, nzv(phx, prdhighest[i]), nzv(plx, prdhighest[i]));
+        countpp += 1;
+        if (countpp > 40) break;
+        if (!aas[countpp]) continue;
+        const base = truthy(phx) ? H(i - x - rb) : L(i - x - rb);
+        const upl = base + cwidth;
+        const dnl = base - cwidth;
+        // the pivots that are in this channel
+        const tmp: boolean[] = new Array(41).fill(true);
+        let cnt = 0;
+        let tpoint = 0;
+        for (let xx = 0; xx <= prd; xx++) {
+          if (i - xx < 0) break;
+          const phxx = ph[i - xx];
+          const plxx = pl[i - xx];
+          if (Number.isNaN(phxx) && Number.isNaN(plxx)) continue;
+          let chg = false;
+          cnt += 1;
+          if (cnt > 40) break;
+          if (aas[cnt]) {
+            if (!Number.isNaN(phxx)) {
+              const hx = H(i - xx - rb);
+              if (le(hx, upl) && ge(hx, dnl)) {
+                tpoint += 1;
+                chg = true;
+              }
+            }
+            if (!Number.isNaN(plxx)) {
+              const lx = L(i - xx - rb);
+              if (le(lx, upl) && ge(lx, dnl)) {
+                tpoint += 1;
+                chg = true;
+              }
+            }
+          }
+          if (chg && cnt < 41) tmp[cnt] = false;
+        }
+        if (tpoint >= nump) {
+          for (let g = 0; g <= 40; g++) if (!tmp[g]) aas[g] = false;
+          if (truthy(phx) && countpp < 21) srLevels[countpp] = H(i - x - rb);
+          if (truthy(plx) && countpp < 21) srLevels[countpp] = L(i - x - rb);
+        }
+      }
+      srLevs = srLevels;
+      linesBar = i;
+      lineHighest = highestph;
+      lineLowest = lowestpl;
+    }
+
+    // The level that the close crosses on this bar (the last one in the list)
+    const close = bars[i].close;
+    const close1 = i > 0 ? bars[i - 1].close : NaN;
+    for (const lev of srLevs) {
+      if (!truthy(lev)) continue;
+      if (le(close1, lev) && gt(close, lev)) rsLevel[i] = lev;
+      if (ge(close1, lev) && lt(close, lev)) rsLevel[i] = lev;
+    }
+  }
+
+  // Lines of the last pivot bar and labels of the last bar
+  const lines: LineDrawingData[] = [];
+  const labels: LabelData[] = [];
+  if (n > 0) {
+    const interval = barInterval(bars);
+    const style = linestyle === 'Solid' ? 'solid' : linestyle === 'Dotted' ? 'dotted' : 'dashed';
+    if (linesBar >= 1) {
+      const time1 = bars[linesBar - 1].time;
+      const time2 = bars[linesBar].time;
+      if (drawhl) {
+        for (const price of [lineHighest, lineLowest]) {
+          if (Number.isFinite(price)) {
+            lines.push({ time1, price1: price, time2, price2: price, extend: 'both', color: BLUE, style: 'dashed', width: 1 });
+          }
+        }
+      }
+      for (const lev of srLevs) {
+        if (truthy(lev)) lines.push({ time1, price1: lev, time2, price2: lev, extend: 'both', color: lineColor, style, width: 2 });
+      }
+    }
+    const close = bars[n - 1].close;
+    const labelTime = barTime(bars, n - 1 + labelLocation, interval);
+    for (const lev of srLevs) {
+      if (!truthy(lev)) continue;
+      labels.push({
+        time: labelTime, price: lev, text: str.tostring(math.round_to_mintick(lev, MINTICK)), color: LIME, textColor: BLACK,
+        style: ge(close, lev) ? 'label_up' : 'label_down',
+      });
+    }
+    if (drawhl) {
+      const time = barTime(bars, n - 1 + labelLocation + Math.sign(labelLocation) * 20, interval);
+      if (Number.isFinite(highestph)) {
+        labels.push({ time, price: highestph, text: 'Highest PH ' + str.tostring(highestph), color: SILVER, textColor: BLACK, style: 'label_down' });
+      }
+      if (Number.isFinite(lowestpl)) {
+        labels.push({ time, price: lowestpl, text: 'Lowest PL ' + str.tostring(lowestpl), color: SILVER, textColor: BLACK, style: 'label_up' });
+      }
+    }
+  }
+
+  return {
+    metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
+    plots: { plot0: bars.map((b, i) => ({ time: b.time, value: rsLevel[i] })) },
+    markers,
+    labels,
+    lines,
+  };
+}
+
+export const SupportResistanceDynamic = { calculate, metadata, defaultInputs, inputConfig, plotConfig };

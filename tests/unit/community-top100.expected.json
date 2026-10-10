@@ -2,15 +2,15 @@
  "smart-money-concepts-luxalgo": {
   "daily": {
    "plots": {},
-   "lines": 257,
+   "lines": 193,
    "boxes": 5,
-   "labels": 257
+   "labels": 193
   },
   "m15": {
    "plots": {},
-   "lines": 394,
+   "lines": 247,
    "boxes": 5,
-   "labels": 394
+   "labels": 247
   }
  },
  "cm-macd-custom-mtf": {
@@ -19,7 +19,7 @@
     "plot0": 3175,
     "plot1": 3167,
     "plot2": 3167,
-    "plot3": 162
+    "plot3": 320
    },
    "hlines": 1
   },
@@ -28,7 +28,7 @@
     "plot0": 3975,
     "plot1": 3967,
     "plot2": 3967,
-    "plot3": 201
+    "plot3": 399
    },
    "hlines": 1
   }
@@ -36,15 +36,15 @@
  "market-structure-break-order-block": {
   "daily": {
    "plots": {},
-   "lines": 279,
-   "boxes": 40,
+   "lines": 311,
+   "boxes": 4,
    "labels": 40
   },
   "m15": {
    "plots": {},
-   "lines": 349,
-   "boxes": 46,
-   "labels": 46
+   "lines": 397,
+   "boxes": 3,
+   "labels": 50
   }
  },
  "wavetrend-oscillator-wt": {
@@ -107,15 +107,15 @@
  "support-resistance-high-volume-boxes": {
   "daily": {
    "plots": {},
-   "markers": 28,
-   "boxes": 45,
-   "labels": 23
+   "markers": 111,
+   "boxes": 54,
+   "labels": 22
   },
   "m15": {
    "plots": {},
-   "markers": 39,
-   "boxes": 52,
-   "labels": 30
+   "markers": 133,
+   "boxes": 53,
+   "labels": 26
   }
  },
  "sessions-luxalgo": {
@@ -165,15 +165,15 @@
  "liquidity-swings": {
   "daily": {
    "plots": {},
-   "lines": 151,
-   "boxes": 134,
-   "labels": 132
+   "lines": 149,
+   "boxes": 97,
+   "labels": 95
   },
   "m15": {
    "plots": {},
-   "lines": 188,
-   "boxes": 166,
-   "labels": 164
+   "lines": 182,
+   "boxes": 120,
+   "labels": 118
   }
  },
  "order-block-finder": {
@@ -215,19 +215,19 @@
  "order-block-detector": {
   "daily": {
    "plots": {
-    "plot0": 142,
-    "plot1": 149
+    "plot0": 114,
+    "plot1": 177
    },
-   "lines": 4,
-   "boxes": 4
+   "lines": 6,
+   "boxes": 6
   },
   "m15": {
    "plots": {
-    "plot0": 166,
-    "plot1": 198
+    "plot0": 139,
+    "plot1": 225
    },
-   "lines": 3,
-   "boxes": 3
+   "lines": 6,
+   "boxes": 6
   }
  },
  "cm-ultimate-ma-mtf-v2": {
@@ -255,7 +255,7 @@
     "plot3": 3001,
     "plot4": 3199
    },
-   "markers": 988,
+   "markers": 997,
    "fills": 1
   },
   "m15": {
@@ -266,7 +266,7 @@
     "plot3": 3801,
     "plot4": 3999
    },
-   "markers": 1237,
+   "markers": 1249,
    "bgColors": 1080,
    "fills": 1
   }
@@ -275,9 +275,9 @@
   "daily": {
    "plots": {
     "plot0": 3174,
-    "plot1": 8
+    "plot1": 90
    },
-   "markers": 4,
+   "markers": 45,
    "barColors": 3200,
    "labels": 500,
    "tables": 1
@@ -316,7 +316,7 @@
     "plot1": 0
    },
    "lines": 500,
-   "labels": 6,
+   "labels": 14,
    "tables": 1
   },
   "m15": {
@@ -325,34 +325,33 @@
     "plot1": 0
    },
    "lines": 500,
-   "labels": 6,
+   "labels": 15,
    "tables": 1
   }
  },
  "smart-money-breakout-channels": {
   "daily": {
    "plots": {},
-   "markers": 73,
-   "lines": 53,
-   "boxes": 222,
-   "labels": 1,
-   "plotCandles": 2432
+   "markers": 70,
+   "lines": 52,
+   "boxes": 210,
+   "plotCandles": 1660
   },
   "m15": {
    "plots": {},
-   "markers": 93,
+   "markers": 87,
    "lines": 55,
-   "boxes": 282,
+   "boxes": 264,
    "labels": 1,
-   "plotCandles": 3952
+   "plotCandles": 2210
   }
  },
  "breakout-probability": {
   "daily": {
    "plots": {},
-   "lines": 4,
-   "labels": 4,
-   "linefills": 2,
+   "lines": 8,
+   "labels": 8,
+   "linefills": 6,
    "tables": 1
   },
   "m15": {
@@ -368,12 +367,12 @@
    "plots": {},
    "lines": 8,
    "boxes": 10,
-   "labels": 5
+   "labels": 3
   },
   "m15": {
    "plots": {},
    "lines": 11,
-   "boxes": 12,
+   "boxes": 11,
    "labels": 7
   }
  },
@@ -383,35 +382,35 @@
     "plot0": 0,
     "plot1": 0
    },
-   "lines": 163,
-   "labels": 126
+   "lines": 201,
+   "labels": 158
   },
   "m15": {
    "plots": {
     "plot0": 0,
     "plot1": 0
    },
-   "lines": 201,
-   "labels": 157
+   "lines": 247,
+   "labels": 192
   }
  },
  "buyside-sellside-liquidity": {
   "daily": {
    "plots": {},
-   "lines": 4,
-   "boxes": 4
+   "lines": 10,
+   "boxes": 12
   },
   "m15": {
    "plots": {},
-   "lines": 4,
-   "boxes": 4
+   "lines": 12,
+   "boxes": 15
   }
  },
  "order-blocks-breaker-blocks": {
   "daily": {
    "plots": {},
-   "lines": 18,
-   "boxes": 9
+   "lines": 16,
+   "boxes": 8
   },
   "m15": {
    "plots": {},
@@ -427,8 +426,8 @@
   },
   "m15": {
    "plots": {},
-   "lines": 5,
-   "labels": 5
+   "lines": 3,
+   "labels": 3
   }
  },
  "super-orderblock-fvg-bos": {
@@ -437,7 +436,7 @@
     "plot0": 3192,
     "plot1": 3197
    },
-   "markers": 317,
+   "markers": 342,
    "barColors": 80,
    "boxes": 44
   },
@@ -446,7 +445,7 @@
     "plot0": 3992,
     "plot1": 3997
    },
-   "markers": 391,
+   "markers": 415,
    "barColors": 101,
    "boxes": 44
   }
@@ -454,27 +453,27 @@
  "breakout-finder": {
   "daily": {
    "plots": {},
-   "markers": 57,
-   "lines": 228
+   "markers": 22,
+   "lines": 88
   },
   "m15": {
    "plots": {},
-   "markers": 76,
-   "lines": 304
+   "markers": 25,
+   "lines": 100
   }
  },
  "volume-based-support-resistance-zones": {
   "daily": {
    "plots": {},
-   "lines": 148,
+   "lines": 146,
    "labels": 4,
-   "linefills": 74
+   "linefills": 73
   },
   "m15": {
    "plots": {},
-   "lines": 130,
-   "labels": 4,
-   "linefills": 65
+   "lines": 134,
+   "labels": 6,
+   "linefills": 67
   }
  },
  "ict-killzones-toolkit": {
@@ -484,7 +483,7 @@
   "m15": {
    "plots": {},
    "lines": 334,
-   "boxes": 230,
+   "boxes": 183,
    "labels": 167
   }
  },
@@ -496,7 +495,7 @@
     "plot2": 0,
     "plot3": 0
    },
-   "boxes": 166,
+   "boxes": 19,
    "tables": 1,
    "fills": 2
   },
@@ -507,7 +506,7 @@
     "plot2": 0,
     "plot3": 0
    },
-   "boxes": 201,
+   "boxes": 12,
    "tables": 1,
    "fills": 2
   }
@@ -515,13 +514,13 @@
  "order-blocks-flux-charts": {
   "daily": {
    "plots": {},
-   "lines": 12,
-   "boxes": 24
+   "lines": 6,
+   "boxes": 12
   },
   "m15": {
    "plots": {},
-   "lines": 12,
-   "boxes": 24
+   "lines": 10,
+   "boxes": 20
   }
  },
  "volume-profile-fixed-range": {
@@ -543,17 +542,17 @@
    "plots": {
     "plot0": 0
    },
-   "lines": 154,
-   "boxes": 20,
-   "labels": 303
+   "lines": 210,
+   "boxes": 32,
+   "labels": 412
   },
   "m15": {
    "plots": {
     "plot0": 0
    },
-   "lines": 154,
-   "boxes": 20,
-   "labels": 303
+   "lines": 210,
+   "boxes": 32,
+   "labels": 412
   }
  },
  "cm-pivot-points-filtered": {
@@ -649,33 +648,33 @@
  "fvg-order-blocks": {
   "daily": {
    "plots": {},
-   "boxes": 54
+   "boxes": 38
   },
   "m15": {
    "plots": {},
-   "boxes": 54
+   "boxes": 41
   }
  },
  "bjorgum-key-levels": {
   "daily": {
    "plots": {},
-   "boxes": 155
+   "boxes": 403
   },
   "m15": {
    "plots": {},
-   "boxes": 196
+   "boxes": 490
   }
  },
  "pivot-points-high-low-missed-reversal": {
   "daily": {
    "plots": {},
-   "lines": 2,
-   "labels": 2
+   "lines": 31,
+   "labels": 26
   },
   "m15": {
    "plots": {},
-   "lines": 2,
-   "labels": 2
+   "lines": 39,
+   "labels": 34
   }
  },
  "market-sessions-volume-profile": {
@@ -703,8 +702,8 @@
     "plot5": 3200,
     "plot6": 3200
    },
-   "markers": 336,
-   "bgColors": 336,
+   "markers": 294,
+   "bgColors": 294,
    "fills": 1
   },
   "m15": {
@@ -717,8 +716,8 @@
     "plot5": 4000,
     "plot6": 4000
    },
-   "markers": 419,
-   "bgColors": 419,
+   "markers": 372,
+   "bgColors": 372,
    "fills": 1
   }
  },
@@ -731,8 +730,8 @@
     "plot3": 3200,
     "plot4": 3200
    },
-   "markers": 68,
-   "bgColors": 2710,
+   "markers": 110,
+   "bgColors": 463,
    "fills": 1
   },
   "m15": {
@@ -743,8 +742,8 @@
     "plot3": 4000,
     "plot4": 4000
    },
-   "markers": 68,
-   "bgColors": 3510,
+   "markers": 137,
+   "bgColors": 609,
    "fills": 1
   }
  },
@@ -759,7 +758,7 @@
    "plots": {},
    "lines": 3,
    "boxes": 2,
-   "labels": 7
+   "labels": 9
   }
  },
  "scalping-pullback-tool": {
@@ -772,7 +771,7 @@
     "plot4": 3001,
     "plot5": 0
    },
-   "markers": 891,
+   "markers": 969,
    "barColors": 3200,
    "bgColors": 3200,
    "fills": 1
@@ -786,7 +785,7 @@
     "plot4": 3801,
     "plot5": 0
    },
-   "markers": 1124,
+   "markers": 1217,
    "barColors": 4000,
    "bgColors": 4000,
    "fills": 1
@@ -796,19 +795,19 @@
   "daily": {
    "plots": {},
    "barColors": 3200,
-   "lines": 52,
+   "lines": 50,
    "boxes": 501,
-   "labels": 52,
-   "linefills": 53,
+   "labels": 54,
+   "linefills": 55,
    "tables": 1
   },
   "m15": {
    "plots": {},
    "barColors": 4000,
-   "lines": 54,
+   "lines": 52,
    "boxes": 504,
-   "labels": 53,
-   "linefills": 54,
+   "labels": 55,
+   "linefills": 50,
    "tables": 1
   }
  },
@@ -869,6 +868,7 @@
     "plot51": 1,
     "plot52": 0
    },
+   "markers": 4,
    "lines": 50
   },
   "m15": {
@@ -927,6 +927,7 @@
     "plot51": 1,
     "plot52": 0
    },
+   "markers": 4,
    "lines": 50
   }
  },
@@ -939,7 +940,9 @@
     "plot0": 3958
    },
    "lines": 502,
-   "boxes": 42
+   "boxes": 42,
+   "labels": 145,
+   "linefills": 26
   }
  },
  "ma-cross-alert-mtf": {
@@ -947,75 +950,79 @@
    "plots": {
     "plot0": 3151,
     "plot1": 3101,
-    "plot2": 0
+    "plot2": 8
    },
+   "markers": 6,
    "barColors": 3200,
+   "bgColors": 8,
    "fills": 1
   },
   "m15": {
    "plots": {
     "plot0": 3951,
     "plot1": 3901,
-    "plot2": 0
+    "plot2": 12
    },
+   "markers": 9,
    "barColors": 4000,
+   "bgColors": 12,
    "fills": 1
   }
  },
  "support-resistance-signals-mtf": {
   "daily": {
    "plots": {},
-   "lines": 59,
-   "boxes": 64,
-   "labels": 13
+   "lines": 178,
+   "boxes": 258,
+   "labels": 238
   },
   "m15": {
    "plots": {},
-   "lines": 72,
-   "boxes": 77,
-   "labels": 13
+   "lines": 216,
+   "boxes": 317,
+   "labels": 286
   }
  },
  "trendline-breakouts-with-targets": {
   "daily": {
    "plots": {},
-   "markers": 28,
-   "lines": 374,
-   "labels": 28,
-   "linefills": 212
+   "markers": 52,
+   "lines": 380,
+   "labels": 52,
+   "linefills": 184
   },
   "m15": {
    "plots": {},
-   "markers": 31,
-   "lines": 482,
-   "labels": 31,
-   "linefills": 280
+   "markers": 64,
+   "lines": 470,
+   "labels": 52,
+   "linefills": 228
   }
  },
  "liquidity-pools": {
   "daily": {
    "plots": {},
-   "lines": 27,
-   "boxes": 27,
-   "labels": 27
+   "lines": 19,
+   "boxes": 21,
+   "labels": 19
   },
   "m15": {
    "plots": {},
-   "lines": 33,
-   "boxes": 33,
-   "labels": 33
+   "lines": 24,
+   "boxes": 26,
+   "labels": 24
   }
  },
  "fluidtrades-smc-lite": {
   "daily": {
    "plots": {},
-   "lines": 140,
-   "boxes": 124
+   "lines": 141,
+   "boxes": 123
   },
   "m15": {
    "plots": {},
-   "lines": 180,
-   "boxes": 143
+   "lines": 178,
+   "boxes": 144
   }
  }
 }

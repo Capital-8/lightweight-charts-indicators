@@ -40,7 +40,8 @@ export function makeBars(count: number, step: number): FixtureBar[] {
       low = open - 0.05;
     }
     bars.push({ time: end - (count - 1 - i) * step, open, high, low, close, volume });
-    price = close;
+    // a strong bar does not move the walk (the next bar opens with a gap back), so the series keeps its swings
+    price = i % 41 === 20 ? open : close;
   }
   return bars;
 }
