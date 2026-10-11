@@ -5,6 +5,7 @@
 
 import { isInputActive, type Bar, type InputConfig } from 'oakscriptjs';
 import { ChartManager } from './chart';
+import { buildChartContext } from './chart-context';
 import { parseColor } from '../../src/render/color';
 import { indicatorRegistry, type IndicatorRegistryEntry, type IndicatorCategory } from '../../src/index';
 
@@ -515,7 +516,8 @@ export class IndicatorUI {
     }
 
     try {
-      const result = indicator.calculate(this.bars, this.currentInputs);
+      const chart = buildChartContext(this.bars, this.chartManager.getChart());
+      const result = indicator.calculate(this.bars, this.currentInputs, chart);
       this.chartManager.renderIndicator(indicator, result, this.bars, this.currentInputs);
     } catch (error) {
       console.error('Error calculating indicator:', error);
