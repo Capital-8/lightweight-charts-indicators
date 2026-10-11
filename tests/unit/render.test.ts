@@ -2,11 +2,23 @@
  * IndicatorRenderer ownership rules on a fake chart (no canvas): a render replaces what the instance drew before,
  * clear() removes everything it created (series and primitives), two instances do not touch each other, the pane of
  * the host is used, force_overlay output goes to pane 0.
+ * Drawing defaults: what the draw functions use for a property the result omits (fake canvas context and document).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Bar } from 'oakscriptjs';
 import { IndicatorRenderer } from '../../src/render';
 import { indicatorRegistry } from '../../src/index';
+import {
+  buildTable,
+  drawBox,
+  drawLabel,
+  drawLine,
+  DEFAULT_BOX_TEXT_COLOR,
+  DEFAULT_LABEL_TEXT_COLOR,
+  DEFAULT_TABLE_TEXT_COLOR,
+  PINE_BLUE,
+  type DrawEnv,
+} from '../../src/render/primitives';
 
 interface FakeSeries {
   pane: number;
@@ -203,5 +215,123 @@ describe('IndicatorRenderer', () => {
       r.clear();
       expect(f.series.size).toBe(0);
     });
+  });
+});
+
+// ─── Drawing defaults ───────────────────────────────────────────────────────
+
+interface DrawCall { op: string; style: string; text?: string; lineWidth?: number; dash?: number[]; font?: string; align?: string }
+
+/** Canvas context that records the colour (and width, dash, font) of every fill, stroke and text */
+function fakeContext() {
+  const calls: DrawCall[] = [];
+  let dash: number[] = [];
+  const ctx = {
+    fillStyle: '', strokeStyle: '', lineWidth: 1, font: '', textAlign: '', textBaseline: '', lineJoin: '', lineCap: '',
+    save() {}, restore() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, rect() {}, clip() {}, roundRect() {},
+    setLineDash(d: number[]) { dash = d; },
+    measureText: (t: string) => ({ width: t.length * 6 }),
+    fill() { calls.push({ op: 'fill', style: this.fillStyle }); },
+    stroke() { calls.push({ op: 'stroke', style: this.strokeStyle, lineWidth: this.lineWidth, dash }); },
+    fillRect() { calls.push({ op: 'fillRect', style: this.fillStyle }); },
+    strokeRect() { calls.push({ op: 'strokeRect', style: this.strokeStyle, lineWidth: this.lineWidth, dash }); },
+    fillText(text: string) { calls.push({ op: 'fillText', style: this.fillStyle, text, font: this.font, align: this.textAlign }); },
+    strokeText(text: string) { calls.push({ op: 'strokeText', style: this.strokeStyle, text }); },
+  };
+  const env = {
+    ctx, width: 800, height: 400,
+    series: { priceToCoordinate: (p: number) => 400 - p },
+    grid: { x: (_scale: unknown, time: number) => time, byTime: new Map() },
+    timeScale: {},
+  } as unknown as DrawEnv;
+  return { env, calls };
+}
+
+interface FakeElement {
+  style: Record<string, string>;
+  children: FakeElement[];
+  textContent?: string;
+  insertRow(): FakeElement;
+  insertCell(): FakeElement;
+}
+
+function fakeElement(): FakeElement {
+  const el: FakeElement = {
+    style: {},
+    children: [],
+    insertRow() { const row = fakeElement(); el.children.push(row); return row; },
+    insertCell() { const cell = fakeElement(); el.children.push(cell); return cell; },
+  };
+  return el;
+}
+
+describe('drawing defaults (a property the result omits)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('has the text colours of the current language version', () => {
+    expect(DEFAULT_LABEL_TEXT_COLOR).toBe('#FFFFFF');
+    expect(DEFAULT_BOX_TEXT_COLOR).toBe('#FFFFFF');
+    expect(DEFAULT_TABLE_TEXT_COLOR).toBe('#363A45');
+    expect(PINE_BLUE).toBe('#2962FF');
+  });
+
+  it('label: blue label_down box, white centred text of normal size', () => {
+    const { env, calls } = fakeContext();
+    drawLabel(env, { time: 100, price: 50, text: 'L' });
+    // box and tip
+    expect(calls.filter((c) => c.op === 'fill').map((c) => c.style)).toEqual(['#2962FF', '#2962FF']);
+    const text = calls.filter((c) => c.op === 'fillText');
+    expect(text).toHaveLength(1);
+    expect(text[0]).toMatchObject({ style: '#FFFFFF', text: 'L', font: '13px sans-serif', align: 'center' });
+  });
+
+  it('label: keeps a text colour that the result sets', () => {
+    const { env, calls } = fakeContext();
+    drawLabel(env, { time: 100, price: 50, text: 'L', textColor: '#363A45' });
+    expect(calls.find((c) => c.op === 'fillText')!.style).toBe('#363A45');
+  });
+
+  it('box: blue background, blue solid border of width 1, white centred text', () => {
+    const { env, calls } = fakeContext();
+    drawBox(env, { time1: 100, price1: 300, time2: 300, price2: 100, text: 'B' });
+    expect(calls.find((c) => c.op === 'fillRect')!.style).toBe('#2962FF');
+    expect(calls.find((c) => c.op === 'strokeRect')).toMatchObject({ style: '#2962FF', lineWidth: 1, dash: [] });
+    expect(calls.find((c) => c.op === 'fillText')).toMatchObject({ style: '#FFFFFF', text: 'B', align: 'center' });
+  });
+
+  it('box: keeps a text colour that the result sets, draws no text for a transparent one', () => {
+    const set = fakeContext();
+    drawBox(set.env, { time1: 100, price1: 300, time2: 300, price2: 100, text: 'B', textColor: '#363A45' });
+    expect(set.calls.find((c) => c.op === 'fillText')!.style).toBe('#363A45');
+    const na = fakeContext();
+    drawBox(na.env, { time1: 100, price1: 300, time2: 300, price2: 100, text: 'B', textColor: 'transparent' });
+    expect(na.calls.some((c) => c.op === 'fillText')).toBe(false);
+  });
+
+  it('line: blue, solid, width 1', () => {
+    const { env, calls } = fakeContext();
+    drawLine(env, { time1: 100, price1: 300, time2: 300, price2: 100 });
+    expect(calls).toEqual([{ op: 'stroke', style: '#2962FF', lineWidth: 1, dash: [] }]);
+  });
+
+  it('table: no background, frame or border; cell text in #363A45, centred, 11 px', () => {
+    vi.stubGlobal('document', { createElement: () => fakeElement() });
+    const table = buildTable(
+      { position: 'top_right', columns: 2, rows: 1, cells: [{ column: 0, row: 0, text: 'C' }, { column: 1, row: 0, text: 'D', textColor: '#AA5500' }] },
+      { width: 800, height: 400 },
+    ) as unknown as FakeElement;
+    expect(table.style.background).toBeUndefined();
+    expect(table.style.border).toBeUndefined();
+    const [first, second] = table.children[0].children;
+    expect(first.textContent).toBe('C');
+    expect(first.style.color).toBe('#363A45');
+    expect(first.style.textAlign).toBe('center');
+    expect(first.style.verticalAlign).toBe('middle');
+    expect(first.style.font).toBe('11px sans-serif');
+    expect(first.style.background).toBeUndefined();
+    expect(first.style.border).toBeUndefined();
+    expect(second.style.color).toBe('#AA5500');
   });
 });

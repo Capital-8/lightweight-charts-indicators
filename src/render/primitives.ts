@@ -880,6 +880,19 @@ export function drawExtendedShape(
  */
 export const PINE_BLUE = '#2962FF';
 
+/**
+ * Text colours of drawings whose result omits them: the defaults of PineScript v6 (the current language version).
+ * - label text (label.new without textcolor): color.white; scripts of v4 and v5 draw it with color.black (#363A45)
+ * - box text (box.new without text_color): color.white; scripts of v5 draw it with color.black (#363A45)
+ * - table cell text (table.cell without text_color): color.black (#363A45) in every version
+ * The result does not carry the language version: a port of an older script sets the colour of its version.
+ * (color.blue is also #2196F3 instead of #2962FF in v4: a port of a v4 script sets the colour of a label, line or
+ * box that the script leaves out.)
+ */
+export const DEFAULT_LABEL_TEXT_COLOR = '#FFFFFF';
+export const DEFAULT_BOX_TEXT_COLOR = '#FFFFFF';
+export const DEFAULT_TABLE_TEXT_COLOR = '#363A45';
+
 /** Context of a drawing function (media coordinates) */
 export interface DrawEnv {
   ctx: CanvasRenderingContext2D;
@@ -1196,7 +1209,7 @@ export function wrapLine(ctx: CanvasRenderingContext2D, line: string, width: num
 
 /** Text of a box (clipped to the box): size auto fits the text in the box */
 export function drawBoxText(ctx: CanvasRenderingContext2D, box: BoxData, left: number, top: number, w: number, h: number): void {
-  const color = box.textColor ?? '#000000';
+  const color = box.textColor ?? DEFAULT_BOX_TEXT_COLOR;
   if (!box.text || !shown(color)) return;
   const innerW = w - BOX_TEXT_PAD * 2;
   const innerH = h - BOX_TEXT_PAD * 2;
@@ -1306,7 +1319,7 @@ export function drawLabel(env: DrawEnv, label: LabelData): void {
   const { ctx } = env;
   const style = label.style ?? 'label_down';
   const color = label.color ?? PINE_BLUE;
-  const textColor = label.textColor ?? '#ffffff';
+  const textColor = label.textColor ?? DEFAULT_LABEL_TEXT_COLOR;
   const px = textPx(label.size);
   ctx.font = fontOf(px, label.fontFamily, label.textFormatting);
   const lines = label.text.split('\n');
@@ -1410,7 +1423,8 @@ export const TABLE_TEXT_SIZES: Record<PineSize, number> = { auto: 11, tiny: 9, s
 
 /**
  * DOM table of a table.new table: merged cells (table.merge_cells), frame and cell borders, cell width / height in %
- * of the plotting area (0: fit the text).
+ * of the plotting area (0: fit the text). A cell without a text colour is drawn with DEFAULT_TABLE_TEXT_COLOR, without
+ * a text size with size.auto.
  */
 export function buildTable(table: TableData, area: { width: number; height: number }): HTMLTableElement {
   const el = document.createElement('table');
@@ -1448,9 +1462,9 @@ export function buildTable(table: TableData, area: { width: number; height: numb
       const cell = cells.get(key);
       if (!cell) continue;
       td.textContent = cell.text;
-      const px = typeof cell.textSize === 'number' ? Math.max(1, cell.textSize) : TABLE_TEXT_SIZES[cell.textSize ?? 'normal'] ?? 11;
+      const px = typeof cell.textSize === 'number' ? Math.max(1, cell.textSize) : TABLE_TEXT_SIZES[cell.textSize ?? 'auto'] ?? 11;
       td.style.font = fontOf(px, cell.fontFamily, cell.textFormatting);
-      td.style.color = cell.textColor ?? '#000000';
+      td.style.color = cell.textColor ?? DEFAULT_TABLE_TEXT_COLOR;
       if (shown(cell.bgColor)) td.style.background = cell.bgColor;
       td.style.textAlign = cell.textHAlign ?? 'center';
       td.style.verticalAlign = cell.textVAlign === 'top' ? 'top' : cell.textVAlign === 'bottom' ? 'bottom' : 'middle';

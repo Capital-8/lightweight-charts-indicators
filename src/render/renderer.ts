@@ -906,7 +906,8 @@ export class IndicatorRenderer {
 
   /**
    * Tables (table.new) as DOM overlays in the chart element, on their pane (the price pane with force_overlay), at
-   * their position inside the plotting area. PineScript defaults: no background, frame or borders; black cell text.
+   * their position inside the plotting area. PineScript defaults: no background, frame or borders; cell text in
+   * color.black (#363A45).
    */
   private drawTables(tables: TableData[], pane: number): void {
     const host = this.chart.chartElement();
