@@ -15,6 +15,8 @@
  *   estimate that gives all the volume of a bar to "up" when it closes at or above the previous close (first bar:
  *   the open), else to "down"
  * - lower timeframe above the chart timeframe: error, as the original
+ * The chart timeframe is `timeframe` of the chart context (third argument of calculate) when given, else it is
+ * taken from the bar spacing.
  * The design (columns, colours, delta character) is the one of the standard indicator.
  *
  * PineScript display:
@@ -26,6 +28,7 @@
 import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lowerTimeframe, upDownVolumeOfChartBars } from '../lower-tf-volume';
+import type { ChartContext } from '../chart-context';
 
 export interface UpDownVolumeInputs {
   /** Use the custom lower timeframe instead of the automatic one */
@@ -65,9 +68,10 @@ const gt = (a: number, b: number) => a - b > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<UpDownVolumeInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
   const { useCustomTimeframe, lowerTimeframe: customTimeframe } = { ...defaultInputs, ...inputs };
-  const { exact } = lowerTimeframe(bars, useCustomTimeframe, customTimeframe);
+  const { exact } = lowerTimeframe(bars, useCustomTimeframe, customTimeframe, chart);
   const exactVolume = exact ? upDownVolumeOfChartBars(bars) : null;
   const up: { time: number; value: number }[] = [];
   const down: { time: number; value: number }[] = [];

@@ -11,14 +11,16 @@
  *
  * Bands #1 are shown by default; each band pair has its fill (green / olive / teal, 95% transparency). A hidden band
  * keeps its values (as the original): its plots are hidden through `visible` (= showBandK) and its fill is left out.
- * 'Hide VWAP on 1D or Above' gives na on daily, weekly and monthly bars (the bar interval, the most frequent gap
- * between two bars, is one day or more). Offset shifts every plot by that number of bars.
+ * 'Hide VWAP on 1D or Above' gives na on daily, weekly and monthly bars (the chart timeframe of the chart context,
+ * the optional third argument of calculate; without it the bar interval, the most frequent gap between two bars,
+ * is one day or more). Offset shifts every plot by that number of bars.
  *
  * Anchor periods: the original resets on timeframe.change("D" / "W" / "M" / "3M" / "12M") in the exchange time zone,
- * Decade / Century on a new year divisible by 10 / 100, and always on the first bar. The bars carry no time zone or
- * session, so the port takes the calendar of the bar time in UTC (weeks start on Monday): exact on daily and higher
- * bars and on UTC 24x7 symbols; on intraday bars whose trading day differs from the UTC day (sessions crossing UTC
- * midnight) the reset bar can differ.
+ * Decade / Century on a new year divisible by 10 / 100, and always on the first bar. With the time zone and the
+ * session of the chart context the periods are those of the exchange calendar (see src/anchor-period.ts) and the
+ * year is read in the exchange time zone. Without them the port takes the calendar of the bar time in UTC (weeks
+ * start on Monday): exact on daily and higher bars and on UTC 24x7 symbols; on intraday bars whose trading day
+ * differs from the UTC day (sessions crossing UTC midnight) the reset bar can differ.
  * Earnings / Dividends / Splits: the original resets on the corporate events of the symbol (request.earnings /
  * dividends / splits) and never on the first bar. The bars carry no such events, so the port has no anchor bar and
  * the VWAP and bands are na on every bar, as the original gives on a symbol without these events.
@@ -26,7 +28,10 @@
  * Based on the standard "Volume Weighted Average Price" indicator.
  */
 
-import { Series, ta, getSourceSeries, barInterval, barTime, type FillData, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { Series, ta, getSourceSeries, barInterval, barTime, time as pineTime, timeframe as pineTimeframe, type FillData, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+
+import { hasCalendar, periodStarts, chartTimeframe } from '../anchor-period';
+import { timezoneOf, type ChartContext } from '../chart-context';
 
 export type VWAPAnchor = 'Session' | 'Week' | 'Month' | 'Quarter' | 'Year' | 'Decade' | 'Century' | 'Earnings' | 'Dividends' | 'Splits';
 
@@ -95,6 +100,9 @@ export const metadata = {
   overlay: true,
 };
 
+/** Timeframe of timeframe.change() of each calendar anchor (Decade and Century: a new year) */
+const ANCHOR_TIMEFRAME: Partial<Record<VWAPAnchor, string>> = { Session: 'D', Week: 'W', Month: 'M', Quarter: '3M', Year: '12M' };
+
 /** UTC calendar of a bar time (seconds or milliseconds) */
 function utcDate(time: number): Date {
   return new Date(time < 1e12 ? time * 1000 : time);
@@ -117,6 +125,7 @@ function periodKey(d: Date, anchor: VWAPAnchor): number {
 export function calculate(
   bars: Bar[],
   inputs: Partial<VWAPInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { visibility: Record<string, boolean> } {
   const cfg = { ...defaultInputs, ...inputs };
   const { anchor, offset } = cfg;
@@ -129,25 +138,31 @@ export function calculate(
   // isNewPeriod: timeframe.change(...) per anchor; Earnings / Dividends / Splits: no event data (never)
   const isEsdAnchor = anchor === 'Earnings' || anchor === 'Dividends' || anchor === 'Splits';
   const isNewPeriod: number[] = new Array(n).fill(0);
+  // With the exchange calendar of the chart context: timeframe.change(tf) of the anchor timeframe, and the year in
+  // the exchange time zone. Else the UTC calendar of the bar times.
+  const exchange = !isEsdAnchor && hasCalendar(chart) ? periodStarts(bars, ANCHOR_TIMEFRAME[anchor] ?? '12M', chart) : null;
+  const timezone = timezoneOf(chart);
   let prevKey = NaN;
   for (let i = 0; i < n; i++) {
     if (isEsdAnchor) break;
     const d = utcDate(bars[i].time);
-    const key = periodKey(d, anchor);
+    const key = exchange ? exchange[i] : periodKey(d, anchor);
     const change = i > 0 && key !== prevKey;
     prevKey = key;
     let isNew = change;
-    if (anchor === 'Decade') isNew = change && d.getUTCFullYear() % 10 === 0;
-    else if (anchor === 'Century') isNew = change && d.getUTCFullYear() % 100 === 0;
+    const year = exchange ? pineTime.year(d.getTime(), timezone) : d.getUTCFullYear();
+    if (anchor === 'Decade') isNew = change && year % 10 === 0;
+    else if (anchor === 'Century') isNew = change && year % 100 === 0;
     // if na(src[1]) and not isEsdAnchor: isNewPeriod := true
     if (i === 0 || Number.isNaN(srcArr[i - 1])) isNew = true;
     isNewPeriod[i] = isNew ? 1 : 0;
   }
 
-  // timeframe.isdwm: the bar interval is one day or more
+  // timeframe.isdwm: the chart timeframe of the context, else the bar interval is one day or more
   const interval = barInterval(bars);
   const day = n > 0 && bars[0].time < 1e12 ? 86400 : 86400000;
-  const hidden = cfg.hideOnDWM && interval >= day;
+  const isDwm = chart?.timeframe ? pineTimeframe.info(chartTimeframe(bars, chart)).isdwm : interval >= day;
+  const hidden = cfg.hideOnDWM && isDwm;
 
   const nan = () => new Array<number>(n).fill(NaN);
   const vwapValue = nan();

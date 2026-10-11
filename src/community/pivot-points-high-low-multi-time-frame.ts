@@ -8,13 +8,20 @@
  * As in the original, a pivot confirmed on the bar of the higher timeframe that follows another confirmation of the
  * same side is not drawn. At most 500 lines and 500 labels are kept.
  *
- * Timeframe: the bars of the higher timeframe are built from the chart bars with the UTC calendar rule of the period
+ * Timeframe: the bars of the higher timeframe are built from the chart bars with the calendar rule of the period
  * helper (see anchor-period.ts for its limits). The original reads the higher timeframe with lookahead: a pivot is
  * drawn on the first chart bar of the bar of the higher timeframe that confirms it. A timeframe below the chart
  * timeframe (the default 240 on a daily chart) needs data that the chart bars do not have: the port throws an Error.
  *
  * Chart context (optional third argument): the label text is the price rounded to the price tick of the symbol,
  * read from the context (`mintick`). Without it the tick is 0.01.
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "Pivot Points High Low Multi Time Frame" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -23,7 +30,7 @@
 
 import { ta, Series, str, math, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData } from '../types';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface PivotPointsHighLowMultiTimeFrameInputs {
@@ -82,14 +89,18 @@ const truthy = (v: number) => !isNaN(v) && v !== 0;
  * from the chart bars (their time is the start of the period) and for each chart bar the index of its bar of that
  * timeframe.
  */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; group: number[] } {
-  const chartTf = chartTimeframe(bars);
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; group: number[] } {
+  const chartTf = chartTimeframe(bars, context);
   if (tf.trim() === '' || chartTf === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chartTf)) {
     return { htf: bars, group: bars.map((_b, i) => i) };
   }
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chartTf)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chartTf}": the chart bars do not have that data`);
   }
+  // With the exchange calendar of the chart context (time zone and session): the periods come from the library
+  // rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) return { htf: exchange.htf, group: exchange.group };
   const starts = periodStarts(bars, tf);
   const htf: Bar[] = [];
   const group: number[] = [];
@@ -119,7 +130,7 @@ export function calculate(
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
 
   // get_phpl() on the bars of the timeframe
-  const { htf, group } = timeframeBars(bars, cfg.timeframe);
+  const { htf, group } = timeframeBars(bars, cfg.timeframe, chart);
   const phH = A(ta.pivothigh(Series.fromArray(htf, htf.map((b) => b.high)), leftBars, rightBars));
   const plH = A(ta.pivotlow(Series.fromArray(htf, htf.map((b) => b.low)), leftBars, rightBars));
   const htfTime = (k: number) => (k >= 0 ? htf[k].time : NaN);

@@ -6,8 +6,9 @@
  * semi-transparent historical colours (when "Show Historical Inside Bars" is on). "Highlight Current Bar Only" keeps
  * only the real-time bar. Optional triangle markers above (or below) the inside bars.
  *
- * The port computes on historical (confirmed) bars only: barstate.isrealtime is false on every bar, so the bars get
- * the historical colours and "Highlight Current Bar Only" colours no bar.
+ * The real-time bar is the last bar when it is still open. The port reads the state of the last bar from the
+ * optional third argument (see src/chart-context.ts); without it every bar is a historical (closed) bar, so the
+ * bars get the historical colours and "Highlight Current Bar Only" colours no bar.
  *
  * Reference: "Inside Bar Coloring (Real-time + Historical) w/ Alerts" by SpinTrades
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +17,7 @@
 
 import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface InsideBarColoringWAlertsInputs {
   /** Bullish Inside Bar (Close >= Open) */
@@ -75,7 +77,11 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<InsideBarColoringWAlertsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const { bullishInsideColor, bearishInsideColor, bullishHistoricalColor, bearishHistoricalColor } = cfg;
   const { showHistorical, showCurrentOnly, showMarkers, markerPosition } = cfg;
@@ -93,8 +99,8 @@ export function calculate(
     const low1 = i > 0 ? bars[i - 1].low : NaN;
     const isInsideBar = le(high, high1) && ge(low, low1);
     const isBullish = ge(close, open);
-    // barstate.isrealtime and bar_index == last_bar_index: the port has only historical bars (isrealtime false)
-    const isRealtime = false;
+    // barstate.isrealtime and bar_index == last_bar_index: the last bar when it is still open
+    const isRealtime = !barIsConfirmed(i);
     const isCurrentBar = isRealtime && i === n - 1;
 
     let barColor: string | null;

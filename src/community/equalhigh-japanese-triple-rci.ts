@@ -8,6 +8,10 @@
  * zero; a marker on the first bar of a new alignment. Zones beyond the extreme levels are shaded; the background can
  * show the alignment.
  *
+ * Last bar: with 'Confirmer uniquement à la clôture' the reversal and alignment signals need a closed bar. The port
+ * reads the state of the last bar from the optional third argument (see src/chart-context.ts); without it every bar
+ * is taken as closed.
+ *
  * Reference: "Equalhigh — RCI japonais triple 9/26/52" by Stevesyl
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Stevesyl
@@ -15,6 +19,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface EqualhighJapaneseTripleRciInputs {
   /** Short RCI length */
@@ -32,7 +37,7 @@ export interface EqualhighJapaneseTripleRciInputs {
   showReversals: boolean;
   /** Show the new alignment markers */
   showAlignments: boolean;
-  /** Signals only on closed bars (every bar given to calculate() is closed) */
+  /** Signals only on closed bars */
   confirmAtClose: boolean;
   /** Shade the zones beyond the extreme levels */
   shadeExtremeZones: boolean;
@@ -153,7 +158,11 @@ function rci(src: number[], length: number): number[] {
 export function calculate(
   bars: Bar[],
   inputs: Partial<EqualhighJapaneseTripleRciInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -163,8 +172,8 @@ export function calculate(
   const rciMedium = rci(src, cfg.mediumLength);
   const rciLong = rci(src, cfg.longLength);
 
-  // barConfirmed = not confirmAtClose or barstate.isconfirmed: every bar given to calculate() is a closed bar, so
-  // ta.crossover / ta.crossunder (right of the lazy `and`) run on every bar
+  // barConfirmed = not confirmAtClose or barstate.isconfirmed. ta.crossover / ta.crossunder are right of the lazy
+  // `and`: they do not run on an open last bar, which is the last bar, so the other bars do not change
   const crossUp = A(ta.crossover(Series.fromArray(bars, rciShort), -cfg.reversalLevel));
   const crossDn = A(ta.crossunder(Series.fromArray(bars, rciShort), cfg.reversalLevel));
 
@@ -175,12 +184,13 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const medPrev = i > 0 ? rciMedium[i - 1] : NaN;
-    const earlyBull = crossUp[i] === 1 && gt(rciMedium[i], medPrev);
-    const earlyBear = crossDn[i] === 1 && lt(rciMedium[i], medPrev);
+    const barConfirmed = !cfg.confirmAtClose || barIsConfirmed(i);
+    const earlyBull = barConfirmed && crossUp[i] === 1 && gt(rciMedium[i], medPrev);
+    const earlyBear = barConfirmed && crossDn[i] === 1 && lt(rciMedium[i], medPrev);
     const bull = gt(rciShort[i], 0.0) && gt(rciMedium[i], 0.0) && gt(rciLong[i], 0.0);
     const bear = lt(rciShort[i], 0.0) && lt(rciMedium[i], 0.0) && lt(rciLong[i], 0.0);
-    const newBull = bull && !prevBull;
-    const newBear = bear && !prevBear;
+    const newBull = barConfirmed && bull && !prevBull;
+    const newBear = barConfirmed && bear && !prevBear;
     prevBull = bull;
     prevBear = bear;
 

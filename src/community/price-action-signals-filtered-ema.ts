@@ -6,12 +6,16 @@
  * close is below the EMA gives a bearish signal. A signal is shown only when the same side is not already active:
  * a bullish setup makes the bullish side active and ends the bearish side, and the other way round.
  *
+ * Last bar: a pivot is processed on a closed bar only. The port reads the state of the last bar from the optional
+ * third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Price Action Signals Filtered +EMA" by Aleksin_Aleksandar
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export type PriceActionBullShape = 'Circle' | 'Triangle Up' | 'Arrow Up';
 export type PriceActionBearShape = 'Circle' | 'Triangle Down' | 'Arrow Down';
@@ -80,7 +84,11 @@ const BEAR_SHAPES: Record<string, MarkerData['shape']> = { Circle: 'circle', 'Tr
 export function calculate(
   bars: Bar[],
   inputs: Partial<PriceActionSignalsFilteredEmaInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -102,8 +110,8 @@ export function calculate(
     const isBearishTrend = lt(close[i], ema[i]);
     let bullishConfirmed = false;
     let bearishConfirmed = false;
-    // Historical bars are confirmed (barstate.isconfirmed)
-    if (!isNaN(pivotLow[i])) {
+    // if newLow and barstate.isconfirmed
+    if (!isNaN(pivotLow[i]) && barIsConfirmed(i)) {
       let tempBull = true;
       // for k = 0 to confirmationCandles - 1: if close[k] <= close[k + 1] -> false (na compares false)
       for (let k = 0; k <= cfg.confirmationCandles - 1; k++) {
@@ -117,7 +125,7 @@ export function calculate(
         bearishActive = false;
       }
     }
-    if (!isNaN(pivotHigh[i])) {
+    if (!isNaN(pivotHigh[i]) && barIsConfirmed(i)) {
       let tempBear = true;
       for (let k = 0; k <= cfg.confirmationCandles - 1; k++) {
         if (ge(closeAt(i - k), closeAt(i - k - 1))) tempBear = false;

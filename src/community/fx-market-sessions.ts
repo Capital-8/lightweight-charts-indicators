@@ -33,6 +33,9 @@
  *   market is open (session.ismarket: the last bar is in the regular session). Without the hours every bar is
  *   taken as a market bar.
  *
+ * Chart timeframe: `timeframe` of the chart context (optional third argument of calculate) when given; without it
+ * the chart timeframe is read from the bar spacing (the most frequent gap between two bars).
+ *
  * Reference: "FX Market Sessions" by boitoki
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © boitoki
@@ -483,10 +486,11 @@ export function calculate(
   /** Utilities.toPips(): price / (tick * 10) */
   const toPips = (v: number) => v / (MINTICK * 10);
   const hist = Math.trunc(cfg.historyPeriod);
-  const tf = chartTimeframe(bars);
+  const tf = chartTimeframe(bars, chart);
   // session.ismarket on the last bar: on intraday bars, the bar is in the regular session hours of the chart context
   // (read in the exchange time zone). Without these hours every bar is taken as a market bar.
-  const regular = chart?.regularSession ?? chart?.session;
+  const regularSpec = chart?.regularSession ?? chart?.session;
+  const regular = typeof regularSpec === 'string' ? regularSpec : regularSpec?.session;
   const isMarket = n > 0 && tf !== '' && timeframe.in_seconds(tf) < 86400
     && typeof regular === 'string' && /^(24x7|\d{4}-\d{4}(,\d{4}-\d{4})*(:\d+)?)$/.test(regular.trim())
     ? pineTime.inSession(inMs ? bars[n - 1].time : bars[n - 1].time * 1000, regular.trim(), timezoneOf(chart))

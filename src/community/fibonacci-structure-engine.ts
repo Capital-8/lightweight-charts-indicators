@@ -41,13 +41,19 @@
  *   tables without a cell are not returned (nothing is drawn).
  * - The alert inputs are kept but alerts have no output.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "Fibonacci Structure Engine 2.1 [WillyAlgoTrader]" by WillyAlgoTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, math, str, timeframe, time as pineTime, barTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PineSize, TableCellData, TableData, TablePosition } from '../types';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { securityStarts, chartTimeframe } from '../anchor-period';
 import { backgroundColorOf, lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
 
 export interface FibonacciStructureEngineInputs {
@@ -484,7 +490,7 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
   const S = (a: number[]) => Series.fromArray(bars, a);
   const ms = n > 0 && bars[0].time >= 1e12;
   const tMs = (i: number) => (ms ? bars[i].time : bars[i].time * 1000);
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   const tfSeconds = chartTf === '' ? 0 : timeframe.in_seconds(chartTf);
   const isIntraday = chartTf !== '' && timeframe.info(chartTf).isintraday;
   const closeMs = (i: number) => tMs(i) + tfSeconds * 1000;
@@ -516,7 +522,7 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
   const htfBias: number[] = new Array(n).fill(NaN);
   const htfCloseTime: number[] = new Array(n).fill(NaN);
   if (htfValid && n > 0) {
-    const starts = periodStarts(bars, cfg.htf);
+    const starts = securityStarts(bars, cfg.htf, chart);
     const htf: Bar[] = [];
     const group: number[] = [];
     const lastOf: number[] = [];
@@ -582,7 +588,7 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
   const prevDayH: number[] = new Array(n).fill(NaN);
   const prevDayL: number[] = new Array(n).fill(NaN);
   if (dayValid) {
-    const days = periodStarts(bars, 'D');
+    const days = securityStarts(bars, 'D', chart);
     let prevHigh = NaN;
     let prevLow = NaN;
     let dayHigh = NaN;

@@ -20,16 +20,19 @@
  *   estimate that gives all the volume of a bar to up or down volume by close vs open (0 when equal), with the bar
  *   as the only intrabar (high / low = open + max / min of 0 and the delta)
  * - lower timeframe above the chart timeframe: error, as the original
- * 'Anchor period' accepts any timeframe ("" = the chart timeframe: the CVD restarts on every bar); the periods are
- * taken from the UTC calendar and the bars, as the bars carry no exchange time zone or session (see
- * src/anchor-period.ts). The design (colours, zero line) is the one of the
- * standard indicator.
+ * The chart timeframe is `timeframe` of the chart context (third argument of calculate) when given, else it is
+ * taken from the bar spacing.
+ * 'Anchor period' accepts any timeframe ("" = the chart timeframe: the CVD restarts on every bar). With the time
+ * zone and the session of the chart context the periods are those of the exchange calendar; without them they are
+ * taken from the UTC calendar and the bars (see src/anchor-period.ts). The design (colours, zero line) is the one
+ * of the standard indicator.
  */
 
 import { type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
 import type { PlotCandleData } from '../types';
 import { periodStarts } from '../anchor-period';
 import { lowerTimeframe, upDownVolumeOfChartBars } from '../lower-tf-volume';
+import type { ChartContext } from '../chart-context';
 
 export interface CumulativeVolumeDeltaInputs {
   /** Anchor period: any timeframe string ("1D", "1W", "240", ...; "" = chart timeframe) */
@@ -75,12 +78,12 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<CumulativeVolumeDeltaInputs> = {}): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]> } {
+export function calculate(bars: Bar[], inputs: Partial<CumulativeVolumeDeltaInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]> } {
   const { anchorTimeframe, useCustomTimeframe, lowerTimeframe: customTimeframe } = { ...defaultInputs, ...inputs };
-  const { exact } = lowerTimeframe(bars, useCustomTimeframe, customTimeframe);
+  const { exact } = lowerTimeframe(bars, useCustomTimeframe, customTimeframe, chart);
   const exactDelta = exact ? upDownVolumeOfChartBars(bars).delta : [];
   // timeframe.change(anchorTimeframe); "" restarts on every bar
-  const starts = periodStarts(bars, anchorTimeframe);
+  const starts = periodStarts(bars, anchorTimeframe, chart);
 
   const candles: PlotCandleData[] = [];
   let lastVolume = 0;

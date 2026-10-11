@@ -7,12 +7,19 @@
  * unchanged histogram keeps its colour) and a circle marks each cross of MACD and signal. Options: bar colours by
  * trend and a background colour on the crosses.
  *
- * Other timeframe: the bars of that timeframe are built from the chart bars with the UTC calendar rule of the period
+ * Other timeframe: the bars of that timeframe are built from the chart bars with the calendar rule of the period
  * helper (see anchor-period.ts for its limits), so its averages start at the first chart bar. The value of a bar of
  * that timeframe appears on the chart bar that completes it (on symbols that trade every day, a bar whose close
  * reaches the end of the period, else the first bar of the next period; on other symbols the last bar of the
  * period). A timeframe below the chart timeframe needs data that the chart bars do not have: the port throws an
  * Error. The plot widths are inputs in the original; the plots are drawn with their default widths.
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "_CM_MacD_Ult_MTF_V2.1" by ChrisMoody
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -24,7 +31,8 @@ import {
 } from 'oakscriptjs';
 import type { BarColorData, BgColorData } from '../types';
 import { barInterval } from '../bar-time';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 export interface CmMacdCustomMtfV5Inputs {
   /** Timeframe of the MACD ('' = chart timeframe) */
@@ -163,13 +171,21 @@ const truthy = (v: number) => !isNaN(v) && v !== 0;
  * request.security(syminfo.tickerid, tf, ...) without lookahead: the bars of timeframe `tf` built from the chart
  * bars, and for each chart bar the index of the latest completed bar of that timeframe (-1: none yet).
  */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; latest: number[] } {
-  const chart = chartTimeframe(bars);
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; latest: number[] } {
+  const chart = chartTimeframe(bars, context);
   if (tf.trim() === '' || chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
     return { htf: bars, latest: bars.map((_b, i) => i) };
   }
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
+  }
+  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
+  // complete them come from the library rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) {
+    // the time of a bar of the timeframe: its first chart bar
+    const htf = exchange.htf.map((b, k) => ({ ...b, time: bars[exchange.first[k]].time }));
+    return { htf, latest: exchange.latest };
   }
   const n = bars.length;
   const starts = periodStarts(bars, tf);
@@ -237,13 +253,14 @@ function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; latest: number[] 
 export function calculate(
   bars: Bar[],
   inputs: Partial<CmMacdCustomMtfV5Inputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
 
   // The three request.security calls: the averages on the bars of the timeframe
-  const { htf, latest } = timeframeBars(bars, cfg.res);
+  const { htf, latest } = timeframeBars(bars, cfg.res, chart);
   const source = getSourceSeries(htf, cfg.src);
   const ma = (type: 'SMA' | 'EMA', s: Series, len: number) => A(type === 'SMA' ? ta.sma(s, len) : ta.ema(s, len));
   const fastHtf = ma(cfg.smaSource, source, cfg.fastLength);

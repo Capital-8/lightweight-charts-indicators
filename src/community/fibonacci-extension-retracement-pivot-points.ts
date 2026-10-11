@@ -24,6 +24,12 @@
  * - `chart.now`: the current time, for the "Last Bar" position of the pivot labels (as the original). Without it the
  *   clock of the computer.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "Fibonacci Extention / Retracment / Pivot Points by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © dgtrd
@@ -425,7 +431,7 @@ export function calculate(
   const ms = n > 0 && bars[0].time >= 1e12;
 
   // Higher timeframe of the pivot points
-  const chartTf = chart?.timeframe ?? chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   const info = chartTf === '' ? null : timeframe.info(chartTf);
   const fixed: Record<string, string> = {
     '15 Min': '15', '1 Hour': '60', '4 Hour': '240', Session: 'D', Daily: 'D', Weekly: 'W', Monthly: 'M', Quarterly: '3M', Yearly: '12M',
@@ -435,7 +441,7 @@ export function calculate(
       : ['30', '45', '60', '120', '180', '240'].includes(chartTf) ? 'W'
         : info?.isdaily ? 'M'
           : info?.isweekly || info?.ismonthly ? '12M' : '3M');
-  const starts = periodStarts(bars, htf);
+  const starts = periodStarts(bars, htf, chart);
 
   const atr10 = ta.atr(bars, 10).toArray();
   const atr = ta.atr(bars, cfg.atrLength).toArray();

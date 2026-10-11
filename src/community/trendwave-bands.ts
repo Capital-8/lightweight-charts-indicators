@@ -7,12 +7,16 @@
  * band is hidden). The visible band fades while the trend lasts (transparency = trend duration, max 70), and a
  * dotted wave is drawn at 5 * ATR(100) on the other side of it. Circles mark the trend changes.
  *
+ * Last bar: a cross of the bands counts on a closed bar only. The port reads the state of the last bar from the
+ * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "TrendWave Bands [BigBeluga]" by BigBeluga
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface TrendWaveBandsInputs {
   length: number;
@@ -59,7 +63,11 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendWaveBandsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const { length, factor, colUp, colDn, colUl } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const arr = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -86,9 +94,9 @@ export function calculate(
     const hlc3 = (bars[i].high + bars[i].low + bars[i].close) / 3;
     const prevHlc3 = i > 0 ? (bars[i - 1].high + bars[i - 1].low + bars[i - 1].close) / 3 : NaN;
     // sig_up = ta.crossover(hlc3, upper) and barstate.isconfirmed; sig_dn = ta.crossunder(hlc3, lower) and ...
-    // (the band values passed to the calls, before the na reassignment; every historical bar is confirmed)
-    const sigUp = i > 0 && hlc3 > upperRaw[i] && prevHlc3 <= upperRaw[i - 1];
-    const sigDn = i > 0 && hlc3 < lowerRaw[i] && prevHlc3 >= lowerRaw[i - 1];
+    // (the band values passed to the calls, before the na reassignment)
+    const sigUp = i > 0 && hlc3 > upperRaw[i] && prevHlc3 <= upperRaw[i - 1] && barIsConfirmed(i);
+    const sigDn = i > 0 && hlc3 < lowerRaw[i] && prevHlc3 >= lowerRaw[i - 1] && barIsConfirmed(i);
     if (sigUp) dir = 1;
     else if (sigDn) dir = -1;
     upper[i] = dir === 1 ? NaN : upperRaw[i];

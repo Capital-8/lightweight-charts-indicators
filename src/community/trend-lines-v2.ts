@@ -6,11 +6,15 @@
  * Draws up to 3 uptrend lines (ascending pivot lows) and
  * 3 downtrend lines (descending pivot highs).
  *
+ * The start date (year, month, day inputs) is a date of the exchange time zone, as in the original. The port reads
+ * the time zone from the optional third argument (see src/chart-context.ts); without it the date is a UTC date.
+ *
  * Reference: "Trend Lines v2" by LonesomeTheBlue (Pine v4)
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LineDrawingData } from '../types';
+import type { ChartContext } from '../chart-context';
 
 export interface TrendLinesV2Inputs {
   startYear: number;
@@ -59,7 +63,7 @@ const EPS = 1e-10;
 const lt = (a: number, b: number) => b - a > EPS;
 const gt = (a: number, b: number) => a - b > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<TrendLinesV2Inputs> = {}): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[] } {
+export function calculate(bars: Bar[], inputs: Partial<TrendLinesV2Inputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[] } {
   const { startYear, startMonth, startDay, prd, ppNum, utcol, dtcol } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -108,9 +112,11 @@ export function calculate(bars: Bar[], inputs: Partial<TrendLinesV2Inputs> = {})
   // Now process all pivot pairs to find valid trend lines
   // Pine deletes and redraws the lines on every bar with time >= starttime; the lines left are the ones of the
   // last bar. Before starttime nothing is drawn.
-  // Pine timestamp() uses the exchange timezone; the port has no symbol timezone and uses UTC.
+  // Pine timestamp() uses the exchange time zone: the one of the chart context, UTC without it.
   const lastBar = n - 1;
-  const startTime = Date.UTC(startYear, startMonth - 1, startDay, 0, 0, 0) / 1000;
+  const startTime = (chart?.timezone === undefined
+    ? Date.UTC(startYear, startMonth - 1, startDay, 0, 0, 0)
+    : pineTime.timestamp(chart.timezone, startYear, startMonth, startDay, 0, 0, 0)) / 1000;
   if (n === 0 || bars[lastBar].time < startTime) {
     return {
       metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },

@@ -21,11 +21,20 @@
  * chart context (third argument, lastBarConfirmed); without it every bar given to calculate() is a closed bar.
  * Line and label ends after the last bar are times (last bar time + 20 bar durations), as in the original.
  * Other timeframes (fair value gaps, day / week / month levels): the bars of that timeframe are built from the chart
- * bars (periods from the UTC calendar and the bars, see src/anchor-period.ts). Exact on UTC 24x7 symbols and on
- * symbols whose trading day is inside the UTC day; the first periods of the bars can differ. A fair value gap
+ * bars. With the time zone and the session of the chart context the periods are those of the exchange calendar, and
+ * the chart timeframe is the one of the context. Without them the periods come from the UTC calendar and the bars
+ * (see src/anchor-period.ts): exact on UTC 24x7 symbols and on symbols whose trading day is inside the UTC day. The
+ * first periods of the bars can differ. A fair value gap
  * timeframe below the chart timeframe needs data that the bars do not carry: the port throws an Error.
  * The automatic fair value gap threshold and the "Cumulative Mean Range" filter divide by the bar index: it counts
  * from the first bar given to calculate().
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "Smart Money Concepts (SMC) [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -38,7 +47,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, PlotCandleData } from '../types';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 type Show = 'All' | 'BOS' | 'CHoCH';
@@ -361,7 +370,13 @@ function getStyle(style: string): LineStyle {
 }
 
 /** Bars of the timeframe `tf` built from the chart bars, and the index of the period of each chart bar */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; group: number[] } {
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; group: number[] } {
+  // With the exchange calendar of the chart context (time zone and session): the periods come from the library
+  // rule (see anchor-period.ts)
+  const chartTf = chartTimeframe(bars, context);
+  const lower = tf.trim() !== '' && chartTf !== '' && timeframe.in_seconds(tf) < timeframe.in_seconds(chartTf);
+  const exchange = lower ? null : securityBars(bars, tf, context);
+  if (exchange) return { htf: exchange.htf, group: exchange.group };
   const starts = periodStarts(bars, tf);
   const htf: Bar[] = [];
   const group: number[] = [];
@@ -402,7 +417,7 @@ export function calculate(
   const at = (a: number[], i: number) => (i >= 0 ? a[i] : NaN);
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
 
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   const chartSeconds = chartTf === '' ? NaN : timeframe.in_seconds(chartTf);
   const chartInfo = chartTf === '' ? null : timeframe.info(chartTf);
   const lastBarTime = n > 0 ? T[last] : NaN;
@@ -478,7 +493,7 @@ export function calculate(
     if (tf.trim() !== '' && chartTf !== '' && timeframe.in_seconds(tf) < chartSeconds) {
       throw new Error(`Fair value gap timeframe "${tf}" is below the chart timeframe "${chartTf}": the bars do not carry lower timeframe data`);
     }
-    fvgBars = timeframeBars(bars, tf);
+    fvgBars = timeframeBars(bars, tf, chart);
   }
   let fvgCum = 0; // ta.cum(math.abs(newTimeframe ? barDeltaPercent : 0))
 
@@ -706,7 +721,7 @@ export function calculate(
   /** drawLevels(): high and low of the previous day / week / month (of the bar on the same timeframe) */
   const drawLevels = (tf: 'D' | 'W' | 'M', sameTimeframe: boolean, style: string, levelColor: string, i: number) => {
     // request.security(syminfo.tickerid, timeframe, [high[1], low[1], time[1], time], lookahead = barmerge.lookahead_on)
-    const { htf, group } = timeframeBars(bars, tf);
+    const { htf, group } = timeframeBars(bars, tf, chart);
     const g = group[i];
     const previous = g > 0 ? htf[g - 1] : null;
     const parsedTop = sameTimeframe ? H[i] : previous ? previous.high : NaN;

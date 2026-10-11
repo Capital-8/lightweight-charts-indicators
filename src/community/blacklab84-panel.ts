@@ -10,6 +10,10 @@
  * volatility line (the share of the last N bars with an ATR below the current ATR) is mapped to -105..-85.
  * Invisible plots at 105 and -105 fix the pane scale.
  *
+ * Last bar: the volatility percentile is computed on a closed bar only (0 on an open bar). The port reads the state
+ * of the last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as
+ * closed.
+ *
  * Reference: "EDGE Panel" by blacklab84
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -17,6 +21,7 @@
 import { ta, Series, math, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface Blacklab84PanelInputs {
   /** CMO length */
@@ -121,7 +126,11 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<Blacklab84PanelInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { bgColors: BgColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -200,9 +209,10 @@ export function calculate(
   const adx = A(ta.rma(S(dx), cfg.adxLen));
 
   // ③ Volatility state: share of the last p_atrPctLen bars with an ATR below the current ATR
-  // (barstate.isconfirmed: every historical bar)
+  // (if barstate.isconfirmed; else p_atrPct stays 0.0)
   const atr = A(ta.atr(bars, cfg.p_atrLen));
   const atrPct = bars.map((_b, i) => {
+    if (!barIsConfirmed(i)) return 0.0;
     let count = 0;
     for (let k = 1; k <= cfg.p_atrPctLen; k++) {
       if (lt(prev(atr, i, k), atr[i])) count += 1;

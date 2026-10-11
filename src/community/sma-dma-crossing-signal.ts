@@ -7,12 +7,16 @@
  * SELL (recovery, not on a bearish DMA crossover bar). While bullish, a bearish DMA crossover or `confirmBars` closes
  * below the fast DMA with the last close below the fast DMA - ATR * buffer give a SELL.
  *
+ * Last bar: the signal state is updated on a closed bar only. The port reads the state of the last bar from the
+ * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "SMA DMA Market Signals" by tradingqueen18
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface SmaDmaCrossingSignalInputs {
   len30: number;
@@ -91,7 +95,11 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<SmaDmaCrossingSignalInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -114,7 +122,7 @@ export function calculate(
   const crossUp = ta.crossover(fastS, slowS).toArray();
   const crossDown = ta.crossunder(fastS, slowS).toArray();
 
-  // Signal state (historical bars are confirmed: barstate.isconfirmed is true)
+  // Signal state (if barstate.isconfirmed: nothing changes on a bar that is still open)
   let bullishIndication = false;
   let hasSellHistory = false;
   let pendingDmaBuy = false;
@@ -123,6 +131,7 @@ export function calculate(
   const buySignal: boolean[] = new Array(n).fill(false);
   const sellSignal: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
+    if (!barIsConfirmed(i)) continue;
     const c = bars[i].close;
     const f = fast[i];
     const buffer = atr[i] * cfg.atrBuffer;

@@ -9,6 +9,10 @@
  * a latent range inversion signal (the core / reflection EMA spread compresses while the setup is reclaimed),
  * legacy cross / overextension signals, a state background and data window values complete the display.
  *
+ * Last bar: with 'Use confirmed bar close only' the reversal state machine and its signals run on a closed bar only.
+ * The port reads the state of the last bar from the optional third argument (see src/chart-context.ts); without it
+ * every bar is taken as closed.
+ *
  * Reference: "User Defined Range Selector and Color Changing EMA Line" by Crypto_Moses
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Crypto_Moses
@@ -20,13 +24,14 @@ import {
 } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface UserDefinedRangeSelectorInputs {
   len: number;
   slopeLength: number;
   /** EMA / overextension source */
   src: SourceType;
-  /** Use confirmed bar close only (every bar given to calculate() is a closed bar) */
+  /** Use confirmed bar close only */
   confirmedOnly: boolean;
   overextensionThresholdPct: number;
   flatSlopeDeadbandPct: number;
@@ -236,7 +241,11 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<UserDefinedRangeSelectorInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -361,42 +370,45 @@ export function calculate(
     const bullReclaimNow = gt(b.close, bullAcceptLevel[i]) && prev !== undefined && le(prev.close, bullAcceptLevel[i - 1]);
     const bearReclaimNow = lt(b.close, bearAcceptLevel[i]) && prev !== undefined && ge(prev.close, bearAcceptLevel[i - 1]);
 
-    // State machine (canProcess: every bar given to calculate() is a confirmed bar)
-    if (bullOverextended) {
-      bullArmed = true;
-      bullReclaimed = false;
-      bullSetupBar = i;
-      bearArmed = false;
-      bearReclaimed = false;
-      bearSetupBar = NaN;
+    // State machine (canProcess = not confirmedOnly or barstate.isconfirmed)
+    const canProcess = !cfg.confirmedOnly || barIsConfirmed(i);
+    if (canProcess) {
+      if (bullOverextended) {
+        bullArmed = true;
+        bullReclaimed = false;
+        bullSetupBar = i;
+        bearArmed = false;
+        bearReclaimed = false;
+        bearSetupBar = NaN;
+      }
+      if (bearOverextended) {
+        bearArmed = true;
+        bearReclaimed = false;
+        bearSetupBar = i;
+        bullArmed = false;
+        bullReclaimed = false;
+        bullSetupBar = NaN;
+      }
+      if (bullArmed && !isNaN(bullSetupBar) && i - bullSetupBar > cfg.maxSetupBars) {
+        bullArmed = false;
+        bullReclaimed = false;
+        bullSetupBar = NaN;
+      }
+      if (bearArmed && !isNaN(bearSetupBar) && i - bearSetupBar > cfg.maxSetupBars) {
+        bearArmed = false;
+        bearReclaimed = false;
+        bearSetupBar = NaN;
+      }
+      if (bullArmed && bullReclaimNow) bullReclaimed = true;
+      if (bearArmed && bearReclaimNow) bearReclaimed = true;
     }
-    if (bearOverextended) {
-      bearArmed = true;
-      bearReclaimed = false;
-      bearSetupBar = i;
-      bullArmed = false;
-      bullReclaimed = false;
-      bullSetupBar = NaN;
-    }
-    if (bullArmed && !isNaN(bullSetupBar) && i - bullSetupBar > cfg.maxSetupBars) {
-      bullArmed = false;
-      bullReclaimed = false;
-      bullSetupBar = NaN;
-    }
-    if (bearArmed && !isNaN(bearSetupBar) && i - bearSetupBar > cfg.maxSetupBars) {
-      bearArmed = false;
-      bearReclaimed = false;
-      bearSetupBar = NaN;
-    }
-    if (bullArmed && bullReclaimNow) bullReclaimed = true;
-    if (bearArmed && bearReclaimNow) bearReclaimed = true;
 
     const bullSetupFresh = bullArmed && !isNaN(bullSetupBar) && i - bullSetupBar <= cfg.maxSetupBars;
     const bearSetupFresh = bearArmed && !isNaN(bearSetupBar) && i - bearSetupBar <= cfg.maxSetupBars;
     const bullSlopeOk = !cfg.requireSlopeForReversal || emaSlopeUp;
     const bearSlopeOk = !cfg.requireSlopeForReversal || emaSlopeDown;
-    const bullReversalRaw = bullSetupFresh && bullReclaimed && acceptedAboveEMA && bullSlopeOk && bullReflectionOk;
-    const bearReversalRaw = bearSetupFresh && bearReclaimed && acceptedBelowEMA && bearSlopeOk && bearReflectionOk;
+    const bullReversalRaw = canProcess && bullSetupFresh && bullReclaimed && acceptedAboveEMA && bullSlopeOk && bullReflectionOk;
+    const bearReversalRaw = canProcess && bearSetupFresh && bearReclaimed && acceptedBelowEMA && bearSlopeOk && bearReflectionOk;
 
     // Latent range inversion
     const sp = emaNonZero ? Math.abs(e - r) / e : 0.0;
@@ -408,9 +420,9 @@ export function calculate(
     const spreadCompressedEnough = le(sp, compressionThreshPct);
     const spreadReducedEnough = ge(spreadReduction, compressionMinReductionPct);
     const reflectionCompression = spreadWasWider && spreadCompressedEnough && spreadReducedEnough;
-    const bullLatentInversion = cfg.showLatentInversion && bullSetupFresh && bullReclaimed && acceptedAboveEMA
+    const bullLatentInversion = cfg.showLatentInversion && canProcess && bullSetupFresh && bullReclaimed && acceptedAboveEMA
       && !emaSlopeUp && reflectionCompression && gt(b.close, r);
-    const bearLatentInversion = cfg.showLatentInversion && bearSetupFresh && bearReclaimed && acceptedBelowEMA
+    const bearLatentInversion = cfg.showLatentInversion && canProcess && bearSetupFresh && bearReclaimed && acceptedBelowEMA
       && !emaSlopeDown && reflectionCompression && lt(b.close, r);
 
     // Final signals (buySignal / sellSignal, signalMode, longOnlyProfitGuard) only feed alert conditions.

@@ -10,12 +10,19 @@
  * (see src/anchor-period.ts). On daily and higher bars every bar starts a new day. The first bar of the data never
  * starts a day (as in the original), so the outputs begin with the second day of the data.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "VWAP Stdev Bands v2 Mod" by TheYangGuizi
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar } from 'oakscriptjs';
-import { periodStarts } from '../anchor-period';
+import { securityStarts } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 export interface VwapStdevBandsV2ModInputs {
   devUp1: number;
@@ -113,12 +120,12 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<VwapStdevBandsV2ModInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<VwapStdevBandsV2ModInputs> = {}, chart?: ChartContext): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
   // start = security(tickerid, "D", time); newSession = iff(change(start), 1, 0): never on the first bar
-  const start = periodStarts(bars, 'D');
+  const start = securityStarts(bars, 'D', chart);
 
   const myvwap: number[] = new Array(n).fill(NaN);
   const dev: number[] = new Array(n).fill(NaN);

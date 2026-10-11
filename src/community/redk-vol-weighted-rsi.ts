@@ -6,6 +6,9 @@
  * smoothed with a WMA. A sentiment RSI uses the same formula over `sentiment * len` bars, rounded to a step, and is
  * drawn as an area. Triangles mark the bars where the RSI crosses zero in the direction of the sentiment RSI.
  *
+ * Last bar: with the real-time option a signal needs a closed bar. The port reads the state of the last bar from the
+ * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "RedK Vol_Weighted RSI: Extending the power of the classic RSI" by RedKTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © RedKTrader
@@ -13,6 +16,7 @@
 
 import { ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface RedKVolWeightedRsiInputs {
   /** RSI length */
@@ -75,7 +79,11 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<RedKVolWeightedRsiInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -108,9 +116,10 @@ export function calculate(
   const sigDn = String(color.new(color.red, 20));
   const sigUp = String(color.new(color.green, 20));
   for (let i = 1; i < n; i++) {
-    // RT_update: barstate.isconfirmed with rtOpt (historical bars are confirmed), true otherwise
-    const signalUp = gt(longrsi[i], 0) && ge(rsi[i], 0) && lt(rsi[i - 1], 0);
-    const signalDn = lt(longrsi[i], 0) && lt(rsi[i], 0) && ge(rsi[i - 1], 0);
+    // RT_update = RT_Opt ? barstate.isconfirmed : true
+    const rtUpdate = cfg.rtOpt ? barIsConfirmed(i) : true;
+    const signalUp = rtUpdate && gt(longrsi[i], 0) && ge(rsi[i], 0) && lt(rsi[i - 1], 0);
+    const signalDn = rtUpdate && lt(longrsi[i], 0) && lt(rsi[i], 0) && ge(rsi[i - 1], 0);
     // plotshape(..., location.top / location.bottom, size.small, display = display.pane)
     if (signalDn) markers.push({ time: bars[i].time, position: 'top', shape: 'triangleDown', color: sigDn, size: 'small' });
     if (signalUp) markers.push({ time: bars[i].time, position: 'bottom', shape: 'triangleUp', color: sigUp, size: 'small' });

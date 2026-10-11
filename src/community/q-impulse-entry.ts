@@ -7,6 +7,9 @@
  * the EMA(13) and a positive MACD(12, 26, 9) histogram) and ADX(14, 14) above 20, at least 30 bars after the last
  * signal and not after another buy; a sell signal is the mirror. The close of the last signal is drawn as dots.
  *
+ * Last bar: the impulse trend changes on a closed bar only. The port reads the state of the last bar from the
+ * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Q Impulse Entry" by Quantora
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Quantora
@@ -14,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface QImpulseEntryInputs {
   /** SMA length of the high / low bands */
@@ -56,7 +60,11 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<QImpulseEntryInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -91,9 +99,9 @@ export function calculate(
   const markers: MarkerData[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
-    // barstate.isconfirmed: true on every historical bar
-    if (isCrossUp[i]) impulseTrend = true;
-    else if (isCrossDown[i]) impulseTrend = false;
+    // if isCrossUp and barstate.isconfirmed ... else if isCrossDown and barstate.isconfirmed ...
+    if (isCrossUp[i] && barIsConfirmed(i)) impulseTrend = true;
+    else if (isCrossDown[i] && barIsConfirmed(i)) impulseTrend = false;
     const changed = impulseTrend !== prevTrend; // ta.change(impulseTrend)
     prevTrend = impulseTrend;
     const rawBuySignal = changed && impulseTrend;

@@ -3,7 +3,10 @@
  *
  * Red to green flip: the previous bar is red (close < open) and the current low is not below the previous low
  * (triangle below the bar). Green to red flip: the previous bar is green (close > open) and the current high is not
- * above the previous high (triangle above the bar). Signals on confirmed bars only (every historical bar).
+ * above the previous high (triangle above the bar). Signals on confirmed bars only.
+ *
+ * Last bar: a flip is marked on a closed bar only. The port reads the state of the last bar from the optional third
+ * argument (see src/chart-context.ts); without it every bar is taken as closed.
  *
  * Reference: "Candle Color Flip" by LorPlant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +14,7 @@
 
 import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 // The Pine script has no inputs
 export interface CandleColorFlipInputs {}
@@ -38,7 +42,11 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   _inputs: Partial<CandleColorFlipInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const markers: MarkerData[] = [];
   const lime = '#00E676';
   const red = '#F23645';
@@ -56,9 +64,9 @@ export function calculate(
     const noHigherHigh = le(b.high, high1);
     const noLowerLow = ge(b.low, low1);
 
-    // barstate.isconfirmed: true on every historical bar
-    const bearFlip = prevBull && noHigherHigh;
-    const bullFlip = prevBear && noLowerLow;
+    // bearFlip = barstate.isconfirmed and prevBull and noHigherHigh
+    const bearFlip = barIsConfirmed(i) && prevBull && noHigherHigh;
+    const bullFlip = barIsConfirmed(i) && prevBear && noLowerLow;
 
     // plotshape(bullFlip, "Red→Green Flip", shape.triangleup, location.belowbar, color.lime, size = size.tiny)
     if (bullFlip) markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: lime, size: 'tiny' });

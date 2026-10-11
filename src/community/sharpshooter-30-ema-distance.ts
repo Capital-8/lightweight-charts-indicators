@@ -5,12 +5,16 @@
  * confirmed bar after that where the fast EMA is at least `distUSD` below the slow EMA gives a BUY label and disarms
  * it (one signal per death cross).
  *
+ * Last bar: a BUY label needs a closed bar. The port reads the state of the last bar from the optional third argument
+ * (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Sharpshooter 30" by hrak22
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface Sharpshooter30EmaDistanceInputs {
   /** Fast EMA length */
@@ -51,7 +55,11 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<Sharpshooter30EmaDistanceInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const close = Series.fromArray(bars, bars.map((b) => b.close));
   const fastSeries = ta.ema(close, cfg.fastLength);
@@ -65,8 +73,8 @@ export function calculate(
   let armed = false; // var bool armed = false
   for (let i = 0; i < bars.length; i++) {
     armed = deathCross[i] ? true : armed;
-    // buySignal = barstate.isconfirmed and armed and fastMA <= slowMA - distUSD (historical bars are confirmed)
-    const buySignal = armed && le(fastMa[i], slowMa[i] - cfg.distUSD);
+    // buySignal = barstate.isconfirmed and armed and fastMA <= slowMA - distUSD
+    const buySignal = barIsConfirmed(i) && armed && le(fastMa[i], slowMa[i] - cfg.distUSD);
     if (buySignal) {
       armed = false;
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: color.lime, text: 'BUY',

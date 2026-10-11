@@ -7,12 +7,16 @@
  * least the short threshold above the MAs. Signals give BUY / SELL labels and a background shade; optional debug
  * characters show the trend and threshold flags.
  *
+ * Last bar: with 'Confirm on Bar Close' a signal needs a closed bar. The port reads the state of the last bar from
+ * the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "BNF 25/50 — Threshold + Debug (Indicator) [v6, price-scale only]" by jackson_g_sheehan
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BgColorData, MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface Bnf2550MaPullbackScreenerInputs {
   src: SourceType;
@@ -89,7 +93,11 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<Bnf2550MaPullbackScreenerInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -122,9 +130,10 @@ export function calculate(
     const above50 = ge(close, maSlow[i] * (1.0 + tS));
     const farBelow = cfg.mustTouchBoth ? below25 && below50 : below25 || below50;
     const farAbove = cfg.mustTouchBoth ? above25 && above50 : above25 || above50;
-    // sigLong = confirmClose ? rawLong and barstate.isconfirmed : rawLong (historical bars are confirmed)
-    const sigLong = uptrend && farBelow;
-    const sigShort = downtrend && farAbove;
+    // sigLong = confirmClose ? rawLong and barstate.isconfirmed : rawLong
+    const confirmed = !cfg.confirmClose || barIsConfirmed(i);
+    const sigLong = uptrend && farBelow && confirmed;
+    const sigShort = downtrend && farAbove && confirmed;
 
     // bgcolor(showBG ? (sigLong ? color.new(color.teal, 90) : sigShort ? color.new(color.red, 90) : na) : na)
     if (cfg.showBG && sigLong) bgColors.push({ time, color: longBg });

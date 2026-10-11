@@ -7,6 +7,9 @@
  * from transparent at 0 to the up colour at +3 and to the down colour at -3; gradient zones at 13.464..20.285 and
  * -18.25..-9.472, a zero line, and a price-pane background when the ratio is above 18 / below -15.
  *
+ * Last bar: on an open bar the Heikin-Ashi close of the previous bar is used. The port reads the state of the last
+ * bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Crosby Ratio | QuantumResearch " by QuantumResearch
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Rocheur
@@ -14,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 type ColorMode = 'Classic' | 'Classic2' | 'Classic3' | 'Classic4' | 'Classic5' | 'Classic6' | 'Classic7' | 'Classic8';
 
@@ -88,15 +92,20 @@ function modeColors(mode: ColorMode): [string, string] {
 export function calculate(
   bars: Bar[],
   inputs: Partial<CrosbyRatioQuantumresearchInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { bgColors: BgColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { length } = cfg;
   const [colUp1, colDn1] = modeColors(cfg.colMode);
 
   const atr = ta.atr(bars, length).toArray().map((v) => v ?? NaN);
-  // Hclose = Heikin_ashi_close[barstate.isconfirmed ? 0 : 1]: every historical bar is confirmed
-  const hclose = bars.map((b) => (b.open + b.low + b.close + b.high) / 4);
+  // Hclose = Heikin_ashi_close[barstate.isconfirmed ? 0 : 1]: on an open last bar, the value of the bar before
+  const haClose = bars.map((b) => (b.open + b.low + b.close + b.high) / 4);
+  const hclose = haClose.map((v, i) => (barIsConfirmed(i) ? v : i > 0 ? haClose[i - 1] : NaN));
   // math.avg(Hclose, Hclose[1], ..., Hclose[4]): na when one is na
   const smooth = hclose.map((_v, i) => (i >= 4
     ? (hclose[i] + hclose[i - 1] + hclose[i - 2] + hclose[i - 3] + hclose[i - 4]) / 5 : NaN));

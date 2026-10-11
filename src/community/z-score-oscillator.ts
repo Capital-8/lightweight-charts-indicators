@@ -10,6 +10,10 @@
  * has a gradient (or sign) colour, more opaque when it moves away from zero. Optional pivot divergences between price
  * and the displayed value (regular and hidden) with Bull / Bear labels.
  *
+ * Last bar: with 'Delay Plot Until Candle Closes' a divergence is not drawn on an open bar. The port reads the state
+ * of the last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as
+ * closed.
+ *
  * Reference: "Z-Score Oscillator" by B3AR_Trades
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -17,6 +21,7 @@
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export type ZScoreTheme = 'Modern' | 'Classic' | 'Neon' | 'Monochrome' | 'Sunset' | 'Ocean';
 export type ZScoreDisplayMode = 'Oscillator' | 'Z-Score' | 'Percentile Rank';
@@ -76,7 +81,7 @@ export interface ZScoreOscillatorInputs {
   divPlotBear: boolean;
   divPlotHidBull: boolean;
   divPlotHidBear: boolean;
-  /** Delay the divergences until the candle closes (only changes the live bar; all bars here are closed bars) */
+  /** Delay the divergences until the candle closes (only changes the last bar, when it is still open) */
   divNoRepaint: boolean;
   /** Source */
   src: SourceType;
@@ -222,7 +227,11 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<ZScoreOscillatorInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -350,9 +359,9 @@ export function calculate(
     const plPrice: number[] = [];
     const phMain: number[] = [];
     const phPrice: number[] = [];
-    // repaint = not div_no_repaint or barstate.ishistory or barstate.isconfirmed: true on closed bars
-    const repaint = true;
     for (let i = 0; i < n; i++) {
+      // repaint = not div_no_repaint or barstate.ishistory or barstate.isconfirmed: false only on an open last bar
+      const repaint = !cfg.divNoRepaint || barIsConfirmed(i);
       const prevPl = i > 0 && plFound[i - 1];
       const prevPh = i > 0 && phFound[i - 1];
       sincePl = prevPl ? 0 : isNaN(sincePl) ? NaN : sincePl + 1;

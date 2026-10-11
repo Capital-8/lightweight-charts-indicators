@@ -6,13 +6,20 @@
  * of z above the upper boundary gives red, (optional down trend) a cross of z below the lower boundary gives white
  * candles on a grey background, and a cross of z above the lower midline or below the upper midline gives dim grey.
  *
+ * The average type "VWAP" restarts on each day. On intraday bars the port reads the exchange time zone and the
+ * session of the symbol from the optional third argument (see src/chart-context.ts) and uses the trading day of
+ * the exchange, as the original. Without them the day starts at 00:00 UTC.
+ *
  * Reference: "Pure Coca" by La_Von
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: @Adam's Cat
  */
 
-import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { ta, Series, getSourceSeries, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BgColorData, PlotCandleData } from '../types';
+import type { ChartContext } from '../chart-context';
+import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
+import { barInterval } from '../bar-time';
 
 export type PureCocaMaType = 'SMA' | 'EMA' | 'WMA' | 'RMA' | 'VWMA' | 'ALMA' | 'TEMA' | 'DEMA' | 'KAMA' | 'T3' | 'JMA'
   | 'SMMA' | 'VWAP';
@@ -82,14 +89,33 @@ export const metadata = {
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 
-/** Start of a new UTC day (Pine ta.vwap anchor on daily bars); true on the first bar */
-function newDay(bars: Bar[]): boolean[] {
-  return bars.map((b, i) => i === 0 || Math.floor(b.time / 86400) !== Math.floor(bars[i - 1].time / 86400));
+/**
+ * First bar of each trading day of the exchange on intraday bars (Pine timeframe.change("1D")), found by the library
+ * from the time zone and the session of the chart context. Null when the context does not give both, or when the bars
+ * are not intraday.
+ */
+function tradingDayStarts(bars: Bar[], chart?: ChartContext): boolean[] | null {
+  const interval = barInterval(bars);
+  if (chart?.timezone === undefined || chart.session === undefined || !(interval > 0 && interval < 86400)) return null;
+  let change: Array<number | null> = [];
+  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(interval) };
+  executeScript(() => { change = scriptTimeframe.change('1D').toArray(); }, bars, {}, context);
+  return change.map((v) => v === 1);
+}
+
+/**
+ * Start of a new day (Pine ta.vwap anchor: timeframe.change("1D")); true on the first bar. On intraday bars with the
+ * time zone and the session of the chart context: the trading days of the exchange. Else: UTC days.
+ */
+function newDay(bars: Bar[], chart?: ChartContext): boolean[] {
+  const starts = tradingDayStarts(bars, chart);
+  return bars.map((b, i) => i === 0 || (starts ? starts[i] : Math.floor(b.time / 86400) !== Math.floor(bars[i - 1].time / 86400)));
 }
 
 export function calculate(
   bars: Bar[],
   inputs: Partial<PureCocaInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -112,7 +138,7 @@ export function calculate(
     case 'VWAP': {
       // ta.vwap: VWAP of hlc3 anchored to the session (a new day on daily bars)
       const hlc3 = S(bars.map((b) => (b.high + b.low + b.close) / 3));
-      smoothed = A(ta.vwap(hlc3, volume, S(newDay(bars).map(Number))));
+      smoothed = A(ta.vwap(hlc3, volume, S(newDay(bars, chart).map(Number))));
       break;
     }
     default: smoothed = new Array(n).fill(NaN); // TEMA, DEMA, KAMA: na

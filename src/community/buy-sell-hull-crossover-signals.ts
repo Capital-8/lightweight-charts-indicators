@@ -5,12 +5,16 @@
  * or above the slow HMA, else red. BUY / SELL triangles mark the crossovers / crossunders of the fast HMA over the
  * slow HMA; an optional background shows the regime (fast above slow: green, else red).
  *
+ * Last bar: with 'Confirm signals on bar close' a signal needs a closed bar. The port reads the state of the last bar
+ * from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Buy/Sell Hull Crossover Signals (Fast & Slow)" by VibeAlgos
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType, type Series } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface BuySellHullCrossoverSignalsInputs {
   /** Fast HMA length */
@@ -19,7 +23,7 @@ export interface BuySellHullCrossoverSignalsInputs {
   slowLen: number;
   /** Source */
   src: SourceType;
-  /** Signals only on confirmed bars (every bar given to calculate() is a closed bar) */
+  /** Signals only on confirmed (closed) bars */
   confirmOnClose: boolean;
   /** Show the BUY / SELL triangles */
   showLabels: boolean;
@@ -78,7 +82,11 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<BuySellHullCrossoverSignalsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -111,9 +119,10 @@ export function calculate(
       prevF = f;
       prevS = s;
     }
-    // longSignal = rawLong and (not confirmOnClose or barstate.isconfirmed): every bar is a closed bar
-    const longSignal = rawLong;
-    const shortSignal = rawShort;
+    // longSignal = rawLong and (not confirmOnClose or barstate.isconfirmed)
+    const confirmed = !cfg.confirmOnClose || barIsConfirmed(i);
+    const longSignal = rawLong && confirmed;
+    const shortSignal = rawShort && confirmed;
 
     // ribbonColor = hmaFast >= hmaSlow ? bull : bear; fill colour = showRibbon ? ribbonColor : na
     ribbon[i] = cfg.showRibbon ? (ge(f, s) ? bullRibbon : bearRibbon) : 'transparent';

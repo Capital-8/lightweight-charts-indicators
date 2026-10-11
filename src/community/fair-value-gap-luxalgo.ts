@@ -13,13 +13,20 @@
  * each side, whose edge follows the close into the gap. The dashboard shows the number of gaps and the percentage of
  * mitigated gaps. At most 500 boxes and 500 lines are kept.
  *
- * Timeframe: the higher-timeframe bars are built from the chart bars with the UTC calendar rule of the period
+ * Timeframe: the higher-timeframe bars are built from the chart bars with the calendar rule of the period
  * helper (see anchor-period.ts for its limits). The values of a higher-timeframe bar appear on the chart bar that
  * completes it: on symbols that trade every day, a bar whose close reaches the end of the period, else the first bar
  * of the next period; on other symbols the last bar of the period. Every bar is a closed bar. As in the original, a
  * higher timeframe gives a runtime error when the first chart bar does not complete a bar of that timeframe (the
  * record is na there). A timeframe lower than the chart timeframe needs data that the chart bars do not have: the
  * port throws an Error.
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "Fair Value Gap [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,7 +36,8 @@
 import { str, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LineDrawingData, TableData, TableCellData } from '../types';
 import { barInterval, barTime } from '../bar-time';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 export interface FairValueGapLuxalgoInputs {
   /** Smallest gap size, in percent */
@@ -129,13 +137,21 @@ interface Level {
  * request.security(syminfo.tickerid, tf, ...) without lookahead: the bars of timeframe `tf` built from the chart
  * bars, and for each chart bar the index of the latest completed bar of that timeframe (-1: none yet).
  */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; latest: number[] } {
-  const chart = chartTimeframe(bars);
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; latest: number[] } {
+  const chart = chartTimeframe(bars, context);
   if (tf.trim() === '' || chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
     return { htf: bars, latest: bars.map((_b, i) => i) };
   }
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`Fair Value Gap: the timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
+  }
+  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
+  // complete them come from the library rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) {
+    // the time of a bar of the timeframe: its first chart bar
+    const htf = exchange.htf.map((b, k) => ({ ...b, time: bars[exchange.first[k]].time }));
+    return { htf, latest: exchange.latest };
   }
   const n = bars.length;
   const starts = periodStarts(bars, tf);
@@ -204,6 +220,7 @@ function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; latest: number[] 
 export function calculate(
   bars: Bar[],
   inputs: Partial<FairValueGapLuxalgoInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'lines' | 'tables'> & { boxes: BoxData[]; lines: LineDrawingData[]; tables: TableData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -211,7 +228,7 @@ export function calculate(
   const { bullCss, bearCss, dynamic } = cfg;
 
   // detect() on the bars of the timeframe
-  const { htf, latest } = timeframeBars(bars, cfg.tf);
+  const { htf, latest } = timeframeBars(bars, cfg.tf, chart);
   // `new_fvg.t` is read on every bar: when the first chart bar does not complete a bar of the timeframe, the
   // record is na there and the script stops with a runtime error
   if (n > 0 && latest[0] < 0) {

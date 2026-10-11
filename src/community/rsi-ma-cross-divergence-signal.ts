@@ -7,12 +7,16 @@
  * signal is the mirror (cross down, high above the last pivot high, RSI below the last RSI pivot high). Signals are
  * drawn as triangles with a text and as 'L' / 'S' characters at the bottom / top of the chart.
  *
+ * Last bar: with the bar close option a signal needs a closed bar. The port reads the state of the last bar from the
+ * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "RSI MA Cross + Divergence Signal (fixed)" by noxum
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface RsiMaCrossDivergenceSignalInputs {
   rsiLength: number;
@@ -23,7 +27,7 @@ export interface RsiMaCrossDivergenceSignalInputs {
   src: SourceType;
   /** Pivot left / right length of the divergence detection */
   lookback: number;
-  /** Only signal on a closed bar (every bar of a calculation is closed: no effect in the port) */
+  /** Only signal on a closed bar */
   confirmClose: boolean;
 }
 
@@ -62,7 +66,11 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<RsiMaCrossDivergenceSignalInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const lb = cfg.lookback;
@@ -102,9 +110,10 @@ export function calculate(
     const b = bars[i];
     const bullDiv = !isNaN(pLowPrice) && !isNaN(pLowRSI) && lt(b.low, pLowPrice) && gt(rsi[i], pLowRSI);
     const bearDiv = !isNaN(pHighPrice) && !isNaN(pHighRSI) && gt(b.high, pHighPrice) && lt(rsi[i], pHighRSI);
-    // barstate.isconfirmed is true on every calculated bar: confirmClose has no effect
-    const longSignal = crossUp[i] === 1 && bullDiv;
-    const shortSignal = crossDown[i] === 1 && bearDiv;
+    // longSignal = confirmClose ? (rawLong and barstate.isconfirmed) : rawLong
+    const confirmed = !cfg.confirmClose || barIsConfirmed(i);
+    const longSignal = crossUp[i] === 1 && bullDiv && confirmed;
+    const shortSignal = crossDown[i] === 1 && bearDiv && confirmed;
 
     if (longSignal) {
       // plotshape(longSignal, 'Bullish Signal', color.new(color.lime, 0), shape.triangleup, location.belowbar, size.tiny, text = '▲ Long')

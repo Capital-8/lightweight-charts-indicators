@@ -38,9 +38,15 @@
  *   the entry / exit dates in texts can differ. The level lines end some days after the last bar: that time is not
  *   placed on a trading calendar. A time between two bars is given as the time of the next bar, where it is drawn.
  * - Days (previous day high / low, session VWAP anchor) and the bars of the higher timeframe are built from the chart
- *   bars with the UTC calendar rule of src/anchor-period.ts. The close time of a higher-timeframe bar is its start
+ *   bars with the calendar rule of src/anchor-period.ts. The close time of a higher-timeframe bar is its start
  *   plus the timeframe length (exact on symbols that trade around the clock).
  * - The alert inputs are kept but alerts (alert() calls and 16 alert conditions) have no output.
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "Precision Sniper [WillyAlgoTrader]" by WillyAlgoTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -48,7 +54,7 @@
 
 import { ta, Series, color, math, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TableMergeData, TablePosition } from '../types';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, securityStarts, chartTimeframe } from '../anchor-period';
 import {
   backgroundColorOf, currencyOf, foregroundColorOf, lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext,
 } from '../chart-context';
@@ -596,7 +602,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   const fromMs = (t: number) => (ms ? t : t / 1000);
 
   // Preset profiles: EMA lengths, RSI, ATR, minimum score (out of 10) and ATR stop multiplier
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   const tfSeconds = chartTf === '' ? 0 : timeframe.in_seconds(chartTf);
   const isIntraday = chartTf !== '' && timeframe.info(chartTf).isintraday;
   const preset = cfg.presetInput === 'Auto'
@@ -665,7 +671,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   const priorDayLow: number[] = new Array(n).fill(NaN);
   let vwap: number[] = new Array(n).fill(NaN);
   if (isIntraday) {
-    const days = periodStarts(bars, 'D');
+    const days = periodStarts(bars, 'D', chart);
     const newDay = days.map((d, i) => i === 0 || d !== days[i - 1]);
     if (vwapEnabled) vwap = A(ta.vwap(S(bars.map((b) => (b.high + b.low + b.close) / 3)), S(volume), S(newDay.map(Number))));
     // request.security(tickerid, "1D", [high[1], low[1]], lookahead on): the high / low of the previous day
@@ -690,7 +696,8 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
 
   // time_close: the bar time plus the chart timeframe. On daily bars of a symbol with a day session (chart context:
   // session hours such as "0930-1600" and the exchange time zone) it is the end of the session of that day.
-  const daySession = typeof chart?.session === 'string' && tfSeconds === 86400 ? /^(\d\d)(\d\d)-(\d\d)(\d\d)$/.exec(chart.session.trim()) : null;
+  const sessionHours = typeof chart?.session === 'string' ? chart.session : chart?.session?.session;
+  const daySession = sessionHours !== undefined && tfSeconds === 86400 ? /^(\d\d)(\d\d)-(\d\d)(\d\d)$/.exec(sessionHours.trim()) : null;
   const sessionEnd = daySession !== null && Number(daySession[3]) * 60 + Number(daySession[4]) > Number(daySession[1]) * 60 + Number(daySession[2])
     ? { hour: Number(daySession[3]), minute: Number(daySession[4]), tz: timezoneOf(chart) } : null;
   const closeMs = (i: number) => {
@@ -706,7 +713,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   const htfClosedAt: number[] = new Array(n).fill(NaN);
   const htfReady: boolean[] = new Array(n).fill(false);
   if (htfEnabled && n > 0) {
-    const starts = periodStarts(bars, cfg.htfInput);
+    const starts = securityStarts(bars, cfg.htfInput, chart);
     const htf: Bar[] = [];
     const group: number[] = [];
     /** Last chart bar of each bar of the higher timeframe */

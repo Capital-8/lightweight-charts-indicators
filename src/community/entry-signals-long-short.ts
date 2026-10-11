@@ -4,7 +4,8 @@
  * RSI crossing its SMA signal line arms a pending long (RSI crosses up) or a pending short (RSI crosses down). A
  * pending long gives a Long signal when the fast EMA crosses above the slow EMA; it is cancelled by an RSI cross down
  * or an EMA cross down. The short side is the mirror. The two EMAs are plotted on the price chart.
- * Every bar given to calculate() is a closed bar, so Pine barstate.isconfirmed is true on every bar.
+ * A signal needs a closed bar (barstate.isconfirmed). The port reads the state of the last bar from the optional
+ * third argument (see src/chart-context.ts); without it every bar is taken as closed.
  *
  * Reference: "Entry Signals (Long/Short)" by tradegear9
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +13,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface EntrySignalsLongShortInputs {
   /** RSI period; also the length of the RSI signal SMA */
@@ -47,8 +49,12 @@ export const metadata = {
 
 export function calculate(
   bars: Bar[],
-  inputs: Partial<EntrySignalsLongShortInputs> = {}
+  inputs: Partial<EntrySignalsLongShortInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const { rsiLength, emaFastLength, emaSlowLength } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -77,13 +83,13 @@ export function calculate(
     // Long signal
     if (bullishRsiCross) pendingLong = true;
     if (pendingLong && (bearishRsiCross || bearishEmaCross)) pendingLong = false;
-    const longSignal = pendingLong && bullishEmaCross; // and barstate.isconfirmed (closed bar)
+    const longSignal = pendingLong && bullishEmaCross && barIsConfirmed(i); // and barstate.isconfirmed
     if (longSignal) pendingLong = false;
 
     // Short signal
     if (bearishRsiCross) pendingShort = true;
     if (pendingShort && (bullishRsiCross || bullishEmaCross)) pendingShort = false;
-    const shortSignal = pendingShort && bearishEmaCross;
+    const shortSignal = pendingShort && bearishEmaCross && barIsConfirmed(i);
     if (shortSignal) pendingShort = false;
 
     // plotshape(long_signal, 'Long Signal', location.belowbar, shape.triangleup, size.small, color.green,

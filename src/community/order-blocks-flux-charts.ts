@@ -25,6 +25,9 @@
  * drawings are those of the bar before it (an open block then ends on the open bar, which holds its end time).
  * Without a chart context every bar is a closed bar.
  *
+ * Chart timeframe: `timeframe` of the chart context (optional third argument of calculate) when given; without it
+ * the chart timeframe is read from the bar spacing (the most frequent gap between two bars).
+ *
  * Reference: "Volumized Order Blocks | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © fluxchart
@@ -314,7 +317,7 @@ export function calculate(
   }
 
   // formatTimeframeString(timeframe.period)
-  const chartTf = chartTimeframe(bars).replace(/^1([DWM])$/, '$1');
+  const chartTf = chartTimeframe(bars, chart).replace(/^1([DWM])$/, '$1');
   let tfText = chartTf;
   if (chartTf !== '' && !/[DWSM]/.test(chartTf)) {
     const seconds = timeframe.in_seconds(chartTf);

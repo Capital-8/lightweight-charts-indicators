@@ -10,10 +10,17 @@
  * the level changes). As in the original, each side starts with a default line at price 0 from the first bar to the
  * bar before its first drawn level. At most 500 lines are kept.
  *
- * Timeframe: the bars of a higher timeframe are built from the chart bars with the UTC calendar rule of the period
+ * Timeframe: the bars of a higher timeframe are built from the chart bars with the calendar rule of the period
  * helper (see anchor-period.ts for its limits). The original reads the higher timeframe with lookahead: the level of
  * a bar of that timeframe is drawn from its first chart bar. A timeframe below the chart timeframe needs data that
  * the chart bars do not have: the port throws an Error.
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "Support/Resistance" by BarsStallone
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -22,7 +29,8 @@
 
 import { ta, math, Series, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LineDrawingData } from '../types';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 export interface SupportResistanceV2IndicatorInputs {
   /** Timeframe of the levels ('' = chart timeframe) */
@@ -63,14 +71,18 @@ const truthy = (v: number) => !isNaN(v) && v !== 0;
  * request.security(syminfo.tickerid, tf, ..., lookahead = barmerge.lookahead_on): the bars of timeframe `tf` built
  * from the chart bars and for each chart bar the index of its bar of that timeframe.
  */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; group: number[] } {
-  const chart = chartTimeframe(bars);
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; group: number[] } {
+  const chart = chartTimeframe(bars, context);
   if (tf.trim() === '' || chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
     return { htf: bars, group: bars.map((_b, i) => i) };
   }
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
   }
+  // With the exchange calendar of the chart context (time zone and session): the periods come from the library
+  // rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) return { htf: exchange.htf, group: exchange.group };
   const starts = periodStarts(bars, tf);
   const htf: Bar[] = [];
   const group: number[] = [];
@@ -151,11 +163,12 @@ interface Level {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceV2IndicatorInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
-  const { htf, group } = timeframeBars(bars, cfg.srTf);
+  const { htf, group } = timeframeBars(bars, cfg.srTf, chart);
   const { xup, xdown } = levels(htf);
 
   // Lines in creation order. When a creation brings the count above max + 5, the oldest are deleted until max

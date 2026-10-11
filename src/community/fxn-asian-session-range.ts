@@ -30,13 +30,20 @@
  * - The six plots are hidden in the original (white, transparency 100, only the last 5 bars): only the fills between
  *   them are visible. The three session background colours have a transparency of 100.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "FXN - Asian Session Range" by RobMinty
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, LineDrawingData, LabelData, PineSize } from '../types';
-import { chartTimeframe, periodStarts } from '../anchor-period';
+import { chartTimeframe, periodStarts, securityBars } from '../anchor-period';
 import { mintickOf, nowOf, timezoneOf, type ChartContext } from '../chart-context';
 
 type StyleName = 'solid' | 'dashed' | 'dotted';
@@ -308,7 +315,11 @@ const minuteOf = (input: string) => (MINUTES.includes(input) ? Number(input) : 0
  * Bars of timeframe `tf` built from the chart bars, with the index of the bar of that timeframe of each chart bar
  * (security() with lookahead on and no gaps: every chart bar reads the finished bar of its period).
  */
-function timeframeBars(bars: Bar[], tf: string): { high: number[]; low: number[]; group: number[] } {
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { high: number[]; low: number[]; group: number[] } {
+  // With the exchange calendar of the chart context (time zone and session): the periods come from the library
+  // rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) return { high: exchange.htf.map((b) => b.high), low: exchange.htf.map((b) => b.low), group: exchange.group };
   const starts = periodStarts(bars, tf);
   const high: number[] = [];
   const low: number[] = [];
@@ -343,7 +354,7 @@ export function calculate(
   const inMs = n > 0 && bars[0].time >= 1e12;
   const ms = (t: number) => (inMs ? t : t * 1000);
   const out = (tMs: number) => (inMs ? tMs : tMs / 1000);
-  const period = chartTimeframe(bars);
+  const period = chartTimeframe(bars, chart);
   const info = period === '' ? null : timeframe.info(period);
   const col = (name: string) => COLORS[name] ?? COLORS.black;
   const style = (name: string): StyleName => (name === 'dashed' || name === 'dotted' ? name : 'solid');
@@ -399,8 +410,8 @@ export function calculate(
   };
 
   // Daily and weekly bars of the symbol (security(..., lookahead_on)), on the resolutions that use them
-  const day = validResolution ? timeframeBars(bars, 'D') : null;
-  const week = validResolution ? timeframeBars(bars, 'W') : null;
+  const day = validResolution ? timeframeBars(bars, 'D', chart) : null;
+  const week = validResolution ? timeframeBars(bars, 'W', chart) : null;
   // adr(length) = sma((high - low)[1], length) on the daily bars
   let dayAdr: number[] = [];
   if (day) {

@@ -36,6 +36,9 @@
  * table). Without a chart context it is the dark theme colour #DBDBDB. A gauge pointer without a value (na) is not drawn and is left out. The 3 alert conditions of the
  * script have no output.
  *
+ * Chart timeframe: `timeframe` of the chart context (optional third argument of calculate) when given; without it
+ * the chart timeframe is read from the bar spacing (the most frequent gap between two bars).
+ *
  * Reference: "Smart Money Breakout Channels [AlgoAlpha]" by AlgoAlpha
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © AlgoAlpha
@@ -204,7 +207,7 @@ export function calculate(
   const S = (a: number[]) => Series.fromArray(bars, a);
 
   // [uv, dv, vold] = ta.requestUpAndDownVolume(tf): checkLTF() of the library first
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   if (chartTf !== '' && timeframe.in_seconds(cfg.tf) > timeframe.in_seconds(chartTf)) {
     throw new Error(`Invalid lower timeframe: '${cfg.tf}'. The timeframe must be lower than or equal to '${chartTf}'`);
   }

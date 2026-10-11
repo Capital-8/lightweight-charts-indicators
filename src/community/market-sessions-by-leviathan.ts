@@ -21,6 +21,9 @@
  * - "Change (Pips)" divides by the symbol tick: the `mintick` value of the chart; without it, 0.01.
  * - "Screener (Soon)" does nothing in the original.
  *
+ * Chart timeframe: `timeframe` of the chart context (optional third argument of calculate) when given; without it
+ * the chart timeframe is read from the bar spacing (the most frequent gap between two bars).
+ *
  * Reference: "Market Sessions - By Leviathan" by LeviathanCapital
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © LeviathanCapital. Box generation code inspired by Jos(TradingCode), session box visuals
@@ -221,7 +224,7 @@ export function calculate(
   const exchangeZone = timezoneOf(chart);
   const n = bars.length;
   const inMs = n > 0 && bars[0].time >= 1e12;
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   const isIntraday = chartTf !== '' && timeframe.info(chartTf).isintraday;
   const days = cfg.hideWeekends ? ':123456' : ':1234567';
   const lineStyle = (x: LineStyleName) => x.toLowerCase() as 'solid' | 'dashed' | 'dotted';

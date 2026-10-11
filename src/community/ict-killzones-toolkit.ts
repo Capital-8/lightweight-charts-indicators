@@ -24,10 +24,16 @@
  *   and on symbols whose trading day is inside one UTC day.
  * - Chart values read: the symbol price tick (the price texts of the open price labels are formatted with it).
  *   Without a chart context the tick is 0.01.
- * - The chart timeframe is read from the bars (the most frequent gap between two bars). With fewer than 2 bars it
- *   is not known and nothing is drawn.
+ * - The chart timeframe is the one of the chart context, else it is read from the bars (the most frequent gap
+ *   between two bars). With fewer than 2 bars and no context value it is not known and nothing is drawn.
  * - The label of a killzone is at the middle time of the zone. A time between two bars is drawn on the next bar, as
  *   the original does: the port gives the time of that bar.
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "ICT Killzones Toolkit [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -302,7 +308,7 @@ export function calculate(
   const n = bars.length;
   const ms = n > 0 && bars[0].time >= 1e12;
   const tMs = bars.map((b) => (ms ? b.time : b.time * 1000));
-  const tfName = chartTimeframe(bars);
+  const tfName = chartTimeframe(bars, chart);
   const tfInfo = tfName === '' ? null : timeframe.info(tfName);
   const isIntraday = tfInfo?.isintraday ?? false;
   const tfM = tfInfo?.multiplier ?? 1;
@@ -330,7 +336,7 @@ export function calculate(
   const ppH = A(ta.pivothigh(highS, cfg.mssLN, cfg.mssLN));
   const ppL = A(ta.pivotlow(lowS, cfg.mssLN, cfg.mssLN));
   const dwmTf = cfg.dwmO === 'the Day' ? 'D' : cfg.dwmO === 'the Week' ? 'W' : cfg.dwmO === 'the Month' ? 'M' : null;
-  const dwmStarts = dwmTf ? periodStarts(bars, dwmTf) : null;
+  const dwmStarts = dwmTf ? periodStarts(bars, dwmTf, chart) : null;
   const xTxt = dwmTf ? `${dwmTf}O` : '';
   const kzO = cfg.dwmO === 'Killzones';
   const obbMP = cfg.obbMT === 'Closing Price';

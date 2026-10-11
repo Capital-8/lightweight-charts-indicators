@@ -24,13 +24,19 @@
  * - the exchange time zone (`timezone`): the hours of the FX sessions are read in it. Without it the port throws an
  *   Error when one of the three FX session ranges is switched on.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "Key Levels SpacemanBTC IDWM" by spacemanbtc
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { array, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LineDrawingData, LabelData, PineSize } from '../types';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { securityStarts, chartTimeframe } from '../anchor-period';
 import { nowOf, type ChartContext } from '../chart-context';
 
 export interface KeyLevelsSpacemanbtcIdwmInputs {
@@ -250,11 +256,11 @@ function buildable(chart: string, tf: string): boolean {
 }
 
 /** request.security(syminfo.tickerid, tf, ..., lookahead = barmerge.lookahead_on) on the last bar */
-function periodOf(bars: Bar[], tf: string, chart: string): Period {
+function periodOf(bars: Bar[], tf: string, chart: string, context?: ChartContext): Period {
   if (chart !== '' && !buildable(chart, tf)) {
     throw new Error(`Key Levels: the chart bars ("${chart}") cannot build the timeframe "${tf}": the bars do not carry that data.`);
   }
-  const starts = periodStarts(bars, tf);
+  const starts = securityStarts(bars, tf, context);
   const n = bars.length;
   let a = n - 1;
   while (a > 0 && starts[a - 1] === starts[n - 1]) a--;
@@ -300,12 +306,12 @@ export function calculate(
   }
   if (n === 0) return result();
 
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   const cache = new Map<string, Period>();
   const period = (tf: string): Period => {
     let p = cache.get(tf);
     if (!p) {
-      p = periodOf(bars, tf, chartTf);
+      p = periodOf(bars, tf, chartTf, chart);
       cache.set(tf, p);
     }
     return p;

@@ -15,11 +15,15 @@
  *   7. Asia KZ           23:00-03:00  orange transp=90
  *   8. Asia Open Alert   00:00-00:15  orange transp=70
  *
+ * The kill zone windows are wall times of the exchange time zone, as in the original. The port reads the time zone
+ * from the optional third argument (see src/chart-context.ts); without it the windows are UTC times.
+ *
  * Reference: "Bitcoin Kill Zones v2 [oscarvs]"
  */
 
-import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import type { ChartContext } from '../chart-context';
 
 export interface BitcoinKillZonesInputs {
   showNY: boolean;
@@ -67,15 +71,19 @@ function inSession(minuteOfDay: number, startH: number, startM: number, endH: nu
   return minuteOfDay >= start || minuteOfDay < end;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<BitcoinKillZonesInputs> = {}): Omit<IndicatorResult, 'markers'> & { bgColors: BgColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<BitcoinKillZonesInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { bgColors: BgColorData[] } {
   const { showNY, showLondonOpen, showLondonClose, showAsia, showAlertBars } = { ...defaultInputs, ...inputs };
 
   const bgColors: BgColorData[] = [];
+  const timezone = chart?.timezone;
 
   for (let i = 0; i < bars.length; i++) {
     const t = bars[i].time;
+    // time(period, session): wall time of the exchange time zone of the chart context (UTC without one)
     const date = new Date(t * 1000);
-    const minuteOfDay = date.getUTCHours() * 60 + date.getUTCMinutes();
+    const minuteOfDay = timezone === undefined
+      ? date.getUTCHours() * 60 + date.getUTCMinutes()
+      : pineTime.hour(t * 1000, timezone) * 60 + pineTime.minute(t * 1000, timezone);
 
     // In PineScript, multiple bgcolor() calls stack independently.
     // Since our bgColors array supports one color per bar, we pick the most opaque

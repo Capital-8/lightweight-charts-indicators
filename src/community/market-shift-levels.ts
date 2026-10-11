@@ -4,11 +4,16 @@
  * Detect market structure shifts using HMA crossovers.
  * Plots shift level, colored candles, bar colors, and reversal labels.
  *
+ * The level line of the original has the chart foreground colour on every second bar and no colour on the others.
+ * With a foreground colour in the optional third argument (see src/chart-context.ts) the port does the same. Without
+ * it the line keeps one fixed grey (#787B86) on every bar.
+ *
  * Reference: "Market Shift Levels [ChartPrime]" (community)
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, PlotCandleData, LabelData } from '../types';
+import { foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface MarketShiftLevelsInputs {
   length: number;
@@ -35,7 +40,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<MarketShiftLevelsInputs> = {}): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]>; labels: LabelData[] } {
+export function calculate(bars: Bar[], inputs: Partial<MarketShiftLevelsInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]>; labels: LabelData[] } {
   const { length, labelData } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const useLblVol = labelData === 'Volume';
@@ -76,15 +81,18 @@ export function calculate(bars: Bar[], inputs: Partial<MarketShiftLevelsInputs> 
   }
 
   // Pine: plot(level != level[1] ? na : level, ..., style=plot.style_linebr)
-  // Also: color = bar_index % 2 == 0 ? na : chart.fg_color  (alternating visibility)
+  // Also: color = bar_index % 2 == 0 ? na : chart.fg_color  (alternating visibility): only with the foreground
+  // colour of the chart context; without it the points carry no colour (the fixed colour of plotConfig)
+  const fgColor = chart?.foregroundColor !== undefined ? foregroundColorOf(chart) : undefined;
   const shiftPlot: { time: number; value: number; color?: string }[] = [];
   for (let i = 0; i < n; i++) {
     const lvl = levelArr[i];
     const prevLvl = i > 0 ? levelArr[i - 1] : NaN;
+    const pointColor = fgColor !== undefined ? { color: i % 2 === 0 ? 'transparent' : fgColor } : {};
     if (isNaN(lvl) || lvl !== prevLvl) {
-      shiftPlot.push({ time: bars[i].time, value: NaN });
+      shiftPlot.push({ time: bars[i].time, value: NaN, ...pointColor });
     } else {
-      shiftPlot.push({ time: bars[i].time, value: lvl });
+      shiftPlot.push({ time: bars[i].time, value: lvl, ...pointColor });
     }
   }
 

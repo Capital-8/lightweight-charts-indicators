@@ -5,8 +5,8 @@
  * crossed over the fast SMA at most `confirmBarsAO` bars ago, the Awesome Oscillator (SMA(hl2, 5) - SMA(hl2, 34))
  * crosses over 0 on this bar, the RSI is above the threshold and at least `cooldownBars` bars passed since the last
  * BUY. A SELL label is the mirror (close below the slow SMA, cross under the fast SMA, AO cross under 0, RSI below the
- * threshold). With "confirm on bar close", a signal needs a confirmed bar: all bars given to `calculate` are taken as
- * confirmed (closed) bars.
+ * threshold). With "confirm on bar close", a signal needs a confirmed (closed) bar. The port reads the state of the
+ * last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
  *
  * Reference: "Crypto M1 - SMA20 SMA200 RSI50 AO confirm (cooldown)" by hernangarcia_78
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +14,7 @@
 
 import { ta, Series, callsite, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface IndicadorMilloSma20Sma200AoRsiM1Inputs {
   /** Enable the BUY (long) signals */
@@ -86,7 +87,11 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<IndicadorMilloSma20Sma200AoRsiM1Inputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -111,8 +116,6 @@ export function calculate(
   // var int lastBuyBar = na / lastSellBar = na. bar_index differences only: the bar index origin does not matter
   let lastBuyBar = NaN;
   let lastSellBar = NaN;
-  // barstate.isconfirmed: every bar given to calculate is a closed bar
-  const isConfirmed = true;
 
   const plot0 = [];
   const plot1 = [];
@@ -142,8 +145,8 @@ export function calculate(
 
     const rawBuy = cfg.useLong && trendUp && buyConfirmWindow && aoCrossUp && rsiAboveNow && buyCooldownOK;
     const rawSell = cfg.useShort && trendDn && sellConfirmWindow && aoCrossDown && rsiBelowNow && sellCooldownOK;
-    const buySignal = rawBuy && (!cfg.confirmClose || isConfirmed);
-    const sellSignal = rawSell && (!cfg.confirmClose || isConfirmed);
+    const buySignal = rawBuy && (!cfg.confirmClose || barIsConfirmed(i));
+    const sellSignal = rawSell && (!cfg.confirmClose || barIsConfirmed(i));
     if (buySignal) lastBuyBar = i;
     if (sellSignal) lastSellBar = i;
 

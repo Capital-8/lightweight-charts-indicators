@@ -9,6 +9,9 @@
  * falls, and kfilt1 > kfilt; a green label below the bar in the opposite case (sigmoid below 1 - threshold).
  * Each breaker shades the background of its bar and the next four bars with a fading colour.
  *
+ * Last bar: a trend breaker is marked on a closed bar only. The port reads the state of the last bar from the
+ * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Kalman Filter Trend Breakers v1.1" by kypexin
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: original Kalman filter calculations (c) loxx; Kalman Filter Trend Breakers (c) kypexin 2025-01-29
@@ -16,6 +19,7 @@
 
 import { ta, taCore, callsite, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface KalmanFilterTrendBreakersInputs {
   /** Kalman filter source */
@@ -85,7 +89,11 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<KalmanFilterTrendBreakersInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -119,14 +127,14 @@ export function calculate(
   const downRising = callsite.whenCalled(downA, (x) => taCore.rising(x, L), smaPrev);
   const downB = downA.map((a, i) => a && downRising[i] === true);
   const downFalling = callsite.whenCalled(downB, (x) => taCore.falling(x, 1), sma);
-  const reverseDown = downB.map((b, i) => b && downFalling[i] === true && gt(kfilt1[i], kfilt[i]));
+  const reverseDown = downB.map((b, i) => b && downFalling[i] === true && gt(kfilt1[i], kfilt[i]) && barIsConfirmed(i));
   // fillReverseUp = sigmoid < 1 - thr and ta.falling(kfilt1SMA[1], L) and ta.rising(kfilt1SMA, 1) and kfilt1 < kfilt
   const upA = sigmoid.map((s) => lt(s, thrUp));
   const upFalling = callsite.whenCalled(upA, (x) => taCore.falling(x, L), smaPrev);
   const upB = upA.map((a, i) => a && upFalling[i] === true);
   const upRising = callsite.whenCalled(upB, (x) => taCore.rising(x, 1), sma);
-  const reverseUp = upB.map((b, i) => b && upRising[i] === true && lt(kfilt1[i], kfilt[i]));
-  // barstate.isconfirmed: every bar given to calculate() is a closed bar
+  const reverseUp = upB.map((b, i) => b && upRising[i] === true && lt(kfilt1[i], kfilt[i]) && barIsConfirmed(i));
+  // (both end with `and barstate.isconfirmed`)
 
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];

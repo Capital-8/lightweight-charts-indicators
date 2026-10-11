@@ -20,12 +20,15 @@
  * - lower timeframe below the chart timeframe: the chart bars do not have the intrabar volume; the values are an
  *   estimate that gives all the volume of a bar to up or down volume by close vs open (0 when equal)
  * - lower timeframe above the chart timeframe: error, as the original
+ * The chart timeframe is `timeframe` of the chart context (third argument of calculate) when given, else it is
+ * taken from the bar spacing.
  * The design (colours, zero line) is the one of the standard indicator.
  */
 
 import { type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
 import type { PlotCandleData } from '../types';
 import { lowerTimeframe, upDownVolumeOfChartBars } from '../lower-tf-volume';
+import type { ChartContext } from '../chart-context';
 
 export interface VolumeDeltaInputs {
   /** Use the custom lower timeframe instead of the automatic one */
@@ -67,9 +70,9 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<VolumeDeltaInputs> = {}): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]> } {
+export function calculate(bars: Bar[], inputs: Partial<VolumeDeltaInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]> } {
   const { useCustomTimeframe, lowerTimeframe: customTimeframe } = { ...defaultInputs, ...inputs };
-  const { exact } = lowerTimeframe(bars, useCustomTimeframe, customTimeframe);
+  const { exact } = lowerTimeframe(bars, useCustomTimeframe, customTimeframe, chart);
   const exactDelta = exact ? upDownVolumeOfChartBars(bars).delta : [];
   const candles: PlotCandleData[] = [];
 

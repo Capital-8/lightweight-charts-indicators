@@ -11,6 +11,9 @@
  * "crypto" and 252 for the others: the port reads the symbol type from the chart context (third argument) and uses
  * 252 without it.
  *
+ * Chart timeframe: `timeframe` of the chart context (optional third argument of calculate) when given; without it
+ * the chart timeframe is read from the bar spacing (the most frequent gap between two bars).
+ *
  * Reference: "Adaptive Trend Finder (log)" by Julien_Eche
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: Copyright (c) 2023-present, Julien Eche
@@ -279,7 +282,7 @@ export function calculate(
     cells.push({ column: 0, row: 1, text, textColor: cfg.channelColor, textSize });
   }
   // Annualized return of the trend, on daily and weekly bars only
-  const tf = chartTimeframe(bars);
+  const tf = chartTimeframe(bars, chart);
   const isDaily = tf.endsWith('D');
   const isWeekly = tf.endsWith('W');
   if (cfg.showTrendAnnualizedReturn && (isDaily || isWeekly)) {

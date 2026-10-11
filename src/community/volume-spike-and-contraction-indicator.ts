@@ -7,6 +7,9 @@
  * marked with '💥' below a bull bar (close > open) or above any other bar; a contraction with '↗' below a bull bar or
  * '⤵' above any other bar.
  *
+ * Last bar: a volume contraction is marked on a closed bar only. The port reads the state of the last bar from the
+ * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Volume Spike and Contraction Indicator" by epicurusMcPot
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © epicurusMcPot
@@ -14,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface VolumeSpikeAndContractionInputs {
   /** Length of the volume SMA and stdev */
@@ -52,7 +56,11 @@ const gt = (a: number, b: number) => a - b > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeSpikeAndContractionInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -67,8 +75,8 @@ export function calculate(
 
   // ta.crossover / ta.crossunder compare exactly (library functions)
   const volumeSpike = ta.crossover(volume, S(upperDevVol1)).toArray();
-  // volumeContraction = ta.crossunder(volume, lowerDevVol1) and barstate.isconfirmed (every bar is a closed bar)
-  const volumeContraction = ta.crossunder(volume, S(lowerDevVol1)).toArray();
+  // volumeContraction = ta.crossunder(volume, lowerDevVol1) and barstate.isconfirmed
+  const volumeContraction = ta.crossunder(volume, S(lowerDevVol1)).toArray().map((v, i) => !!v && barIsConfirmed(i));
 
   const yellow = String(color.yellow);
   const aqua = String(color.aqua);

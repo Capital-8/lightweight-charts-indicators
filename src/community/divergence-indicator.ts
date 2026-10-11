@@ -12,11 +12,16 @@
  * Pine plots 4 lines through every oscillator pivot (value osc[lbR], or low/high with "Plot on price",
  * offset=-lbR) with a transparent colour unless a divergence is found there, and 4 plotshape labels.
  *
+ * Last bar: with "Delay plot until candle is closed" a divergence is not drawn on an open bar. The port reads the
+ * state of the last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as
+ * closed.
+ *
  * Reference: "Divergence Indicator (any oscillator)" (community, Pine v4)
  */
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface DivergenceIndicatorInputs {
   /** Pine overlay_main: "Plot on price (rather than on indicator)" */
@@ -32,7 +37,7 @@ export interface DivergenceIndicatorInputs {
   plotHiddenBear: boolean;
   /**
    * Pine delay_plot_til_closed. Pine: repaint = not delay_plot_til_closed or barstate.ishistory or
-   * barstate.isconfirmed. Every bar given to calculate() is a closed (historical) bar, so repaint is always true.
+   * barstate.isconfirmed: it only changes the last bar, when that bar is still open (chart context).
    */
   delayPlotTilClosed: boolean;
 }
@@ -90,10 +95,13 @@ export const metadata = {
 
 type PlotPoint = { time: number; value: number; color?: string };
 
-export function calculate(bars: Bar[], inputs: Partial<DivergenceIndicatorInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<DivergenceIndicatorInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const {
     overlayMain, src, pivotLookbackLeft, pivotLookbackRight,
-    rangeUpper, rangeLower, plotBull, plotHiddenBull, plotBear, plotHiddenBear,
+    rangeUpper, rangeLower, plotBull, plotHiddenBull, plotBear, plotHiddenBear, delayPlotTilClosed,
   } = { ...defaultInputs, ...inputs };
 
   const n = bars.length;
@@ -104,8 +112,8 @@ export function calculate(bars: Bar[], inputs: Partial<DivergenceIndicatorInputs
   const lbR = pivotLookbackRight;
 
   // Pine: repaint = not delay_plot_til_closed or barstate.ishistory or barstate.isconfirmed.
-  // All bars given to calculate() are closed, so repaint is true on every bar.
-  const repaint = true;
+  // The last bar, when it is still open, is the only bar that is neither historical nor confirmed.
+  const repaintAt = (index: number) => !delayPlotTilClosed || barIsConfirmed(index);
 
   // plFound / phFound are true on the confirmation bar, lbR bars after the pivot bar.
   const plArr = ta.pivotlow(osc, lbL, lbR).toArray();
@@ -141,6 +149,7 @@ export function calculate(bars: Bar[], inputs: Partial<DivergenceIndicatorInputs
       const p = i - lbR;
       const o = oscArr[p];
       const low = bars[p].low;
+      const repaint = repaintAt(i);
       const bullCond = plotBull && low < plLastLow && o > plLastOsc && plInRange && repaint;
       const hiddenBullCond = plotHiddenBull && low > plLastLow && o < plLastOsc && plInRange && repaint;
       // Pine: plFound ? overlay_main ? low[lbR] : osc[lbR] : na
@@ -157,6 +166,7 @@ export function calculate(bars: Bar[], inputs: Partial<DivergenceIndicatorInputs
       const p = i - lbR;
       const o = oscArr[p];
       const high = bars[p].high;
+      const repaint = repaintAt(i);
       const bearCond = plotBear && high > phLastHigh && o < phLastOsc && phInRange && repaint;
       const hiddenBearCond = plotHiddenBear && high < phLastHigh && o > phLastOsc && phInRange && repaint;
       // Pine: phFound ? overlay_main ? high[lbR] : osc[lbR] : na

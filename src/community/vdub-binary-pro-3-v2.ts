@@ -17,13 +17,21 @@
  * not carry: the port throws an Error. With the default timeframes ("30" and "240") the chart must be 30 minutes
  * or lower.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "VDUB_BINARY_PRO_3_V2" by vdubus
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 export interface VdubBinaryPro3V2Inputs {
   /** WMA length of the close */
@@ -138,14 +146,18 @@ const truthy = (v: number) => !isNaN(v) && v !== 0;
  * function that brings one value per bar of that timeframe back to the chart bars. Version 1 rule: every chart bar
  * of a period shows the value of the period (no gaps).
  */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; toChart: (values: number[]) => number[] } {
-  const chart = chartTimeframe(bars);
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; toChart: (values: number[]) => number[] } {
+  const chart = chartTimeframe(bars, context);
   if (tf.trim() === '' || chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
     return { htf: bars, toChart: (values) => values };
   }
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the bars do not carry that data.`);
   }
+  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
+  // complete them come from the library rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) return { htf: exchange.htf, toChart: (values) => exchange.group.map((g) => values[g]) };
   const starts = periodStarts(bars, tf);
   const htf: Bar[] = [];
   const group: number[] = [];
@@ -169,6 +181,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<VdubBinaryPro3V2Inputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -194,13 +207,13 @@ export function calculate(
   const crossed = ta.cross(longS, shortS).toArray();
 
   // Large channel: security(tickerid, tf, highest(Range2)) / lowest(Range2)
-  const large = timeframeBars(bars, cfg.lrgChannelTf);
+  const large = timeframeBars(bars, cfg.lrgChannelTf, chart);
   const largeHigh = Series.fromArray(large.htf, large.htf.map((b) => b.high));
   const largeLow = Series.fromArray(large.htf, large.htf.map((b) => b.low));
   const sell = large.toChart(A(ta.highest(largeHigh, cfg.range2)));
   const buy = large.toChart(A(ta.lowest(largeLow, cfg.range2)));
   // Small channel: security(tickerid, tf, high) / low
-  const small = timeframeBars(bars, cfg.smlChannelTf);
+  const small = timeframeBars(bars, cfg.smlChannelTf, chart);
   const mHigh = small.toChart(small.htf.map((b) => b.high));
   const mLow = small.toChart(small.htf.map((b) => b.low));
 

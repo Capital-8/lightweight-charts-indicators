@@ -6,11 +6,15 @@
  * Plots: pivot avg stepline (off by default), top/bottom level circles, fractal chaos channel (off by default),
  * breakout/breakdown markers, and labels with the pivot price.
  *
+ * The pivot price of a label is printed with the symbol tick (format.mintick). The port reads the tick from the
+ * optional third argument (see src/chart-context.ts); without it the tick is 0.01 (2 decimals).
+ *
  * Reference: "Pivot Points High Low (HH/HL/LH/LL) [Anan]" (Pine v6)
  */
 
 import { ta, str, math, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, LabelData } from '../types';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface PivotHhHlLhLlInputs {
   /** Pivot high source */
@@ -53,8 +57,6 @@ export interface PivotHhHlLhLlInputs {
 const TEAL_50 = 'rgba(8,153,129,0.5)';
 const RED_50 = 'rgba(242,54,69,0.5)';
 const TRANSPARENT = 'rgba(0,0,0,0)';
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 /** Pine max_labels_count */
 const MAX_LABELS = 500;
 
@@ -136,7 +138,7 @@ const EPS = 1e-10;
 const lt = (a: number, b: number) => b - a > EPS;
 const differs = (a: number, b: number) => Math.abs(a - b) > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<PivotHhHlLhLlInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; labels: LabelData[] } {
+export function calculate(bars: Bar[], inputs: Partial<PivotHhHlLhLlInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { leftBars: leftLenH, rightBars: rightLenH, leftLenL, rightLenL, colorH, colorL } = cfg;
   const n = bars.length;
@@ -152,8 +154,13 @@ export function calculate(bars: Bar[], inputs: Partial<PivotHhHlLhLlInputs> = {}
 
   const inRange = (i: number) => cfg.maxBarsBack === 0 || i > lastBarIndex - cfg.maxBarsBack;
   // Pine: str.tostring(_pivot, format.mintick) = value rounded with round(v / mintick) * mintick, printed with the
-  // decimals of mintick. The port gets no syminfo.mintick: tick 0.01.
-  const fmt = (v: number) => '[' + str.tostring(math.round_to_mintick(v, MINTICK), '0.00') + ']';
+  // decimals of mintick. With the symbol tick of the chart context the library format is used. Without it the port
+  // keeps its first rule: tick 0.01 with the exact decimal rounding (a price on a half tick, e.g. 38.995, can then
+  // print one tick higher than the original).
+  const hasTick = chart?.mintick !== undefined || (chart?.minmove !== undefined && chart.pricescale !== undefined);
+  const mintick = mintickOf(chart);
+  const fmt = (v: number) => '['
+    + (hasTick ? str.tostring(v, 'mintick', mintick) : str.tostring(math.round_to_mintick(v, mintick), '0.00')) + ']';
 
   const markers: MarkerData[] = [];
   const labels: LabelData[] = [];

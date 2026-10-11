@@ -12,13 +12,20 @@
  * bars long (it is removed). Options: HH / LL labels of one term, a background colour (close above / below the line
  * of the term) and bar colours (close against the three lines). At most 500 lines and 500 labels are kept.
  *
- * Timeframe: the swings of a higher timeframe come from bars built from the chart bars with the UTC calendar rule
+ * Timeframe: the swings of a higher timeframe come from bars built from the chart bars with the calendar rule
  * of the period helper (see anchor-period.ts for its limits); a swing appears on the chart bar that completes its
  * bar of that timeframe (every bar is a closed bar). A timeframe below the chart timeframe needs data that the
  * chart bars do not have: the port throws an Error.
  *
  * Chart values (third argument): the port reads the chart foreground colour for the HH / LL labels (without it:
  * #DBDBDB, a dark chart).
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "Trendline Breakout Navigator [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,7 +36,7 @@ import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, t
 import type { BarColorData, BgColorData, LabelData, LineDrawingData } from '../types';
 import { barInterval } from '../bar-time';
 import { foregroundColorOf, type ChartContext } from '../chart-context';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 
 export interface TrendlineBreakoutNavigatorInputs {
   /** Timeframe of the swings ('' = chart timeframe) */
@@ -165,14 +172,18 @@ const setXY2 = (l: Trendline | null, x: number, y: number) => {
  * bars (their time is the start of the period), and for each chart bar the index of the latest completed bar of
  * that timeframe (-1: none yet).
  */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; latest: number[] } {
-  const chart = chartTimeframe(bars);
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; latest: number[] } {
+  const chart = chartTimeframe(bars, context);
   if (tf.trim() === '' || chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
     return { htf: bars, latest: bars.map((_b, i) => i) };
   }
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
   }
+  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
+  // complete them come from the library rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) return { htf: exchange.htf, latest: exchange.latest };
   const n = bars.length;
   const starts = periodStarts(bars, tf);
   const htf: Bar[] = [];
@@ -275,7 +286,7 @@ export function calculate(
 
   // The swings of the three lengths: [time[2], pivot] of the timeframe on the chart bars, then
   // ta.change(fixnan(pivot)) of the highs and of the lows
-  const { htf, latest } = timeframeBars(bars, cfg.res);
+  const { htf, latest } = timeframeBars(bars, cfg.res, chart);
   const highs = Series.fromArray(htf, htf.map((b) => b.high));
   const lows = Series.fromArray(htf, htf.map((b) => b.low));
   const swings = (left: number) => {

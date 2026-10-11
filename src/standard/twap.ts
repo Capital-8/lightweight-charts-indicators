@@ -5,13 +5,16 @@
  * Resets at each new anchor period boundary (timeframe.change(anchor)).
  *
  * 'Anchor Period' accepts any timeframe ("" = the chart timeframe: every bar is its own period). The original takes
- * the periods from the exchange time zone and sessions, which the bars do not carry: the port takes them from the
- * UTC calendar and the bars (see src/anchor-period.ts). Exact on UTC 24x7 symbols and on symbols whose trading day
- * is inside the UTC day (e.g. US stocks), after the first period of the bars; not on sessions that cross 00:00 UTC.
+ * the periods from the exchange time zone and sessions. The port reads the time zone and the session from the chart
+ * context (third argument of calculate) and takes the periods of the exchange calendar. Without them it takes the
+ * periods from the UTC calendar and the bars (see src/anchor-period.ts): exact on UTC 24x7 symbols and on symbols
+ * whose trading day is inside the UTC day (e.g. US stocks), after the first period of the bars; not on sessions
+ * that cross 00:00 UTC.
  */
 
 import { getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import { periodStarts } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 export interface TWAPInputs {
   /** Anchor period: any timeframe string ("1D", "1W", "240", ...; "" = chart timeframe) */
@@ -42,13 +45,13 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TWAPInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<TWAPInputs> = {}, chart?: ChartContext): IndicatorResult {
   const { anchor, src, offset } = { ...defaultInputs, ...inputs };
   const sourceArr = getSourceSeries(bars, src).toArray();
 
   let sum = 0;
   let count = 0;
-  const starts = periodStarts(bars, anchor);
+  const starts = periodStarts(bars, anchor, chart);
   const twapArr: number[] = [];
 
   for (let i = 0; i < bars.length; i++) {

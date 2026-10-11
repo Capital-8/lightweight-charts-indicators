@@ -26,6 +26,9 @@
  * - The original stops with a runtime error when a session never starts for 15,000 bars (e.g. the London session
  *   on a symbol without bars before 07:00 UTC): the port throws the same error.
  *
+ * Chart timeframe: `timeframe` of the chart context (optional third argument of calculate) when given; without it
+ * the chart timeframe is read from the bar spacing (the most frequent gap between two bars).
+ *
  * Reference: "Market sessions and Volume profile - By Leviathan" by LeviathanCapital
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Leviathan. Some Volume Profile elements are inspired by @LonesomeTheBlue's volume profile script
@@ -196,7 +199,7 @@ export function calculate(
   // time(timeframe.period, '0000-2400', 'GMT'): the start of the chart timeframe period that contains the bar, with
   // periods counted from 00:00 GMT (measured: 13:30 gives 13:00 on 60-minute bars, 12:00 on 240-minute bars, and
   // 00:00 of the day on daily and higher bars)
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   const periodMs = chartTf === '' ? 0 : timeframe.in_seconds(chartTf) * 1000;
   const DAY = 86400000;
   const sessionTime = (tMs: number) => {

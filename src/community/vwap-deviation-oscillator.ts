@@ -8,12 +8,16 @@
  * (multiples 0.5 / 1 / 2 / 2.8 of the standard deviation of the deviation, with a minimum, or fixed z levels).
  * Lines at +-1, 2 and 3 standard deviations; in line mode, a fill between the oscillator and zero.
  *
+ * The mode 'Rolling (Lookback: Days)' counts back from the current time (timenow). The port reads it from the optional
+ * third argument (see src/chart-context.ts); without it, it is the clock of the computer.
+ *
  * Reference: "VWAP Deviation Oscillator [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © BackQuant
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { nowOf, type ChartContext } from '../chart-context';
 
 export type VwapMode = '4 Hours' | 'Daily' | 'Weekly' | 'Rolling (Lookback: Bars)' | 'Rolling (Lookback: Days)';
 
@@ -131,7 +135,7 @@ function periodId(timeMs: number, mode: VwapMode): number {
   return NaN;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<VwapDeviationOscillatorInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<VwapDeviationOscillatorInputs> = {}, chart?: ChartContext): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -139,7 +143,7 @@ export function calculate(bars: Bar[], inputs: Partial<VwapDeviationOscillatorIn
   const isRollingBars = cfg.sessionType === 'Rolling (Lookback: Bars)';
   const isRollingDays = cfg.sessionType === 'Rolling (Lookback: Days)';
   const timeMs = bars.map((b) => b.time * 1000);
-  const timenow = Date.now();
+  const timenow = nowOf(chart);
 
   // Window length per bar
   const period: number[] = new Array(n);

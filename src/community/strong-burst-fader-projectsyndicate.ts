@@ -8,12 +8,16 @@
  * it above the high (below the low), coloured by a cool-to-hot gradient of magnitude / heatSat; a triangle above
  * (below) the stack when it has at least fadeMin diamonds, and an optional background tint at the full stack.
  *
+ * Last bar: with 'Confirm on bar close' a burst peak is detected on a closed bar only. The port reads the state of
+ * the last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Strong Burst Fader" by ProjectSyndicate
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface StrongBurstFaderInputs {
   src: SourceType;
@@ -25,7 +29,7 @@ export interface StrongBurstFaderInputs {
   maxLevels: number;
   heatSat: number;
   needClose: boolean;
-  /** Confirm on bar close: every bar given to calculate() is a closed bar, so it has no effect */
+  /** Confirm on bar close: a peak is detected on a closed bar only */
   confirmBar: boolean;
   baseGap: number;
   rowGap: number;
@@ -117,7 +121,11 @@ const min = (a: number, b: number) => (isNaN(a) || isNaN(b) ? NaN : Math.min(a, 
 export function calculate(
   bars: Bar[],
   inputs: Partial<StrongBurstFaderInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -163,10 +171,9 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
-  // barstate.isconfirmed: true on every bar given to calculate() (historical bars)
-  const okBar = true;
   for (let i = 2; i < n; i++) {
     const at = (m: number[], k: number) => m[i - k];
+    const okBar = cfg.confirmBar ? barIsConfirmed(i) : true; // okBar = confirmBar ? barstate.isconfirmed : true
     const upPeak = okBar && gt(at(upM0, 1), 0) && ge(at(upM0, 1), at(upM0, 2)) && gt(at(upM0, 1), upM0[i]);
     const dnPeak = okBar && gt(at(dnM0, 1), 0) && ge(at(dnM0, 1), at(dnM0, 2)) && gt(at(dnM0, 1), dnM0[i]);
     if (!upPeak && !dnPeak) continue;

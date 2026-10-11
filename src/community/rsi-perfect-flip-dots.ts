@@ -5,6 +5,9 @@
  * EMA is above the slow EMA, a down arrow above the bar while it is below. A large green dot below the bar where the
  * fast EMA crosses over the slow EMA, a large red dot above the bar where it crosses under (confirmed bars only).
  *
+ * Last bar: a buy / sell dot needs a closed bar. The port reads the state of the last bar from the optional third
+ * argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "RSI (Kernel Optimized) | Flux Charts + PERFECT Flip Dots" by debanshuchanda6
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -14,6 +17,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface RsiPerfectFlipDotsInputs {
   rsiLengthInput: number;
@@ -47,7 +51,11 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<RsiPerfectFlipDotsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
 
@@ -79,8 +87,7 @@ export function calculate(
     // plotarrow(bearCond ? -1 : na, colordown = color.new(bearishColor, 70))
     if (bearCond) markers.push({ time: b.time, position: 'aboveBar', shape: 'arrowDown', color: arrowDownColor });
 
-    // barstate.isconfirmed: historical bars are confirmed
-    const isConfirmed = true;
+    const isConfirmed = barIsConfirmed(i); // barstate.isconfirmed
     const buySignal = isConfirmed && bullFlip[i] === 1;
     const sellSignal = isConfirmed && bearFlip[i] === 1;
 

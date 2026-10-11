@@ -7,6 +7,9 @@
  * clock time in the chosen time zone. A dot arms a trigger; the trigger fires a signal label when the close crosses
  * back over the EMA (high setup: close below the EMA, low setup: close above it), then disarms.
  *
+ * Last bar: a label fires on a closed bar only. The port reads the state of the last bar from the optional third
+ * argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "The Mean Goose v1" by FattyGuinness
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -14,6 +17,7 @@
 import { ta, time, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface TheMeanGooseV1Inputs {
   kc1Len: number;
@@ -112,7 +116,11 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TheMeanGooseV1Inputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: { toArray(): (number | null)[] }) => s.toArray().map((v) => v ?? NaN);
@@ -170,9 +178,9 @@ export function calculate(
 
     if (highDot) highTrigger = true;
     if (lowDot) lowTrigger = true;
-    // barstate.isconfirmed: true on every bar of the calculation (historical bars are confirmed)
-    const fireDown = highTrigger && lt(b.close, emaVal[i]);
-    const fireUp = lowTrigger && gt(b.close, emaVal[i]);
+    // fireDown = highTrigger and close < ema_val and barstate.isconfirmed
+    const fireDown = highTrigger && lt(b.close, emaVal[i]) && barIsConfirmed(i);
+    const fireUp = lowTrigger && gt(b.close, emaVal[i]) && barIsConfirmed(i);
     if (fireDown) highTrigger = false;
     if (fireUp) lowTrigger = false;
     if (fireDown) {

@@ -9,12 +9,16 @@
  * 0.7 levels while Hyper Wave is beyond -0.5 / 0.5; weak signals: Hyper Wave crosses 0 while Money Flow is inside
  * the levels. Threshold bands at 0.7..1 and -0.7..-1 and a zero band at -0.1..0.1.
  *
+ * Last bar: the three zero lines and the fill between them are drawn on closed bars only. The port reads the state of
+ * the last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Oscillator Matrix [Alpha Extract]" by AlphaExtract
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, MarkerData, PlotCandleData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface OscillatorMatrixInputs {
   mfLength: number;
@@ -86,6 +90,8 @@ const UPPER_COL = '#FF6B7A';
 const LOWER_COL = '#00D4AA';
 /** grayc: color.new(color.gray, 50) on confirmed bars (all historical bars) */
 const GRAY_C = String(color.new(color.gray, 50));
+/** grayc on a bar that is still open */
+const GRAY_OPEN = String(color.new(color.gray, 100));
 
 export const plotConfig: PlotConfig[] = [
   { id: 'plot0', title: 'MF Upper Threshold', color: UPPER_COL, lineWidth: 1 },
@@ -117,7 +123,11 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<OscillatorMatrixInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -194,9 +204,11 @@ export function calculate(
     plots.plot3.push({ time: t, value: cfg.showThresholds ? -1 : NaN, color: LOWER_COL });
     plots.plot4.push({ time: t, value: cfg.showOverflow && mfOverflowBull ? 0.9 : NaN, color: bull30 });
     plots.plot5.push({ time: t, value: cfg.showOverflow && mfOverflowBear ? -0.9 : NaN, color: bear30 });
-    plots.plot6.push({ time: t, value: 0.1, color: GRAY_C });
-    plots.plot7.push({ time: t, value: 0, color: GRAY_C });
-    plots.plot8.push({ time: t, value: -0.1, color: GRAY_C });
+    // color grayc = color.new(color.gray, 100); if barstate.isconfirmed grayc := color.new(color.gray, 50)
+    const grayc = barIsConfirmed(i) ? GRAY_C : GRAY_OPEN;
+    plots.plot6.push({ time: t, value: 0.1, color: grayc });
+    plots.plot7.push({ time: t, value: 0, color: grayc });
+    plots.plot8.push({ time: t, value: -0.1, color: grayc });
     plots.plot9.push({ time: t, value: cfg.showHyperWave ? hw : NaN, color: hwColor });
     plots.plot10.push({ time: t, value: cfg.showMoneyFlow ? mf : NaN, color: mfColor });
 
@@ -228,7 +240,7 @@ export function calculate(
       // fill(low1, low2, color = color.new(#00D4AA, 80))
       { plot1: 'plot2', plot2: 'plot3', colors: new Array<string>(n).fill(String(color.new(LOWER_COL, 80))) },
       // fill(hline1, hline3, color = barstate.isconfirmed ? color.new(color.gray, 50) : na)
-      { plot1: 'plot6', plot2: 'plot8', colors: new Array<string>(n).fill(GRAY_C) },
+      { plot1: 'plot6', plot2: 'plot8', colors: bars.map((_b, i) => (barIsConfirmed(i) ? GRAY_C : 'transparent')) },
     ],
     markers,
     bgColors,

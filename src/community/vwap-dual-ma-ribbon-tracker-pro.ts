@@ -7,18 +7,21 @@
  * cushion is ATR * multiplier (0 when the ATR filter is off); the EFI condition is skipped when its filter is off.
  * The MAs are EMAs or SMAs of the close.
  *
- * Timeframe limit: daily and higher timeframes only. Pine `ta.vwap` resets on each new trading day
- * (anchor timeframe.change("1D")). When each bar is one trading day or more, it resets on every bar, so the VWAP is
- * hlc3 of the bar (na when the volume is 0 or na). On intraday bars the reset needs the exchange time zone and the
- * symbol session, which calculate() does not get: calculate() throws an Error when the bar interval
- * (barInterval: most frequent gap between bars) is below one day.
+ * Timeframes: Pine `ta.vwap` resets on each new trading day (anchor timeframe.change("1D")). When each bar is one
+ * trading day or more, it resets on every bar, so the VWAP is hlc3 of the bar (na when the volume is 0 or na). On
+ * intraday bars (barInterval, the most frequent gap between bars, below one day) the reset needs the exchange time
+ * zone and the session of the symbol: the port reads them from the optional third argument (see
+ * src/chart-context.ts) and sums from the first bar of each trading day (from the first bar on the first day).
+ * Without them calculate() throws an Error on intraday bars.
  *
  * Reference: "VWAP & Dual MA Ribbon Tracker Pro" by Simon20cent
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { barInterval } from '../bar-time';
+import type { ChartContext } from '../chart-context';
+import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
 
 export interface VwapDualMaRibbonTrackerProInputs {
   /** Moving average type */
@@ -76,12 +79,38 @@ const lt = (a: number, b: number) => b - a > EPS;
 
 const DAY_SECONDS = 86400;
 
-export function calculate(bars: Bar[], inputs: Partial<VwapDualMaRibbonTrackerProInputs> = {}): IndicatorResult {
+/**
+ * First bar of each trading day of the exchange on intraday bars (Pine timeframe.change("1D")), found by the library
+ * from the time zone and the session of the chart context. Null when the context does not give both, or when the bars
+ * are not intraday.
+ */
+function tradingDayStarts(bars: Bar[], chart?: ChartContext): boolean[] | null {
+  const interval = barInterval(bars);
+  if (chart?.timezone === undefined || chart.session === undefined || !(interval > 0 && interval < 86400)) return null;
+  let change: Array<number | null> = [];
+  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(interval) };
+  executeScript(() => { change = scriptTimeframe.change('1D').toArray(); }, bars, {}, context);
+  return change.map((v) => v === 1);
+}
+
+/**
+ * ta.vwap (hlc3) on intraday bars: sum(hlc3 * volume) / sum(volume) since the first bar of the trading day (since the
+ * first bar on the first day)
+ */
+function intradayVwap(bars: Bar[], dayStarts: boolean[]): number[] {
+  const hlc3 = Series.fromArray(bars, bars.map((b) => (b.high + b.low + b.close) / 3));
+  const volume = Series.fromArray(bars, bars.map((b) => b.volume ?? NaN));
+  const anchor = Series.fromArray(bars, dayStarts.map((v, i) => Number(i === 0 || v)));
+  return ta.vwap(hlc3, volume, anchor).toArray().map((v) => v ?? NaN);
+}
+
+export function calculate(bars: Bar[], inputs: Partial<VwapDualMaRibbonTrackerProInputs> = {}, chart?: ChartContext): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
   const interval = barInterval(bars);
-  if (interval > 0 && interval < DAY_SECONDS) {
+  const dayStarts = tradingDayStarts(bars, chart);
+  if (interval > 0 && interval < DAY_SECONDS && dayStarts === null) {
     throw new Error(
       'VWAP & Dual MA Ribbon Tracker Pro supports daily and higher timeframes only: on intraday bars ta.vwap resets '
       + 'on each trading day, which needs the exchange time zone and session.',
@@ -92,9 +121,11 @@ export function calculate(bars: Bar[], inputs: Partial<VwapDualMaRibbonTrackerPr
   const S = (a: number[]) => Series.fromArray(bars, a);
   const vol = bars.map((b) => b.volume ?? NaN);
 
-  // ta.vwap (hlc3, anchor timeframe.change("1D")): a new anchor on every daily or higher bar, so
-  // sum(hlc3 * volume) / sum(volume) over the bar alone (0 / 0 = na when the volume is 0, na when it is na)
-  const vwap = bars.map((b, i) => (((b.high + b.low + b.close) / 3) * vol[i]) / vol[i]);
+  // ta.vwap (hlc3, anchor timeframe.change("1D")). Intraday bars: the sums restart on each trading day of the
+  // exchange. Daily or higher bars: a new anchor on every bar, so sum(hlc3 * volume) / sum(volume) over the bar
+  // alone (0 / 0 = na when the volume is 0, na when it is na)
+  const vwap = dayStarts ? intradayVwap(bars, dayStarts)
+    : bars.map((b, i) => (((b.high + b.low + b.close) / 3) * vol[i]) / vol[i]);
   // get_ma(type, src, len) => type == 'EMA' ? ta.ema(src, len) : ta.sma(src, len)
   const close = S(bars.map((b) => b.close));
   const ma = (len: number) => A(cfg.maType === 'EMA' ? ta.ema(close, len) : ta.sma(close, len));

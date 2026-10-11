@@ -9,12 +9,16 @@
  * filter. Optional signals: a triangle when the counter crosses above `ris_fal`, drawn on the previous bar.
  * Optional bar colours with the line colour.
  *
+ * Last bar: a signal triangle needs a closed bar. The port reads the state of the last bar from the optional third
+ * argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Trend Filter (2-pole) [BigBeluga]" by BigBeluga
  * Licence: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International, as the original Pine script (https://creativecommons.org/licenses/by-nc-sa/4.0/).
  */
 
 import { ta, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface TrendFilterInputs {
   /** Length of the filter */
@@ -71,10 +75,13 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TrendFilterInputs> = {}): Omit<IndicatorResult, 'markers'> & {
+export function calculate(bars: Bar[], inputs: Partial<TrendFilterInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & {
   markers: MarkerData[];
   barColors: BarColorData[];
 } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const { length, damping, risFal, bands, upCol, dnCol, neutralCol, barCol, signals } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -137,9 +144,9 @@ export function calculate(bars: Bar[], inputs: Partial<TrendFilterInputs> = {}):
       markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: tpf[i] - atr, shape: 'circle', color: col });
     }
 
-    // sig_up = ta.crossover(rising, ris_fal) and barstate.isconfirmed and signals (every bar given is closed)
-    const sigUp = signals && !isNaN(prevRising) && rising > risFal && prevRising <= risFal;
-    const sigDn = signals && !isNaN(prevFalling) && falling > risFal && prevFalling <= risFal;
+    // sig_up = ta.crossover(rising, ris_fal) and barstate.isconfirmed and signals
+    const sigUp = signals && barIsConfirmed(i) && !isNaN(prevRising) && rising > risFal && prevRising <= risFal;
+    const sigDn = signals && barIsConfirmed(i) && !isNaN(prevFalling) && falling > risFal && prevFalling <= risFal;
     // plotshape(sig_dn ? tp_f[1] + atr : na, "Falling", shape.triangledown, location.absolute, color = color,
     //   size = size.tiny, offset = -1): drawn on the previous bar
     if (sigDn && i >= 1 && !isNaN(atr)) {

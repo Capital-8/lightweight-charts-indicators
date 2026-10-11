@@ -13,16 +13,22 @@
  *
  * Limits of the port:
  * - The first bar of the session (session.isfirstbar) and the periods of "Time Period" (timeframe.change) need the
- *   exchange session, which the bars do not carry. The port uses the UTC calendar: on symbols with weekend bars the
+ *   exchange session: the port reads the time zone and the session from the chart context and takes both from the
+ *   exchange calendar. Without them the port uses the UTC calendar: on symbols with weekend bars the
  *   session starts at 00:00 UTC; on other symbols the session starts on the first bar of each UTC day. Equal on UTC
  *   24x7 symbols and on symbols whose session is inside one UTC day without extended hours (e.g. US stocks). The
  *   first bar of the bars is a session start only when it is not later in the day than the first bar of the next day.
  * - Tooltips of the labels are prices printed with the price tick of the symbol: the port reads the tick from the
- *   chart context (third argument of calculate) and uses 0.01 without it. The session rule above does not read the
- *   chart context.
+ *   chart context (third argument of calculate) and uses 0.01 without it.
  * - The moving average type WMA needs a weighted average with a length that changes on each bar, which the
  *   library does not have: the port throws an Error for it.
  * - The Pine script stops with an error on daily and higher bars; the port throws the same error.
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "Opening Range with Breakouts & Targets [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -35,7 +41,7 @@ import {
 } from 'oakscriptjs';
 import type { LineDrawingData, BoxData, LabelData, LinefillData, PineSize } from '../types';
 import { barInterval, barTime } from '../bar-time';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, sessionFlags } from '../anchor-period';
 import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface OpeningRangeBreakoutsTargetsInputs {
@@ -219,7 +225,7 @@ export function calculate(
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // if timeframe.in_seconds(timeframe.period) >= timeframe.in_seconds("D") => runtime.error(...)
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   if (chartTf !== '' && timeframe.in_seconds(chartTf) >= timeframe.in_seconds('D')) {
     throw new Error('Timeframe is too High! Please Reduce Timeframe to be Less-Than 1 Day.');
   }
@@ -251,8 +257,11 @@ export function calculate(
     }
   } else {
     // session.isfirstbar: the first bar of the trading day; timeframe.change(orTF): a new period of the timeframe
-    const day = periodStarts(bars, 'D');
-    const period = periodStarts(bars, cfg.orTF);
+    // With the time zone and the session of the chart context both come from the exchange calendar (see
+    // anchor-period.ts); else from the UTC calendar and the bars
+    const exchangeFirst = sessionFlags(bars, chart)?.isfirstbar ?? null;
+    const day = periodStarts(bars, 'D', chart);
+    const period = periodStarts(bars, cfg.orTF, chart);
     // The session of bar 0 can have started before the bars: bar 0 is a first bar when it is not later in the day (UTC)
     // than the first bar of the next day
     const daySec = inMs ? 86400000 : 86400;
@@ -260,7 +269,7 @@ export function calculate(
     const firstIsStart = n > 0 && (nextDay < 0 || bars[0].time % daySec <= bars[nextDay].time % daySec);
     let state = false;
     for (let i = 0; i < n; i++) {
-      const firstBar = i === 0 ? firstIsStart : day[i] !== day[i - 1];
+      const firstBar = exchangeFirst !== null ? exchangeFirst[i] : i === 0 ? firstIsStart : day[i] !== day[i - 1];
       const newTf = i === 0 || period[i] !== period[i - 1];
       if (firstBar) state = true;
       else if (newTf) state = false;

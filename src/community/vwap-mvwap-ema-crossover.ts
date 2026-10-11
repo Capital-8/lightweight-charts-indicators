@@ -5,11 +5,18 @@
  * Custom VWAP calculation (cumulative volume-weighted price).
  * Includes Senkou span cloud for trend context.
  *
+ * The VWAP restarts on each day. On intraday bars the port reads the exchange time zone and the session of the
+ * symbol from the optional third argument (see src/chart-context.ts) and uses the trading day of the exchange, as
+ * the original. Without them the day is the UTC date.
+ *
  * Reference: "VWAP/MVWAP/EMA CROSSOVER" by DerrickLaFlame
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import type { ChartContext } from '../chart-context';
+import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
+import { barInterval } from '../bar-time';
 
 export interface VwapMvwapEmaCrossoverInputs {
   vwapLength: number;
@@ -63,7 +70,21 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+/**
+ * First bar of each trading day of the exchange on intraday bars (Pine timeframe.change("1D")), found by the library
+ * from the time zone and the session of the chart context. Null when the context does not give both, or when the bars
+ * are not intraday.
+ */
+function tradingDayStarts(bars: Bar[], chart?: ChartContext): boolean[] | null {
+  const interval = barInterval(bars);
+  if (chart?.timezone === undefined || chart.session === undefined || !(interval > 0 && interval < 86400)) return null;
+  let change: Array<number | null> = [];
+  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(interval) };
+  executeScript(() => { change = scriptTimeframe.change('1D').toArray(); }, bars, {}, context);
+  return change.map((v) => v === 1);
+}
+
+export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
   const {
     vwapLength, emaLength1, emaLength2, mvwapLength,
     conversionLen, baseLineLen, senkouBLen, displacementA, displacementB,
@@ -71,7 +92,9 @@ export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInpu
   const n = bars.length;
 
   // Compute VWAP: Pine uses vwap built-in, then ema(vwap, vwapLength)
-  // Since we don't have session-based VWAP, compute cumulative VWAP per day
+  // Cumulative VWAP per day: the trading days of the exchange with the chart context (intraday bars), else the
+  // UTC dates
+  const dayStarts = tradingDayStarts(bars, chart);
   const vwapArr: number[] = new Array(n).fill(NaN);
   {
     let cumPV = 0;
@@ -80,7 +103,7 @@ export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInpu
     for (let i = 0; i < n; i++) {
       const d = new Date(bars[i].time * 1000);
       const dayKey = d.getUTCFullYear() * 10000 + d.getUTCMonth() * 100 + d.getUTCDate();
-      if (dayKey !== prevDay) {
+      if (dayStarts ? i === 0 || dayStarts[i] : dayKey !== prevDay) {
         cumPV = 0;
         cumV = 0;
         prevDay = dayKey;

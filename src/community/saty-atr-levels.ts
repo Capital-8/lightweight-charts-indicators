@@ -7,7 +7,7 @@
  * A table shows the range of the current period against the ATR, the trigger and +-1 ATR levels, and the trend of
  * the chart (the close and the 8 / 21 / 34 EMAs in order: green or red, else orange).
  *
- * Other timeframe: the bars of the period are built from the chart bars with the UTC calendar rule of the period
+ * Other timeframe: the bars of the period are built from the chart bars with the calendar rule of the period
  * helper (see anchor-period.ts for its limits), so the ATR starts at the first chart bar. The original reads the
  * period with lookahead: every chart bar of a period shows the close and the ATR of the period before it. It also
  * asks for the extended session of the symbol: the port uses the chart bars as they are. Limits on intraday charts:
@@ -16,6 +16,13 @@
  * A period shorter than the chart timeframe needs data that the chart bars do not have: the port throws an Error.
  * "Level Size" is the plot width in the original; the plots are drawn with the default width 2.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "Saty ATR Levels" by satymahajan
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: Copyright (C) 2022 Saty Mahajan
@@ -23,7 +30,8 @@
 
 import { ta, Series, str, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { TableData, TableCellData } from '../types';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 type TradingType = 'Day' | 'Multiday' | 'Swing' | 'Position' | 'Long-term';
 
@@ -177,14 +185,18 @@ const PERIOD: Record<TradingType, string> = { Day: 'D', Multiday: 'W', Swing: 'M
  * request.security(ticker, tf, ..., lookahead = barmerge.lookahead_on): the bars of timeframe `tf` built from the
  * chart bars and for each chart bar the index of its bar of that timeframe.
  */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; group: number[] } {
-  const chart = chartTimeframe(bars);
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; group: number[] } {
+  const chart = chartTimeframe(bars, context);
   if (chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
     return { htf: bars, group: bars.map((_b, i) => i) };
   }
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`The period "${tf}" of the trading type is shorter than the chart timeframe "${chart}": the chart bars do not have that data`);
   }
+  // With the exchange calendar of the chart context (time zone and session): the periods come from the library
+  // rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) return { htf: exchange.htf, group: exchange.group };
   const starts = periodStarts(bars, tf);
   const htf: Bar[] = [];
   const group: number[] = [];
@@ -206,6 +218,7 @@ function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; group: number[] }
 export function calculate(
   bars: Bar[],
   inputs: Partial<SatyAtrLevelsInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { tables: TableData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -218,7 +231,7 @@ export function calculate(
   const slow = A(ta.ema(price, cfg.slowEma));
 
   // Data of the period: close[period_index], ta.atr(atr_length)[period_index], high, low
-  const { htf, group } = timeframeBars(bars, PERIOD[cfg.tradingType] ?? 'D');
+  const { htf, group } = timeframeBars(bars, PERIOD[cfg.tradingType] ?? 'D', chart);
   const atrHtf = A(ta.atr(htf, cfg.atrLength));
   const back = cfg.useCurrentClose ? 0 : 1;
   const previousClose = group.map((g) => (g - back >= 0 ? htf[g - back].close : NaN));

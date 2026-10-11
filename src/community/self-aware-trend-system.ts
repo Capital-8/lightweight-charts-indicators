@@ -454,7 +454,7 @@ export function calculate(
   }
 
   // Preset resolution: tfMinutes = timeframe.in_seconds(timeframe.period) / 60
-  const chartTf = chart?.timeframe ?? chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   const tfMinutes = chartTf === '' ? NaN : timeframe.in_seconds(chartTf) / 60.0;
   const resolvedPreset: Preset = cfg.preset === 'Auto' ? (tfMinutes <= 5 ? 'Scalping' : tfMinutes <= 240 ? 'Default' : 'Swing') : cfg.preset;
   const pick = <T,>(scalping: T, def: T, swing: T, crypto: T, custom: T): T => {

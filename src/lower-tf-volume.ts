@@ -11,11 +11,13 @@
  * The bars passed to a port are the chart bars only. When the lower timeframe is the chart timeframe, the
  * intrabars are the chart bars and the port computes the original values (`exact`). When it is lower, the intrabar
  * volume is not available and each port keeps its estimate from the chart bars.
- * The chart timeframe is taken from the bars (`chartTimeframe`: the most frequent gap between two bars).
+ * The chart timeframe is `timeframe` of the chart context (optional last argument) when the caller gives it, else
+ * it is taken from the bars (`chartTimeframe`: the most frequent gap between two bars).
  */
 
 import { timeframe } from 'oakscriptjs';
 import { chartTimeframe } from './anchor-period';
+import type { ChartContext } from './chart-context';
 
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
@@ -38,8 +40,9 @@ export function lowerTimeframe(
   bars: ReadonlyArray<{ time: number }>,
   useCustomTimeframe: boolean,
   customTimeframe: string,
+  context?: ChartContext,
 ): LowerTimeframe {
-  const chart = chartTimeframe(bars);
+  const chart = chartTimeframe(bars, context);
   if (chart === '') return { timeframe: useCustomTimeframe ? customTimeframe : '', chart, exact: false };
   const info = timeframe.info(chart);
   const tf = useCustomTimeframe ? customTimeframe

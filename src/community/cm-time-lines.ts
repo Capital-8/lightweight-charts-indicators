@@ -12,11 +12,15 @@
  *   5. Session 5 (default 1500-1600)  maroon
  *   6. Session 6 (default 1700-1800)  lime
  *
+ * The session windows are wall times of the exchange time zone, as in the original. The port reads the time zone
+ * from the optional third argument (see src/chart-context.ts); without it the windows are UTC times.
+ *
  * Reference: "CM_Time Based Vertical Lines" by ChrisMoody
  */
 
-import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import type { ChartContext } from '../chart-context';
 
 export interface CMTimeLinesInputs {
   show1: boolean;
@@ -81,10 +85,12 @@ function parseSession(sess: string): { startMin: number; endMin: number } | null
   };
 }
 
-/** Check if a bar's time falls within a session window */
-function inSession(barTime: number, startMin: number, endMin: number): boolean {
+/** Check if a bar's time falls within a session window (wall time of the exchange time zone; UTC without one) */
+function inSession(barTime: number, startMin: number, endMin: number, timezone: string | undefined): boolean {
   const d = new Date(barTime * 1000);
-  const minuteOfDay = d.getUTCHours() * 60 + d.getUTCMinutes();
+  const minuteOfDay = timezone === undefined
+    ? d.getUTCHours() * 60 + d.getUTCMinutes()
+    : pineTime.hour(barTime * 1000, timezone) * 60 + pineTime.minute(barTime * 1000, timezone);
   if (startMin <= endMin) {
     return minuteOfDay >= startMin && minuteOfDay < endMin;
   }
@@ -92,7 +98,7 @@ function inSession(barTime: number, startMin: number, endMin: number): boolean {
   return minuteOfDay >= startMin || minuteOfDay < endMin;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<CMTimeLinesInputs> = {}): Omit<IndicatorResult, 'markers'> & { bgColors: BgColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<CMTimeLinesInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { bgColors: BgColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
 
   // Pine session colors: yellow, orange, aqua, fuchsia, maroon, lime (all transp=40 => 0.60 alpha)
@@ -118,7 +124,7 @@ export function calculate(bars: Bar[], inputs: Partial<CMTimeLinesInputs> = {}):
     let matchColor: string | null = null;
     for (const s of parsed) {
       if (!s.show || !s.range) continue;
-      if (inSession(t, s.range.startMin, s.range.endMin)) {
+      if (inSession(t, s.range.startMin, s.range.endMin, chart?.timezone)) {
         matchColor = s.color;
       }
     }

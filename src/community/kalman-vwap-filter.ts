@@ -7,16 +7,20 @@
  * Filter per bar: p = P + processNoise, K = p / (p + measurementNoise), x = x + K * (meas - x), P = (1 - K) * p,
  * started at the first measurement with P = 1 (started again after an na measurement). The line and the price bars
  * are green while the filter rises and red otherwise.
- * Limit: the VWAP day starts at 00:00 UTC. Pine starts it with the exchange trading day (exchange time zone), so on
- * intraday bars of a symbol whose trading day does not start at 00:00 UTC the session VWAP differs.
+ * The VWAP day: on intraday bars the port reads the exchange time zone and the session of the symbol from the
+ * optional third argument (see src/chart-context.ts) and starts the VWAP with the trading day of the exchange, as
+ * the original. Without them the day starts at 00:00 UTC.
  *
  * Reference: "Kalman VWAP Filter [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © BackQuant
  */
 
-import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { ta, Series, getSourceSeries, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import type { ChartContext } from '../chart-context';
+import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
+import { barInterval } from '../bar-time';
 
 export interface KalmanVwapFilterInputs {
   /** Price the filter observes */
@@ -91,14 +95,33 @@ export const metadata = {
 /** Pine a > b: a - b > 1e-10 (false with na) */
 const gt = (a: number, b: number) => a - b > 1e-10;
 
-/** Start of a new UTC day (Pine ta.vwap anchor: timeframe.change("1D")); true on the first bar */
-function newDay(bars: Bar[]): boolean[] {
-  return bars.map((b, i) => i === 0 || Math.floor(b.time / 86400) !== Math.floor(bars[i - 1].time / 86400));
+/**
+ * First bar of each trading day of the exchange on intraday bars (Pine timeframe.change("1D")), found by the library
+ * from the time zone and the session of the chart context. Null when the context does not give both, or when the bars
+ * are not intraday.
+ */
+function tradingDayStarts(bars: Bar[], chart?: ChartContext): boolean[] | null {
+  const interval = barInterval(bars);
+  if (chart?.timezone === undefined || chart.session === undefined || !(interval > 0 && interval < 86400)) return null;
+  let change: Array<number | null> = [];
+  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(interval) };
+  executeScript(() => { change = scriptTimeframe.change('1D').toArray(); }, bars, {}, context);
+  return change.map((v) => v === 1);
+}
+
+/**
+ * Start of a new day (Pine ta.vwap anchor: timeframe.change("1D")); true on the first bar. On intraday bars with the
+ * time zone and the session of the chart context: the trading days of the exchange. Else: UTC days.
+ */
+function newDay(bars: Bar[], chart?: ChartContext): boolean[] {
+  const starts = tradingDayStarts(bars, chart);
+  return bars.map((b, i) => i === 0 || (starts ? starts[i] : Math.floor(b.time / 86400) !== Math.floor(bars[i - 1].time / 86400)));
 }
 
 export function calculate(
   bars: Bar[],
   inputs: Partial<KalmanVwapFilterInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { barColors: BarColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -109,7 +132,7 @@ export function calculate(
   const volume = bars.map((b) => b.volume ?? NaN);
 
   // sessionVWAP = ta.vwap(hlc3); rollingVWAP = sma(price * volume, len) / sma(volume, len) (x / 0 is +-infinity)
-  const sessionVwap = A(ta.vwap(S(bars.map((b) => (b.high + b.low + b.close) / 3)), S(volume), S(newDay(bars).map(Number))));
+  const sessionVwap = A(ta.vwap(S(bars.map((b) => (b.high + b.low + b.close) / 3)), S(volume), S(newDay(bars, chart).map(Number))));
   const vwN = A(ta.sma(S(vwapPrice.map((p, i) => p * volume[i])), cfg.vwapLen));
   const vwD = A(ta.sma(S(volume), cfg.vwapLen));
   const rollingVwap = vwN.map((v, i) => v / vwD[i]);

@@ -5,8 +5,8 @@
  * least `rip` % above the lowest previous low. Dip: the low is at least `dip` % (a negative threshold) under the
  * highest previous high. A bar with only a dip gets a red bar colour and a red circle under the bar; a bar with only
  * a rip gets a green bar colour and a green circle above the bar (a bar with both gets nothing). The script has no
- * plot. Pine shows the signals of the last (live) bar only once the bar is closed; this port receives closed bars,
- * so every bar counts as confirmed.
+ * plot. The original shows the signals of the last bar only once the bar is closed. The port reads the state of the
+ * last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
  *
  * Reference: "Dip & Rip Patterns [The Quant Science]" by thequantscience
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +14,7 @@
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface DipRipPatternsInputs {
   /** Analysis period [bars]: the current bar and (period - 1) previous bars */
@@ -56,7 +57,11 @@ const RIP_COLOR = '#03FF00';
 export function calculate(
   bars: Bar[],
   inputs: Partial<DipRipPatternsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const { analysisPeriod, dipThreshold, ripThreshold } = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
 
@@ -71,8 +76,9 @@ export function calculate(
     // Plain division: x / 0 is +-infinity (compares), 0 / 0 is na
     const ripPerf = ((b.high - pastLowest[i]) / pastLowest[i]) * 100.0;
     const dipPerf = ((b.low - pastHighest[i]) / pastHighest[i]) * 100.0;
-    const dip = le(dipPerf, dipThreshold);
-    const rip = ge(ripPerf, ripThreshold);
+    // dip = dip_raw and (not barstate.islast or barstate.isconfirmed)
+    const dip = le(dipPerf, dipThreshold) && barIsConfirmed(i);
+    const rip = ge(ripPerf, ripThreshold) && barIsConfirmed(i);
     const realDip = dip && !rip;
     const realRip = rip && !dip;
     if (realDip) barColors.push({ time: b.time, color: DIP_COLOR });

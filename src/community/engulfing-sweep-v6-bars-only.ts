@@ -7,12 +7,16 @@
  * "Require next candle confirmation" option, that bar must close in the same direction); the engulfing candle is
  * then coloured (barcolor with offset -1: the colour of bar i is drawn on bar i - 1).
  *
+ * Last bar: a signal needs a closed confirmation bar. The port reads the state of the last bar from the optional
+ * third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Engulfing + Sweep (Confirmed Only) v6 — bars only" by fanta-grapefruit
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface EngulfingSweepV6BarsOnlyInputs {
   enableBullish: boolean;
@@ -61,7 +65,11 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<EngulfingSweepV6BarsOnlyInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -91,9 +99,9 @@ export function calculate(
   const barColors: BarColorData[] = [];
   for (let i = 2; i < n; i++) {
     const b = bars[i];
-    // Historical bars are confirmed (barstate.isconfirmed)
-    const confirmationBull = cfg.requireConfirmation ? gt(b.close, b.open) : true;
-    const confirmationBear = cfg.requireConfirmation ? lt(b.close, b.open) : true;
+    // confirmation_bull = requireConfirmation ? (bullNow and barstate.isconfirmed) : barstate.isconfirmed
+    const confirmationBull = barIsConfirmed(i) && (cfg.requireConfirmation ? gt(b.close, b.open) : true);
+    const confirmationBear = barIsConfirmed(i) && (cfg.requireConfirmation ? lt(b.close, b.open) : true);
     const any = cfg.enableBullish || cfg.enableBearish;
     const bullSignal = bullEngulf[i - 1] && confirmationBull && any;
     const bearSignal = bearEngulf[i - 1] && confirmationBear && any;

@@ -11,11 +11,18 @@
  *   7) Fill between Hull lines (lime when bullish, red when bearish)
  *   8) Buy/Sell markers from Hull crossovers
  *
+ * VWAP: the original restarts it on each trading day. With the exchange time zone and the session of the symbol in
+ * the optional third argument (see src/chart-context.ts) the port does the same (on daily and higher bars: on every
+ * bar). Without them the sums never restart.
+ *
  * Reference: "IDEAL BB with MA (With Alerts) by Adarsh" (community)
  */
 
-import { ta, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { ta, getSourceSeries, Series, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import type { ChartContext } from '../chart-context';
+import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
+import { barInterval } from '../bar-time';
 
 export interface IdealBbMaInputs {
   length1: number;
@@ -63,7 +70,21 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<IdealBbMaInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+/**
+ * First bar of each trading day of the exchange on intraday bars (Pine timeframe.change("1D")), found by the library
+ * from the time zone and the session of the chart context. Null when the context does not give both, or when the bars
+ * are not intraday.
+ */
+function tradingDayStarts(bars: Bar[], chart?: ChartContext): boolean[] | null {
+  const interval = barInterval(bars);
+  if (chart?.timezone === undefined || chart.session === undefined || !(interval > 0 && interval < 86400)) return null;
+  let change: Array<number | null> = [];
+  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(interval) };
+  executeScript(() => { change = scriptTimeframe.change('1D').toArray(); }, bars, {}, context);
+  return change.map((v) => v === 1);
+}
+
+export function calculate(bars: Bar[], inputs: Partial<IdealBbMaInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
   const { length1, length2, maType, src, hullLength, hullGain, useKahlman } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const source = getSourceSeries(bars, src);
@@ -94,7 +115,13 @@ export function calculate(bars: Bar[], inputs: Partial<IdealBbMaInputs> = {}): O
 
   // --- VWAP ---
   const hlc3Series = new Series(bars, (b) => (b.high + b.low + b.close) / 3);
-  const vwapArr = ta.vwap(hlc3Series, volSeries).toArray();
+  // vwap(hlc3): the anchor is a new trading day. With the chart context: the trading days of the exchange on
+  // intraday bars (and the first bar), every bar on daily and higher bars. Without it: no anchor.
+  const dayStarts = tradingDayStarts(bars, chart);
+  const hasSession = chart?.timezone !== undefined && chart.session !== undefined;
+  const daily = barInterval(bars) >= 86400;
+  const anchor = hasSession ? Series.fromArray(bars, bars.map((_, i) => Number(i === 0 || (dayStarts ? dayStarts[i] : daily)))) : undefined;
+  const vwapArr = ta.vwap(hlc3Series, volSeries, anchor).toArray();
 
   // --- Bollinger Bands (SMA 20, mult 2) ---
   const closeSeries = new Series(bars, (b) => b.close);

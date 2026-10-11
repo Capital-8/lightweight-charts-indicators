@@ -211,7 +211,7 @@ export function calculate(
 
   // syminfo.mintick (format.mintick in the texts)
   const MINTICK = mintickOf(chart);
-  const chartSeconds = timeframe.in_seconds(chart?.timeframe ?? chartTimeframe(bars));
+  const chartSeconds = timeframe.in_seconds(chartTimeframe(bars, chart));
   const htfSeconds = timeframe.in_seconds(cfg.higherTimeframe);
   if (htfSeconds <= chartSeconds) throw new Error('Higher timeframe must be higher than current timeframe.');
   const barLength = Math.trunc(htfSeconds / 60 / (chartSeconds / 60));

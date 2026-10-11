@@ -8,6 +8,9 @@
  * sequence * quality * (1 + |extension| / 10), plus 10 times the 5-bar SMA momentum in % of close, smoothed by an
  * EMA. Drawn as a histogram and a glowing line; gradient zones between +-2 * max length and +-50.
  *
+ * Last bar: with the confirmed bars option the signal plots are na on an open bar. The port reads the state of the
+ * last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Sequential Pattern Strength [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © QuantAlgo
@@ -15,6 +18,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface SequentialPatternStrengthInputs {
   /** Maximum sequence length before the pattern resets */
@@ -84,7 +88,11 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<SequentialPatternStrengthInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { barColors: BarColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -144,12 +152,13 @@ export function calculate(
   const outerBear = String(color.new(bear, 98));
   const maxThreshold = cfg.maxSequence * 2;
 
-  // show_data = use_confirmed_bars ? barstate.isconfirmed : true: the bars given to the port are confirmed
+  // show_data = use_confirmed_bars ? barstate.isconfirmed : true; plot(show_data ? signal : na, ...)
+  const shown = (i: number) => (cfg.useConfirmedBars && !barIsConfirmed(i) ? NaN : signal[i]);
   const plots: IndicatorResult['plots'] = {
-    plot0: bars.map((b, i) => ({ time: b.time, value: signal[i], color: gt(signal[i], 0) ? histBull : histBear })),
-    plot1: bars.map((b, i) => ({ time: b.time, value: signal[i], color: gt(signal[i], 0) ? bull : bear })),
-    plot2: bars.map((b, i) => ({ time: b.time, value: signal[i], color: gt(signal[i], 0) ? glowBull : glowBear })),
-    plot3: bars.map((b, i) => ({ time: b.time, value: signal[i], color: gt(signal[i], 0) ? outerBull : outerBear })),
+    plot0: bars.map((b, i) => ({ time: b.time, value: shown(i), color: gt(signal[i], 0) ? histBull : histBear })),
+    plot1: bars.map((b, i) => ({ time: b.time, value: shown(i), color: gt(signal[i], 0) ? bull : bear })),
+    plot2: bars.map((b, i) => ({ time: b.time, value: shown(i), color: gt(signal[i], 0) ? glowBull : glowBear })),
+    plot3: bars.map((b, i) => ({ time: b.time, value: shown(i), color: gt(signal[i], 0) ? outerBull : outerBear })),
     plot4: bars.map((b) => ({ time: b.time, value: maxThreshold })),
     plot5: bars.map((b) => ({ time: b.time, value: 50 })),
     plot6: bars.map((b) => ({ time: b.time, value: -maxThreshold })),

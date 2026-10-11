@@ -15,13 +15,21 @@
  * is still open). A timeframe below the chart timeframe needs data that the bars do not carry: the port throws an
  * Error.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "Moving Average Cross Alert, Multi-Timeframe (MTF) (by ChartArt)" by ChartArt
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, timeframe, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 export interface MaCrossAlertMtfInputs {
   /** Price source of the moving averages (the original also offers the volume) */
@@ -89,14 +97,18 @@ const lt = (a: number, b: number) => b - a > EPS;
  * function that brings one value per bar of that timeframe back to the chart bars. Version 1 rule: every chart bar
  * of a period shows the value of the period (no gaps).
  */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; toChart: (values: number[]) => number[] } {
-  const chart = chartTimeframe(bars);
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; toChart: (values: number[]) => number[] } {
+  const chart = chartTimeframe(bars, context);
   if (tf.trim() === '' || chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
     return { htf: bars, toChart: (values) => values };
   }
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the bars do not carry that data.`);
   }
+  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
+  // complete them come from the library rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) return { htf: exchange.htf, toChart: (values) => exchange.group.map((g) => values[g]) };
   const starts = periodStarts(bars, tf);
   const htf: Bar[] = [];
   const group: number[] = [];
@@ -115,13 +127,13 @@ function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; toChart: (values:
   return { htf, toChart: (values) => group.map((g) => values[g]) };
 }
 
-export function calculate(bars: Bar[], inputs: Partial<MaCrossAlertMtfInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<MaCrossAlertMtfInputs> = {}, chart?: ChartContext): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
 
   // price = security(tickerid, res, pricetype), res = useCurrentRes ? period : resCustom
-  const { htf, toChart } = timeframeBars(bars, cfg.useCurrentRes ? '' : cfg.resCustom);
+  const { htf, toChart } = timeframeBars(bars, cfg.useCurrentRes ? '' : cfg.resCustom, chart);
   const source = cfg.pricetype === 'volume' ? htf.map((b) => b.volume ?? NaN) : A(getSourceSeries(htf, cfg.pricetype));
   const price = Series.fromArray(bars, toChart(source));
 

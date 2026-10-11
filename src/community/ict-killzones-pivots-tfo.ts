@@ -27,11 +27,18 @@
  * - chart.fg_color / chart.bg_color (day names, table texts, table frame and background): read from the chart
  *   context; without it the colours of a dark chart (#DBDBDB text, #0F0F0F background).
  * - Drawings whose price is na (the previous high / low of the first period) are not in the result.
- * - The chart timeframe is read from the bars (the most frequent gap between two bars). With fewer than 2 bars it
- *   is not known and only the table header is given.
+ * - The chart timeframe is the one of the chart context, else it is read from the bars (the most frequent gap
+ *   between two bars). With fewer than 2 bars and no context value it is not known and only the table header is
+ *   given.
  * - With a time zone that has summer time (America/New_York), on the day the clocks go forward the original puts
  *   the bars from 01:00 to 01:59 inside a session that starts at 02:00; the session test of oakscriptjs does not.
  *   The other days are equal.
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "ICT Killzones & Pivots [TFO]" by tradeforopp
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -470,7 +477,7 @@ export function calculate(
   const ms = n > 0 && bars[0].time >= 1e12;
   const tMs = bars.map((b) => (ms ? b.time : b.time * 1000));
   const tz = cfg.gmt_tz;
-  const tfName = chartTimeframe(bars);
+  const tfName = chartTimeframe(bars, chart);
   const chartSec = tfName === '' ? NaN : timeframe.in_seconds(tfName);
   const limitSec = cfg.tf_limit.trim() === '' ? chartSec : timeframe.in_seconds(cfg.tf_limit);
   // timeframe.in_seconds("") <= timeframe.in_seconds(tf_limit)
@@ -542,7 +549,7 @@ export function calculate(
     { tf: 'M' as const, period: 'Month', open: cfg.show_m_open, hl: cfg.mhl, mid: cfg.mmid, sep: cfg.ms, col: cfg.m_color },
   ].map((d) => ({
     ...d, info: newInfo(d.tf), data: newHl(), sepLines: [] as Ln[], openLines: [] as Ln[], openLabels: [] as Lb[],
-    starts: periodStarts(bars, d.tf),
+    starts: periodStarts(bars, d.tf, chart),
   }));
   const dwmLimit = dwmRecent ? 1 : maxDays;
   const dwmTip = (period: string, what: string, price: number, t0: number, T: Track | null) => {

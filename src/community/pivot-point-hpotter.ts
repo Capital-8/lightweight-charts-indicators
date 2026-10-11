@@ -10,13 +10,20 @@
  * above one day needs data that the bars do not carry: the port throws an Error.
  * The line width input is not applied (the plot width is static: the default, 2).
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "Pivot Point" by HPotter
  * Original notice: Copyright by HPotter v1.0 10/07/2014
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { securityStarts, chartTimeframe } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 export interface PivotPointHpotterInputs {
   /** Line width of the plots */
@@ -53,12 +60,12 @@ export const metadata = {
  * security(tickerid, "D", x[1]) for x = high, low, close: the high, low and close of the previous day on every
  * chart bar of a day (version 1 rule: no gaps, each chart bar of a period shows the value of that period).
  */
-function previousDay(bars: Bar[]): { high: number[]; low: number[]; close: number[] } {
-  const chart = chartTimeframe(bars);
+function previousDay(bars: Bar[], context?: ChartContext): { high: number[]; low: number[]; close: number[] } {
+  const chart = chartTimeframe(bars, context);
   if (chart !== '' && timeframe.in_seconds(chart) > timeframe.in_seconds('D')) {
     throw new Error(`Pivot Point: the daily timeframe is lower than the chart timeframe "${chart}": the bars do not carry that data.`);
   }
-  const starts = periodStarts(bars, 'D');
+  const starts = securityStarts(bars, 'D', context);
   const high: number[] = [];
   const low: number[] = [];
   const close: number[] = [];
@@ -80,8 +87,8 @@ function previousDay(bars: Bar[]): { high: number[]; low: number[]; close: numbe
   return { high, low, close };
 }
 
-export function calculate(bars: Bar[], _inputs: Partial<PivotPointHpotterInputs> = {}): IndicatorResult {
-  const { high: xHigh, low: xLow, close: xClose } = previousDay(bars);
+export function calculate(bars: Bar[], _inputs: Partial<PivotPointHpotterInputs> = {}, chart?: ChartContext): IndicatorResult {
+  const { high: xHigh, low: xLow, close: xClose } = previousDay(bars, chart);
 
   const vPP = bars.map((_b, i) => (xHigh[i] + xLow[i] + xClose[i]) / 3);
   const series = (value: (i: number) => number) => bars.map((b, i) => ({ time: b.time, value: value(i) }));

@@ -22,6 +22,12 @@
  * Limits of the port: the periods of the higher timeframe come from the UTC calendar and the bars (see
  * src/anchor-period.ts); the alerts of the original are not ported.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "Auto Pitchfork, Fib Retracement and Zig Zag by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © dgtrd
@@ -537,7 +543,7 @@ export function calculate(
     + (cfg.isFib ? fibLevels.length * (cfg.fibTool === 'Extentions' ? 2 : 1) + fibLevels.filter((l) => l.show).length : 0);
 
   // Higher timeframe of the pivot levels
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   const info = chartTf === '' ? null : timeframe.info(chartTf);
   const fixed: Record<string, string> = {
     '15 Min': '15', '1 Hour': '60', '4 Hour': '240', Session: 'D', Daily: 'D', Weekly: 'W', Monthly: 'M', Quarterly: '3M', Yearly: '12M',
@@ -547,8 +553,8 @@ export function calculate(
       : ['30', '45', '60', '120', '180', '240'].includes(chartTf) ? 'W'
         : info?.isdaily ? 'M'
           : info?.isweekly || info?.ismonthly ? '12M' : '3M');
-  const starts = periodStarts(bars, htf);
-  const dayStarts = htf === 'W' ? periodStarts(bars, 'D') : starts;
+  const starts = periodStarts(bars, htf, chart);
+  const dayStarts = htf === 'W' ? periodStarts(bars, 'D', chart) : starts;
   /** dayofweek: 1 = Sunday ... 7 = Saturday, in the exchange time zone */
   const timezone = timezoneOf(chart);
   const dayOfWeek = (i: number) => pineTime.dayofweek(ms ? bars[i].time : bars[i].time * 1000, timezone);

@@ -13,13 +13,21 @@
  * period is known from its first bar; the last period is still open). A timeframe below the chart timeframe needs
  * data that the bars do not carry: the port throws an Error (for the second stochastic only when it is shown).
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "CM Stochastic Multi-TimeFrame" by ChrisMoody
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 export interface CmStochasticMtfInputs {
   len: number;
@@ -133,14 +141,18 @@ const truthy = (v: number) => !isNaN(v) && v !== 0;
  * function that brings one value per bar of that timeframe back to the chart bars. Version 1 rule: every chart bar
  * of a period shows the value of the period (no gaps).
  */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; toChart: (values: number[]) => number[] } {
-  const chart = chartTimeframe(bars);
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; toChart: (values: number[]) => number[] } {
+  const chart = chartTimeframe(bars, context);
   if (tf.trim() === '' || chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
     return { htf: bars, toChart: (values) => values };
   }
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the bars do not carry that data.`);
   }
+  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
+  // complete them come from the library rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) return { htf: exchange.htf, toChart: (values) => exchange.group.map((g) => values[g]) };
   const starts = periodStarts(bars, tf);
   const htf: Bar[] = [];
   const group: number[] = [];
@@ -160,8 +172,8 @@ function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; toChart: (values:
 }
 
 /** k = sma(stoch(close, high, low, len), smoothK), d = sma(k, smoothD) on timeframe `tf`, on the chart bars */
-function stochastic(bars: Bar[], tf: string, len: number, smoothK: number, smoothD: number): { k: number[]; d: number[] } {
-  const { htf, toChart } = timeframeBars(bars, tf);
+function stochastic(bars: Bar[], tf: string, len: number, smoothK: number, smoothD: number, context?: ChartContext): { k: number[]; d: number[] } {
+  const { htf, toChart } = timeframeBars(bars, tf, context);
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (f: (b: Bar) => number) => Series.fromArray(htf, htf.map(f));
   const k = ta.sma(ta.stoch(S((b) => b.close), S((b) => b.high), S((b) => b.low), len), smoothK);
@@ -169,16 +181,16 @@ function stochastic(bars: Bar[], tf: string, len: number, smoothK: number, smoot
   return { k: toChart(A(k)), d: toChart(A(d)) };
 }
 
-export function calculate(bars: Bar[], inputs: Partial<CmStochasticMtfInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<CmStochasticMtfInputs> = {}, chart?: ChartContext): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { upLine, lowLine } = cfg;
 
   // res = useCurrentRes ? period : resCustom; res2 = useCurrentRes2 ? period : resCustom2
-  const { k: outK, d: outD } = stochastic(bars, cfg.useCurrentRes ? '' : cfg.resCustom, cfg.len, cfg.smoothK, cfg.smoothD);
+  const { k: outK, d: outD } = stochastic(bars, cfg.useCurrentRes ? '' : cfg.resCustom, cfg.len, cfg.smoothK, cfg.smoothD, chart);
   // The second stochastic is only drawn when ssStoch is on: it is not computed otherwise
   const second = cfg.ssStoch
-    ? stochastic(bars, cfg.useCurrentRes2 ? '' : cfg.resCustom2, cfg.len2, cfg.smoothK2, cfg.smoothD2)
+    ? stochastic(bars, cfg.useCurrentRes2 ? '' : cfg.resCustom2, cfg.len2, cfg.smoothK2, cfg.smoothD2, chart)
     : null;
 
   const red70 = String(color.new(RED_HEX, 70));

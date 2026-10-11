@@ -5,11 +5,15 @@
  * its high and low as support/resistance levels. Generates BUY signals
  * on breakout above the high, and SELL signals on breakdown below the low.
  *
+ * Last bar: a breakout / breakdown label needs a closed bar. The port reads the state of the last bar from the
+ * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Volume Bar Breakout and Breakdown Indicator" by tradeswithashish
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface VolumeBarBreakoutInputs {
   lookback: number;
@@ -34,7 +38,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<VolumeBarBreakoutInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<VolumeBarBreakoutInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const lb = cfg.lookback;
@@ -94,7 +101,6 @@ export function calculate(bars: Bar[], inputs: Partial<VolumeBarBreakoutInputs> 
   // Breakout/Breakdown signals
   // Pine: breakout = ta.crossover(close, highVB) and volume>volMA and barstate.isconfirmed and volume>volume[1] and (close-low)/(high-low)>0.5
   // Pine: breakdown = ta.crossunder(close, lowVB) and volume>volMA and barstate.isconfirmed and volume>volume[1] and (close-low)/(high-low)<0.5
-  // We skip barstate.isconfirmed (always true in historical data)
   const markers: MarkerData[] = [];
   for (let i = warmup + 1; i < n; i++) {
     const vol = bars[i].volume ?? 0;
@@ -105,10 +111,11 @@ export function calculate(bars: Bar[], inputs: Partial<VolumeBarBreakoutInputs> 
 
     // crossover: close crosses above highVB
     const crossOver = bars[i].close > highVBArr[i] && bars[i - 1].close <= highVBArr[i - 1];
+    const confirmed = barIsConfirmed(i); // barstate.isconfirmed
     // crossunder: close crosses below lowVB
     const crossUnder = bars[i].close < lowVBArr[i] && bars[i - 1].close >= lowVBArr[i - 1];
 
-    if (crossOver && vol > ma && vol > prevVol && closeRatio > 0.5) {
+    if (crossOver && vol > ma && confirmed && vol > prevVol && closeRatio > 0.5) {
       markers.push({
         time: bars[i].time,
         position: 'belowBar',

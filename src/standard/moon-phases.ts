@@ -8,10 +8,18 @@
  *   plotshape(moonType == +1, "New Moon", shape.circle, location.abovebar, color.new(waxingMoonColorInput, 50))
  *   plotshape(moonType == -1, "Full Moon", shape.circle, location.belowbar, color.new(waningMoonColorInput, 50))
  *   bgcolor(color.new(moonPhase == 1 ? waxingMoonColorInput : waningMoonColorInput, 95))
+ *
+ * The original works on the close time of each bar (time_close): it reads its date (year, month, dayofmonth) and
+ * builds the time of the moon phase (timestamp) in the exchange time zone. With the exchange time zone and the
+ * session of the symbol in the optional third argument (see src/chart-context.ts) the port does the same. Without
+ * them it uses the open time of the bar and UTC.
  */
 
-import { array, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { array, time as pineTime, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import type { ChartContext } from '../chart-context';
+import { executeScript, time_close as scriptTimeClose } from 'oakscriptjs/script';
+import { barInterval } from '../bar-time';
 
 export interface MoonPhasesInputs {
   waxingMoonColor: string;
@@ -46,13 +54,19 @@ function barTimeToMs(time: number | string): number {
   return time < 1e12 ? time * 1000 : time;
 }
 
-function getYearMonthDay(timeMs: number): { year: number; month: number; day: number } {
+const isUtc = (timezone: string) => timezone === 'Etc/UTC' || timezone === 'UTC';
+
+/** year(time), month(time), dayofmonth(time) in the exchange time zone */
+function getYearMonthDay(timeMs: number, timezone: string): { year: number; month: number; day: number } {
+  if (!isUtc(timezone)) {
+    return { year: pineTime.year(timeMs, timezone), month: pineTime.month(timeMs, timezone), day: pineTime.dayofmonth(timeMs, timezone) };
+  }
   const d = new Date(timeMs);
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
 }
 
-function dayofyear(timeMs: number): number {
-  const { year, month, day } = getYearMonthDay(timeMs);
+function dayofyear(timeMs: number, timezone: string): number {
+  const { year, month, day } = getYearMonthDay(timeMs, timezone);
   const leapYear = (year % 400 === 0) || (year % 4 === 0 && year % 100 !== 0);
 
   const dayCount = array.new_float();
@@ -78,7 +92,7 @@ function dayofyear(timeMs: number): number {
   return doy + day;
 }
 
-function getUNIXTimeFromJD(julianDay: number): number {
+function getUNIXTimeFromJD(julianDay: number, timezone: string): number {
   const z = Math.floor(julianDay + 0.5);
   const f = (julianDay + 0.5) % 1;
   const alpha = Math.floor((z - 1867216.25) / 36524.25);
@@ -96,7 +110,24 @@ function getUNIXTimeFromJD(julianDay: number): number {
   const _minute = Math.trunc((secondTotal - _hour * 3600) / 60);
   const _second = secondTotal % 60;
 
+  // timestamp(_year, _month, _day, _hour, _minute, _second): a wall time of the exchange time zone
+  if (!isUtc(timezone)) return pineTime.timestamp(timezone, _year, _month, _day, _hour, _minute, _second);
   return Date.UTC(_year, _month - 1, _day, _hour, _minute, _second);
+}
+
+/**
+ * Close time of every bar in ms (Pine time_close), found by the library from the time zone and the session of the
+ * chart context. Null without them.
+ */
+function closeTimes(bars: Bar[], chart?: ChartContext): number[] | null {
+  if (chart?.timezone === undefined || chart.session === undefined) return null;
+  if (bars.length === 0 || typeof bars[0].time !== 'number') return null;
+  const interval = barInterval(bars);
+  if (chart.timeframe === undefined && !(interval > 0)) return null;
+  let close: Array<number | null> = [];
+  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(interval) };
+  executeScript(() => { close = scriptTimeClose.toArray(); }, bars, {}, context);
+  return close.map((v) => v ?? NaN);
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -106,10 +137,13 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<MoonPhasesInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<MoonPhasesInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
   const { waxingMoonColor, waningMoonColor } = { ...defaultInputs, ...inputs };
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  // getLastNewMoon(time_close) in the exchange time zone with the chart context; else the open time in UTC
+  const closes = closeTimes(bars, chart);
+  const timezone = closes && chart?.timezone !== undefined ? chart.timezone : 'Etc/UTC';
 
   let prevTimeLastMoonPhase = NaN;
   let prevMoonPhaseAdjusted = NaN;
@@ -117,9 +151,9 @@ export function calculate(bars: Bar[], inputs: Partial<MoonPhasesInputs> = {}): 
 
   for (let i = 0; i < bars.length; i++) {
     const bar = bars[i];
-    const barTimeMs = barTimeToMs(bar.time);
-    const { year: _year } = getYearMonthDay(barTimeMs);
-    const doy = dayofyear(barTimeMs);
+    const barTimeMs = closes ? closes[i] : barTimeToMs(bar.time);
+    const { year: _year } = getYearMonthDay(barTimeMs, timezone);
+    const doy = dayofyear(barTimeMs, timezone);
 
     let k = (doy / 364.25 + _year - 1900) * 12.3685;
     let moonPhase: number;
@@ -156,7 +190,7 @@ export function calculate(bars: Bar[], inputs: Partial<MoonPhasesInputs> = {}): 
       + 0.00033 * Math.sin(toRadians(166.56) + toRadians(132.87) * t - toRadians(0.009173) * t * t)
       + dev;
 
-    let timeLastMoonPhase = getUNIXTimeFromJD(julianDate);
+    let timeLastMoonPhase = getUNIXTimeFromJD(julianDate, timezone);
 
     if (timeLastMoonPhase >= barTimeMs) {
       timeLastMoonPhase = isNaN(prevTimeLastMoonPhase) ? timeLastMoonPhase : prevTimeLastMoonPhase;

@@ -9,10 +9,16 @@
  * lines (value area and other channels in two colours), with a POC line that runs until the next profile (the last
  * one is extended to the right).
  *
- * "Auto" takes the higher timeframe from the chart timeframe (the chart timeframe is read from the bar spacing).
+ * "Auto" takes the higher timeframe from the chart timeframe.
  * The periods come from the UTC calendar and the bars (see anchor-period.ts): exact on symbols that trade every day
  * in UTC and on symbols whose trading day is inside the UTC day.
  * The 3 alerts of the original (price in / above / below the POC) are not part of the port.
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "Market Profile" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -23,6 +29,7 @@ import { compare, math, type IndicatorResult, type InputConfig, type PlotConfig,
 import type { LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe, periodStarts } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 type ShowWhat = "Don't Show Value Area" | 'Show Value Area High' | 'Show All Channels';
 
@@ -121,6 +128,7 @@ function autoTimeframe(period: string): string {
 export function calculate(
   bars: Bar[],
   inputs: Partial<MarketProfileInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const percent = cfg.percent / 100;
@@ -128,9 +136,9 @@ export function calculate(
   const n = bars.length;
 
   // timeframe.period: "D" / "W" / "M" without the multiplier 1
-  const period = chartTimeframe(bars).replace(/^1([DWM])$/, '$1');
+  const period = chartTimeframe(bars, chart).replace(/^1([DWM])$/, '$1');
   const tf = cfg.timeframe === 'Auto' ? autoTimeframe(period) : cfg.timeframe;
-  const starts = n > 0 ? periodStarts(bars, tf) : [];
+  const starts = n > 0 ? periodStarts(bars, tf, chart) : [];
 
   // Live lines in creation order: above max + 5 lines the oldest are deleted until max remain
   let live: LineObj[] = [];

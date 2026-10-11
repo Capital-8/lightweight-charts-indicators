@@ -19,15 +19,22 @@
  *
  * Chart context (third argument), all optional:
  * - Regular session hours and exchange time zone: a range starts on the first bar of the regular session, as in the
- *   original. Without the session hours the port starts a range on the first bar of each UTC day (symbols with
+ *   original (the flag of the exchange calendar, with the corrections and holidays of the session when the caller
+ *   gives them). Without the session hours the port starts a range on the first bar of each UTC day (symbols with
  *   weekend bars: 00:00 UTC). This is the same bar on 24x7 UTC symbols and on bars of the regular session only
  *   (e.g. US stocks); not with bars of extended hours, nor on sessions that cross 00:00 UTC.
  * - Exchange time zone: the hours of "Custom Session" are read in it; in UTC without it.
  * - Price tick of the symbol: the prices of the dashboard; 0.01 without it.
  * - State of the last bar: the original computes on closed bars only. While the last bar is open, its state is the
  *   one of the bar before. Without the value every bar is a closed bar.
- * The original throws above 15 minutes: the port throws the same error; the chart timeframe is taken from the most
- * frequent gap between two bars.
+ * The original throws above 15 minutes: the port throws the same error; the chart timeframe is the one of the chart
+ * context, else it is taken from the most frequent gap between two bars.
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
  * Reference: "ORB Algo | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -36,7 +43,7 @@
 
 import { ta, str, timeframe, time as pineTime, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TableMergeData, TablePosition } from '../types';
-import { chartTimeframe, periodStarts } from '../anchor-period';
+import { chartTimeframe, periodStarts, sessionFlags } from '../anchor-period';
 import { lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
 
 type Position = 'Top Right' | 'Right Center' | 'Top Center';
@@ -204,7 +211,7 @@ export function calculate(
   });
   if (n === 0) return result();
 
-  if (timeframe.in_seconds(chartTimeframe(bars)) > timeframe.in_seconds('15')) {
+  if (timeframe.in_seconds(chartTimeframe(bars, chart)) > timeframe.in_seconds('15')) {
     throw new Error('ORB Algo only works on timeframes lower than 15 min.');
   }
   const ms = bars[0].time >= 1e12;
@@ -224,7 +231,7 @@ export function calculate(
   // starts when the bar is in the session and the bar before was not, or when a run started after the bar before
   // (t[1] < t). The function is called from bar 1 on: t[1] is na on its first call.
   // The session hours are read in the exchange time zone (chart context; UTC without it).
-  const dayStart = periodStarts(bars, 'D');
+  const dayStart = periodStarts(bars, 'D', chart);
   const tz = timezoneOf(chart);
   const utc = tz === 'UTC' || tz === 'Etc/UTC';
   const DAY = 86400000;
@@ -251,13 +258,17 @@ export function calculate(
     };
   };
   const customBegins = runBegins(cfg.customSessionTime, 1);
-  // session.isfirstbar_regular: with the regular session hours of the chart context, the first bar of a session run;
-  // without them, the first bar of a UTC day
-  const regular = chart?.regularSession ?? chart?.session;
+  // session.isfirstbar_regular: with the time zone and the session of the chart context, the flag of the exchange
+  // calendar (see anchor-period.ts); with regular session hours that the calendar cannot use, the first bar of a
+  // session run; without them, the first bar of a UTC day
+  const exchangeFirst = cfg.customSessionEnabled ? null : sessionFlags(bars, chart)?.isfirstbar_regular ?? null;
+  const regularSpec = chart?.regularSession ?? chart?.session;
+  const regular = typeof regularSpec === 'string' ? regularSpec : regularSpec?.session;
   const regularBegins = typeof regular === 'string' && /^(24x7|\d{4}-\d{4}(,\d{4}-\d{4})*(:\d+)?)$/.test(regular.trim())
     ? runBegins(regular, -1) : null;
   const newRange = (i: number): boolean => {
     if (cfg.customSessionEnabled) return customBegins(i);
+    if (exchangeFirst !== null) return exchangeFirst[i];
     return regularBegins !== null ? regularBegins(i) : dayStart[i] !== dayStart[i - 1];
   };
 

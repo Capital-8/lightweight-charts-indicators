@@ -28,6 +28,13 @@
  * argument): while the last bar is open, the drawings are those of the bar before. Without the value every bar is
  * a closed bar.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "Supply & Demand (MTF) | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © fluxchart
@@ -36,7 +43,7 @@
 import { ta, color, timeframe, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
-import { chartTimeframe, periodStarts } from '../anchor-period';
+import { chartTimeframe, periodStarts, securityBars } from '../anchor-period';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface SupplyDemandFluxChartsInputs {
@@ -262,12 +269,15 @@ function nextBarTime(bars: Bar[]): number {
  * timeframe at each chart bar (null before the first one). A chart bar completes its period when the next bar is in
  * another period (for the last chart bar: the bar that would follow it, see nextBarTime).
  */
-function higherTimeframeLists(bars: Bar[], tf: string, maxDistance: number, wick: boolean): Array<ZoneLists | null> {
+function higherTimeframeLists(bars: Bar[], tf: string, maxDistance: number, wick: boolean, context?: ChartContext): Array<ZoneLists | null> {
   const n = bars.length;
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
+  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
+  // complete them come from the library rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  const starts = exchange ? exchange.starts : periodStarts(bars, tf);
+  const htf: Bar[] = exchange ? exchange.htf : [];
+  const group: number[] = exchange ? exchange.group : [];
+  if (!exchange) bars.forEach((b, i) => {
     if (i === 0 || starts[i] !== starts[i - 1]) {
       htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
     } else {
@@ -283,6 +293,7 @@ function higherTimeframeLists(bars: Bar[], tf: string, maxDistance: number, wick
   const snapshots: ZoneLists[] = [];
   const copy = (z: ZoneInfo): ZoneInfo => ({ ...z });
   findZones(htf, maxDistance, wick, (_, lists) => snapshots.push({ demand: lists.demand.map(copy), supply: lists.supply.map(copy) }));
+  if (exchange) return exchange.latest.map((k) => (k >= 0 ? snapshots[k] : null));
   const lastCompletes = n > 0 && periodStarts([...bars.slice(Math.max(0, n - 3000)), { time: nextBarTime(bars) }], tf).pop() !== starts[n - 1];
   return group.map((g, i) => {
     const complete = i < n - 1 ? group[i + 1] !== g : lastCompletes;
@@ -313,7 +324,7 @@ export function calculate(
   const timeMs = timeMsOf(bars);
   const maxDistance = cfg.maxDistanceString === 'Low' ? 150 : cfg.maxDistanceString === 'Normal' ? 500 : 1250;
   const wick = cfg.sdEndMethod === 'Wick';
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   const chartSeconds = chartTf === '' ? NaN : timeframe.in_seconds(chartTf);
   const secondsOf = (tf: string) => (tf.trim() === '' ? chartSeconds : timeframe.in_seconds(tf));
   // timeframe.period
@@ -347,7 +358,7 @@ export function calculate(
     if (secondsOf(tf) < chartSeconds) {
       throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chartTf}": the bars do not carry that data.`);
     }
-    return higherTimeframeLists(bars, tf, maxDistance, wick);
+    return higherTimeframeLists(bars, tf, maxDistance, wick, chart);
   });
 
   // Labels of the script (500 at most: a creation that brings the count above 505 deletes the oldest ones)

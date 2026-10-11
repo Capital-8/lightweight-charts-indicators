@@ -15,12 +15,20 @@
  * levels of that period. A timeframe below the chart timeframe needs data that the bars do not carry: the port
  * throws an Error when such a timeframe is switched on.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "CM_Pivot Points_M-W-D-4H-1H_Filtered" by ChrisMoody
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 export interface CmPivotPointsFilteredInputs {
   /** Show Filtered Pivots */
@@ -147,14 +155,18 @@ const truthy = (v: number) => !isNaN(v) && v !== 0;
  * function that brings one value per bar of that timeframe back to the chart bars. Version 1 rule: every chart bar
  * of a period shows the value of the period (no gaps).
  */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; toChart: (values: number[]) => number[] } {
-  const chart = chartTimeframe(bars);
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; toChart: (values: number[]) => number[] } {
+  const chart = chartTimeframe(bars, context);
   if (tf.trim() === '' || chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
     return { htf: bars, toChart: (values) => values };
   }
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the bars do not carry that data.`);
   }
+  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
+  // complete them come from the library rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) return { htf: exchange.htf, toChart: (values) => exchange.group.map((g) => values[g]) };
   const starts = periodStarts(bars, tf);
   const htf: Bar[] = [];
   const group: number[] = [];
@@ -174,8 +186,8 @@ function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; toChart: (values:
 }
 
 /** security(tickerid, tf, level[1]) of every level: the levels of the previous bar of timeframe `tf`, on the chart bars */
-function levelsOf(bars: Bar[], tf: string, pf: boolean, sh3: boolean): Record<Level, number[]> {
-  const { htf, toChart } = timeframeBars(bars, tf);
+function levelsOf(bars: Bar[], tf: string, pf: boolean, sh3: boolean, context?: ChartContext): Record<Level, number[]> {
+  const { htf, toChart } = timeframeBars(bars, tf, context);
   const m = htf.length;
   const pivot = htf.map((b) => (b.high + b.low + b.close) / 3.0);
   const smaP = ta.sma(Series.fromArray(htf, pivot), 3).toArray().map((v) => v ?? NaN);
@@ -205,7 +217,7 @@ function levelsOf(bars: Bar[], tf: string, pf: boolean, sh3: boolean): Record<Le
   };
 }
 
-export function calculate(bars: Bar[], inputs: Partial<CmPivotPointsFilteredInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<CmPivotPointsFilteredInputs> = {}, chart?: ChartContext): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
 
   // A timeframe is computed only when one of its plots is shown
@@ -217,7 +229,7 @@ export function calculate(bars: Bar[], inputs: Partial<CmPivotPointsFilteredInpu
     const shown = cfg[s.on] && (s.level !== 'avg' || cfg.sa) && ((s.level !== 'r3' && s.level !== 's3') || cfg.sh3);
     let values: number[] | null = null;
     if (shown) {
-      if (!levels.has(s.tf)) levels.set(s.tf, levelsOf(bars, s.tf, cfg.pf, cfg.sh3));
+      if (!levels.has(s.tf)) levels.set(s.tf, levelsOf(bars, s.tf, cfg.pf, cfg.sh3, chart));
       values = levels.get(s.tf)![s.level];
     }
     plots[`plot${j}`] = bars.map((b, i) => ({ time: b.time, value: values && truthy(values[i]) ? values[i] : NaN }));

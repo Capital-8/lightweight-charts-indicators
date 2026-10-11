@@ -26,6 +26,13 @@
  * symbol (EXCHANGE:NAME)"). Without a chart context the name and its brackets are left out of the text. The 32
  * alert() calls have no output.
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "Volume-based Support & Resistance Zones V2" by tommyf1001
  * Original notice: Original script is thanks to synapticex and additional modifications is thanks to Lij_MC.
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -33,7 +40,7 @@
 
 import { ta, Series, color, timeframe, barInterval, barTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LineDrawingData, LabelData, LinefillData, TableData } from '../types';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import { tickeridOf, type ChartContext } from '../chart-context';
 
 type Menu = 'S/R' | 'S/R Zones' | 'Disable';
@@ -394,7 +401,7 @@ export function calculate(
     linefills,
     tables,
   });
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   if (n === 0 || chartTf === '') return result([], [], [], []);
 
   const styleOf = (s: StyleName) => (s === 'Dotted' ? 'dotted' : s === 'Dashed' ? 'dashed' : 'solid');
@@ -453,8 +460,11 @@ export function calculate(
         resZoneAt: f.upZone, supZoneAt: f.downZone, starts: bars.map((b) => b.time),
       };
     }
-    const starts = periodStarts(bars, tf);
-    const { tfBars, latest } = higherTimeframe(bars, starts, tf);
+    // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
+    // complete them come from the library rule (see anchor-period.ts)
+    const exchange = securityBars(bars, tf, chart);
+    const starts = exchange ? exchange.starts : periodStarts(bars, tf);
+    const { tfBars, latest } = exchange ? { tfBars: exchange.htf, latest: exchange.latest } : higherTimeframe(bars, starts, tf);
     const f = fractals(tfBars, volLen);
     const map = (values: number[]) => latest.map((p) => (p < 0 ? NaN : values[p]));
     return {

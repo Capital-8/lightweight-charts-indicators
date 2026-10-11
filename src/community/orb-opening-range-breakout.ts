@@ -10,6 +10,9 @@
  * The session hours are read in the exchange time zone of the symbol, given by the optional third argument (see
  * src/chart-context.ts); without it they are read in UTC.
  *
+ * Chart timeframe: `timeframe` of the chart context (optional third argument of calculate) when given; without it
+ * the chart timeframe is read from the bar spacing (the most frequent gap between two bars).
+ *
  * Reference: "ORB" by zzzcrypto123
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -63,7 +66,7 @@ export function calculate(
   const n = bars.length;
   const inMs = n > 0 && bars[0].time >= 1e12;
   // hide = timeframe.isintraday and timeframe.multiplier <= inputMax
-  const tf = chartTimeframe(bars);
+  const tf = chartTimeframe(bars, chart);
   const info = tf === '' ? null : timeframe.info(tf);
   const hide = info !== null && info.isintraday && info.multiplier <= cfg.inputMax;
   // t = time(timeframe.period, sess + ":1234567")

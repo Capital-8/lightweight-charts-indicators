@@ -9,6 +9,9 @@
  * SMA. The SMA line and the fill between the two lines are red when the entropy is above its SMA, teal otherwise;
  * BULL / BEAR labels on the price chart when the SMA crosses over / under the entropy.
  *
+ * Last bar: a BULL / BEAR label needs a closed bar. The port reads the state of the last bar from the optional third
+ * argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Prometheus Topological Persistent Entropy" by ScorsoneEnterprises
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © ScorsoneEnterprises
@@ -16,6 +19,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface PrometheusTopologicalPersistentEntropyInputs {
   /** Number of closes in each segment */
@@ -154,7 +158,11 @@ function entropyOf(values: number[], bins: number): number {
 export function calculate(
   bars: Bar[],
   inputs: Partial<PrometheusTopologicalPersistentEntropyInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const nBars = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -197,19 +205,19 @@ export function calculate(
   const plot0 = bars.map((_b, i) => ({ time: t(i), value: Number.isFinite(smoothPe[i]) ? smoothPe[i] : NaN, color: cfg.indicColor }));
   const plot1 = bars.map((_b, i) => ({ time: t(i), value: Number.isFinite(smaVal[i]) ? smaVal[i] : NaN, color: peColor[i] }));
 
-  // bull = plot_bull_bear ? ta.crossover(sma_val, smooth_pe) and barstate.isconfirmed : false (historical bars are
-  // confirmed); the crossings run on every bar (plot_bull_bear is an input)
+  // bull = plot_bull_bear ? ta.crossover(sma_val, smooth_pe) and barstate.isconfirmed : false; the crossings run on
+  // every bar (plot_bull_bear is an input)
   const markers: MarkerData[] = [];
   if (cfg.plotBullBear) {
     const up = ta.crossover(S(smaVal), S(smoothPe)).toArray();
     const down = ta.crossunder(S(smaVal), S(smoothPe)).toArray();
     const white = String(color.rgb(255, 255, 255));
     for (let i = 0; i < nBars; i++) {
-      if (up[i]) {
+      if (up[i] && barIsConfirmed(i)) {
         markers.push({ time: t(i), position: 'belowBar', shape: 'labelUp', color: color.teal, text: 'BULL',
           textColor: white, forceOverlay: true });
       }
-      if (down[i]) {
+      if (down[i] && barIsConfirmed(i)) {
         markers.push({ time: t(i), position: 'aboveBar', shape: 'labelDown', color: color.red, text: 'BEAR',
           textColor: white, forceOverlay: true });
       }

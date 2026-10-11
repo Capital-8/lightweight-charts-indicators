@@ -8,6 +8,10 @@
  * `minBarsBetweenSignals` bars since the last change. The line and the zone take the direction colour (gray before
  * the first direction); triangles at signalOffsetAtr * ATR from the trend line mark each change.
  *
+ * Last bar: the direction state is updated on a closed bar only, and a signal needs a closed bar. The port reads the
+ * state of the last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as
+ * closed.
+ *
  * Reference: "Trend Direction Zone" by MarketStructureLab
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © MarketStructureLab
@@ -18,6 +22,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface TrendDirectionZoneInputs {
   /** Price source of the trend line */
@@ -110,7 +115,11 @@ const safeDivide = (num: number, den: number, fallback: number) =>
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendDirectionZoneInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -135,7 +144,7 @@ export function calculate(
     lowerZone[i] = trendLine[i] - adaptiveWidth;
   }
 
-  // Direction state (historical bars are confirmed: barstate.isconfirmed is true on every bar)
+  // Direction state (if barstate.isconfirmed: the counts and the state keep their values on an open bar)
   const marketState: number[] = new Array(n);
   let bullCount = 0;
   let bearCount = 0;
@@ -147,21 +156,23 @@ export function calculate(
     const minimumDistance = atrValue[i] * cfg.switchFilter;
     const bullCondition = gt(normalizedSlope, 0.0) && gt(source[i], trendLine[i] + minimumDistance);
     const bearCondition = lt(normalizedSlope, 0.0) && lt(source[i], trendLine[i] - minimumDistance);
-    bullCount = bullCondition ? bullCount + 1 : 0;
-    bearCount = bearCondition ? bearCount + 1 : 0;
-    // bar_index - lastSwitchBar: a difference of bar indexes, the same from any first bar
-    const cooldownPassed = isNaN(lastSwitchBar) || ge(i - lastSwitchBar, cfg.minBarsBetweenSignals);
-    if (cooldownPassed) {
-      if (state !== 1 && bullCount >= cfg.confirmBars) {
-        state = 1;
-        lastSwitchBar = i;
-        bullCount = 0;
-        bearCount = 0;
-      } else if (state !== -1 && bearCount >= cfg.confirmBars) {
-        state = -1;
-        lastSwitchBar = i;
-        bullCount = 0;
-        bearCount = 0;
+    if (barIsConfirmed(i)) {
+      bullCount = bullCondition ? bullCount + 1 : 0;
+      bearCount = bearCondition ? bearCount + 1 : 0;
+      // bar_index - lastSwitchBar: a difference of bar indexes, the same from any first bar
+      const cooldownPassed = isNaN(lastSwitchBar) || ge(i - lastSwitchBar, cfg.minBarsBetweenSignals);
+      if (cooldownPassed) {
+        if (state !== 1 && bullCount >= cfg.confirmBars) {
+          state = 1;
+          lastSwitchBar = i;
+          bullCount = 0;
+          bearCount = 0;
+        } else if (state !== -1 && bearCount >= cfg.confirmBars) {
+          state = -1;
+          lastSwitchBar = i;
+          bullCount = 0;
+          bearCount = 0;
+        }
       }
     }
     marketState[i] = state;
@@ -177,8 +188,8 @@ export function calculate(
     const bullishState = marketState[i] === 1;
     const bearishState = marketState[i] === -1;
     const previousState = i > 0 ? marketState[i - 1] : 0; // nz(marketState[1], 0)
-    const bullishSignal = bullishState && previousState !== 1;
-    const bearishSignal = bearishState && previousState !== -1;
+    const bullishSignal = barIsConfirmed(i) && bullishState && previousState !== 1;
+    const bearishSignal = barIsConfirmed(i) && bearishState && previousState !== -1;
     const stateColor = bullishState ? cfg.bullColor : bearishState ? cfg.bearColor : color.gray;
     const zoneBorderColor = String(color.new(stateColor, 50));
     fillColors.push(cfg.showZone ? String(color.new(stateColor, 88)) : 'transparent');

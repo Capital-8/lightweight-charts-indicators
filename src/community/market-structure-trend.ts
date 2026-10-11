@@ -8,6 +8,9 @@
  * and the last swing high in a downtrend, drawn with a glow; four radial fill bands go from the line to the bar
  * midpoint. Circles mark the trend flips; optional bar and background colours follow the trend.
  *
+ * Last bar: the structure direction and level change on a closed bar only. The port reads the state of the last bar
+ * from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Market Structure Trend [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © QuantAlgo
@@ -15,6 +18,7 @@
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, BgColorData, MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface MarketStructureTrendInputs {
   /** 'Default' uses the manual structure inputs; the presets override them */
@@ -117,7 +121,11 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<MarketStructureTrendInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: { toArray(): (number | null | undefined)[] }) => s.toArray().map((v) => v ?? NaN);
@@ -169,8 +177,8 @@ export function calculate(
     const breakDownSrc = cfg.breakOnWick ? b.low : src[i];
     const breakUpSrc = cfg.breakOnWick ? b.high : src[i];
 
-    // barstate.isconfirmed is true on historical bars
-    if (ready) {
+    // if barstate.isconfirmed and structure_ready
+    if (barIsConfirmed(i) && ready) {
       if (dir === 0) {
         dir = ge(src[i], (swingHigh + swingLow) / 2.0) ? 1 : -1;
         level = dir === 1 ? swingLow : swingHigh;
@@ -191,8 +199,8 @@ export function calculate(
       }
     }
 
-    const bullShift = dir === 1 && prevDir === -1;
-    const bearShift = dir === -1 && prevDir === 1;
+    const bullShift = dir === 1 && prevDir === -1 && barIsConfirmed(i);
+    const bearShift = dir === -1 && prevDir === 1 && barIsConfirmed(i);
     const structureColor = dir === -1 ? bearishColor : bullishColor;
 
     const line = dir === 0 ? NaN : level;

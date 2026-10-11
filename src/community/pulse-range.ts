@@ -7,12 +7,16 @@
  * green while it rises, red while it falls (grey before the first move); the bars take the same colour. A triangle
  * at center -+ range * offset marks each turn of the direction (red to green, green to red).
  *
+ * Last bar: with 'Confirm Signal On Bar Close' a signal needs a closed bar. The port reads the state of the last bar
+ * from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Pulse Range" by MarketStructureLab
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface PulseRangeInputs {
   /** Source */
@@ -21,7 +25,7 @@ export interface PulseRangeInputs {
   rangeLength: number;
   /** Range multiplier */
   rangeScale: number;
-  /** Signal only on a closed bar (every bar of a calculation is closed: no effect in the port) */
+  /** Signal only on a closed bar */
   confirmAtClose: boolean;
   /** Draw the upper / lower tracks */
   displayBands: boolean;
@@ -92,7 +96,11 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<PulseRangeInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -139,9 +147,10 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     const time = bars[i].time;
     const prior = i > 0 ? dir[i - 1] : 0; // nz(trackDirection[1], 0)
-    // historical bars are confirmed: barConfirmed is true whatever confirmAtClose
-    const greenSignal = dir[i] === 1 && prior === -1;
-    const redSignal = dir[i] === -1 && prior === 1;
+    // barConfirmed = not confirmAtClose or barstate.isconfirmed
+    const barConfirmed = !cfg.confirmAtClose || barIsConfirmed(i);
+    const greenSignal = dir[i] === 1 && prior === -1 && barConfirmed;
+    const redSignal = dir[i] === -1 && prior === 1 && barConfirmed;
     if (cfg.displaySignals && greenSignal) {
       // plotshape(greenMarkerPrice, "Green Signal", shape.triangleup, location.absolute, risingColor, size = size.small)
       const price0 = center[i] - range[i] * cfg.signalOffset;

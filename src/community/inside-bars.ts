@@ -7,6 +7,10 @@
  * breakout; without it, a high above / low below the zone is a breakout. A breakout ends the zone. The zone edges
  * are drawn with a fill between them, breakouts with triangles, and the bars in a zone get a transparent bar colour.
  *
+ * Last bar: with the range expansion option, an open bar uses the rule without expansion (breakout on the high /
+ * low). The port reads the state of the last bar from the optional third argument (see src/chart-context.ts); without
+ * it every bar is taken as closed.
+ *
  * Reference: "Inside Bars (Multiple / Consecutive)" by nilstrades_
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © nilstrades_
@@ -14,6 +18,7 @@
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface InsideBarsInputs {
   /** The zone high / low expands to absorb wicks instead of a breakout on a wick */
@@ -49,7 +54,11 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<InsideBarsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -75,8 +84,8 @@ export function calculate(
       consecutive = true;
     }
     if (consecutive) {
-      // expandRange and barstate.isconfirmed (historical bars are confirmed)
-      if (cfg.expandRange) {
+      // expandRange and barstate.isconfirmed
+      if (cfg.expandRange && barIsConfirmed(i)) {
         if (gt(b.high, highBefore) && le(Math.max(b.open, b.close), highBefore)) highBefore = b.high;
         if (gt(lowBefore, b.low) && le(lowBefore, Math.min(b.open, b.close))) lowBefore = b.low;
         if (gt(b.close, highBefore)) {

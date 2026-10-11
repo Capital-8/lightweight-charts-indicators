@@ -7,12 +7,17 @@
  * above 0, red otherwise, blue when |strength| < 10. Triangles when the strength crosses above the entry threshold
  * or below minus the threshold.
  *
+ * Last bar: the filter is updated on a closed bar only (an open bar keeps the values of the bar before). The port
+ * reads the state of the last bar from the optional third argument (see src/chart-context.ts); without it every bar
+ * is taken as closed.
+ *
  * Reference: "Kaufman Trend Strength Signal" by PakunFX
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, matrix, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 type PineMatrix = ReturnType<typeof matrix.new_matrix<number>>;
 
@@ -47,7 +52,11 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<KaufmanTrendStrengthSignalInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const processNoise1 = 0.01;
@@ -82,22 +91,24 @@ export function calculate(
     matrix.set(P, 0, 0, 1.0);
     matrix.set(P, 1, 1, 1.0);
     if (i === 0) X = [src, 0.0]; // var X = array.from(src, 0.0)
-    // barstate.isconfirmed: true on historical bars
-    const x1 = matrix.get(F, 0, 0) * X[0] + matrix.get(F, 0, 1) * X[1];
-    const x2 = matrix.get(F, 1, 1) * X[1];
-    X = [x1, x2];
-    P = matrix.sum(mult(F, mult(P, matrix.transpose(F))), Q);
-    const S = matrix.sum(mult(H, mult(P, matrix.transpose(H))), R);
-    const Sinv = matrix.inv(S);
-    if (Sinv === null) throw new Error("In the 'matrix.inv()' function. Cannot inverse a singular matrix (matrix  determinant is zero).");
-    const K = mult(P, mult(matrix.transpose(H), Sinv));
-    const hx = matrix.mult(H, X) as unknown as number[];
-    const innovation = src - hx[0];
-    const diff = mult(K, innovation);
-    X = [X[0] + matrix.get(diff, 0, 0), X[1] + matrix.get(diff, 1, 0)];
-    P = mult(matrix.sum(I, mult(mult(K, H), -1)), P);
-    oscillator = X[1];
-    filteredSrc = X[0];
+    // if barstate.isconfirmed: the filter update
+    if (barIsConfirmed(i)) {
+      const x1 = matrix.get(F, 0, 0) * X[0] + matrix.get(F, 0, 1) * X[1];
+      const x2 = matrix.get(F, 1, 1) * X[1];
+      X = [x1, x2];
+      P = matrix.sum(mult(F, mult(P, matrix.transpose(F))), Q);
+      const S = matrix.sum(mult(H, mult(P, matrix.transpose(H))), R);
+      const Sinv = matrix.inv(S);
+      if (Sinv === null) throw new Error("In the 'matrix.inv()' function. Cannot inverse a singular matrix (matrix  determinant is zero).");
+      const K = mult(P, mult(matrix.transpose(H), Sinv));
+      const hx = matrix.mult(H, X) as unknown as number[];
+      const innovation = src - hx[0];
+      const diff = mult(K, innovation);
+      X = [X[0] + matrix.get(diff, 0, 0), X[1] + matrix.get(diff, 1, 0)];
+      P = mult(matrix.sum(I, mult(mult(K, H), -1)), P);
+      oscillator = X[1];
+      filteredSrc = X[0];
+    }
     filtered[i] = filteredSrc;
 
     // osc_buffer: the last N2 oscillator values; A = max |value| (Pine `absVal > A`)

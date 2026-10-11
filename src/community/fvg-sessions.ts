@@ -21,6 +21,12 @@
  * low - tick; without it: 0.01; the line is vertical and extended both ways, so it looks the same) and the chart
  * foreground colour (delimiter and first range lines; without it: #DBDBDB, a dark chart).
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "FVG Sessions [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © LuxAlgo
@@ -109,7 +115,7 @@ export function calculate(
   // syminfo.mintick
   const mintick = mintickOf(chart);
   const chartCss = String(color.new(foregroundColorOf(chart), 50));
-  const dayStarts = periodStarts(bars, 'D');
+  const dayStarts = periodStarts(bars, 'D', chart);
 
   const lines = new Live<Ln>();
   const boxes = new Live<Bx>();

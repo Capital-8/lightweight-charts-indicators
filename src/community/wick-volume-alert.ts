@@ -6,6 +6,9 @@
  * lower limit and / or only above an upper limit (when both are on, the upper limit test replaces the lower one, as
  * in the Pine script). A body of 0 gives an infinite ratio (a wick > 0 counts as long) or na (no wick).
  *
+ * Last bar: a wick label needs a closed bar. The port reads the state of the last bar from the optional third
+ * argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Wick Volume Alert" by Shazam77
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Shazam77
@@ -13,6 +16,7 @@
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface WickVolumeAlertInputs {
   wickToBodyRatio: number;
@@ -66,7 +70,11 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<WickVolumeAlertInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const upperColor = String(color.new(color.red, 0));
   const lowerColor = String(color.new(color.green, 0));
@@ -89,8 +97,7 @@ export function calculate(
     if (cfg.useLowerPriceLimit) priceWithinLimits = lt(b.close, cfg.lowerPriceLimit);
     if (cfg.useUpperPriceLimit) priceWithinLimits = gt(b.close, cfg.upperPriceLimit);
 
-    // barstate.isconfirmed: historical bars are confirmed
-    const isConfirmed = true;
+    const isConfirmed = barIsConfirmed(i); // barstate.isconfirmed
     if (longUpperWick && highVolume && isConfirmed && priceWithinLimits) {
       markers.push({ time: b.time, position: 'aboveBar', shape: 'labelDown', color: upperColor, size: 'small' });
     }

@@ -29,6 +29,9 @@
  * Limits of the port:
  * - The bar interval (10 and 50 bar lengths of time-based drawings) is the most frequent gap between two bars.
  *
+ * Chart timeframe: `timeframe` of the chart context (optional third argument of calculate) when given; without it
+ * the chart timeframe is read from the bar spacing (the most frequent gap between two bars).
+ *
  * Reference: "ICT Concepts [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © LuxAlgo
@@ -354,7 +357,7 @@ export function calculate(
   const at = (arr: number[], i: number) => (i >= 0 ? arr[i] : NaN);
 
   // General calculations
-  const tf = chartTimeframe(bars);
+  const tf = chartTimeframe(bars, chart);
   const tfMsec = tf === '' ? NaN : timeframe.in_seconds(tf) * 1000;
   const timenow = nowOf(chart);
   // syminfo.timezone: `dayofweek` is read in the exchange time zone

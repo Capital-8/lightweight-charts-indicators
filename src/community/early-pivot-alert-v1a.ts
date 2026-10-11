@@ -8,12 +8,16 @@
  * uptrend, with a minimum bar gap between two signals. The trigger level of the current trend is drawn as a line;
  * the signals are triangles.
  *
+ * Last bar: with 'Alleen signalen op bar close' a signal needs a closed bar. The port reads the state of the last bar
+ * from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Early Pivot Alert (price-quantum reversal) • v1a (arrows only)" by dirkbiebaut
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export type EarlyPivotMethod = 'Percent' | 'ATR' | 'Points' | 'StdDev';
 
@@ -32,7 +36,7 @@ export interface EarlyPivotAlertV1aInputs {
   sdLen: number;
   /** Standard deviation multiplier */
   sdK: number;
-  /** Signals only on bar close (all historical bars are closed) */
+  /** Signals only on bar close */
   confirmClose: boolean;
   /** Minimum bars between two signals */
   minBarsGap: number;
@@ -100,7 +104,11 @@ const nz = (x: number, y: number) => (Number.isFinite(x) ? x : y);
 export function calculate(
   bars: Bar[],
   inputs: Partial<EarlyPivotAlertV1aInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -121,8 +129,6 @@ export function calculate(
   let lastHigh = NaN;
   let lastLow = NaN;
   let lastSigBar = NaN;
-  // barConfirmed = confirmClose ? barstate.isconfirmed : true: every historical bar is confirmed
-  const barConfirmed = true;
 
   const plot0 = [];
   const plot1 = [];
@@ -152,6 +158,8 @@ export function calculate(
     const triggerUp = dir <= 0 && ge(c, nz(lastLow, l) + thUp);
     const triggerDown = dir >= 0 && le(c, nz(lastHigh, h) - thDown);
     const gapOk = isNaN(lastSigBar) || i - lastSigBar >= cfg.minBarsGap;
+    // barConfirmed = confirmClose ? barstate.isconfirmed : true
+    const barConfirmed = cfg.confirmClose ? barIsConfirmed(i) : true;
     const longSignal = barConfirmed && gapOk && triggerUp;
     const shortSignal = barConfirmed && gapOk && triggerDown;
 

@@ -24,6 +24,13 @@
  * of a dark chart, without it).
  * Limit of the port: the oscillator line width input is not applied to the plot (static plot width).
  *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
+ * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
+ * its period, see src/anchor-period.ts.
+ * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
+ * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
+ *
  * Reference: "Market Sentiment Technicals [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © LuxAlgo
@@ -35,7 +42,7 @@ import {
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PolylineData } from '../types';
 import { barInterval, barTime } from '../bar-time';
-import { periodStarts, chartTimeframe } from '../anchor-period';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import { foregroundColorOf, tickerOf, type ChartContext } from '../chart-context';
 
 type MaType = 'SMA' | 'EMA' | 'HMA' | 'RMA' | 'WMA' | 'VWMA';
@@ -210,7 +217,15 @@ const interpolate = (value: number, valueHigh: number, valueLow: number, rangeHi
  * request.security(syminfo.tickerid, tf, ...) without lookahead: the bars of timeframe `tf` built from the chart
  * bars, and for each chart bar the index of the latest completed bar of that timeframe (-1: none yet).
  */
-function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; latest: number[] } {
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: Bar[]; latest: number[] } {
+  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
+  // complete them come from the library rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) {
+    // the time of a bar of the timeframe: its first chart bar
+    const htf = exchange.htf.map((b, k) => ({ ...b, time: bars[exchange.first[k]].time }));
+    return { htf, latest: exchange.latest };
+  }
   const n = bars.length;
   const starts = periodStarts(bars, tf);
   const htf: Bar[] = [];
@@ -308,7 +323,7 @@ export function calculate(
   const height = cfg.mrktOscHeight;
 
   // timeframe(): the timeframe of the indicators, never below the chart timeframe
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars, chart);
   const period = chartTf.replace(/^1([DWM])$/, '$1'); // timeframe.period
   const chartInfo = chartTf === '' ? null : timeframe.info(chartTf);
   const chartMinutes = chartTf === '' ? NaN : timeframe.in_seconds(chartTf) / 60;
@@ -325,7 +340,7 @@ export function calculate(
   else if (cfg.indiTf === '1 Month' && (weekly || daily || intraday)) tf = 'M';
 
   const sameTf = chartTf === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chartTf);
-  const { htf: hb, latest } = sameTf ? { htf: bars, latest: bars.map((_b, i) => i) } : timeframeBars(bars, tf);
+  const { htf: hb, latest } = sameTf ? { htf: bars, latest: bars.map((_b, i) => i) } : timeframeBars(bars, tf, chart);
   const m = hb.length;
 
   // ---- collectData(): the indicators on the bars of the timeframe ----
@@ -442,7 +457,8 @@ export function calculate(
   let vwapUpper = new Array<number>(m).fill(NaN);
   let vwapLower = new Array<number>(m).fill(NaN);
   if (anchorTf !== '') {
-    const anchorStarts = periodStarts(hb, anchorTf);
+    // on the bars of the timeframe: the chart context with that timeframe
+    const anchorStarts = periodStarts(hb, anchorTf, chart && !sameTf ? { ...chart, timeframe: tf } : chart);
     // timeframe.change() is false on the first bar: the VWAP is na before the first new period
     const anchor = anchorStarts.map((s, k) => k > 0 && s !== anchorStarts[k - 1]);
     const [, upper, lower] = taCore.vwap(hClose, hVolume, anchor, cfg.vwapStDev);

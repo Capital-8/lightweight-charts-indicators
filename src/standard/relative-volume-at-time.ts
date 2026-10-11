@@ -9,16 +9,18 @@
  * timeframe, the average of the past `Length` periods at the same time offset).
  *
  * 'Anchor Timeframe' accepts any timeframe ("" = the chart timeframe: every bar is its own period). The original takes
- * the periods (timeframe.change, time) from the exchange time zone and sessions, which the bars do not carry: the
- * port takes them from the UTC calendar and the bars (see src/anchor-period.ts). Exact on UTC 24x7 symbols and on
- * symbols whose trading day is inside the UTC day (e.g. US stocks), after the first period of the bars; not on
- * sessions that cross 00:00 UTC (futures, forex).
+ * the periods (timeframe.change, time) from the exchange time zone and sessions. The port reads the time zone and
+ * the session from the chart context (third argument of calculate) and takes the periods of the exchange calendar.
+ * Without them it takes the periods from the UTC calendar and the bars (see src/anchor-period.ts): exact on UTC
+ * 24x7 symbols and on symbols whose trading day is inside the UTC day (e.g. US stocks), after the first period of
+ * the bars; not on sessions that cross 00:00 UTC (futures, forex).
  * Adjust Unconfirmed (last bar): the original extrapolates the cumulative volume to the close time of the bar; the
  * bars carry no close time, so it is estimated as the bar time plus the bar interval.
  */
 
 import { barInterval, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
 import { periodStarts } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
 
 export interface RelativeVolumeAtTimeInputs {
   /** Anchor timeframe for period boundaries: any timeframe string ("1D", "1W", "240", ...; "" = chart timeframe) */
@@ -115,12 +117,12 @@ function calcAverageByTime(
   return sum / historicalData.length;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<RelativeVolumeAtTimeInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<RelativeVolumeAtTimeInputs> = {}, chart?: ChartContext): IndicatorResult {
   const { anchorTimeframe, length, calculationMode, adjustRealtime } = { ...defaultInputs, ...inputs };
   const isCumulative = calculationMode === 'Cumulative';
 
   // time(anchorTimeframe) of each bar; timeframe.change(anchorTimeframe) where it differs from the previous bar
-  const starts = periodStarts(bars, anchorTimeframe);
+  const starts = periodStarts(bars, anchorTimeframe, chart);
 
   // Historical periods storage (FIFO queue)
   const historicalData: CollectedData[] = [];

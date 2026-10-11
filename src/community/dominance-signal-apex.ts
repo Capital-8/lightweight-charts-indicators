@@ -8,6 +8,9 @@
  * fades from the start transparency to the end transparency over `steps` bars of the state.
  * The script also computes super-smoother bands of high / low that it never draws: they are not ported.
  *
+ * Last bar: the bull / bear state changes on a closed bar only. The port reads the state of the last bar from the
+ * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Dominance Signal Apex [CHE]]" by chervolino
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © chervolino
@@ -17,6 +20,7 @@ import {
   ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface DominanceSignalApexInputs {
   showShapes: boolean;
@@ -104,7 +108,11 @@ function superSmoother2Pole(x: number[], len: number): number[] {
 export function calculate(
   bars: Bar[],
   inputs: Partial<DominanceSignalApexInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -144,20 +152,21 @@ export function calculate(
     haOpenPrev = haOpen;
     haClosePrev = haClose;
     const haDelta = haClose - haOpen;
+    const confirmed = barIsConfirmed(i);
 
-    // barstate.isconfirmed: true on every historical bar
-    if (gt(haDelta, 0)) {
+    // if barstate.isconfirmed: the state updates below
+    if (confirmed && gt(haDelta, 0)) {
       stateBull = true;
       stateBear = false;
     }
-    if (lt(haDelta, 0)) {
+    if (confirmed && lt(haDelta, 0)) {
       stateBear = true;
       stateBull = false;
     }
     const bullish1 = i > 0 && bullish[i - 1];
     const bearish1 = i > 0 && bearish[i - 1];
-    if (stateBull && !bullish[i] && bullish1) stateBull = false;
-    if (stateBear && !bearish[i] && bearish1) stateBear = false;
+    if (confirmed && stateBull && !bullish[i] && bullish1) stateBull = false;
+    if (confirmed && stateBear && !bearish[i] && bearish1) stateBear = false;
 
     const hma1 = i > 0 ? hma[i - 1] : NaN;
     const isHmaUp = gt(hma[i], hma1);

@@ -14,8 +14,8 @@
  *   The volume of a pivot sums volume[depth] over the bars that built it; the last-bar extension adds the
  *   volume of the last max(depth, 1) bars (depth = max(2, floor(Pivot legs / 2))).
  *
- * The original formats prices with format.mintick (syminfo.mintick). Bars carry no symbol info, so the port uses a
- * tick of 0.01 (prices rounded to 2 decimals); symbols with another tick show other decimals in the original.
+ * The original formats prices with format.mintick (syminfo.mintick). The port reads the symbol tick from the optional
+ * third argument (see src/chart-context.ts); without it the tick is 0.01 (prices rounded to 2 decimals).
  */
 
 import {
@@ -28,9 +28,7 @@ import {
 
 import type { InputConfig, PlotConfig } from 'oakscriptjs';
 import type { LineDrawingData, LabelData } from '../types';
-
-/** syminfo.mintick is not available to the port (Bar has no symbol info): tick 0.01, printed with 2 decimals */
-const MINTICK = 0.01;
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export type ZigZagPriceDiffMode = 'Absolute' | 'Percent';
 
@@ -113,7 +111,7 @@ export const metadata = {
 /**
  * Calculate ZigZag indicator
  */
-export function calculate(bars: Bar[], inputs: Partial<ZigZagInputs> = {}): ZigZagResult {
+export function calculate(bars: Bar[], inputs: Partial<ZigZagInputs> = {}, chart?: ChartContext): ZigZagResult {
   const opts = { ...defaultInputs, ...inputs };
 
   if (bars.length === 0) {
@@ -148,8 +146,9 @@ export function calculate(bars: Bar[], inputs: Partial<ZigZagInputs> = {}): ZigZ
   const segments = pivots.map((p, k) => (k === 0 ? { ...p, start: p.end } : p));
   if (extension) segments.push(extension);
 
-  // str.tostring(v, format.mintick) with the port's tick
-  const fmtPrice = (v: number) => str.tostring(v, 'mintick', MINTICK);
+  // str.tostring(v, format.mintick) with the symbol tick of the chart context (0.01 without it)
+  const mintick = mintickOf(chart);
+  const fmtPrice = (v: number) => str.tostring(v, 'mintick', mintick);
   const labelText = (start: number, end: number, vol: number) => {
     let text = '';
     if (opts.showPrice) text += fmtPrice(end) + ' ';

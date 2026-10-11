@@ -7,6 +7,9 @@
  * line (with a glow) takes the trend colour, a gradient ribbon fills from the filter to the candle midpoint, and
  * BULLISH / BEARISH labels mark the trend changes at the filter -/+ range * distance.
  *
+ * Last bar: with 'Confirm Signals On Bar Close' a signal needs a closed bar. The port reads the state of the last bar
+ * from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ *
  * Reference: "Trend State Signals [Market Structure Lab]" by MarketStructureLab
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Market Structure Lab
@@ -14,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface TrendStateSignalsInputs {
   source: SourceType;
@@ -21,7 +25,7 @@ export interface TrendStateSignalsInputs {
   length: number;
   /** Range multiplier: higher values give fewer trend changes */
   multiplier: number;
-  /** Confirm signals on bar close (all historical bars are confirmed) */
+  /** Confirm signals on bar close */
   confirmOnClose: boolean;
   bullColor: string;
   bearColor: string;
@@ -81,7 +85,11 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendStateSignalsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -127,9 +135,10 @@ export function calculate(
   const barColors: BarColorData[] = [];
   for (let i = 0; i < n; i++) {
     const prevTrend = i > 0 ? trend[i - 1] : 0;
-    // signalConfirmed = not confirmOnClose or barstate.isconfirmed: historical bars are confirmed
-    const bullishSignal = trend[i] === 1 && prevTrend !== 1;
-    const bearishSignal = trend[i] === -1 && prevTrend !== -1;
+    // signalConfirmed = not confirmOnClose or barstate.isconfirmed
+    const signalConfirmed = !cfg.confirmOnClose || barIsConfirmed(i);
+    const bullishSignal = trend[i] === 1 && prevTrend !== 1 && signalConfirmed;
+    const bearishSignal = trend[i] === -1 && prevTrend !== -1 && signalConfirmed;
     if (cfg.showLabels && bullishSignal) {
       const price = filter[i] - range[i] * cfg.labelDistance;
       if (!isNaN(price)) {

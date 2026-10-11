@@ -164,7 +164,7 @@ export function calculate(
   const n = bars.length;
   const ms = n > 0 && bars[0].time >= 1e12;
   const tMs = bars.map((b) => (ms ? b.time : b.time * 1000));
-  const tfName = chart?.timeframe ?? chartTimeframe(bars);
+  const tfName = chartTimeframe(bars, chart);
   const tfSeconds = tfName === '' ? NaN : timeframe.in_seconds(tfName);
 
   const superstrict = cfg.choice === 'Super-Strict';
