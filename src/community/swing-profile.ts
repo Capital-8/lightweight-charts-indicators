@@ -12,8 +12,8 @@
  * An optional moving average of a source is plotted.
  *
  * As the original, the script runs on the last 2,000 bars only.
- * The current leg uses the chart foreground colour (chart.fg_color): the port has no chart theme and uses the
- * colour of a dark chart.
+ * Chart context (optional third argument): the current leg uses the foreground colour of the chart, read from the
+ * context (`foregroundColor`). Without it the colour is #DBDBDB (dark chart).
  *
  * Reference: "Swing Profile [BigBeluga]" by BigBeluga
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -26,6 +26,7 @@ import {
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, PineSize, PolylineData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface SwingProfileInputs {
   swingLength: number;
@@ -98,8 +99,6 @@ const MAX_LABELS = 500;
 const MAX_BOXES = 500;
 const MAX_LINES = 50;
 const MAX_POLYLINES = 50;
-/** chart.fg_color of a dark chart (the port has no chart theme) */
-const CHART_FG = '#DBDBDB';
 /** Text colour of a box when the script gives none (Pine v6) */
 const BOX_TEXT = '#FFFFFF';
 /** transparentNA = color.new(color.black, 100) */
@@ -152,8 +151,11 @@ interface PolyObj {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SwingProfileInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; polylines: PolylineData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  // chart.fg_color
+  const chartFg = foregroundColorOf(chart);
   const { swingLength, showProfile, showHeatMap, showPoc } = cfg;
   const n = bars.length;
   // calc_bars_count: the script runs on the last 2,000 bars; `start` is the first of them
@@ -297,8 +299,8 @@ export function calculate(
 
     // Last bar: profile of the current leg
     if (j === m - 1) {
-      lines.create({ x1: highIndex, y1: highPrice, x2: lowIndex, y2: lowPrice, color: CHART_FG, style: 'dashed' });
-      drawProfile(j, CHART_FG, true);
+      lines.create({ x1: highIndex, y1: highPrice, x2: lowIndex, y2: lowPrice, color: chartFg, style: 'dashed' });
+      drawProfile(j, chartFg, true);
     }
   }
 

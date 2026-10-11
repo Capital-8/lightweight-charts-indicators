@@ -16,8 +16,11 @@
  * seen. At most 500 labels are kept.
  *
  * The original imports the `ta` library of its platform; of its functions only supertrend() is called, which is the
- * built-in SuperTrend calculation (close prices, no wicks). The error texts of the original end with the ticker of
- * the symbol, which the bars do not carry: the port leaves it out.
+ * built-in SuperTrend calculation (close prices, no wicks).
+ *
+ * Chart values read from the optional third argument (see src/chart-context.ts): the ticker id of the symbol at the
+ * end of the error texts (left out without it), and the state of the last bar: a break counts on a closed bar only
+ * (without it every bar is closed).
  *
  * Reference: "SuperTrend + Relative Volume (Kernel Optimized) | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -26,6 +29,7 @@
 
 import { ta, array, str, color, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, LabelData, MarkerData, TableData } from '../types';
+import { lastBarConfirmedOf, tickeridOf, type ChartContext } from '../chart-context';
 
 export interface SupertrendRelativeVolumeKernelInputs {
   atrLength: number;
@@ -146,6 +150,7 @@ interface Side {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupertrendRelativeVolumeKernelInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'labels' | 'tables'> & {
   markers: MarkerData[]; labels: LabelData[]; tables: TableData[]; barColors: BarColorData[];
 } {
@@ -235,8 +240,12 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const st = supertrend[i];
-    const bullishBreak = crossUp(b.close, st);
-    const bearishBreak = crossDown(b.close, st);
+    // ta.crossover(close, supertrend) and barstate.isconfirmed
+    const confirmed = i < n - 1 || lastBarConfirmedOf(chart);
+    const crossedUp = crossUp(b.close, st);
+    const crossedDown = crossDown(b.close, st);
+    const bullishBreak = crossedUp && confirmed;
+    const bearishBreak = crossedDown && confirmed;
     const buyVolume = buyShort[i] / buyAverage[i];
     const sellVolume = sellShort[i] / sellAverage[i];
     const hasVolume = !isNaN(volume[i]);
@@ -301,9 +310,9 @@ export function calculate(
   if (n > 0 && cfg.showErrors) {
     const lastVolume = volume[n - 1];
     const errorText = isNaN(lastVolume) || Math.abs(lastVolume) <= EPS
-      ? '⚠️ No Volume Data Available for '
+      ? '⚠️ No Volume Data Available for ' + tickeridOf(chart)
       : bullSide.volumes.length !== steps || bearSide.volumes.length !== steps
-        ? '⚠️ Not enough data. There were not enough SuperTrend Signals generated on this chart for the model. Lower bin value or change chart settings. '
+        ? '⚠️ Not enough data. There were not enough SuperTrend Signals generated on this chart for the model. Lower bin value or change chart settings. ' + tickeridOf(chart)
         : null;
     if (errorText !== null) {
       tables.push({

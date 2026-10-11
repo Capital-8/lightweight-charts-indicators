@@ -16,10 +16,12 @@
  * The candlestick pattern functions come from the library "BjCandlePatterns" by Bjorgum (version 2, the version
  * the original imports); the functions used are ported in this file.
  * The original keeps at most 500 boxes and 500 labels (max_boxes_count, max_labels_count).
- * The port has closed bars only: "Wait For Confirmed Bar" has no effect, and the "Alerts Mode" input is kept for
- * the settings only (alerts are not ported).
- * The level labels round the price to the tick of the symbol; the port has no symbol information and uses a tick of
- * 0.01. The height of the false break arrows (third "False Break Color" input) is not ported.
+ * Chart context (third argument of calculate): the port reads the symbol tick (the level labels round the price to
+ * it; 0.01 without a context) and the state of the last bar. When the context says that the last bar is still open,
+ * no pivot zone is made on it and, with "Wait For Confirmed Bar", no candlestick pattern is detected on it, as in
+ * the original. Without a context every bar is a closed bar and "Wait For Confirmed Bar" has no effect.
+ * The "Alerts Mode" input is kept for the settings only (alerts are not ported). The height of the false break
+ * arrows (third "False Break Color" input) is not ported.
  *
  * Reference: "Bjorgum Key Levels" by Bjorgum
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,6 +31,7 @@
 import { ta, Series, color, compare, math, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BoxData, LabelData, LineDrawingData } from '../types';
 import { barTime } from '../bar-time';
+import { mintickOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface BjorgumKeyLevelsInputs {
   left: number;
@@ -59,7 +62,7 @@ export interface BjorgumKeyLevelsInputs {
   supPush: boolean;
   resPush: boolean;
   curl: boolean;
-  /** Wait For Confirmed Bar (no effect: the port has closed bars only) */
+  /** Wait For Confirmed Bar (has an effect only on a last bar that the chart context gives as still open) */
   repaint: boolean;
   labels: boolean;
   sBox: boolean;
@@ -338,8 +341,6 @@ export const metadata = {
 
 /** Pine max_boxes_count / max_labels_count / max_lines_count */
 const MAX_OBJECTS = 500;
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 
 /** Pine `for i = a to b`: counts down when a > b */
 function pineRange(a: number, b: number): number[] {
@@ -414,9 +415,14 @@ const TIP = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<BjorgumKeyLevelsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { left, right, nPiv, mult, per, fut, lookback, reflect } = cfg;
+  /** syminfo.mintick (0.01 without a chart context) */
+  const MINTICK = mintickOf(chart);
+  /** barstate.isconfirmed of the last bar (true without a chart context) */
+  const lastConfirmed = lastBarConfirmedOf(chart);
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -678,12 +684,13 @@ export function calculate(
     const LH = pivotLowArr[i] + band;
     const LL = pivotLowArr[i] - band;
 
-    // ---- Logical order (every bar of the port is confirmed)
-    if (truthy(pivotHighArr[i]) && cfg.dhighs) {
+    // ---- Logical order (confirmed = barstate.isconfirmed: false only on a last bar that is still open)
+    const confirmed = i < n - 1 || lastConfirmed;
+    if (truthy(pivotHighArr[i]) && cfg.dhighs && confirmed) {
       arrayLoad(highBull, nPiv, false);
       arrayBox(pivotHigh, nPiv, newBox(i - right, HH, i, HL, cfg.bearBorder, cfg.bearBgCol, extrap));
     }
-    if (truthy(pivotLowArr[i]) && cfg.dlows) {
+    if (truthy(pivotLowArr[i]) && cfg.dlows && confirmed) {
       arrayLoad(lowsBull, nPiv, true);
       arrayBox(pivotLows, nPiv, newBox(i - right, LH, i, LL, cfg.bullBorder, cfg.bullBgCol, extrap));
     }
@@ -771,25 +778,28 @@ export function calculate(
     const hsFilter = ge(candleSize[i], cfg.hammerSize * atr[i]);
     const atrMaxSize = le(candleSize[i], cfg.atrMax * atr[i]) || eq(cfg.atrMax, 0);
 
+    // rp = confirmed or not repaint
+    const rp = confirmed || !cfg.repaint;
+
     // ---- Pattern recognition
-    const dw = isBull1 && cfg.detectDoji && atrMaxSize && doji(i);
-    const db = isBear1 && cfg.detectDoji && atrMaxSize && doji(i);
-    const bew = isBull2 && cfg.detectEngulfing && atrMaxSize && bullEngulf(i);
-    const beb = isBear2 && cfg.detectEngulfing && atrMaxSize && bearEngulf(i);
-    const h = isBull1 && cfg.detectHammerStar && atrMaxSize && hammer(i) && hsFilter && hMatch;
-    const ss = isBear1 && cfg.detectHammerStar && atrMaxSize && star(i) && hsFilter && sMatch;
-    const dd = isBull1 && cfg.detectDragonGrave && atrMaxSize && dragonflyDoji(i);
-    const gd = isBear1 && cfg.detectDragonGrave && atrMaxSize && gravestoneDoji(i);
-    const tb = isBull2 && cfg.detectTweezers && atrMaxSize && tweezerBottom(i);
-    const tt = isBear2 && cfg.detectTweezers && atrMaxSize && tweezerTop(i);
-    const stw = isBull1 && cfg.detectSpinningTop && atrMaxSize && spinningTop(i);
-    const stb = isBear1 && cfg.detectSpinningTop && atrMaxSize && spinningTop(i);
-    const p = isBull1 && cfg.detectPiercingCloud && atrMaxSize && piercing(i);
-    const dcc = isBear1 && cfg.detectPiercingCloud && atrMaxSize && darkCloudCover(i);
-    const bhw = isBull1 && cfg.detectHarami && atrMaxSize && haramiBull(i);
-    const bhb = isBear1 && cfg.detectHarami && atrMaxSize && haramiBear(i);
-    const ll = isBull1 && cfg.detectLongShadows && atrMaxSize && lls(i) && hsFilter;
-    const lu = isBear1 && cfg.detectLongShadows && atrMaxSize && lus(i) && hsFilter;
+    const dw = isBull1 && rp && cfg.detectDoji && atrMaxSize && doji(i);
+    const db = isBear1 && rp && cfg.detectDoji && atrMaxSize && doji(i);
+    const bew = isBull2 && rp && cfg.detectEngulfing && atrMaxSize && bullEngulf(i);
+    const beb = isBear2 && rp && cfg.detectEngulfing && atrMaxSize && bearEngulf(i);
+    const h = isBull1 && rp && cfg.detectHammerStar && atrMaxSize && hammer(i) && hsFilter && hMatch;
+    const ss = isBear1 && rp && cfg.detectHammerStar && atrMaxSize && star(i) && hsFilter && sMatch;
+    const dd = isBull1 && rp && cfg.detectDragonGrave && atrMaxSize && dragonflyDoji(i);
+    const gd = isBear1 && rp && cfg.detectDragonGrave && atrMaxSize && gravestoneDoji(i);
+    const tb = isBull2 && rp && cfg.detectTweezers && atrMaxSize && tweezerBottom(i);
+    const tt = isBear2 && rp && cfg.detectTweezers && atrMaxSize && tweezerTop(i);
+    const stw = isBull1 && rp && cfg.detectSpinningTop && atrMaxSize && spinningTop(i);
+    const stb = isBear1 && rp && cfg.detectSpinningTop && atrMaxSize && spinningTop(i);
+    const p = isBull1 && rp && cfg.detectPiercingCloud && atrMaxSize && piercing(i);
+    const dcc = isBear1 && rp && cfg.detectPiercingCloud && atrMaxSize && darkCloudCover(i);
+    const bhw = isBull1 && rp && cfg.detectHarami && atrMaxSize && haramiBull(i);
+    const bhb = isBear1 && rp && cfg.detectHarami && atrMaxSize && haramiBear(i);
+    const ll = isBull1 && rp && cfg.detectLongShadows && atrMaxSize && lls(i) && hsFilter;
+    const lu = isBear1 && rp && cfg.detectLongShadows && atrMaxSize && lus(i) && hsFilter;
 
     // ---- Graphical display
     const plotFalseDn = cfg.falseBull && falseBreakBull;

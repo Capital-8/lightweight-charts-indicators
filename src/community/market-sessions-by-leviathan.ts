@@ -14,12 +14,11 @@
  * "Hide Weekends" leaves out the sessions of Saturday (days 1 to 6 of the week, Sunday being day 1).
  *
  * Notes on the port:
- * - The lookback is counted back from the current time (timenow in the original): the port uses the clock of the
- *   computer (Date.now()).
- * - The background colours of the "Zones" display read the session hours in the exchange time zone in the original
- *   (the box, candle and timeline displays use the "Input Timezone"). The bars do not carry the exchange time zone:
- *   the port uses UTC for it, which is equal on UTC symbols.
- * - "Change (Pips)" divides by the price tick of the symbol. The bars carry no price tick: the port uses 0.01.
+ * - The lookback is counted back from the current time: the `now` value of the chart (optional third argument);
+ *   without it, the clock of the computer.
+ * - The background colours of the "Zones" display read the session hours in the exchange time zone (the box,
+ *   candle and timeline displays use the "Input Timezone"): the `timezone` value of the chart; without it, UTC.
+ * - "Change (Pips)" divides by the symbol tick: the `mintick` value of the chart; without it, 0.01.
  * - "Screener (Soon)" does nothing in the original.
  *
  * Reference: "Market Sessions - By Leviathan" by LeviathanCapital
@@ -32,6 +31,7 @@ import { color, str, timeframe, time as pineTime, type IndicatorResult, type Inp
 import type { MarkerData, BarColorData, BgColorData, LineDrawingData, BoxData, LabelData, PineSize } from '../types';
 import { barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
+import { mintickOf, nowOf, timezoneOf, type ChartContext } from '../chart-context';
 
 type LineStyleName = 'Solid' | 'Dashed' | 'Dotted';
 
@@ -174,8 +174,6 @@ export const metadata = {
 
 /** indicator(max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500) */
 const MAX_OBJECTS = 500;
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 const MSPD = 24 * 60 * 60 * 1000;
 /** color.rgb(0, 0, 0, 100) */
 const NO_COLOR = 'rgba(0, 0, 0, 0)';
@@ -212,11 +210,15 @@ class Live<T extends object> {
 export function calculate(
   bars: Bar[],
   inputs: Partial<MarketSessionsByLeviathanInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & {
   markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[];
   lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
+  // syminfo.mintick, syminfo.timezone
+  const MINTICK = mintickOf(chart);
+  const exchangeZone = timezoneOf(chart);
   const n = bars.length;
   const inMs = n > 0 && bars[0].time >= 1e12;
   const chartTf = chartTimeframe(bars);
@@ -231,7 +233,7 @@ export function calculate(
   const zones = cfg.displayType === 'Zones';
   const timeline = cfg.displayType === 'Timeline';
   // timenow, to the second (timestamp(year(timenow), ..., second(timenow)))
-  const now = Math.floor(Date.now() / 1000) * 1000;
+  const now = Math.floor(nowOf(chart) / 1000) * 1000;
 
   // Sessions in the order Tokyo, London, New York, Sydney: the next session of each one (Sydney -> Tokyo) is the one
   // that "Merge Overlaps" cuts it at
@@ -252,10 +254,10 @@ export function calculate(
   // time(timeframe.period, session) counts the periods of the chart timeframe from the start of the session, so it
   // is the bar time only when the bar opens a whole number of periods after the session start (session 0030-0900 on
   // 60-minute bars: 00:30, 01:30, ... never a bar time; on daily and higher bars: only a bar that opens at the
-  // session start)
+  // session start). The hours are read in the exchange time zone
   const periodSeconds = isIntraday ? timeframe.in_seconds(chartTf) : 0;
   const onSessionGrid = (tMs: number, hours: string): boolean => {
-    const second = pineTime.hour(tMs, 'UTC') * 3600 + pineTime.minute(tMs, 'UTC') * 60 + pineTime.second(tMs, 'UTC');
+    const second = pineTime.hour(tMs, exchangeZone) * 3600 + pineTime.minute(tMs, exchangeZone) * 60 + pineTime.second(tMs, exchangeZone);
     for (const part of hours.split(',')) {
       const m = /^\s*(\d{2})(\d{2})-(\d{2})(\d{2})\s*$/.exec(part);
       if (!m) continue;
@@ -399,13 +401,13 @@ export function calculate(
       if (c !== null) barColors.push({ time: t, color: c });
     }
 
-    // Background colours of the 'Zones' display: time == time(timeframe.period, session), in the exchange time zone
-    // (UTC in the port), also on bars that are not intraday
+    // Background colours of the 'Zones' display: time == time(timeframe.period, session), in the exchange time zone,
+    // also on bars that are not intraday
     if (zones && inRange) {
       sessions.forEach((s, k) => {
         const next = sessions[(k + 1) % 4];
         if (!s.show || (cfg.merge && next.active)) return;
-        if (pineTime.inSession(tMs, s.session, 'UTC') && onSessionGrid(tMs, s.hours)) bgColors.push({ time: t, color: s.col });
+        if (pineTime.inSession(tMs, s.session, exchangeZone) && onSessionGrid(tMs, s.hours)) bgColors.push({ time: t, color: s.col });
       });
     }
 

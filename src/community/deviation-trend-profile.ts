@@ -12,8 +12,9 @@
  * levels of that bar). Each bin is a box whose length is its count; a label gives the number of bars of the trend.
  * At most 500 boxes are kept.
  *
- * The port has no chart theme: the chart foreground and background colours used by the original are those of the
- * reference run (dark theme: foreground #DBDBDB, background #0F0F0F).
+ * Chart values read from the optional third argument (see src/chart-context.ts): the chart foreground and
+ * background colours (lines, labels, boxes of the last bar). Without them the port uses those of a dark chart
+ * (foreground #DBDBDB, background #0F0F0F).
  *
  * Reference: "Deviation Trend Profile [BigBeluga]" by BigBeluga
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -23,6 +24,7 @@
 import { ta, str, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LineDrawingData, LabelData, BoxData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface DeviationTrendProfileInputs {
   /** SMA length */
@@ -74,9 +76,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** chart.fg_color / chart.bg_color of the reference run (dark theme) */
-const CHART_FG = '#DBDBDB';
-const CHART_BG = '#0F0F0F';
 /** indicator(max_boxes_count = 500) */
 const MAX_BOXES = 500;
 
@@ -94,6 +93,7 @@ const css = (c: unknown): string => {
 export function calculate(
   bars: Bar[],
   inputs: Partial<DeviationTrendProfileInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'lines' | 'labels' | 'boxes'> & {
   markers: MarkerData[];
   lines: LineDrawingData[];
@@ -103,6 +103,9 @@ export function calculate(
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { colUp, colDn } = cfg;
+  // chart.fg_color / chart.bg_color
+  const CHART_FG = foregroundColorOf(chart);
+  const CHART_BG = backgroundColorOf(chart);
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
 
   const avg = A(ta.sma(new Series(bars, (b) => b.close), cfg.length));

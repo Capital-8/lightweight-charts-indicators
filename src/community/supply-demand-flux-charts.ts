@@ -22,8 +22,11 @@
  * Timeframes: "" is the chart timeframe. A higher timeframe is computed on bars built from the chart bars (UTC
  * calendar, see anchor-period); its zones are those of its last completed bar (the last chart bar completes a
  * period when it is the last bar of its trading day and the next weekday is in another period). A timeframe below the chart
- * timeframe throws an error (the bars do not carry that data). The original redraws on closed bars only: every bar
- * of the port is a closed bar.
+ * timeframe throws an error (the bars do not carry that data).
+ *
+ * The original redraws on closed bars only. The port reads the state of the last bar from the chart context (third
+ * argument): while the last bar is open, the drawings are those of the bar before. Without the value every bar is
+ * a closed bar.
  *
  * Reference: "Supply & Demand (MTF) | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -34,6 +37,7 @@ import { ta, color, timeframe, Series, type IndicatorResult, type InputConfig, t
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe, periodStarts } from '../anchor-period';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface SupplyDemandFluxChartsInputs {
   /** Max Distance To Last Bar */
@@ -290,6 +294,7 @@ function higherTimeframeLists(bars: Bar[], tf: string, maxDistance: number, wick
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupplyDemandFluxChartsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'lines' | 'labels'> & { boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -308,11 +313,11 @@ export function calculate(
   const timeMs = timeMsOf(bars);
   const maxDistance = cfg.maxDistanceString === 'Low' ? 150 : cfg.maxDistanceString === 'Normal' ? 500 : 1250;
   const wick = cfg.sdEndMethod === 'Wick';
-  const chart = chartTimeframe(bars);
-  const chartSeconds = chart === '' ? NaN : timeframe.in_seconds(chart);
+  const chartTf = chartTimeframe(bars);
+  const chartSeconds = chartTf === '' ? NaN : timeframe.in_seconds(chartTf);
   const secondsOf = (tf: string) => (tf.trim() === '' ? chartSeconds : timeframe.in_seconds(tf));
   // timeframe.period
-  const chartPeriod = chart.replace(/^1([DWM])$/, '$1');
+  const chartPeriod = chartTf.replace(/^1([DWM])$/, '$1');
 
   // formatTimeframeString()
   const formatTimeframe = (tf: string): string => {
@@ -340,7 +345,7 @@ export function calculate(
   const higher = tfs.map(({ tf, enabled }) => {
     if (!enabled || secondsOf(tf) === chartSeconds) return null;
     if (secondsOf(tf) < chartSeconds) {
-      throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the bars do not carry that data.`);
+      throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chartTf}": the bars do not carry that data.`);
     }
     return higherTimeframeLists(bars, tf, maxDistance, wick);
   });
@@ -379,8 +384,9 @@ export function calculate(
   let lastRetestIndexSupply = 0;
   let lastRetestIndexDemand = 0;
   let allZones: ZoneInfo[] = [];
-  // The original redraws on closed bars only: every bar of the port is closed
-  const lastClosed = last;
+  // The original redraws on closed bars only (barstate.isconfirmed): the last bar is left out while it is open
+  // (chart context; without it every bar is closed)
+  const lastClosed = lastBarConfirmedOf(chart) ? last : last - 1;
 
   findZones(bars, maxDistance, wick, (i, own, atr) => {
     if (!(i > last - maxDistance) || i > lastClosed) return;

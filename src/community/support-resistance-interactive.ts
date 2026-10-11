@@ -10,8 +10,10 @@
  *
  * In the original the levels are picked on the chart (interactive price inputs, default 0): here they are plain
  * inputs with the same defaults. The alerts of the original (zone broken, price in a zone) have no output; their
- * inputs are kept. The prices of the label text are rounded to the price tick, which the port does not get: it uses
- * 0.01.
+ * inputs are kept.
+ *
+ * Chart context (optional third argument): the prices of the label text are rounded to the symbol tick
+ * (`chart.mintick`). Without it the tick is 0.01.
  *
  * Reference: "Support Resistance Interactive" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -21,6 +23,7 @@
 import { ta, str, math, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface SupportResistanceInteractiveInputs {
   /** Number of S/R levels shown (1 to 5) */
@@ -99,9 +102,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
-
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
@@ -110,9 +110,12 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceInteractiveInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'labels'> & { boxes: BoxData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  // syminfo.mintick
+  const MINTICK = mintickOf(chart);
   const boxes: BoxData[] = [];
   const labels: LabelData[] = [];
 

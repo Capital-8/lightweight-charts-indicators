@@ -19,7 +19,11 @@
  * that starts at or after its time; an open block ends on the last bar.
  *
  * The original reads its own lists through a request on the chart symbol and the chart timeframe: this gives the
- * lists themselves. It redraws on closed bars only: every bar of the port is a closed bar.
+ * lists themselves. It redraws on closed bars only.
+ *
+ * Chart values read: the state of the last bar. When the chart context says that the last bar is still open, the
+ * drawings are those of the bar before it (an open block then ends on the open bar, which holds its end time).
+ * Without a chart context every bar is a closed bar.
  *
  * Reference: "Volumized Order Blocks | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -28,6 +32,7 @@
 
 import { ta, str, color, callsite, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LineDrawingData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
 
@@ -119,10 +124,13 @@ interface Swing {
 export function calculate(
   bars: Bar[],
   inputs: Partial<OrderBlocksFluxChartsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'lines'> & { boxes: BoxData[]; lines: LineDrawingData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
+  // barstate.isconfirmed: the last bar on which the script draws (the bar before an open last bar)
+  const drawn = lastBarConfirmedOf(chart) ? last : last - 1;
   const len = Math.trunc(cfg.swingLength);
   const shown = cfg.zoneCount === 'One' ? 1 : cfg.zoneCount === 'Low' ? 3 : cfg.zoneCount === 'Medium' ? 5 : 10;
   const wick = cfg.obEndMethod === 'Wick';
@@ -143,7 +151,7 @@ export function calculate(
   let top: Swing = { x: NaN, y: NaN, crossed: false };
   let btm: Swing = { x: NaN, y: NaN, crossed: false };
 
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i <= drawn; i++) {
     // findOrderBlocks(): if bar_index > last_bar_index - maxDistanceToLastBar
     if (!(i > last - MAX_DISTANCE_TO_LAST_BAR)) continue;
     const b = bars[i];
@@ -242,10 +250,10 @@ export function calculate(
     boxes,
     lines,
   });
-  if (n === 0) return result();
+  if (drawn < 0) return result();
 
-  // handleOrderBlocksFinal() on the last bar: every bar deletes all drawings and draws the lists again
-  const time = timeMs(last);
+  // handleOrderBlocksFinal() on the last closed bar: every closed bar deletes all drawings and draws the lists again
+  const time = timeMs(drawn);
   const all: OrderBlockInfo[] = [];
   for (let j = 0; j <= Math.min(bullList.length - 1, shown - 1); j++) all.unshift({ ...bullList[j] });
   for (let j = 0; j <= Math.min(bearList.length - 1, shown - 1); j++) all.unshift({ ...bearList[j] });
@@ -306,15 +314,15 @@ export function calculate(
   }
 
   // formatTimeframeString(timeframe.period)
-  const chart = chartTimeframe(bars).replace(/^1([DWM])$/, '$1');
-  let tfText = chart;
-  if (chart !== '' && !/[DWSM]/.test(chart)) {
-    const seconds = timeframe.in_seconds(chart);
+  const chartTf = chartTimeframe(bars).replace(/^1([DWM])$/, '$1');
+  let tfText = chartTf;
+  if (chartTf !== '' && !/[DWSM]/.test(chartTf)) {
+    const seconds = timeframe.in_seconds(chartTf);
     if (seconds >= 3600) {
       const hourCount = Math.trunc(seconds / 3600);
       tfText = `${hourCount} Hour${hourCount > 1 ? 's' : ''}`;
     } else {
-      tfText = `${chart} Min`;
+      tfText = `${chartTf} Min`;
     }
   }
 

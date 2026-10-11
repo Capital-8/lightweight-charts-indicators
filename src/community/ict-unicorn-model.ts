@@ -14,8 +14,8 @@
  * goes through its gap or when a new pattern replaces it. With "Trailing Stop" two plots show a stop that follows
  * the pivots of the trailing length. At most 500 boxes, lines and labels are kept.
  *
- * The original draws the block and the lines with the foreground colour of the chart; the port has no chart theme
- * and uses #DBDBDB (a dark chart).
+ * The block and the lines have the foreground colour of the chart: the port reads it from the chart context (third
+ * argument) and uses #DBDBDB (a dark chart) without it.
  *
  * Reference: "ICT Unicorn Model [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -25,6 +25,7 @@
 import { ta, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface IctUnicornModelInputs {
   /** Bars on the left of a swing */
@@ -90,8 +91,6 @@ export const metadata = {
 
 /** indicator(max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500) */
 const MAX_OBJECTS = 500;
-/** chart.fg_color of the reference chart */
-const CHART_FG = '#DBDBDB';
 /** Size of the zigzag arrays */
 const ZZ_SIZE = 50;
 
@@ -150,6 +149,7 @@ interface Unicorn {
 export function calculate(
   bars: Bar[],
   inputs: Partial<IctUnicornModelInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & { boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -168,6 +168,8 @@ export function calculate(
   const phTsLArr = ta.pivothigh(highS, lenS, lenS).toArray();
   const plTsLArr = ta.pivotlow(lowS, lenS, lenS).toArray();
 
+  // chart.fg_color
+  const CHART_FG = foregroundColorOf(chart);
   const fg50 = String(color.new(CHART_FG, 50));
   const fg65 = String(color.new(CHART_FG, 65));
   const fg97 = String(color.new(CHART_FG, 97));

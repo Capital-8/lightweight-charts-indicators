@@ -15,8 +15,9 @@
  * The table counts the winning and losing trades.
  *
  * At most 500 lines and 500 labels are kept (the oldest are removed first).
- * The tooltip of a stopped trade shows the stop rounded to the price tick. The bars do not carry the tick of the
- * symbol: the port uses 0.01.
+ * The tooltip of a stopped trade shows the stop rounded to the price tick.
+ *
+ * Chart values (third argument): the port reads the symbol tick for that tooltip (without it: 0.01).
  *
  * Reference: "Smart Money Breakouts [ChartPrime]" by ChartPrime
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -26,6 +27,7 @@
 import { ta, math, str, array, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, BgColorData, LabelData, LineDrawingData, PlotCandleData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface SmartMoneyBreakoutsInputs {
   /** Swing length: bars on each side of a pivot */
@@ -86,8 +88,6 @@ const WICK = '#676363';
 const LIME = '#00E676';
 /** color.new(color.red, 100) */
 const OFF = String(color.new('#FF5252', 100));
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 /** indicator(max_labels_count = 500, max_lines_count = 500) */
 const MAX_OBJECTS = 500;
 
@@ -122,6 +122,7 @@ interface Lb {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SmartMoneyBreakoutsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'labels' | 'lines' | 'tables' | 'barColors' | 'bgColors' | 'plotCandles'> & {
   labels: LabelData[];
   lines: LineDrawingData[];
@@ -132,6 +133,8 @@ export function calculate(
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  // syminfo.mintick
+  const mintick = mintickOf(chart);
   const period = Math.trunc(cfg.period);
   const wicks = cfg.candleType === 'Wicks';
   const slOnClose = cfg.slType === 'Close';
@@ -302,7 +305,7 @@ export function calculate(
       score[1] += 1;
       if (lab) {
         lab.color = String(color.new(RED, 70));
-        lab.tooltip = 'Stoploss Hit : ' + str.tostring(math.round_to_mintick(SL, MINTICK));
+        lab.tooltip = 'Stoploss Hit : ' + str.tostring(math.round_to_mintick(SL, mintick));
       }
       tradeIsOn = false;
     };

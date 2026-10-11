@@ -14,8 +14,9 @@
  * timeframe needs data that the chart bars do not have: the port throws an Error. The default timeframes are 5, 15,
  * 60, 240 and 1D: on a chart above 5 minutes, set the timeframes to the chart timeframe or higher.
  *
- * The script reads the chart background and foreground colours (table, label texts). A port has no chart theme: it
- * uses the colours of the reference run (background #0F0F0F, foreground #DBDBDB).
+ * The table and the label texts have the chart background and foreground colours: the port reads them from the
+ * chart context (third argument) and uses the colours of a dark chart without it (background #0F0F0F, foreground
+ * #DBDBDB).
  *
  * Reference: "Zero Lag Trend Signals (MTF) [AlgoAlpha]" by AlgoAlpha
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -26,6 +27,7 @@ import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, t
 import type { MarkerData, TableData, TableCellData } from '../types';
 import { barInterval } from '../bar-time';
 import { periodStarts, chartTimeframe } from '../anchor-period';
+import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface ZeroLagTrendSignalsInputs {
   /** Look-back window of the zero-lag EMA */
@@ -79,10 +81,6 @@ export const metadata = {
   shortTitle: 'AlgoAlpha - 0️⃣Zero Lag Signals',
   overlay: true,
 };
-
-/** Chart colours of the reference run (chart.bg_color / chart.fg_color) */
-const CHART_BG = '#0F0F0F';
-const CHART_FG = '#DBDBDB';
 
 /**
  * request.security(syminfo.tickerid, tf, ...) without lookahead: the bars of timeframe `tf` built from the chart
@@ -184,8 +182,12 @@ function trendOf(bars: Bar[], length: number, mult: number) {
 export function calculate(
   bars: Bar[],
   inputs: Partial<ZeroLagTrendSignalsInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { markers: MarkerData[]; tables: TableData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  // chart.bg_color / chart.fg_color
+  const CHART_BG = backgroundColorOf(chart);
+  const CHART_FG = foregroundColorOf(chart);
   const n = bars.length;
   const { green, red } = cfg;
   const green70 = String(color.new(green, 70));

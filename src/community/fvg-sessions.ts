@@ -16,10 +16,10 @@
  * Limits of the port:
  * - New days come from the UTC calendar and the bars (see anchor-period): equal on UTC symbols and on symbols whose
  *   trading day is inside one UTC day.
- * - The day delimiter goes from high + tick to low - tick in the original. Bars carry no symbol info: the port uses
- *   a tick of 0.01 (the line is vertical and extended both ways, so it looks the same).
- * - The delimiter and the first range lines use the chart foreground colour. The port has no chart theme and uses
- *   the foreground colour of a dark chart (#DBDBDB).
+ *
+ * Chart values (third argument): the port reads the symbol tick (the day delimiter goes from high + tick to
+ * low - tick; without it: 0.01; the line is vertical and extended both ways, so it looks the same) and the chart
+ * foreground colour (delimiter and first range lines; without it: #DBDBDB, a dark chart).
  *
  * Reference: "FVG Sessions [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,6 +29,7 @@
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { periodStarts } from '../anchor-period';
 import type { BoxData, LineDrawingData } from '../types';
+import { foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
 
 export interface FvgSessionsInputs {
   /** FVG Level (bullish) */
@@ -71,10 +72,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** chart.fg_color of a dark chart (the port has no chart theme) */
-const CHART_FG = '#DBDBDB';
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 /** max_lines_count, max_boxes_count */
 const MAX_COUNT = 500;
 
@@ -105,10 +102,13 @@ interface Fvg { top: number; btm: number; mitigated: boolean; isnew: boolean; is
 export function calculate(
   bars: Bar[],
   inputs: Partial<FvgSessionsInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
-  const chartCss = String(color.new(CHART_FG, 50));
+  // syminfo.mintick
+  const mintick = mintickOf(chart);
+  const chartCss = String(color.new(foregroundColorOf(chart), 50));
   const dayStarts = periodStarts(bars, 'D');
 
   const lines = new Live<Ln>();
@@ -136,7 +136,7 @@ export function calculate(
 
     if (dtf) {
       // Delimiter, new range, end of the gap of the prior day
-      lines.add({ x1: i, y1: high + MINTICK, x2: i, y2: low - MINTICK, color: chartCss, style: 'dashed', extend: 'both', dead: false });
+      lines.add({ x1: i, y1: high + mintick, x2: i, y2: low - mintick, color: chartCss, style: 'dashed', extend: 'both', dead: false });
       sesr = {
         max: lines.add({ x1: i, y1: high, x2: i, y2: high, color: chartCss, dead: false }),
         min: lines.add({ x1: i, y1: low, x2: i, y2: low, color: chartCss, dead: false }),

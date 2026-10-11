@@ -22,9 +22,10 @@
  * - New days / weeks / months come from the UTC calendar and the bars (see anchor-period): equal on UTC symbols
  *   and on symbols whose trading day is inside one UTC day.
  * - The original rounds range levels, the average range of the table and the prices of merged labels with the
- *   symbol price tick. Bars carry no symbol info: the port uses a tick of 0.01.
- * - chart.fg_color / chart.bg_color: the port has no chart theme and uses the colours of a dark chart
- *   (#DBDBDB text, #0F0F0F background).
+ *   symbol price tick. The port reads the tick from the chart context (third argument); without it the tick is
+ *   0.01.
+ * - chart.fg_color / chart.bg_color (day names, table texts, table frame and background): read from the chart
+ *   context; without it the colours of a dark chart (#DBDBDB text, #0F0F0F background).
  * - Drawings whose price is na (the previous high / low of the first period) are not in the result.
  * - The chart timeframe is read from the bars (the most frequent gap between two bars). With fewer than 2 bars it
  *   is not known and only the table header is given.
@@ -39,6 +40,7 @@
 
 import { array, color, math, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { chartTimeframe, periodStarts } from '../anchor-period';
+import { backgroundColorOf, foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PineSize, TableCellData, TableData, TablePosition } from '../types';
 
 type LineType = 'Solid' | 'Dotted' | 'Dashed';
@@ -327,11 +329,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
-/** chart.fg_color / chart.bg_color of a dark chart (the port has no chart theme) */
-const CHART_FG = '#DBDBDB';
-const CHART_BG = '#0F0F0F';
 /** max_lines_count, max_labels_count, max_boxes_count */
 const MAX_COUNT = 500;
 const NA_COLOR = 'transparent';
@@ -462,8 +459,13 @@ function getColor<D extends string | null>(raw: string, def: D): string | D {
 export function calculate(
   bars: Bar[],
   inputs: Partial<IctKillzonesPivotsTfoInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[]; markers: MarkerData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  // syminfo.mintick, chart.fg_color, chart.bg_color
+  const mintick = mintickOf(chart);
+  const chartFg = foregroundColorOf(chart);
+  const chartBg = backgroundColorOf(chart);
   const n = bars.length;
   const ms = n > 0 && bars[0].time >= 1e12;
   const tMs = bars.map((b) => (ms ? b.time : b.time * 1000));
@@ -499,7 +501,7 @@ export function calculate(
   const measurement = cfg.range_measure.toLowerCase();
   const opaque = (c: string) => String(color.new(c, 0));
   const fmtDate = (t: number) => str.format_time(t, 'M/d/yyyy', tz);
-  const roundTick = (v: number) => math.round_to_mintick(v, MINTICK) as number;
+  const roundTick = (v: number) => math.round_to_mintick(v, mintick) as number;
 
   const lines = new Live<Ln>();
   const boxes = new Live<Bx>();
@@ -936,7 +938,7 @@ export function calculate(
     if (cfg.dow_labels && isIntraday && newDay && !((dow === 1 || dow === 7) && cfg.dow_hide_wknd)) {
       markers.push({
         time: bar.time, position: cfg.dow_yloc === 'Top' ? 'top' : 'bottom', shape: 'square', color: NA_COLOR,
-        text: DAY_NAMES[dow - 1], textColor: CHART_FG,
+        text: DAY_NAMES[dow - 1], textColor: chartFg,
       });
     }
 
@@ -1063,7 +1065,7 @@ export function calculate(
         const cells = new Map<string, TableCellData>();
         const cell = (column: number, row: number, text: string, bg?: string, tooltip?: string) => {
           cells.set(`${column},${row}`, {
-            row, column, text, textSize: dataSize, textColor: CHART_FG,
+            row, column, text, textSize: dataSize, textColor: chartFg,
             ...(bg !== undefined ? { bgColor: bg } : {}), ...(tooltip !== undefined ? { tooltip } : {}),
           });
         };
@@ -1147,7 +1149,7 @@ export function calculate(
         });
         tables.push({
           position: cfg.data_loc.toLowerCase().replace(' ', '_') as TablePosition, columns: 20, rows: 20, cells: [...cells.values()],
-          bgColor: CHART_BG, frameColor: CHART_FG, frameWidth: 2, borderColor: CHART_FG, borderWidth: 1,
+          bgColor: chartBg, frameColor: chartFg, frameWidth: 2, borderColor: chartFg, borderWidth: 1,
         });
       }
       if (badOpens + badStamps + badLevels > 0) {
@@ -1159,8 +1161,8 @@ export function calculate(
         msg += "\n\nExpected formats (one per line):\nOpening Prices: 'Time, Color, Label' - ex. '0930, red, NY Open'\nTimestamps: 'Time, Color' - ex. '1200, black'\nRange Levels: 'Multiplier, Color' - ex. '1.5, purple'\n\nColor and label fields are optional. Times accept 0930, 930, or 09:30. Lines starting with '//' are skipped";
         tables.push({
           position: 'bottom_right', columns: 1, rows: 1,
-          cells: [{ row: 0, column: 0, text: '⚠ Settings', textSize: 'small', textColor: CHART_FG, tooltip: msg }],
-          bgColor: String(color.new(color.red, 80)), frameColor: CHART_FG, frameWidth: 1, borderColor: CHART_FG, borderWidth: 1,
+          cells: [{ row: 0, column: 0, text: '⚠ Settings', textSize: 'small', textColor: chartFg, tooltip: msg }],
+          bgColor: String(color.new(color.red, 80)), frameColor: chartFg, frameWidth: 1, borderColor: chartFg, borderWidth: 1,
         });
       }
     }

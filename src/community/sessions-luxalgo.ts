@@ -15,12 +15,13 @@
  * new day starts.
  *
  * Limits of the port:
- * - "Use Exchange Timezone" needs the exchange time zone of the symbol, which the bars do not carry: the port throws
- *   an Error when it is switched on.
- * - The day dividers use the day of the week in the exchange time zone in the original. The port uses the UTC day:
+ * Values read from the chart context (third argument of calculate):
+ * - "Use Exchange Timezone" reads the session hours in the exchange time zone of the symbol. Without a time zone in
+ *   the chart context the port throws an Error when the option is switched on.
+ * - The day dividers use the day of the week in the exchange time zone. Without it the port uses the UTC day:
  *   equal on UTC symbols and on symbols whose trading day is inside one UTC day (e.g. US stocks).
- * - The day divider is a vertical line through close + tick and close - tick (extended both ways). The bars carry
- *   no price tick: the port uses a tick of 0.01. The line drawn is the same.
+ * - The day divider is a vertical line through close + tick and close - tick (extended both ways), with the symbol
+ *   price tick. Without it the tick is 0.01. The line drawn is the same.
  *
  * Reference: "Sessions [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,6 +30,7 @@
 
 import { color, str, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LineDrawingData, BoxData, LabelData, TableData, TableCellData, TableMergeData, PineSize } from '../types';
+import { mintickOf, timezoneOf, type ChartContext } from '../chart-context';
 
 export interface SessionsLuxalgoInputs {
   showSessionA: boolean;
@@ -65,7 +67,7 @@ export interface SessionsLuxalgoInputs {
   sessionDMaxMin: boolean;
   /** Fixed UTC offset (hours) of the session times */
   timezoneOffset: number;
-  /** Not available in the port (throws) */
+  /** Needs the exchange time zone of the chart context (throws without it) */
   useExchangeTimezone: boolean;
   rangeTransparency: number;
   showRangeOutline: boolean;
@@ -228,8 +230,6 @@ const BORDERS = '#2E2E2E';
 const GRAY = '#787B86';
 /** max_lines_count / max_boxes_count / max_labels_count of the script */
 const MAX_OBJECTS = 500;
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const POSITIONS = { 'Top Right': 'top_right', 'Bottom Right': 'bottom_right', 'Bottom Left': 'bottom_left' } as const;
 
@@ -275,18 +275,23 @@ interface Regression {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SessionsLuxalgoInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & {
   markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
-  if (cfg.useExchangeTimezone) {
-    throw new Error('Sessions [LuxAlgo]: "Use Exchange Timezone" needs the exchange time zone of the symbol, '
-      + 'which the bars do not carry. Set the UTC offset instead.');
+  if (cfg.useExchangeTimezone && chart?.timezone === undefined) {
+    throw new Error('Sessions [LuxAlgo]: "Use Exchange Timezone" needs the exchange time zone of the symbol '
+      + '(chart context, third argument). Give it, or set the UTC offset instead.');
   }
+  // syminfo.timezone (day dividers) and syminfo.mintick
+  const exchangeTz = timezoneOf(chart);
+  const mintick = mintickOf(chart);
   const n = bars.length;
   const offset = Math.trunc(cfg.timezoneOffset);
-  // str.format("UTC{0}{1}", timezoneOffsetInput >= 0 ? "+" : "-", math.abs(timezoneOffsetInput))
-  const tz = `UTC${offset >= 0 ? '+' : '-'}${Math.abs(offset)}`;
+  // useExchangeTimezoneInput ? syminfo.timezone
+  //   : str.format("UTC{0}{1}", timezoneOffsetInput >= 0 ? "+" : "-", math.abs(timezoneOffsetInput))
+  const tz = cfg.useExchangeTimezone ? exchangeTz : `UTC${offset >= 0 ? '+' : '-'}${Math.abs(offset)}`;
   const inMs = n > 0 && bars[0].time >= 1e12;
   const ms = (t: number) => (inMs ? t : t * 1000);
   const transparency = Math.trunc(cfg.rangeTransparency);
@@ -549,11 +554,11 @@ export function calculate(
     }
 
     // Daily dividers: newDay = currentDay != currentDay[1] (false on the first bar)
-    const day = pineTime.dayofweek(tMs, 'UTC');
+    const day = pineTime.dayofweek(tMs, exchangeTz);
     const newDay = !first && day !== prevDay;
     if (newDay && cfg.showDayDivider) {
       lines.add({
-        time1: t, price1: close + MINTICK, time2: t, price2: close - MINTICK, color: GRAY, extend: 'both',
+        time1: t, price1: close + mintick, time2: t, price2: close - mintick, color: GRAY, extend: 'both',
         style: 'dashed',
       });
       markers.push({

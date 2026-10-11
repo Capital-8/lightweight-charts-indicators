@@ -28,8 +28,9 @@
  * - The Heikin-Ashi candles and bars are computed on every bar; without 'Overlays HA Plotcandle' their colours are
  *   na (returned as 'transparent').
  * - 'Real Close' is drawn with an offset of -9999 bars, as in the original.
- * - The type "VWAP" needs the trading day of the exchange on intraday bars: with it the port works on daily and
- *   higher bars (the value is the source of the bar, na without volume) and throws an Error on intraday bars.
+ * - The type "VWAP" restarts on each trading day of the exchange. On daily and higher bars the value is the source of
+ *   the bar (na without volume). On intraday bars the port reads the exchange time zone and the session of the symbol
+ *   from the optional third argument (see src/chart-context.ts); without them it throws an Error.
  * - The alert inputs and the 20 alert conditions have no output.
  *
  * Reference: "Bjorgum SuperScript" by Bjorgum
@@ -38,7 +39,9 @@
 
 import { ta, Series, getSourceSeries, color, str, array, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, MarkerData, PineSize, PlotBarData, PlotCandleData, TableCellData, TableData, TablePosition } from '../types';
+import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
 import { barInterval } from '../bar-time';
+import type { ChartContext } from '../chart-context';
 
 type MaType = 'SMA' | 'EMA' | 'HEMA' | 'T3' | 'DEMA' | 'TEMA' | 'HMA' | 'WMA' | 'VWMA' | 'SWMA' | 'VWAP';
 
@@ -452,6 +455,7 @@ const DAY_SECONDS = 86400;
 export function calculate(
   bars: Bar[],
   inputs: Partial<BjorgumSuperScriptInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & {
     markers: MarkerData[];
     barColors: BarColorData[];
@@ -538,15 +542,30 @@ export function calculate(
       case 'T3': return A(t3(source, length, cfg.alphaInput));
       case 'SWMA': return A(ta.swma(source));
       case 'VWAP': {
-        // ta.vwap(src), anchor timeframe.change("1D"): a new anchor on every daily or higher bar, so
-        // sum(src * volume) / sum(volume) over the bar alone (0 / 0 = na without volume)
+        // ta.vwap(src), anchor timeframe.change("1D"). Intraday bars: a new anchor on each trading day of the
+        // exchange, which the library finds from the time zone and the session of the chart context
         const interval = barInterval(bars);
         if (interval > 0 && interval < DAY_SECONDS) {
-          throw new Error(
-            'Bjorgum SuperScript: the type "VWAP" works on daily and higher timeframes only: on intraday bars ta.vwap '
-            + 'resets on each trading day, which needs the exchange time zone and session.',
-          );
+          if (chart?.timezone === undefined || chart.session === undefined) {
+            throw new Error(
+              'Bjorgum SuperScript: the type "VWAP" works on daily and higher timeframes only: on intraday bars ta.vwap '
+              + 'resets on each trading day, which needs the exchange time zone and session.',
+            );
+          }
+          let newDay: number[] = [];
+          executeScript(() => { newDay = A(scriptTimeframe.change('1D')); }, bars, {}, chart);
+          // sum(src * volume) / sum(volume) since the first bar of the trading day (from the first bar on the first day)
+          const src = A(source);
+          let sumPv = 0;
+          let sumV = 0;
+          return src.map((v, i) => {
+            if (newDay[i] === 1) { sumPv = 0; sumV = 0; }
+            if (!Number.isNaN(v) && !Number.isNaN(volume[i])) { sumPv += v * volume[i]; sumV += volume[i]; }
+            return sumPv / sumV;
+          });
         }
+        // Daily and higher bars: a new anchor on every bar, so sum(src * volume) / sum(volume) over the bar alone
+        // (0 / 0 = na without volume)
         const src = A(source);
         return src.map((v, i) => (v * volume[i]) / volume[i]);
       }

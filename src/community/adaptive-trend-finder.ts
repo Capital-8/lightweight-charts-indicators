@@ -7,8 +7,9 @@
  * standard deviation of the residuals (in log scale). A table shows the selected period, the strength of the trend
  * (or Pearson's R) and, on daily and weekly bars, the annualized return of the trend.
  *
- * The annualized return uses 252 bars a year on daily bars and 52 on weekly bars. The original uses 365 on daily
- * bars for symbols of the type "crypto"; the symbol type is not known here.
+ * The annualized return uses 52 bars a year on weekly bars. On daily bars it uses 365 for a symbol of the type
+ * "crypto" and 252 for the others: the port reads the symbol type from the chart context (third argument) and uses
+ * 252 without it.
  *
  * Reference: "Adaptive Trend Finder (log)" by Julien_Eche
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -21,6 +22,7 @@ import {
 } from 'oakscriptjs';
 import type { LineDrawingData, LinefillData, TableData, TableCellData, TablePosition } from '../types';
 import { chartTimeframe } from '../anchor-period';
+import { symbolTypeOf, type ChartContext } from '../chart-context';
 
 type LineStyleName = 'Solid' | 'Dotted' | 'Dashed';
 type ExtendName = 'Extend Right' | 'Extend Both' | 'Extend None' | 'Extend Left';
@@ -207,6 +209,7 @@ function calcDev(logSource: number[], last: number, length: number): Deviation {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AdaptiveTrendFinderInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'lines' | 'linefills' | 'tables'> & {
   lines: LineDrawingData[]; linefills: LinefillData[]; tables: TableData[];
 } {
@@ -282,7 +285,8 @@ export function calculate(
   if (cfg.showTrendAnnualizedReturn && (isDaily || isWeekly)) {
     let cagr = NaN;
     if (last >= detectedPeriod) {
-      const multiplier = isDaily ? 252 : 52;
+      // get_tf_multiplier(): 365 daily bars a year when syminfo.type is "crypto", else 252; 52 weekly bars
+      const multiplier = isDaily ? (symbolTypeOf(chart) === 'crypto' ? 365 : 252) : 52;
       const startClosePrice = bars[last - (detectedPeriod - 1)].close;
       cagr = Math.pow(bars[last].close / startClosePrice, multiplier / detectedPeriod) - 1;
     }

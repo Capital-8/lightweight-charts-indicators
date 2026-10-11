@@ -17,13 +17,17 @@
  * entry price, current profit, stop and targets) and the backtesting table (days, wins, losses, win rate, average
  * and total profit in %, with the "Backtesting Exit Ratios" of the three take profits).
  *
- * The original starts a range on the first bar of the regular session of the exchange. The bars do not carry the
- * session: the port starts a range on the first bar of each UTC day (symbols with weekend bars: 00:00 UTC). This is
- * the same bar on 24x7 UTC symbols and on bars of the regular session only (e.g. US stocks); not with bars of
- * extended hours, nor on sessions that cross 00:00 UTC. "Custom Session" is read in UTC (the original reads it in
- * the exchange time zone). Prices in the dashboard use a tick of 0.01 (the original uses the tick of the symbol).
+ * Chart context (third argument), all optional:
+ * - Regular session hours and exchange time zone: a range starts on the first bar of the regular session, as in the
+ *   original. Without the session hours the port starts a range on the first bar of each UTC day (symbols with
+ *   weekend bars: 00:00 UTC). This is the same bar on 24x7 UTC symbols and on bars of the regular session only
+ *   (e.g. US stocks); not with bars of extended hours, nor on sessions that cross 00:00 UTC.
+ * - Exchange time zone: the hours of "Custom Session" are read in it; in UTC without it.
+ * - Price tick of the symbol: the prices of the dashboard; 0.01 without it.
+ * - State of the last bar: the original computes on closed bars only. While the last bar is open, its state is the
+ *   one of the bar before. Without the value every bar is a closed bar.
  * The original throws above 15 minutes: the port throws the same error; the chart timeframe is taken from the most
- * frequent gap between two bars. It computes on closed bars only: every bar of the port is a closed bar.
+ * frequent gap between two bars.
  *
  * Reference: "ORB Algo | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -33,6 +37,7 @@
 import { ta, str, timeframe, time as pineTime, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TableMergeData, TablePosition } from '../types';
 import { chartTimeframe, periodStarts } from '../anchor-period';
+import { lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
 
 type Position = 'Top Right' | 'Right Center' | 'Top Center';
 
@@ -132,8 +137,6 @@ const MINIMUM_PROFIT_INCREMENT_PERCENT = 0.075;
 const ATR_TP_MULT = [0.75, 1.5, 2.25];
 const MAX_LINES = 500;
 const MAX_LABELS = 500;
-/** Price tick of the texts (the original uses the tick of the symbol) */
-const MINTICK = 0.01;
 
 /** Pine float comparisons: a > b only when a - b > 1e-10 (a == b within 1e-10; na compares false) */
 const EPS = 1e-10;
@@ -181,6 +184,7 @@ const POSITIONS: Record<string, TablePosition> = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<OrbAlgoFluxChartsInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -219,26 +223,49 @@ export function calculate(
   // sessionBegins(): t = time('1440', sess) is the start of the session run of the bar (na outside the session); a range
   // starts when the bar is in the session and the bar before was not, or when a run started after the bar before
   // (t[1] < t). The function is called from bar 1 on: t[1] is na on its first call.
+  // The session hours are read in the exchange time zone (chart context; UTC without it).
   const dayStart = periodStarts(bars, 'D');
-  const inSession = (i: number) => pineTime.inSession(tMs[i], cfg.customSessionTime, 'UTC');
-  const runStarts = cfg.customSessionTime.trim() === '24x7' ? [0]
-    : [...cfg.customSessionTime.matchAll(/(\d\d)(\d\d)-\d{4}/g)].map((m) => ((Number(m[1]) * 60 + Number(m[2])) % 1440) * 60000);
+  const tz = timezoneOf(chart);
+  const utc = tz === 'UTC' || tz === 'Etc/UTC';
   const DAY = 86400000;
+  // Clock of the exchange time zone minus UTC, at time t
+  const zoneOffset = (t: number) => (utc ? 0 : Date.UTC(
+    pineTime.year(t, tz), pineTime.month(t, tz) - 1, pineTime.dayofmonth(t, tz),
+    pineTime.hour(t, tz), pineTime.minute(t, tz), pineTime.second(t, tz),
+  ) - Math.floor(t / 1000) * 1000);
+  /** Bar i is the first bar of a run of the session `sess` (`firstCall`: the bar before has no session state) */
+  const runBegins = (sess: string, firstCall: number) => {
+    const inSession = (i: number) => pineTime.inSession(tMs[i], sess, tz);
+    const runStarts = sess.trim() === '24x7' ? [0]
+      : [...sess.matchAll(/(\d\d)(\d\d)-\d{4}/g)].map((m) => ((Number(m[1]) * 60 + Number(m[2])) % 1440) * 60000);
+    return (i: number): boolean => {
+      if (!inSession(i)) return false;
+      if (i === firstCall || !inSession(i - 1)) return true;
+      const offset = zoneOffset(tMs[i]);
+      const clock = tMs[i] + offset;
+      return runStarts.some((m) => {
+        let s = Math.floor(clock / DAY) * DAY + m;
+        if (s > clock) s -= DAY;
+        return s - offset > tMs[i - 1] && pineTime.inSession(s - offset, sess, tz);
+      });
+    };
+  };
+  const customBegins = runBegins(cfg.customSessionTime, 1);
+  // session.isfirstbar_regular: with the regular session hours of the chart context, the first bar of a session run;
+  // without them, the first bar of a UTC day
+  const regular = chart?.regularSession ?? chart?.session;
+  const regularBegins = typeof regular === 'string' && /^(24x7|\d{4}-\d{4}(,\d{4}-\d{4})*(:\d+)?)$/.test(regular.trim())
+    ? runBegins(regular, -1) : null;
   const newRange = (i: number): boolean => {
-    if (!cfg.customSessionEnabled) return dayStart[i] !== dayStart[i - 1];
-    if (!inSession(i)) return false;
-    if (i === 1 || !inSession(i - 1)) return true;
-    return runStarts.some((m) => {
-      let s = Math.floor(tMs[i] / DAY) * DAY + m;
-      if (s > tMs[i]) s -= DAY;
-      return s > tMs[i - 1] && pineTime.inSession(s, cfg.customSessionTime, 'UTC');
-    });
+    if (cfg.customSessionEnabled) return customBegins(i);
+    return regularBegins !== null ? regularBegins(i) : dayStart[i] !== dayStart[i - 1];
   };
 
   const diffPercent = (val1: number, val2: number) => (Math.abs(val1 - val2) / val2) * 100.0;
   const orbList: Orb[] = [];
-  // The original computes on closed bars only: every bar of the port is closed
-  const lastClosed = last;
+  // The original computes on closed bars only (barstate.isconfirmed): the last bar is left out while it is open
+  // (chart context; without it every bar is closed)
+  const lastClosed = lastBarConfirmedOf(chart) ? last : last - 1;
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -411,7 +438,8 @@ export function calculate(
     }
   }
 
-  const priceText = (v: number) => str.tostring(v, 'mintick', MINTICK);
+  const mintick = mintickOf(chart);
+  const priceText = (v: number) => str.tostring(v, 'mintick', mintick);
   const close = bars[last].close;
 
   // ORB dashboard

@@ -17,13 +17,13 @@
  *
  * Drawings are kept up to 500 lines and 500 boxes (the oldest are removed).
  *
- * Limits of the port:
- * - The original adds a 'minimum trade framework' to the target threshold on forex, index and futures symbols
- *   (15 pips or 40 ticks). Bars carry no symbol info: the port uses 0, the value of the other symbol types (crypto,
- *   stocks, funds).
- * - The session lines go from the close to close + tick. The port uses a tick of 0.01 (the lines are vertical and
- *   extended both ways, so they look the same).
- * - The chart timeframe is read from the bars (the most frequent gap between two bars).
+ * Chart values read from the optional third argument:
+ * - the symbol type and the symbol tick: the original adds a 'minimum trade framework' to the target threshold, of
+ *   15 pips (150 ticks) on forex symbols and of 40 ticks on index and futures symbols. Without a symbol type the
+ *   port uses 0, the value of the other symbol types (crypto, stocks, funds).
+ * - the symbol tick: the session lines go from the close to close + tick. Without it the tick is 0.01 (the lines
+ *   are vertical and extended both ways, so they look the same).
+ * - the chart timeframe. Without it the timeframe is read from the bars (the most frequent gap between two bars).
  *
  * Reference: "ICT Silver Bullet [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -33,6 +33,7 @@
 import { ta, Series, color, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { chartTimeframe } from '../anchor-period';
 import { barTime } from '../bar-time';
+import { mintickOf, symbolTypeOf, type ChartContext } from '../chart-context';
 import type { BoxData, LineDrawingData, MarkerData, TableData } from '../types';
 
 type Choice = 'All FVG' | 'Only FVG in the same direction of trend' | 'Strict' | 'Super-Strict';
@@ -110,10 +111,6 @@ export const metadata = {
 
 /** Time zone of the session hours */
 const TZ = 'America/New_York';
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
-/** minimum_trade_framework of the symbol types other than forex, index and futures */
-const MIN_TRADE_FRAMEWORK = 0;
 /** max_lines_count, max_boxes_count */
 const MAX_COUNT = 500;
 /** Size of the zigzag arrays */
@@ -155,12 +152,19 @@ interface SessionSet { swingH: Piv[]; swingL: Piv[]; targHi: Ln[]; targLo: Ln[];
 export function calculate(
   bars: Bar[],
   inputs: Partial<IctSilverBulletInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; markers: MarkerData[]; tables: TableData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  // syminfo.mintick
+  const MINTICK = mintickOf(chart);
+  // minimum_trade_framework: 15 pips on forex, 40 ticks on index and futures symbols, else 0
+  const symbolType = symbolTypeOf(chart);
+  const MIN_TRADE_FRAMEWORK = symbolType === 'forex' ? MINTICK * 15 * 10
+    : symbolType === 'index' || symbolType === 'futures' ? MINTICK * 40 : 0;
   const n = bars.length;
   const ms = n > 0 && bars[0].time >= 1e12;
   const tMs = bars.map((b) => (ms ? b.time : b.time * 1000));
-  const tfName = chartTimeframe(bars);
+  const tfName = chart?.timeframe ?? chartTimeframe(bars);
   const tfSeconds = tfName === '' ? NaN : timeframe.in_seconds(tfName);
 
   const superstrict = cfg.choice === 'Super-Strict';

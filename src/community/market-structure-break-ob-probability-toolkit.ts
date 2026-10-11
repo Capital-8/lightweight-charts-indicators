@@ -17,8 +17,8 @@
  * probability blocks.
  *
  * Sessions: a box over the range of each enabled session, with its name.
- * Limit of the port: the session hours are read in UTC. The original reads them in the time zone of the exchange,
- * which the bars do not carry (equal on UTC symbols).
+ * The session hours are read in the exchange time zone, given by the optional third argument (see
+ * src/chart-context.ts); without it they are read in UTC.
  *
  * At most 500 lines, 500 labels and 500 boxes are kept (the oldest are removed first).
  *
@@ -32,6 +32,7 @@ import {
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, TableData, TableCellData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { timezoneOf, type ChartContext } from '../chart-context';
 
 export interface MarketStructureBreakObProbabilityToolkitInputs {
   showStatsInput: boolean;
@@ -191,6 +192,7 @@ interface OrderBlock {
 export function calculate(
   bars: Bar[],
   inputs: Partial<MarketStructureBreakObProbabilityToolkitInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines' | 'tables'> & {
   boxes: BoxData[];
   labels: LabelData[];
@@ -240,7 +242,8 @@ export function calculate(
     return now;
   };
 
-  // drawSession(): one state per call
+  // drawSession(): one state per call. time(timeframe.period, sessStr) reads the hours in the exchange time zone
+  const timezone = timezoneOf(chart);
   const session = (show: boolean, sessStr: string, col: string, name: string) => {
     let sBox: Bx | null = null;
     let sLabel: Lb | null = null;
@@ -249,7 +252,7 @@ export function calculate(
     let inSession1 = false;
     const tms = (i: number) => (bars[i].time < 1e11 ? bars[i].time * 1000 : bars[i].time);
     return (i: number) => {
-      const inSession = pineTime.inSession(tms(i), sessStr, 'UTC');
+      const inSession = pineTime.inSession(tms(i), sessStr, timezone);
       const isStart = inSession && !inSession1;
       inSession1 = inSession;
       if (!(show && inSession)) return;

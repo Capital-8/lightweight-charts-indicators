@@ -20,21 +20,26 @@
  * labels (with tooltips), the six level lines and labels of the last trade, the dashboard table (market, signal,
  * trade, sizing, statistics, diagnostics), the journal table and the watermark.
  *
- * Limits of a port (it gets the bars only):
- * - The bars are closed bars: the model also runs on the last bar (the original skips it while that bar is open).
- * - Price tick: the port has no symbol tick and uses 0.01 (rounding of the entry, stop and targets, minimum risk,
- *   price texts).
- * - The close time of a bar is its time plus the chart timeframe (taken from the bar times): exact on symbols that
- *   trade around the clock and on intraday bars; on daily and longer bars of other symbols the original uses the
- *   session end, so the entry / exit dates in texts and the time ends of the level lines can differ there. A time
- *   between two bars is given as the time of the next bar, where it is drawn.
+ * Chart context (third argument), all optional:
+ * - State of the last bar: the original skips the model on the last bar while that bar is open. Without the value
+ *   every bar is a closed bar and the model also runs on the last bar.
+ * - Price tick of the symbol (rounding of the entry, stop and targets, minimum risk, price texts): 0.01 without it.
+ * - Chart background and foreground colours (theme 'Auto'): without them the colours of a dark chart (background
+ *   #0F0F0F, foreground #DBDBDB).
+ * - Quote currency of the symbol: the position estimate compares it with the account currency once the linear
+ *   contract is confirmed. Without it the port throws an Error for that combination of inputs.
+ * - Session hours and exchange time zone: on daily bars of a symbol with a day session (e.g. "0930-1600") the close
+ *   time of a bar is the end of the session of that day, as in the original (for a bar of the higher timeframe: of
+ *   its last day). A day that closes early is not known.
+ *
+ * Limits:
+ * - Without the session hours, and on weekly and longer bars, the close time of a bar is its time plus the chart
+ *   timeframe (taken from the bar times): exact on symbols that trade around the clock and on intraday bars; else
+ *   the entry / exit dates in texts can differ. The level lines end some days after the last bar: that time is not
+ *   placed on a trading calendar. A time between two bars is given as the time of the next bar, where it is drawn.
  * - Days (previous day high / low, session VWAP anchor) and the bars of the higher timeframe are built from the chart
  *   bars with the UTC calendar rule of src/anchor-period.ts. The close time of a higher-timeframe bar is its start
  *   plus the timeframe length (exact on symbols that trade around the clock).
- * - The script reads the chart background and foreground colours (theme 'Auto'). A port has no chart theme: it uses
- *   the colours of the reference run (background #0F0F0F, foreground #DBDBDB).
- * - The position estimate needs the quote currency of the symbol once the linear contract is confirmed: the port
- *   throws an Error for that combination of inputs.
  * - The alert inputs are kept but alerts (alert() calls and 16 alert conditions) have no output.
  *
  * Reference: "Precision Sniper [WillyAlgoTrader]" by WillyAlgoTrader
@@ -44,6 +49,9 @@
 import { ta, Series, color, math, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TableMergeData, TablePosition } from '../types';
 import { periodStarts, chartTimeframe } from '../anchor-period';
+import {
+  backgroundColorOf, currencyOf, foregroundColorOf, lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext,
+} from '../chart-context';
 
 type Corner = 'Top Right' | 'Top Left' | 'Middle Right' | 'Middle Left' | 'Bottom Right' | 'Bottom Left';
 
@@ -408,14 +416,6 @@ export const inputConfig: InputConfig[] = [
   },
 ];
 
-/** Chart colours of the reference run (chart.bg_color, chart.fg_color) */
-const CHART_BG = '#0F0F0F';
-const CHART_FG = '#DBDBDB';
-/** Price tick used by the port (syminfo.mintick) */
-const MINTICK = 0.01;
-/** The bars given to a port are closed bars (barstate.isconfirmed on the last bar too) */
-const LAST_BAR_CLOSED = true;
-
 const VERSION = '2.1.0';
 const ADX_TREND = 20;
 const ATR_MEAN_LEN = 42;
@@ -455,7 +455,7 @@ const ne = (a: number, b: number) => Math.abs(a - b) > EPS;
 const na = (x: number) => !Number.isFinite(x);
 
 const fmt = (x: number) => (na(x) ? 'N/A' : str.tostring(x, '#.##'));
-const price = (x: number) => (na(x) ? 'N/A' : str.tostring(x, 'mintick', MINTICK));
+const qtyFmt = (x: number) => (na(x) ? 'N/A' : str.tostring(x, '#.################'));
 const gradeOf = (ratio: number) => (ge(ratio, 0.8) ? 'A+' : ge(ratio, 0.65) ? 'A' : ge(ratio, 0.5) ? 'B' : 'C');
 const gradeIndex = (g: string) => (g === 'A+' ? 0 : g === 'A' ? 1 : g === 'B' ? 2 : 3);
 const directionName = (d: number) => (d === 1 ? 'Long' : d === -1 ? 'Short' : 'None');
@@ -468,9 +468,6 @@ function buildGauge(value: number, maxVal: number, width: number): string {
   for (let i = 0; i <= width - 1; i++) result += i < filled ? '▰' : '▱';
   return result;
 }
-const roundToTick = (x: number) => math.round_to_mintick(x, MINTICK) as number;
-const roundDown = (x: number) => roundToTick(Math.floor(x / MINTICK + 1e-8) * MINTICK);
-const roundUp = (x: number) => roundToTick(Math.ceil(x / MINTICK - 1e-8) * MINTICK);
 
 function rejectReason(code: number): string {
   switch (code) {
@@ -579,8 +576,17 @@ function periodEnd(start: number, tf: string): number {
   return start + timeframe.in_seconds(tf) * 1000;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = {}, chart?: ChartContext): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
+  // Values of the chart context (fallbacks: dark chart colours, tick 0.01, every bar closed)
+  const CHART_BG = backgroundColorOf(chart);
+  const CHART_FG = foregroundColorOf(chart);
+  const MINTICK = mintickOf(chart);
+  const LAST_BAR_CLOSED = lastBarConfirmedOf(chart);
+  const price = (x: number) => (na(x) ? 'N/A' : str.tostring(x, 'mintick', MINTICK));
+  const roundToTick = (x: number) => math.round_to_mintick(x, MINTICK) as number;
+  const roundDown = (x: number) => roundToTick(Math.floor(x / MINTICK + 1e-8) * MINTICK);
+  const roundUp = (x: number) => roundToTick(Math.ceil(x / MINTICK - 1e-8) * MINTICK);
   const { bullColor, bearColor, neutralColorInput, sessionTZ } = cfg;
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -609,6 +615,9 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   const htfEnabled = cfg.htfMode !== 'Off' && cfg.htfInput !== '';
 
   // Checks of the first bar (runtime errors of the script)
+  if (MINTICK * 1e9 < 10) {
+    throw new Error('Minimum supported price tick is 0.00000001 (1e-8). Smaller ticks require a separate precision model.');
+  }
   if (!(fastLen < slowLen && slowLen < trendLen)) throw new Error('EMA periods must satisfy Fast < Slow < Trend.');
   if (!(lt(cfg.tp1Mult, cfg.tp2Mult) && lt(cfg.tp2Mult, cfg.tp3Mult))) throw new Error('TP multipliers must satisfy TP1 < TP2 < TP3.');
   if (ge(cfg.tp1Pct + cfg.tp2Pct, 100)) throw new Error('TP1 + TP2 partial fractions must be less than 100%.');
@@ -620,7 +629,8 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   if (cfg.showDash && cfg.showJournal && cfg.dashPos === cfg.journalPos) {
     throw new Error('Select different corners for the dashboard and trade journal.');
   }
-  if (cfg.sizeEnabled && cfg.linearConfirmed) {
+  // The position estimate compares the account currency with the quote currency of the symbol (chart context)
+  if (cfg.sizeEnabled && cfg.linearConfirmed && chart?.currency === undefined) {
     throw new Error('The position estimate needs the quote currency of the symbol (syminfo.currency), which the bars do not carry.');
   }
 
@@ -678,6 +688,18 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
     }
   }
 
+  // time_close: the bar time plus the chart timeframe. On daily bars of a symbol with a day session (chart context:
+  // session hours such as "0930-1600" and the exchange time zone) it is the end of the session of that day.
+  const daySession = typeof chart?.session === 'string' && tfSeconds === 86400 ? /^(\d\d)(\d\d)-(\d\d)(\d\d)$/.exec(chart.session.trim()) : null;
+  const sessionEnd = daySession !== null && Number(daySession[3]) * 60 + Number(daySession[4]) > Number(daySession[1]) * 60 + Number(daySession[2])
+    ? { hour: Number(daySession[3]), minute: Number(daySession[4]), tz: timezoneOf(chart) } : null;
+  const closeMs = (i: number) => {
+    const t = tMs(i);
+    if (sessionEnd === null) return t + tfSeconds * 1000;
+    const { hour, minute, tz } = sessionEnd;
+    return pineTime.timestamp(tz, pineTime.year(t, tz), pineTime.month(t, tz), pineTime.dayofmonth(t, tz), hour, minute);
+  };
+
   // Higher timeframe: EMAs, close time and warm-up of its last closed bar (ema[1], time_close[1], bar_index[1])
   const htfFast: number[] = new Array(n).fill(NaN);
   const htfSlow: number[] = new Array(n).fill(NaN);
@@ -687,6 +709,8 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
     const starts = periodStarts(bars, cfg.htfInput);
     const htf: Bar[] = [];
     const group: number[] = [];
+    /** Last chart bar of each bar of the higher timeframe */
+    const lastOf: number[] = [];
     bars.forEach((b, i) => {
       if (i === 0 || starts[i] !== starts[i - 1]) {
         htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
@@ -697,6 +721,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
         last.close = b.close;
       }
       group.push(htf.length - 1);
+      lastOf[htf.length - 1] = i;
     });
     const htfSource = Series.fromArray(htf, htf.map(sourceOf));
     const fast = A(ta.ema(htfSource, fastLen));
@@ -706,7 +731,8 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
       if (g < 0) continue;
       htfFast[i] = fast[g];
       htfSlow[i] = slow[g];
-      htfClosedAt[i] = periodEnd(ms ? htf[g].time : htf[g].time * 1000, cfg.htfInput);
+      // On daily bars with a day session (chart context): the session end of the last day of the period
+      htfClosedAt[i] = sessionEnd !== null ? closeMs(lastOf[g]) : periodEnd(ms ? htf[g].time : htf[g].time * 1000, cfg.htfInput);
       htfReady[i] = g >= slowLen * cfg.warmupMult;
     }
   }
@@ -722,7 +748,6 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   const sessionSpec = `${cfg.sessionHours}:${cfg.sessionDays}`;
   /** time("1D", session, time zone) of a whole-day session: the start of the day in the session time zone */
   const dayStart = (t: number) => pineTime.timestamp(sessionTZ, pineTime.year(t, sessionTZ), pineTime.month(t, sessionTZ), pineTime.dayofmonth(t, sessionTZ));
-  const closeMs = (i: number) => tMs(i) + tfSeconds * 1000;
 
   // Theme palette of the dashboard, journal and watermark
   const luminance = 0.2126 * (color.r(CHART_BG) as number) + 0.7152 * (color.g(CHART_BG) as number) + 0.0722 * (color.b(CHART_BG) as number);
@@ -1260,9 +1285,22 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
       // Sizing (manual estimate, only when enabled)
       if (cfg.sizeEnabled) {
         addSection('— Sizing —');
-        // The linear contract is not confirmed here (the confirmed case throws above): no estimate is made
-        addData('Estimate', 'Verify linear contract first', textMuted, 'Manual position estimate for linear instruments. Never rewrites the model trade.');
-        addData('Size / notional', 'N/A', textMuted, 'Quantity from the risk budget, and notional value at the estimate entry.');
+        // syminfo.currency (with the linear contract confirmed and no currency in the chart context, calculate() throws above)
+        const symbolCurrency = currencyOf(chart);
+        const riskBudget = cfg.riskMode === 'Cash' ? cfg.riskCash : (cfg.equityInput * cfg.riskPct) / 100;
+        const calcValid = cfg.linearConfirmed && cfg.accountCurrency === symbolCurrency && ge(estimateRisk, MINTICK)
+          && (!cfg.positiveOnly || gt(Math.min(estimateEntry, estimateStop), 0)) && (trade.active || (ready && focusPlan.valid));
+        const quantity = calcValid
+          ? Math.floor(riskBudget / ((estimateRisk + estimatedCosts) * cfg.pointValueInput) / cfg.lotStep) * cfg.lotStep : NaN;
+        const calcStatus = !cfg.linearConfirmed ? 'Verify linear contract first'
+          : cfg.accountCurrency !== symbolCurrency ? `Currency mismatch: ${symbolCurrency}`
+            : !calcValid ? 'Invalid plan / stop side'
+              : lt(quantity, cfg.minQty) ? 'Below minimum quantity'
+                : `${qtyFmt(quantity)} units; risk ${fmt(quantity * (estimateRisk + estimatedCosts) * cfg.pointValueInput)} ${cfg.accountCurrency}`;
+        addData('Estimate', calcStatus, calcValid ? textColor : textMuted, 'Manual position estimate for linear instruments. Never rewrites the model trade.');
+        addData('Size / notional', calcValid && ge(quantity, cfg.minQty)
+          ? `${qtyFmt(quantity)} / ${fmt(quantity * Math.abs(estimateEntry) * cfg.pointValueInput)} ${cfg.accountCurrency} (not margin)` : 'N/A',
+        textMuted, 'Quantity from the risk budget, and notional value at the estimate entry.');
       }
 
       if (cfg.showStats) {

@@ -6,11 +6,12 @@
  * price; TYPE 2 puts the box on the other side of the level). Line and box grow one bar past the current bar until
  * a bar touches the level ("Extend Until Fill"); "Hide Filled" removes them then. With "Show Volume" the box shows
  * the volume of the swing bar. "Volume >" keeps only the swings whose bar volume is above the value, and the
- * lookback option keeps only the swings of the last days before the current time (clock of the computer, as
- * `timenow` in the original).
+ * lookback option keeps only the swings of the last days before the current time (`timenow` in the original).
  *
  * At most 500 lines and 500 boxes are kept (the oldest are removed first).
- * The box text uses the chart foreground colour. A port has no chart theme: it uses #DBDBDB (dark chart).
+ *
+ * Chart values (third argument): the port reads the chart foreground colour for the box text (without it: #DBDBDB,
+ * a dark chart) and the current time for the lookback option (without it: the clock of the computer).
  *
  * Open interest: the original reads the open interest of futures of other exchanges (six other symbols) for the
  * options "Show OI Δ", "OI Δ (abs.) >" and "Only Swings With". The chart bars do not have this data. These options
@@ -25,6 +26,7 @@
 import { ta, str, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LineDrawingData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { foregroundColorOf, nowOf, type ChartContext } from '../chart-context';
 
 export interface SwingLevelsAndLiquidityByLeviathanInputs {
   /** Bars after the swing bar */
@@ -161,8 +163,6 @@ export const metadata = {
 
 /** indicator(max_boxes_count = 500, max_lines_count = 500) */
 const MAX_OBJECTS = 500;
-/** chart.fg_color of a dark chart (the port has no chart theme) */
-const CHART_FG = '#DBDBDB';
 /** color.rgb(0, 0, 0, 100) */
 const CLEAR = '#00000000';
 /** Milliseconds per day */
@@ -192,6 +192,7 @@ interface Level {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SwingLevelsAndLiquidityByLeviathanInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'lines' | 'markers'> & { boxes: BoxData[]; lines: LineDrawingData[]; markers: MarkerData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   if (cfg.showOId || cfg.oitresh > 0 || cfg.pnoid !== '/') {
@@ -209,7 +210,7 @@ export function calculate(
   const pivLoArr = ta.pivotlow(new Series(bars, (b) => b.low), swingSizeL, swingSizeR).toArray();
 
   // timenow, as a time with whole seconds
-  const now = Math.floor(Date.now() / 1000) * 1000;
+  const now = Math.floor(nowOf(chart) / 1000) * 1000;
   const timeMs = (i: number) => (bars[i].time < 1e11 ? bars[i].time * 1000 : bars[i].time);
 
   // Every box / line in creation order (drawing limit), and the levels the script still updates
@@ -328,6 +329,8 @@ export function calculate(
   const textSize = ({
     'Size: Normal': 'normal', 'Size: Small': 'small', 'Size: Tiny': 'tiny', 'Size: Auto': 'auto', 'Size: Large': 'large',
   } as const)[cfg.labelsize];
+  // chart.fg_color
+  const chartFg = foregroundColorOf(chart);
   const textHAlign = cfg.texthalign === 'Middle' ? 'center' : cfg.texthalign === 'Left' ? 'left' : 'right';
 
   return {
@@ -336,7 +339,7 @@ export function calculate(
     markers,
     boxes: allBoxes.map((b) => ({
       time1: T(b.x1), price1: b.top, time2: T(b.x2), price2: b.bottom, bgColor: b.boxColor, borderColor: 'transparent',
-      text: b.text, textSize, textColor: CHART_FG, textHAlign, textVAlign: 'center' as const,
+      text: b.text, textSize, textColor: chartFg, textHAlign, textVAlign: 'center' as const,
     })),
     lines: allLines.map((l) => ({
       time1: T(l.x1), price1: l.y, time2: T(l.x2), price2: l.y, color: l.lineColor, style: lineStyle, width: Math.trunc(cfg.lineWid),

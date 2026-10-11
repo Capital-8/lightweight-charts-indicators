@@ -10,8 +10,10 @@
  * inside it is removed, and only the most recent blocks are kept ("Blocks Amount"). The signals option draws a
  * label when the price leaves a block.
  *
- * The port has no chart theme: the foreground colour of the chart (text and gap boxes) is #DBDBDB, the value of
- * the reference run on a dark chart. Every bar is a closed bar.
+ * Chart context (third argument of calculate): the port reads the foreground colour of the chart (text and gap
+ * boxes; #DBDBDB, the value of a dark chart, without a context) and the state of the last bar. The original looks
+ * for a gap on closed bars only: when the context says that the last bar is still open, no gap is searched on it.
+ * Without a context every bar is a closed bar.
  *
  * Reference: "FVG Order Blocks [BigBeluga]" by BigBeluga
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -21,6 +23,7 @@
 import { ta, str, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { foregroundColorOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface FvgOrderBlocksInputs {
   /** Smallest gap size, in percent of the price */
@@ -62,8 +65,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** chart.fg_color of the reference run (dark chart) */
-const CHART_FG_COLOR = '#DBDBDB';
 /** indicator(max_boxes_count = 500); labels keep the default of 50 */
 const MAX_BOXES = 500;
 const MAX_LABELS = 50;
@@ -96,6 +97,7 @@ interface Block {
 export function calculate(
   bars: Bar[],
   inputs: Partial<FvgOrderBlocksInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'labels'> & { boxes: BoxData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -134,7 +136,10 @@ export function calculate(
     if (labels.length > MAX_LABELS + 5) labels = labels.slice(labels.length - MAX_LABELS);
   };
 
-  const fg = CHART_FG_COLOR;
+  // chart.fg_color (#DBDBDB without a chart context)
+  const fg = foregroundColorOf(chart);
+  /** barstate.isconfirmed of the last bar (true without a chart context) */
+  const lastConfirmed = lastBarConfirmedOf(chart);
   const fg90 = color.new(fg, 90);
   const fg70 = color.new(fg, 70);
   const brokenBg = String(color.new(fg, 85));
@@ -150,7 +155,8 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     const high = bars[i].high;
     const low = bars[i].low;
-    if (last - i < LOOKBACK) {
+    // if barstate.isconfirmed and last_bar_index - bar_index < loockback
+    if ((i < last || lastConfirmed) && last - i < LOOKBACK) {
       isBullGap = lt(H(i - 2), low) && lt(H(i - 2), H(i - 1)) && lt(L(i - 2), low) && gt(filtUp[i], cfg.filter);
       isBearGap = gt(L(i - 2), high) && gt(L(i - 2), L(i - 1)) && gt(H(i - 2), high) && gt(filtDn[i], cfg.filter);
     }

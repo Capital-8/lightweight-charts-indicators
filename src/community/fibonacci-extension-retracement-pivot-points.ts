@@ -16,8 +16,13 @@
  * multiple of the ATR, and bar colours by volume against its average. At most 500 lines and 500 labels are kept.
  *
  * Limits of the port: the periods of the higher timeframe come from the UTC calendar and the bars (see
- * src/anchor-period.ts); prices in label texts use a tick of 0.01 (the bars carry no symbol tick); the "Last Bar"
- * position of the pivot labels uses the current time, as the original; the alerts of the original are not ported.
+ * src/anchor-period.ts); the alerts of the original are not ported.
+ *
+ * Chart context (optional third argument):
+ * - `chart.mintick`: the symbol tick of the prices in the label texts. Without it 0.01.
+ * - `chart.timeframe`: the chart timeframe, for the "Auto" higher timeframe. Without it, it is taken from the bars.
+ * - `chart.now`: the current time, for the "Last Bar" position of the pivot labels (as the original). Without it the
+ *   clock of the computer.
  *
  * Reference: "Fibonacci Extention / Retracment / Pivot Points by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -28,6 +33,7 @@ import { ta, str, math, Series, timeframe, type IndicatorResult, type InputConfi
 import type { BarColorData, LabelData, LineDrawingData, MarkerData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { periodStarts, chartTimeframe } from '../anchor-period';
+import { mintickOf, nowOf, type ChartContext } from '../chart-context';
 
 type LevelLabels = 'Levels' | 'Prices' | 'Levels + Prices' | 'None';
 type LineStyleName = 'Dashed' | 'Dotted' | 'Solid';
@@ -316,8 +322,6 @@ export const metadata = {
 
 /** indicator(max_lines_count = 500, max_labels_count = 500) */
 const MAX_OBJECTS = 500;
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 const GRAY = '#787B86';
 const TEAL = '#089981';
 const BLUE = '#2962FF';
@@ -403,6 +407,7 @@ const lineStyle = (s: LineStyleName) => (s === 'Solid' ? 'solid' : s === 'Dotted
 export function calculate(
   bars: Bar[],
   inputs: Partial<FibonacciExtensionRetracementPivotPointsInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & {
   markers: MarkerData[]; barColors: BarColorData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[];
 } {
@@ -414,18 +419,20 @@ export function calculate(
   const withExt = tool === 'Extensions' || tool === 'Extensions + Pivot Points';
   const withRet = tool === 'Retracements' || tool === 'Retracements + Pivot Points';
   const withPvt = tool === 'Pivot Points' || tool === 'Extensions + Pivot Points' || tool === 'Retracements + Pivot Points';
+  // str.tostring(v, format.mintick) with syminfo.mintick
+  const MINTICK = mintickOf(chart);
   const priceText = (v: number) => str.tostring(v, 'mintick', MINTICK);
   const ms = n > 0 && bars[0].time >= 1e12;
 
   // Higher timeframe of the pivot points
-  const chart = chartTimeframe(bars);
-  const info = chart === '' ? null : timeframe.info(chart);
+  const chartTf = chart?.timeframe ?? chartTimeframe(bars);
+  const info = chartTf === '' ? null : timeframe.info(chartTf);
   const fixed: Record<string, string> = {
     '15 Min': '15', '1 Hour': '60', '4 Hour': '240', Session: 'D', Daily: 'D', Weekly: 'W', Monthly: 'M', Quarterly: '3M', Yearly: '12M',
   };
   const htf = fixed[cfg.pivotTimeframe]
-    ?? (['1', '3', '5', '15'].includes(chart) ? 'D'
-      : ['30', '45', '60', '120', '180', '240'].includes(chart) ? 'W'
+    ?? (['1', '3', '5', '15'].includes(chartTf) ? 'D'
+      : ['30', '45', '60', '120', '180', '240'].includes(chartTf) ? 'W'
         : info?.isdaily ? 'M'
           : info?.isweekly || info?.ismonthly ? '12M' : '3M');
   const starts = periodStarts(bars, htf);
@@ -549,7 +556,9 @@ export function calculate(
   const histPP = cfg.histPP && withPvt;
   const extendStyle = lineStyle(cfg.extendL);
   const tzStyle = cfg.fibTzlp === 'Left' ? 'label_left' : 'label_right';
-  const nowTime = ms ? Date.now() : Math.floor(Date.now() / 1000);
+  // timenow
+  const nowMs = nowOf(chart);
+  const nowTime = ms ? nowMs : Math.floor(nowMs / 1000);
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];

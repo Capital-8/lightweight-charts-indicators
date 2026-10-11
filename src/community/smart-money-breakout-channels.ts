@@ -32,8 +32,8 @@
  * timeframe, the estimate is used whatever its value; above the chart timeframe, the error of the library is
  * thrown.
  *
- * The script reads the chart foreground colour. A port has no chart theme: it uses the colour of the reference run
- * (#DBDBDB). A gauge pointer without a value (na) is not drawn and is left out. The 3 alert conditions of the
+ * Chart values read: the chart foreground colour (channel box, mid line, texts, breakout label texts, gauge pointer,
+ * table). Without a chart context it is the dark theme colour #DBDBDB. A gauge pointer without a value (na) is not drawn and is left out. The 3 alert conditions of the
  * script have no output.
  *
  * Reference: "Smart Money Breakout Channels [AlgoAlpha]" by AlgoAlpha
@@ -44,6 +44,7 @@
 import { ta, Series, color, math, str, timeframe, callsite, barTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, MarkerData, PineSize, PlotCandleData, TableData } from '../types';
 import { chartTimeframe } from '../anchor-period';
+import { foregroundColorOf, type ChartContext } from '../chart-context';
 import { upDownVolumeOfChartBars } from '../lower-tf-volume';
 
 export interface SmartMoneyBreakoutChannelsInputs {
@@ -135,8 +136,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** chart.fg_color of the reference run */
-const CHART_FG = '#DBDBDB';
 /** indicator(max_boxes_count = 500); lines keep the default of 50 */
 const MAX_BOXES = 500;
 const MAX_LINES = 50;
@@ -187,6 +186,7 @@ function register<T extends Obj>(list: T[], obj: T, max: number): T {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SmartMoneyBreakoutChannelsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & {
     markers: MarkerData[];
     plotCandles: Record<string, PlotCandleData[]>;
@@ -197,6 +197,8 @@ export function calculate(
   } {
   const cfg = { ...defaultInputs, ...inputs };
   const { overlap, strong, length, volMode } = cfg;
+  // chart.fg_color
+  const chartFg = foregroundColorOf(chart);
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -230,9 +232,9 @@ export function calculate(
   const smoothedVol = A(ta.sma(S(volume), 20));
   const atr = A(ta.atr(bars, length));
 
-  const fg90 = String(color.new(CHART_FG, 90));
-  const fg50 = String(color.new(CHART_FG, 50));
-  const fg30 = String(color.new(CHART_FG, 30));
+  const fg90 = String(color.new(chartFg, 90));
+  const fg50 = String(color.new(chartFg, 50));
+  const fg30 = String(color.new(chartFg, 30));
   const red70 = String(color.new(cfg.red, 70));
   const green70 = String(color.new(cfg.green, 70));
   const textSize = ({ Tiny: 'tiny', Small: 'small', Medium: 'normal', Large: 'large' } as const)[cfg.textSize];
@@ -343,7 +345,7 @@ export function calculate(
         downHeight = -upHeight;
         // getVolumeTransparency
         const transparency = math.max(20, math.min(80, 80 - (ratio - 0.5) * 40) as number) as number;
-        upColor = String(color.new(CHART_FG, transparency));
+        upColor = String(color.new(chartFg, transparency));
         downColor = upColor;
       } else if (volMode === 'Comparison') {
         upHeight = Number.isNaN(uv[i]) ? 0 : (uv[i] / smoothedVol[i]) * quarter;
@@ -372,12 +374,12 @@ export function calculate(
     // plotshape(upbreak != 0 ? upbreak : na, ...), plotshape(downbreak != 0 ? downbreak : na, ...)
     if (!Number.isNaN(upbreak) && !eq(upbreak, 0)) {
       markers.push({
-        time: bar.time, position: 'atPriceBottom', price: upbreak, shape: 'labelUp', color: cfg.green, text: '▲', textColor: CHART_FG,
+        time: bar.time, position: 'atPriceBottom', price: upbreak, shape: 'labelUp', color: cfg.green, text: '▲', textColor: chartFg,
       });
     }
     if (!Number.isNaN(downbreak) && !eq(downbreak, 0)) {
       markers.push({
-        time: bar.time, position: 'atPriceTop', price: downbreak, shape: 'labelDown', color: cfg.red, text: '▼', textColor: CHART_FG,
+        time: bar.time, position: 'atPriceTop', price: downbreak, shape: 'labelDown', color: cfg.red, text: '▼', textColor: chartFg,
       });
     }
 
@@ -399,7 +401,7 @@ export function calculate(
         const pointerPos = topBound - ((delvol + 100) / 200) * (topBound - bottomBound);
         if (Number.isFinite(pointerPos)) {
           labels.push({
-            time: barTime(bars, i + 3), price: pointerPos, text: '◀', color: 'transparent', textColor: CHART_FG,
+            time: barTime(bars, i + 3), price: pointerPos, text: '◀', color: 'transparent', textColor: chartFg,
             size: 'small', style: 'label_left',
           });
         }
@@ -409,10 +411,10 @@ export function calculate(
     // if not volumeAvailable: the warning table (made once, kept)
     if (Number.isNaN(volume[i]) && tables.length === 0) {
       tables.push({
-        position: 'top_right', columns: 1, rows: 1, bgColor: cfg.red, borderWidth: 1, borderColor: CHART_FG,
-        frameColor: CHART_FG, frameWidth: 1,
+        position: 'top_right', columns: 1, rows: 1, bgColor: cfg.red, borderWidth: 1, borderColor: chartFg,
+        frameColor: chartFg, frameWidth: 1,
         cells: [{
-          column: 0, row: 0, text: 'Volume not available\nGauge may not work as expected', textColor: CHART_FG,
+          column: 0, row: 0, text: 'Volume not available\nGauge may not work as expected', textColor: chartFg,
           textHAlign: 'center', textSize: 'small',
         }],
       });

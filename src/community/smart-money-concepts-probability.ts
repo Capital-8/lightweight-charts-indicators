@@ -16,8 +16,8 @@
  * the range, the bottom 10 % to 25 %, and the middle 10 %), from the bar of the latest level.
  *
  * At most 500 lines and 500 labels are kept (the oldest are removed first).
- * The labels and the table use the chart foreground and background colours. A port has no chart theme: it uses
- * #DBDBDB and #0F0F0F (dark chart).
+ * Chart values read from the optional third argument: the foreground and background colours of the chart, used by
+ * the two labels and the table. Without them the port uses #DBDBDB and #0F0F0F (dark chart).
  * The three inputs of the group "Any alert() function call" only change the text of the alert: no output.
  *
  * Reference: "Smart Money Concepts Probability (Expo)" by Zeiierman
@@ -28,6 +28,7 @@
 import { ta, math, str, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, LinefillData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface SmartMoneyConceptsProbabilityInputs {
   /** Pivot period: bars on each side */
@@ -101,9 +102,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** Chart colours of a dark chart (the port has no chart theme): chart.bg_color / chart.fg_color */
-const CHART_BG = '#0F0F0F';
-const CHART_FG = '#DBDBDB';
 /** color.gray, color.green, color.red */
 const GRAY = '#787B86';
 const GREEN = '#4CAF50';
@@ -134,6 +132,7 @@ interface Lb {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SmartMoneyConceptsProbabilityInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines' | 'linefills' | 'tables'> & {
   boxes: BoxData[];
   labels: LabelData[];
@@ -142,6 +141,9 @@ export function calculate(
   tables: TableData[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
+  // chart.bg_color / chart.fg_color
+  const CHART_BG = backgroundColorOf(chart);
+  const CHART_FG = foregroundColorOf(chart);
   const n = bars.length;
   const prd = Math.trunc(cfg.prd);
   const back = cfg.s1 ? Math.trunc(cfg.resp) : prd;

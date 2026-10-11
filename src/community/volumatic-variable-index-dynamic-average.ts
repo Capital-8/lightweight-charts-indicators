@@ -15,8 +15,8 @@
  * The last bar has two more labels at the trend line: the up-bar and down-bar volume since the last trend change with
  * their difference in percent of their average, and a star.
  *
- * The port has no chart theme: the foreground colour of the chart (texts) is #DBDBDB, the value of the reference run
- * (dark chart).
+ * Chart values read from the optional third argument: the foreground colour of the chart (the colour of the texts).
+ * Without it the port uses #DBDBDB (dark chart).
  *
  * Reference: "Volumatic Variable Index Dynamic Average [BigBeluga]" by BigBeluga
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -26,6 +26,7 @@
 import { ta, math, str, color, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface VolumaticVariableIndexDynamicAverageInputs {
   vidyaLength: number;
@@ -70,8 +71,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** chart.fg_color of the reference run (dark chart) */
-const CHART_FG = '#DBDBDB';
 /** indicator(max_lines_count = 500, max_labels_count = 500) */
 const MAX_OBJECTS = 500;
 /** Pivot bars on each side */
@@ -104,8 +103,11 @@ interface Lb {
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumaticVariableIndexDynamicAverageInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'labels' | 'lines'> & { markers: MarkerData[]; labels: LabelData[]; lines: LineDrawingData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  // chart.fg_color
+  const CHART_FG = foregroundColorOf(chart);
   const n = bars.length;
   const vidyaLength = cfg.vidyaLength;
   const momentumLength = Math.trunc(cfg.vidyaMomentum);

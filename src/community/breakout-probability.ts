@@ -13,8 +13,8 @@
  * bar on the side with the higher first-level probability and counts a win when the bar reaches the previous high
  * (or low).
  *
- * The script reads the chart background and foreground colours for the table. A port has no chart theme: it uses
- * the colours of the reference run (background #0F0F0F, foreground #DBDBDB). The alert() call of the script has no
+ * Chart values read: the chart background and foreground colours, for the table. Without a chart context they are
+ * the dark theme colours (background #0F0F0F, foreground #DBDBDB). The alert() call of the script has no
  * output; its four inputs are kept.
  *
  * Reference: "Breakout Probability (Expo)" by Zeiierman
@@ -25,6 +25,7 @@
 import { color, compare, math, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, LinefillData, TableData } from '../types';
 import { barTime } from '../bar-time';
+import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface BreakoutProbabilityInputs {
   /** Space between two levels, in percent of the close */
@@ -92,9 +93,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** Chart colours of the reference run (chart.bg_color / chart.fg_color) */
-const CHART_BG = '#0F0F0F';
-const CHART_FG = '#DBDBDB';
 /** Pine v5 colour constants */
 const GREEN = '#4CAF50';
 const RED = '#FF5252';
@@ -104,9 +102,13 @@ const BLACK = '#363A45';
 export function calculate(
   bars: Bar[],
   inputs: Partial<BreakoutProbabilityInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[] } {
   const { perc, nbr, upCol, dnCol, fill, disableZero, showStats } = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  // chart.bg_color / chart.fg_color
+  const chartBg = backgroundColorOf(chart);
+  const chartFg = foregroundColorOf(chart);
 
   // var total = matrix.new<int>(7, 4, 0); var vals = matrix.new<float>(5, 4, 0.0)
   const total: number[][] = Array.from({ length: 7 }, () => [0, 0, 0, 0]);
@@ -220,17 +222,17 @@ export function calculate(
   //   border_color = chart.bg_color, border_width = -2); the cells are written on the last bar
   const table: TableData = {
     position: 'top_right', columns: 2, rows: 3, cells: [],
-    frameColor: String(color.new_color(GRAY, 50)), frameWidth: 3, borderColor: CHART_BG, borderWidth: -2,
+    frameColor: String(color.new_color(GRAY, 50)), frameWidth: 3, borderColor: chartBg, borderWidth: -2,
   };
   if (n > 0 && showStats) {
     const W = total[6][0];
     const L = total[6][1];
     const WR = math.round((W / (W + L)) * 100, 2);
     const texts = [`WIN: ${str.tostring(W)}`, `LOSS: ${str.tostring(L)}`, `Profitability: ${str.tostring(WR, 'percent')}`];
-    const cols = [GREEN, RED, CHART_FG];
+    const cols = [GREEN, RED, chartFg];
     for (let i = 0; i <= 2; i++) {
       table.cells.push({
-        column: 0, row: i, text: texts[i], textHAlign: 'center', bgColor: CHART_BG, textColor: cols[i],
+        column: 0, row: i, text: texts[i], textHAlign: 'center', bgColor: chartBg, textColor: cols[i],
         textSize: 'auto', tooltip: TABLE_TIPS[i],
       });
     }

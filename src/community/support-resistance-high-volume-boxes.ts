@@ -12,8 +12,8 @@
  * under its level. Diamonds mark the holds and the retests (drawn one bar back); "Break Sup" / "Break Res" labels
  * mark the first break of a level.
  *
- * The Pine script uses chart.fg_color for the box and label texts. A port has no chart theme: the colour is #DBDBDB,
- * the value of the reference runs (dark theme).
+ * The Pine script uses chart.fg_color for the box and label texts. The port reads it from the chart context (third
+ * argument); without it the colour is #DBDBDB (dark theme).
  * The Pine script keeps at most 50 boxes and 50 labels (the oldest are deleted).
  *
  * Reference: "Support and Resistance (High Volume Boxes) [ChartPrime]" by ChartPrime
@@ -24,6 +24,7 @@
 import { ta, Series, color, str, math, callsite, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BoxData, LabelData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface SupportResistanceHighVolumeBoxesInputs {
   /** Pivot length (left and right) */
@@ -59,8 +60,6 @@ export const metadata = {
 // Pine v5 colour constants
 const GREEN = '#4CAF50';
 const RED = '#FF5252';
-/** chart.fg_color of the reference runs (dark theme) */
-const CHART_FG = '#DBDBDB';
 // indicator(..., max_boxes_count = 50); labels: default 50
 const MAX_BOXES = 50;
 const MAX_LABELS = 50;
@@ -89,8 +88,11 @@ function register<T>(list: T[], obj: T, max: number, onDelete?: (o: T) => void):
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceHighVolumeBoxesInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; boxes: BoxData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  // chart.fg_color
+  const chartFg = foregroundColorOf(chart);
   const n = bars.length;
   const lookback = Math.trunc(cfg.lookbackPeriod);
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -240,14 +242,14 @@ export function calculate(
   for (const b of boxObjs) {
     if (isNaN(b.top) || isNaN(b.bottom) || b.left < 0) continue;
     const out: BoxData = { time1: tm(b.left), price1: b.top, time2: tm(b.right), price2: b.bottom, bgColor: b.bgColor,
-      borderColor: b.borderColor, borderWidth: 1, text: b.text, textColor: CHART_FG, textSize: 'small' };
+      borderColor: b.borderColor, borderWidth: 1, text: b.text, textColor: chartFg, textSize: 'small' };
     if (b.borderStyle !== 'solid') out.borderStyle = b.borderStyle;
     boxes.push(out);
   }
   const labels: LabelData[] = [];
   for (const l of labelObjs) {
     if (isNaN(l.x) || isNaN(l.y)) continue;
-    labels.push({ time: tm(l.x), price: l.y, text: l.text, color: l.color, style: l.style, textColor: CHART_FG,
+    labels.push({ time: tm(l.x), price: l.y, text: l.text, color: l.color, style: l.style, textColor: chartFg,
       size: 'small' });
   }
 

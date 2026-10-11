@@ -20,11 +20,13 @@
  * In the 'Present' mode liquidity, gaps, order blocks, displacement and killzones use the last 501 bars only, and a
  * market structure shift removes the earlier structure lines.
  *
+ * Chart values read:
+ * - The exchange time zone, for the days of the week (NWOG / NDOG). Without a chart context the days are read on
+ *   the UTC calendar: equal on UTC symbols and on symbols whose trading day is inside the UTC day (e.g. US stocks).
+ * - The current time: the right side of a breaker block box is the current time plus 10 bars, as the original.
+ *   Without a chart context it is the clock of the computer: it changes with the call time.
+ *
  * Limits of the port:
- * - Days of the week (NWOG / NDOG) are read on the UTC calendar; the original uses the exchange time zone. Equal on
- *   UTC symbols and on symbols whose trading day is inside the UTC day (e.g. US stocks).
- * - The right side of a breaker block box is the current time (the clock of the computer) plus 10 bars, as the
- *   original: it changes with the call time.
  * - The bar interval (10 and 50 bar lengths of time-based drawings) is the most frequent gap between two bars.
  *
  * Reference: "ICT Concepts [LuxAlgo]" by LuxAlgo
@@ -36,6 +38,7 @@ import { ta, Series, color, math, timeframe, time as pineTime, type IndicatorRes
 import { executeScript, indicator as declareIndicator, box, line, label } from 'oakscriptjs/script';
 import type { BgColorData, BoxData, LabelData, LineDrawingData, MarkerData } from '../types';
 import { chartTimeframe } from '../anchor-period';
+import { nowOf, timezoneOf, type ChartContext } from '../chart-context';
 
 export interface IctConceptsInputs {
   /** Mode */
@@ -329,6 +332,7 @@ interface TwoLnLb { l1: Line; l2: Line; lb: Label }
 export function calculate(
   bars: Bar[],
   inputs: Partial<IctConceptsInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; markers: MarkerData[]; bgColors: BgColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { len, length, showBull, showBear, visVim, visLiq, visBxs, maxNWOG, maxNDOG, iFib } = cfg;
@@ -352,7 +356,9 @@ export function calculate(
   // General calculations
   const tf = chartTimeframe(bars);
   const tfMsec = tf === '' ? NaN : timeframe.in_seconds(tf) * 1000;
-  const timenow = Date.now();
+  const timenow = nowOf(chart);
+  // syminfo.timezone: `dayofweek` is read in the exchange time zone
+  const exchangeTz = timezoneOf(chart);
   const maxSize = 50;
   const perc_Body = 0.36;
   const bxBack = 10;
@@ -886,7 +892,7 @@ export function calculate(
         for (const _k of range(0, maxNWOG - 1)) bl_NWOG.unshift({ b: null, l: null });
         for (const _k of range(0, maxNDOG - 1)) bl_NDOG.unshift({ b: null, l: null });
       }
-      const dow = pineTime.dayofweek(time, 'UTC');
+      const dow = pineTime.dayofweek(time, exchangeTz);
       if (dow === 6) {
         friCp = close;
         friCi = i;

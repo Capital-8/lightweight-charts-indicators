@@ -15,19 +15,21 @@
  * the chart timeframe with "Auto", or set by hand), and "Show Historical Pivots" plots them for every past period.
  * At most 500 lines are kept.
  *
+ * Chart values read from the optional third argument (see src/chart-context.ts): the symbol tick for the prices in
+ * label texts and tooltips (0.01 without it), the exchange time zone for the day of the week of the "Daily" and
+ * "Weekly" pivots (UTC without it), and the current time for the "Last Bar" position of the pivot labels (the clock
+ * of the computer without it).
  * Limits of the port: the periods of the higher timeframe come from the UTC calendar and the bars (see
- * src/anchor-period.ts), and the day of the week ("Daily" and "Weekly" pivots) is the UTC day of the bar, where the
- * original uses the time zone of the exchange; prices in label texts use a tick of 0.01 (the bars carry no symbol
- * tick); the "Last Bar" position of the pivot labels uses the current time, as the original; the alerts of the
- * original are not ported.
+ * src/anchor-period.ts); the alerts of the original are not ported.
  *
  * Reference: "Auto Pitchfork, Fib Retracement and Zig Zag by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © dgtrd
  */
 
-import { ta, str, math, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, str, math, color, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, LinefillData, TableData } from '../types';
+import { mintickOf, nowOf, timezoneOf, type ChartContext } from '../chart-context';
 import { barInterval, barTime } from '../bar-time';
 import { periodStarts, chartTimeframe } from '../anchor-period';
 
@@ -345,8 +347,6 @@ export const metadata = {
 
 /** indicator(max_lines_count = 500) */
 const MAX_LINES = 500;
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 const GRAY = '#787B86';
 const TEAL = '#00897B';
 const CLEAR = '#00000000';
@@ -404,11 +404,14 @@ const round = (v: number) => math.round(v) as number;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AutoPitchforkFibRetracementZigZagInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
-  const priceText = (v: number) => str.tostring(v, 'mintick', MINTICK);
+  // syminfo.mintick
+  const mintick = mintickOf(chart);
+  const priceText = (v: number) => str.tostring(v, 'mintick', mintick);
   const ms = n > 0 && bars[0].time >= 1e12;
   const atr10 = ta.atr(bars, 10).toArray();
 
@@ -534,20 +537,21 @@ export function calculate(
     + (cfg.isFib ? fibLevels.length * (cfg.fibTool === 'Extentions' ? 2 : 1) + fibLevels.filter((l) => l.show).length : 0);
 
   // Higher timeframe of the pivot levels
-  const chart = chartTimeframe(bars);
-  const info = chart === '' ? null : timeframe.info(chart);
+  const chartTf = chartTimeframe(bars);
+  const info = chartTf === '' ? null : timeframe.info(chartTf);
   const fixed: Record<string, string> = {
     '15 Min': '15', '1 Hour': '60', '4 Hour': '240', Session: 'D', Daily: 'D', Weekly: 'W', Monthly: 'M', Quarterly: '3M', Yearly: '12M',
   };
   const htf = fixed[cfg.pivotTimeframe]
-    ?? (['1', '3', '5', '15'].includes(chart) ? 'D'
-      : ['30', '45', '60', '120', '180', '240'].includes(chart) ? 'W'
+    ?? (['1', '3', '5', '15'].includes(chartTf) ? 'D'
+      : ['30', '45', '60', '120', '180', '240'].includes(chartTf) ? 'W'
         : info?.isdaily ? 'M'
           : info?.isweekly || info?.ismonthly ? '12M' : '3M');
   const starts = periodStarts(bars, htf);
   const dayStarts = htf === 'W' ? periodStarts(bars, 'D') : starts;
-  /** dayofweek: 1 = Sunday ... 7 = Saturday (UTC day of the bar) */
-  const dayOfWeek = (i: number) => new Date(ms ? bars[i].time : bars[i].time * 1000).getUTCDay() + 1;
+  /** dayofweek: 1 = Sunday ... 7 = Saturday, in the exchange time zone */
+  const timezone = timezoneOf(chart);
+  const dayOfWeek = (i: number) => pineTime.dayofweek(ms ? bars[i].time : bars[i].time * 1000, timezone);
   const wStart = { Monday: 2, Tuesday: 3, Wednesday: 4, Thursday: 5, Friday: 6, Saturday: 7, Sunday: 1 }[cfg.weekStart];
   const newPeriod = (i: number) => {
     if (i === 0) return false;
@@ -771,7 +775,7 @@ export function calculate(
     // f_processPivotLevelX(): the Camarilla levels of the period before, on the last bar
     if (cfg.pivot !== 'None') {
       const timeX21 = 2 * timeX11 - timeX10;
-      const nowTime = ms ? Date.now() : Math.floor(Date.now() / 1000);
+      const nowTime = ms ? nowOf(chart) : Math.floor(nowOf(chart) / 1000);
       PIVOT_LEVELS.forEach((name, k) => {
         const resistance = k < 4;
         if (!(resistance ? cfg.showR : cfg.showS)) return;

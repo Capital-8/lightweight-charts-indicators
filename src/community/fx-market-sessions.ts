@@ -26,11 +26,12 @@
  * had no bar for 15,000 bars (the window of the session high is longer than Pine allows), when the opening range
  * table gets a third session, and when a session ends with opening range lines but no opening range label.
  *
- * Limits of the port:
- * - Pips and prices printed with the price tick of the symbol: the bars carry no tick, the port uses a tick of 0.01.
- * - The title of the opening range table has the ticker of the symbol in the original; the port leaves it empty.
- * - The information table marks a session as open only when the market is open (session.ismarket); the port takes
- *   every bar as a market bar.
+ * Chart context (third argument), all optional:
+ * - Price tick of the symbol: the pips and the prices of the texts; 0.01 without it.
+ * - Ticker of the symbol: the title of the opening range table ("Opening range(BTCUSD)"); empty without it.
+ * - Regular session hours and exchange time zone: the information table marks a session as open only when the
+ *   market is open (session.ismarket: the last bar is in the regular session). Without the hours every bar is
+ *   taken as a market bar.
  *
  * Reference: "FX Market Sessions" by boitoki
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -47,6 +48,7 @@ import type {
 } from '../types';
 import { barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
+import { mintickOf, tickerOf, timezoneOf, type ChartContext } from '../chart-context';
 
 type YesNo = 'Yes' | '× No';
 type ChartOption = 'Bar color' | 'Candles' | '× No';
@@ -365,8 +367,6 @@ const MAX_OBJECTS = 200;
 const MAX_BARS = 500;
 /** Longest window of ta.highest() / ta.lowest() in Pine */
 const MAX_HISTORY = 15000;
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 const ICON_SEPARATOR = ' • ';
 const WHITE = '#FFFFFF';
 // TRANSPARENT = color.new(color.black, 100)
@@ -450,9 +450,6 @@ class Pool<T extends { deleted?: boolean }> {
 /** f_border_style() */
 const borderStyle = (s: string): Style => (s === BORDER_STYLE1 ? 'solid' : s === BORDER_STYLE2 ? 'dashed' : 'dotted');
 
-/** Utilities.toPips(): price / (tick * 10) */
-const toPips = (v: number) => v / (MINTICK * 10);
-
 /**
  * Utilities.clear_lines() / clear_labels() / clear_boxes(): when the array has more than max(0, min) objects, the
  * loop `for i = min to array.size(arr)` deletes the first object of the array on each turn. The bound is the size
@@ -472,6 +469,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<FxMarketSessionsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & {
   markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; linefills: LinefillData[];
   tables: TableData[]; barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]>;
@@ -480,8 +478,19 @@ export function calculate(
   const n = bars.length;
   const inMs = n > 0 && bars[0].time >= 1e12;
   const tz = cfg.tz;
+  // syminfo.mintick
+  const MINTICK = mintickOf(chart);
+  /** Utilities.toPips(): price / (tick * 10) */
+  const toPips = (v: number) => v / (MINTICK * 10);
   const hist = Math.trunc(cfg.historyPeriod);
   const tf = chartTimeframe(bars);
+  // session.ismarket on the last bar: on intraday bars, the bar is in the regular session hours of the chart context
+  // (read in the exchange time zone). Without these hours every bar is taken as a market bar.
+  const regular = chart?.regularSession ?? chart?.session;
+  const isMarket = n > 0 && tf !== '' && timeframe.in_seconds(tf) < 86400
+    && typeof regular === 'string' && /^(24x7|\d{4}-\d{4}(,\d{4}-\d{4})*(:\d+)?)$/.test(regular.trim())
+    ? pineTime.inSession(inMs ? bars[n - 1].time : bars[n - 1].time * 1000, regular.trim(), timezoneOf(chart))
+    : true;
   const multiplier = tf === '' ? 1 : timeframe.info(tf).multiplier;
 
   // Styles
@@ -1116,8 +1125,8 @@ export function calculate(
       put({ column: 4, row: 0, text: '%', textColor: header, textSize: cfg.infoSize });
       infoMerges.push({ startColumn: 0, startRow: 0, endColumn: 1, endRow: 0 });
       data.forEach((s, r) => {
-        // in_session = my_data.in_session and session.ismarket (every bar is taken as a market bar)
-        const inSession = s.inSession;
+        // in_session = my_data.in_session and session.ismarket
+        const inSession = s.inSession && isMarket;
         const p = s.ohlc.hl / s.priceRangeAvg;
         const curBase = gt(0.75, p) ? MONOKAI_GREEN : gt(1.25, p) ? MONOKAI_ORANGE : MONOKAI_RED;
         const price = cfg.infoValueType === 'Price';
@@ -1144,8 +1153,8 @@ export function calculate(
         if (cell.row > 4) throw new Error(`Row ${cell.row} is out of table bounds, number of rows is 5.`);
         opCells.set(`${cell.column}:${cell.row}`, cell);
       };
-      // 'Opening range(' + syminfo.ticker + ')': the bars carry no ticker
-      put({ column: 0, row: 0, text: `Opening range()${data.length === 0 ? ' (No data)' : ''}`, textSize: cfg.infoSize });
+      // 'Opening range(' + syminfo.ticker + ')'
+      put({ column: 0, row: 0, text: `Opening range(${tickerOf(chart)})${data.length === 0 ? ' (No data)' : ''}`, textSize: cfg.infoSize });
       if (!opMerges.length) opMerges.push({ startColumn: 0, startRow: 0, endColumn: 6, endRow: 0 });
       if (data.length > 0) {
         ['Session', 'Sum', 'R1', 'S1', 'R2', 'S2', 'Total'].forEach((text, column) => {

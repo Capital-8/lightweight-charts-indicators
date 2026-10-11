@@ -16,10 +16,11 @@
  *   timeframe: each bar gives one bar. The port uses the chart bars.
  * - "Profile Data Type" = "Open Interest" needs the open interest of another ticker (<symbol>_OI), which the bars do
  *   not carry: the port throws an Error for it.
- * - New days, weeks, months, quarters and years are read in the exchange time zone in the original. The port uses
- *   UTC: equal on UTC symbols and on symbols whose trading day is inside one UTC day (e.g. US stocks).
- * - The session box border and the session names use the chart foreground colour (chart.fg_color). The port has no
- *   chart theme: it uses #DBDBDB, the foreground colour of a dark chart (the reference runs).
+ * - New days, weeks, months, quarters and years are read in the exchange time zone, as in the original. The port
+ *   reads the time zone from the chart context (third argument of calculate). Without it the port uses UTC: equal
+ *   on UTC symbols and on symbols whose trading day is inside one UTC day (e.g. US stocks).
+ * - The session box border and the session names use the chart foreground colour (chart.fg_color), read from the
+ *   chart context. Without it the port uses #DBDBDB, the foreground colour of a dark chart.
  * - The original stops with a runtime error when a session is longer than 5,000 bars (history reference limit,
  *   e.g. "Yearly" on 60-minute bars). The port has no such limit and draws the session.
  * - The original stops with a runtime error when a session never starts for 15,000 bars (e.g. the London session
@@ -37,6 +38,7 @@ import {
 import type { LineDrawingData, BoxData, LabelData } from '../types';
 import { barInterval } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
+import { foregroundColorOf, timezoneOf, type ChartContext } from '../chart-context';
 
 export interface MarketSessionsVolumeProfileInputs {
   sessionType: 'Tokyo' | 'London' | 'New York' | 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
@@ -140,8 +142,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** chart.fg_color: the port has no chart theme; foreground colour of a dark chart (the reference runs) */
-const CHART_FG_COLOR = '#DBDBDB';
 /** indicator(max_boxes_count = 500); lines and labels keep the default of 50 */
 const MAX_BOXES = 500;
 const MAX_LINES = 50;
@@ -178,8 +178,13 @@ function getVol(y11: number, y12: number, y21: number, y22: number, height: numb
 export function calculate(
   bars: Bar[],
   inputs: Partial<MarketSessionsVolumeProfileInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  /** chart.fg_color (#DBDBDB, the foreground colour of a dark chart, without a chart context) */
+  const CHART_FG_COLOR = foregroundColorOf(chart);
+  /** syminfo.timezone, the time zone of dayofweek, weekofyear, dayofmonth, month and year (UTC without a chart context) */
+  const tz = timezoneOf(chart);
   if (cfg.volType === 'Open Interest') {
     throw new Error('Market sessions and Volume profile: "Open Interest" needs the open interest ticker of the symbol '
       + '(<symbol>_OI), which the bars do not carry.');
@@ -374,10 +379,10 @@ export function calculate(
     prevHigh = highestSite(bar.high, window('highest', lookback + 1));
     prevLow = lowestSite(bar.low, lookback + 1);
 
-    // Session starts: calendar fields in UTC (the original uses the exchange time zone)
+    // Session starts: calendar fields in the exchange time zone
     const cur = {
-      dow: pineTime.dayofweek(tMs, 'UTC'), week: pineTime.weekofyear(tMs, 'UTC'), dom: pineTime.dayofmonth(tMs, 'UTC'),
-      year: pineTime.year(tMs, 'UTC'), month: pineTime.month(tMs, 'UTC'),
+      dow: pineTime.dayofweek(tMs, tz), week: pineTime.weekofyear(tMs, tz), dom: pineTime.dayofmonth(tMs, tz),
+      year: pineTime.year(tMs, tz), month: pineTime.month(tMs, tz),
       // utcHour = hour(time(timeframe.period, '0000-2400', 'GMT'), 'GMT')
       hour: pineTime.hour(sessionTime(tMs), 'GMT'),
     };

@@ -21,13 +21,12 @@
  * Drawings are kept up to 500 lines, 500 labels and 500 boxes (the oldest are removed). Boxes that never get
  * coordinates count in the 500 but are not drawn: they are not in the result.
  *
- * Limits of the port:
- * - The right side of the order / breaker blocks is the current time (the clock of the computer), as the original
- *   does with timenow: the result changes with the call time.
- * - The tooltip of the swing labels is the price rounded to the symbol price tick in the original. Bars carry no
- *   symbol info: the port uses a tick of 0.01.
- * - The text of a liquidity void uses the chart foreground colour. The port has no chart theme and uses the
- *   foreground colour of a dark chart (#DBDBDB).
+ * Chart context (optional third argument):
+ * - `chart.now`: the right side of the order / breaker blocks is the current time, as the original does with
+ *   timenow. Without it the port reads the clock of the computer: the result changes with the call time.
+ * - `chart.mintick`: the tooltip of the swing labels is the price rounded to the symbol tick. Without it 0.01.
+ * - `chart.foregroundColor`: the text colour of a liquidity void. Without it the foreground colour of a dark chart
+ *   (#DBDBDB).
  *
  * Reference: "Pure Price Action ICT Tools [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -36,6 +35,7 @@
 
 import { ta, color, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { barTime } from '../bar-time';
+import { foregroundColorOf, mintickOf, nowOf, type ChartContext } from '../chart-context';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 
 type Term = 'Short Term' | 'Intermediate Term' | 'Long Term';
@@ -187,10 +187,6 @@ export const metadata = {
 
 /** calc_bars_count: the script runs on the last 2,000 bars */
 const CALC_BARS = 2000;
-/** chart.fg_color of a dark chart (the port has no chart theme) */
-const CHART_FG = '#DBDBDB';
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 /** max_lines_count, max_labels_count, max_boxes_count */
 const MAX_COUNT = 500;
 /** Size of the zigzag arrays */
@@ -253,6 +249,7 @@ interface Swing { y: number; x: number; crossed: boolean }
 export function calculate(
   bars: Bar[],
   inputs: Partial<PurePriceActionIctToolsInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -260,7 +257,10 @@ export function calculate(
   const tMs = bars.map((b) => (ms ? b.time : b.time * 1000));
   const start = Math.max(0, n - CALC_BARS);
   const view = bars.slice(start);
-  const timenow = Date.now();
+  const timenow = nowOf(chart);
+  // syminfo.mintick (format.mintick) and chart.fg_color
+  const MINTICK = mintickOf(chart);
+  const CHART_FG = foregroundColorOf(chart);
 
   const msText = cfg.msTextT === 'Enabled';
   const obbUseBody = cfg.obbUseBodyT === 'Enabled';

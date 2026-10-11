@@ -19,9 +19,13 @@
  * the broken range; the backtesting table (entries, wins, losses, win rate, average and total profit in %).
  *
  * The original throws when the higher timeframe is not above the chart timeframe: the port throws the same error.
- * The chart timeframe is taken from the most frequent gap between two bars. The original redraws on closed bars
- * only: every bar of the port is a closed bar. Prices in the texts of the "Alternative" layout use a tick of 0.01
- * (the original uses the tick of the symbol).
+ *
+ * Chart context (optional third argument):
+ * - `chart.timeframe`: the chart timeframe. Without it, it is taken from the most frequent gap between two bars.
+ * - `chart.lastBarConfirmed`: the original redraws on closed bars only. When the last bar is still open, the lines,
+ *   labels and boxes are those of the bar before it (the markers and the table use all bars). Without it every bar
+ *   is a closed bar.
+ * - `chart.mintick`: the symbol tick of the prices in the texts of the "Alternative" layout. Without it 0.01.
  *
  * Reference: "ICT Turtle Soup | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -32,6 +36,7 @@ import { ta, str, color, timeframe, Series, type IndicatorResult, type InputConf
 import type { BoxData, LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TablePosition } from '../types';
 import { barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
+import { lastBarConfirmedOf, mintickOf, type ChartContext } from '../chart-context';
 
 export interface IctTurtleSoupFluxChartsInputs {
   mssOffset: number;
@@ -134,8 +139,6 @@ const RR = 0.9;
 const MAX_SHOWN = 125;
 /** time("", -15): an open trade is drawn up to 15 bars after the current bar */
 const OPEN_TRADE_BARS = 15;
-/** Price tick of the texts (the original uses the tick of the symbol) */
-const MINTICK = 0.01;
 /** Colour constants of the original Pine version */
 const RED = '#FF5252';
 const BLUE = '#2962FF';
@@ -185,6 +188,7 @@ const POSITIONS: Record<string, TablePosition> = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<IctTurtleSoupFluxChartsInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -205,7 +209,9 @@ export function calculate(
   });
   if (n === 0) return result();
 
-  const chartSeconds = timeframe.in_seconds(chartTimeframe(bars));
+  // syminfo.mintick (format.mintick in the texts)
+  const MINTICK = mintickOf(chart);
+  const chartSeconds = timeframe.in_seconds(chart?.timeframe ?? chartTimeframe(bars));
   const htfSeconds = timeframe.in_seconds(cfg.higherTimeframe);
   if (htfSeconds <= chartSeconds) throw new Error('Higher timeframe must be higher than current timeframe.');
   const barLength = Math.trunc(htfSeconds / 60 / (chartSeconds / 60));
@@ -229,8 +235,8 @@ export function calculate(
   let lastTS: TurtleSoup | null = null;
   let highBreaks = 0;
   let lowBreaks = 0;
-  // The original draws on closed bars: the drawings are those of the last bar
-  const drawBar = last;
+  // The original draws on closed bars (barstate.isconfirmed): the drawings are those of the last closed bar
+  const drawBar = lastBarConfirmedOf(chart) ? last : last - 1;
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];

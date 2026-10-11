@@ -7,6 +7,7 @@
  *   their middle
  * - year: the open, the high / low so far and their middle
  * - Monday range: the high, low and middle of the first day of the current week
+ * - FX sessions (London / New York / Asia ranges, off by default): the open, high and low of the latest session
  * With "Merge Levels?" the labels of levels at the same price are joined into one text ("A / B").
  * "Right Anchored" starts every line at a fixed distance right of the last bar instead of the period start.
  *
@@ -16,18 +17,21 @@
  * - A level of a timeframe that the chart bars cannot build needs data that the bars do not carry: the port throws
  *   an Error. That is a timeframe below the chart timeframe (e.g. the day on weekly bars) or one whose periods do
  *   not start on a chart bar (e.g. the month, quarter and year on weekly bars, 4 hours on 3-hour bars).
- * - The right end of the lines is the current time (the clock of the computer, as the original) plus "Distance"
- *   times the gap between the last two bars.
- * - The FX sessions (London / New York / Asia ranges, off by default) are sessions in the exchange time zone of the
- *   symbol, which the bars do not carry: the port throws an Error when one of them is switched on.
+ *
+ * Chart values read from the optional third argument:
+ * - the current time (`now`): the right end of the lines is the current time plus "Distance" times the gap between
+ *   the last two bars. Without it the port reads the clock of the computer.
+ * - the exchange time zone (`timezone`): the hours of the FX sessions are read in it. Without it the port throws an
+ *   Error when one of the three FX session ranges is switched on.
  *
  * Reference: "Key Levels SpacemanBTC IDWM" by spacemanbtc
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { array, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { array, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LineDrawingData, LabelData, PineSize } from '../types';
 import { periodStarts, chartTimeframe } from '../anchor-period';
+import { nowOf, type ChartContext } from '../chart-context';
 
 export interface KeyLevelsSpacemanbtcIdwmInputs {
   displayStyle: 'Standard' | 'Right Anchored';
@@ -273,7 +277,11 @@ function periodOf(bars: Bar[], tf: string, chart: string): Period {
   return { time: starts[n - 1], open: bars[a].open, high, low, prevTime, prevHigh, prevLow, starts };
 }
 
-export function calculate(bars: Bar[], inputs: Partial<KeyLevelsSpacemanbtcIdwmInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<KeyLevelsSpacemanbtcIdwmInputs> = {},
+  chart?: ChartContext,
+): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const lines: LineDrawingData[] = [];
@@ -286,17 +294,18 @@ export function calculate(bars: Bar[], inputs: Partial<KeyLevelsSpacemanbtcIdwmI
   });
 
   // time(timeframe.period, session) of the London / New York / Tokyo sessions is read in the exchange time zone
-  if (cfg.londonRange || cfg.newYorkRange || cfg.asiaRange) {
-    throw new Error('Key Levels: the FX session ranges need the exchange time zone of the symbol, which the bars do not carry.');
+  const exchangeZone = chart?.timezone;
+  if ((cfg.londonRange || cfg.newYorkRange || cfg.asiaRange) && exchangeZone === undefined) {
+    throw new Error('Key Levels: the FX session ranges need the exchange time zone of the symbol (chart.timezone), which the bars do not carry.');
   }
   if (n === 0) return result();
 
-  const chart = chartTimeframe(bars);
+  const chartTf = chartTimeframe(bars);
   const cache = new Map<string, Period>();
   const period = (tf: string): Period => {
     let p = cache.get(tf);
     if (!p) {
-      p = periodOf(bars, tf, chart);
+      p = periodOf(bars, tf, chartTf);
       cache.set(tf, p);
     }
     return p;
@@ -336,7 +345,8 @@ export function calculate(bars: Bar[], inputs: Partial<KeyLevelsSpacemanbtcIdwmI
 
   // get_limit_right(bars) => timenow + (time - time[1]) * bars, in the unit of the bar times (seconds or ms)
   const ms = bars[0].time >= 1e12;
-  const timenow = ms ? Date.now() : Math.floor(Date.now() / 1000);
+  const nowMs = nowOf(chart);
+  const timenow = ms ? nowMs : Math.floor(nowMs / 1000);
   const gap = n > 1 ? bars[n - 1].time - bars[n - 2].time : NaN;
   const limitRight = (count: number) => timenow + gap * count;
   const right = limitRight(cfg.distanceRight);
@@ -347,24 +357,80 @@ export function calculate(bars: Bar[], inputs: Partial<KeyLevelsSpacemanbtcIdwmI
   const labelArray: LabelData[] = [];
   const drawnLines: LineDrawingData[] = [];
   const drawnLabels: LabelData[] = [];
+  const mergeLevel = (price: number, lb: LabelData, levelColor: string): void => {
+    if (array.includes(priceArray, price)) {
+      const hold = labelArray[array.indexof(priceArray, price)];
+      hold.text = `${lb.text} / ${hold.text}`;
+      lb.text = '';
+      hold.textColor = levelColor;
+    } else {
+      array.push(priceArray, price);
+      labelArray.push(lb);
+    }
+  };
   const level = (start: number, price: number, levelText: string, levelColor: string): void => {
     const x1 = rightAnchored ? anchor : start;
     const ln: LineDrawingData = { time1: x1, price1: price, time2: right, price2: price, color: levelColor, width, style };
     const lb: LabelData = { time: right, price, text: levelText, style: 'none', textColor: levelColor, size };
     drawnLines.push(ln);
     drawnLabels.push(lb);
-    if (cfg.mergeLevels) {
-      if (array.includes(priceArray, price)) {
-        const hold = labelArray[array.indexof(priceArray, price)];
-        hold.text = `${lb.text} / ${hold.text}`;
-        lb.text = '';
-        hold.textColor = levelColor;
+    if (cfg.mergeLevels) mergeLevel(price, lb, levelColor);
+  };
+
+  // FX sessions: the range of the session in progress, or of the latest one, and the open of its first bar. A
+  // session that is already running on the first bar keeps the time of that bar and an open of 0, as the original
+  const sessionLevels = (session: string, color: string, high: string, low: string, open: string): void => {
+    if (exchangeZone === undefined) return; // not reached: thrown above
+    let currentHigh = 0.0;
+    let currentLow = bars[0].close;
+    let start = bars[0].time;
+    let finalHigh = 0.0;
+    let finalLow = 0.0;
+    let finalOpen = 0.0;
+    let wasOut = false;
+    for (const bar of bars) {
+      if (pineTime.inSession(ms ? bar.time : bar.time * 1000, session, exchangeZone)) {
+        if (bar.high > currentHigh) currentHigh = bar.high;
+        if (bar.low < currentLow) currentLow = bar.low;
+        if (wasOut) {
+          start = bar.time;
+          finalOpen = bar.open;
+        }
+        finalHigh = currentHigh;
+        finalLow = currentLow;
+        wasOut = false;
       } else {
-        array.push(priceArray, price);
-        labelArray.push(lb);
+        if (!wasOut) {
+          finalHigh = currentHigh;
+          finalLow = currentLow;
+        }
+        wasOut = true;
+        currentHigh = 0.0;
+        currentLow = bar.close;
       }
     }
+    // three lines and three labels, then the merge of the labels in the same order
+    const first = drawnLabels.length;
+    const prices = [finalHigh, finalLow, finalOpen];
+    [high, low, open].forEach((levelText, k) => {
+      drawnLines.push({ time1: rightAnchored ? anchor : start, price1: prices[k], time2: right, price2: prices[k], color, width, style });
+      drawnLabels.push({ time: right, price: prices[k], text: levelText, style: 'none', textColor: color, size });
+    });
+    if (cfg.mergeLevels) prices.forEach((price, k) => mergeLevel(price, drawnLabels[first + k], color));
   };
+  const sessionShort = short(cfg.sessionShortHand);
+  if (cfg.londonRange) {
+    sessionLevels(cfg.londonSession, cfg.londonColor, sessionShort ? 'Lon-H' : 'London High',
+      sessionShort ? 'Lon-L' : 'London Low', sessionShort ? 'Lon-O' : 'London Open');
+  }
+  if (cfg.newYorkRange) {
+    sessionLevels(cfg.newYorkSession, cfg.newYorkColor, sessionShort ? 'NY-H' : 'New York High',
+      sessionShort ? 'NY-L' : 'New York Low', sessionShort ? 'NY-O' : 'New York Open');
+  }
+  if (cfg.asiaRange) {
+    sessionLevels(cfg.tokyoSession, cfg.asiaColor, sessionShort ? 'AS-H' : 'Asia High',
+      sessionShort ? 'AS-L' : 'Asia Low', sessionShort ? 'AS-O' : 'Asia Open');
+  }
 
   // 4 hours
   if (cfg.intraOpen) {

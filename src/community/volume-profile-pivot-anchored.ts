@@ -9,8 +9,9 @@
  * opposite pivot and the traded volume. A developing profile from the last pivot to the last bar is drawn on the
  * last bar. Bars are coloured by their volume against its moving average.
  *
- * The port has no symbol information: prices in the labels are shown with a tick size of 0.01. The alerts of the
- * original script (their text starts with the ticker name) are not part of the port.
+ * The prices in the labels are printed with the symbol tick (format.mintick): the port reads it from the chart
+ * context (third argument of calculate) and uses a tick of 0.01 without it. The alerts of the original script
+ * (their text starts with the ticker name) are not part of the port.
  *
  * Reference: "Volume Profile, Pivot Anchored by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -20,6 +21,7 @@
 import { ta, str, array, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, BoxData, LabelData, LineDrawingData, LinefillData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface VolumeProfilePivotAnchoredInputs {
   pivotLength: number;
@@ -185,8 +187,6 @@ export const metadata = {
 const MAX_BOXES = 500;
 const MAX_LINES = 50;
 const MAX_LABELS = 50;
-/** syminfo.mintick is not available to the port (no symbol information): tick size of format.mintick */
-const MINTICK = 0.01;
 const NO_COLOR = '#00000000';
 
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
@@ -250,6 +250,7 @@ interface LabelObj {
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeProfilePivotAnchoredInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'barColors' | 'boxes' | 'labels' | 'lines' | 'linefills' | 'tables'> & {
   barColors: BarColorData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[]; linefills: LinefillData[];
   tables: TableData[];
@@ -275,6 +276,8 @@ export function calculate(
   const lines = new Registry<LineObj>(MAX_LINES);
   const linefills = new Registry<{ line1: LineObj; line2: LineObj; color: string }>(MAX_LINES);
   const labels = new Registry<LabelObj>(MAX_LABELS);
+  /** syminfo.mintick, the tick size of format.mintick (0.01 without a chart context) */
+  const MINTICK = mintickOf(chart);
   const fmtTick = (v: number) => str.tostring(v, 'mintick', MINTICK);
   const fmtVolume = (v: number) => str.tostring(v, 'volume');
   const fmtPct = (v: number) => str.tostring(v, '#.##');

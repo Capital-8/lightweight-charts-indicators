@@ -17,8 +17,8 @@
  * The original also stops on a time limit of its platform (500 ms per loop) when a rising price adds many levels at
  * once: this limit depends on the speed of the computer and is not ported; the port only stops at 100,000 levels.
  *
- * The port has no chart theme: the foreground colour of the chart (box texts) is #DBDBDB, the value of the reference
- * run (dark chart).
+ * Chart context (optional third argument): the box texts use the foreground colour of the chart, read from the
+ * context (`foregroundColor`). Without it the colour is #DBDBDB (dark chart).
  *
  * Reference: "Volume Orderbook (Zeiierman)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -28,6 +28,7 @@
 import { array, str, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface VolumeOrderbookInputs {
   src: 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4' | 'hlcc4';
@@ -73,8 +74,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** chart.fg_color of the reference run (dark chart) */
-const CHART_FG = '#DBDBDB';
 /** Largest array of the original platform */
 const MAX_ARRAY = 100000;
 
@@ -86,6 +85,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeOrderbookInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'lines'> & { boxes: BoxData[]; lines: LineDrawingData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -197,7 +197,7 @@ export function calculate(
         made[x] = {
           time1: T(i + left + rows * 2 - rank), price1: levels[Math.max(0, k - rows + x)],
           time2: T(i + left + rows * 2 + rank), price2: levels[Math.max(1, k - rows + x + 1)],
-          borderColor: grade, bgColor: grade, borderStyle: 'dotted', text: str.tostring(vol[x], 'volume'), textColor: CHART_FG,
+          borderColor: grade, bgColor: grade, borderStyle: 'dotted', text: str.tostring(vol[x], 'volume'), textColor: foregroundColorOf(chart),
           ...(cfg.poc && rank === rows * 2 ? { extend: 'left' as const } : {}),
         };
         if (cfg.tbli && k - rows + x >= 0) {

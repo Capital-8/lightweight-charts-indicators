@@ -13,9 +13,11 @@
  * Fair value gaps (optional): 3-bar gaps with mitigation, breakers, mid-lines and raids. Mapping structure
  * (optional): a polyline through the swing points. Candles can be coloured by the trend.
  *
- * The drawings are those of the last bar. Every bar given to calculate() is a closed bar. The raid marks have the
- * chart foreground colour in the original: there is no chart theme here, the port uses #DBDBDB (the value of the
- * reference run).
+ * The drawings are those of the last bar. Chart context (third argument of calculate): the port reads the chart
+ * foreground colour (the colour of the raid marks; #DBDBDB, the value of a dark chart, without a context) and the
+ * state of the last bar. The original tests the mitigation and the overlap of the order blocks on closed bars only:
+ * when the context says that the last bar is still open, they are not tested on it. Without a context every bar
+ * given to calculate() is a closed bar.
  * "Adjusted Points" updates the level on bars whose index is a multiple of the pivot length: the index counts from
  * the first bar given to calculate().
  *
@@ -27,6 +29,7 @@
 
 import { ta, Series, color, compare, math, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, PolylineData } from '../types';
+import { foregroundColorOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 type TextSize = 'Tiny' | 'Small' | 'Normal' | 'Large' | 'Huge';
 type Mitigation = 'Close' | 'Wick' | 'Avg';
@@ -82,8 +85,6 @@ export interface PriceActionSmartMoneyConceptsInputs {
   dispraid: boolean;
 }
 
-/** chart.fg_color of the original (no chart theme here) */
-const RAID_COLOR = '#DBDBDB';
 
 export const defaultInputs: PriceActionSmartMoneyConceptsInputs = {
   windowsis: true,
@@ -260,8 +261,13 @@ function overlaps(s: { top: number; btm: number }, c: { top: number; btm: number
 export function calculate(
   bars: Bar[],
   inputs: Partial<PriceActionSmartMoneyConceptsInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; polylines: PolylineData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  /** chart.fg_color, the colour of the raid marks (#DBDBDB without a chart context) */
+  const RAID_COLOR = foregroundColorOf(chart);
+  /** barstate.isconfirmed of the last bar (true without a chart context) */
+  const lastConfirmed = lastBarConfirmedOf(chart);
   const {
     windowsis, mswindow, showSwing, swingLimit, swingcssup, swingcssdn, showMapping, mappingStyle, mappingcss, candlecss,
     mstext, msmode, mslen, buildsweep, msbubble, obshow, oblast, obupcs, obdncs, obshowactivity, obactup, obactdn, obshowbb,
@@ -754,10 +760,12 @@ export function calculate(
     }
 
     if (obshow && oblast > 0) {
-      // barstate.isconfirmed: every bar is a closed bar
-      mitigated(i, blob);
-      mitigated(i, brob);
-      if (hideOverlap) removeOverlap(blob, brob, wichlap === 'Recent', false);
+      // if barstate.isconfirmed (false only on a last bar that the chart context gives as still open)
+      if (i < last || lastConfirmed) {
+        mitigated(i, blob);
+        mitigated(i, brob);
+        if (hideOverlap) removeOverlap(blob, brob, wichlap === 'Recent', false);
+      }
       for (const m of blob) umt(i, m);
       for (const m of brob) umt(i, m);
 

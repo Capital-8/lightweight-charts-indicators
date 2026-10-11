@@ -8,8 +8,11 @@
  * A turn of the oscillator beyond a threshold gives a mean reversion signal (hollow diamond, "Reversion" label on
  * the price). Optionally the candles take the colour of the oscillator sign.
  *
- * The text colour of the threshold labels and the zero line use the foreground colour of the chart in the original;
- * the port has no chart theme and uses #DBDBDB (dark theme).
+ * Chart values read from the optional third argument:
+ * - the foreground colour of the chart: text colour of the threshold labels and base colour of the zero line.
+ *   Without it the port uses #DBDBDB (dark chart).
+ * - the state of the last bar: while the last bar is open, the original fits the line on the close of the bar
+ *   before for that bar. Without it every bar is taken as closed.
  *
  * Reference: "Linear Regression Oscillator [ChartPrime]" by ChartPrime
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -21,6 +24,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { MarkerData, LabelData, PlotCandleData, BarColorData } from '../types';
+import { foregroundColorOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface LinearRegressionOscillatorInputs {
   length: number;
@@ -48,13 +52,13 @@ const COL_UP = '#10cab8';
 const COL_DN = '#2962FF';
 /** color(na): fully transparent */
 const NA_COLOR = '#00000000';
-/** chart.fg_color of the reference chart (dark theme) */
-const CHART_FG = '#DBDBDB';
+/** chart.fg_color of a dark chart: the static colour of the zero line (its points carry the colour of the chart) */
+const DARK_FG = '#DBDBDB';
 
 // The plots of the original have no title
 export const plotConfig: PlotConfig[] = [
   { id: 'plot0', title: 'Oscillator', color: COL_UP, lineWidth: 1, style: 'area' },
-  { id: 'plot1', title: 'Zero Line', color: CHART_FG, lineWidth: 2 },
+  { id: 'plot1', title: 'Zero Line', color: DARK_FG, lineWidth: 2 },
   { id: 'plot2', title: 'Upper Threshold', color: 'transparent', lineWidth: 1, display: 'none' },
   { id: 'plot3', title: 'Lower Threshold', color: 'transparent', lineWidth: 1, display: 'none' },
   { id: 'plot4', title: 'Lower Bound', color: 'transparent', lineWidth: 1, display: 'none' },
@@ -81,6 +85,7 @@ const truthy = (x: number) => !Number.isNaN(x) && x !== 0;
 export function calculate(
   bars: Bar[],
   inputs: Partial<LinearRegressionOscillatorInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'labels' | 'plotCandles' | 'barColors'> & {
   markers: MarkerData[]; labels: LabelData[]; plotCandles: Record<string, PlotCandleData[]>; barColors: BarColorData[];
 } {
@@ -90,6 +95,11 @@ export function calculate(
   if (length < 1) throw new Error('Linear Regression Oscillator: Length must be 1 or more');
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const close = bars.map((b) => b.close);
+  // chart.fg_color
+  const CHART_FG = foregroundColorOf(chart);
+  // source = close[barstate.isconfirmed ? 0 : 1]: an open last bar reads the close of the bar before
+  const source = close.slice();
+  if (n > 0 && !lastBarConfirmedOf(chart)) source[n - 1] = n > 1 ? close[n - 2] : NaN;
 
   // Slope and intercept of the least squares line of the last `length` closes (x = 0 on the current bar)
   const raw: number[] = new Array(n);
@@ -99,7 +109,7 @@ export function calculate(
     let sumXY = 0.0;
     let sumXSquared = 0.0;
     for (let i = 0; i <= length - 1; i++) {
-      const src = bar - i >= 0 ? close[bar - i] : NaN;
+      const src = bar - i >= 0 ? source[bar - i] : NaN;
       sumX += i;
       sumY += src;
       sumXY += i * src;

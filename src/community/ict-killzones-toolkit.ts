@@ -22,7 +22,8 @@
  * Limits of the port:
  * - New days / weeks / months come from the UTC calendar and the bars (see anchor-period): equal on UTC symbols
  *   and on symbols whose trading day is inside one UTC day.
- * - Price texts use the symbol price tick in the original. Bars carry no symbol info: the port uses a tick of 0.01.
+ * - Chart values read: the symbol price tick (the price texts of the open price labels are formatted with it).
+ *   Without a chart context the tick is 0.01.
  * - The chart timeframe is read from the bars (the most frequent gap between two bars). With fewer than 2 bars it
  *   is not known and nothing is drawn.
  * - The label of a killzone is at the middle time of the zone. A time between two bars is drawn on the next bar, as
@@ -36,6 +37,7 @@
 import { ta, Series, color, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { chartTimeframe, periodStarts } from '../anchor-period';
 import type { BgColorData, BoxData, LabelData, LineDrawingData } from '../types';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 type Display = 'All' | 'First' | 'Last';
 
@@ -239,8 +241,6 @@ export const metadata = {
 
 /** Time zone of the killzone hours */
 const TZ = 'UTC-5';
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 /** max_lines_count, max_labels_count, max_boxes_count */
 const MAX_COUNT = 500;
 const NA_COLOR = 'transparent';
@@ -296,6 +296,7 @@ interface KzSite { max: number; mid: number; min: number; sbT: number; xt: boole
 export function calculate(
   bars: Bar[],
   inputs: Partial<IctKillzonesToolkitInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; bgColors: BgColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -315,7 +316,9 @@ export function calculate(
     lines.add({ x1, y1, x2, y2, byTime, color: css, style, dead: false });
   const newBox = (b: Omit<Bx, 'dead'>) => boxes.add({ ...b, dead: false });
   const newLabel = (l: Omit<Lb, 'dead'>) => labels.add({ ...l, dead: false });
-  const priceText = (v: number) => str.tostring(v, 'mintick', MINTICK);
+  // format.mintick: the symbol price tick
+  const mintick = mintickOf(chart);
+  const priceText = (v: number) => str.tostring(v, 'mintick', mintick);
   const opaque = (c: string) => String(color.new(c, 0));
 
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);

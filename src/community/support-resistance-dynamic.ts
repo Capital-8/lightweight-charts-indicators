@@ -8,8 +8,8 @@
  * with a price label next to the last bar; two more lines and labels mark the highest and the lowest pivot of the
  * period. The plot `RS_level` (not displayed) is the level that the close has just crossed.
  *
- * The original rounds the label prices with the symbol price tick (syminfo.mintick). Bars carry no symbol info:
- * the port uses a tick of 0.01.
+ * Chart context (optional third argument): the label prices are rounded to the price tick of the symbol, read
+ * from the context (`mintick`). Without it the tick is 0.01.
  *
  * Reference: "Support Resistance - Dynamic" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,6 +19,7 @@
 import { ta, str, math, compare, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface SupportResistanceDynamicInputs {
   /** Period for Pivot Points */
@@ -47,8 +48,6 @@ const RED = '#FF5252';
 const LIME = '#00E676';
 const BLACK = '#363A45';
 const SILVER = '#B2B5BE';
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 
 export const defaultInputs: SupportResistanceDynamicInputs = {
   rb: 10,
@@ -94,6 +93,7 @@ const truthy = (v: number) => !Number.isNaN(v) && v !== 0;
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceDynamicInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { markers: MarkerData[]; labels: LabelData[]; lines: LineDrawingData[] } {
   const { rb, prd, nump, channelW, labelLocation, linestyle, lineColor, drawhl, showpp } = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -234,7 +234,7 @@ export function calculate(
     for (const lev of srLevs) {
       if (!truthy(lev)) continue;
       labels.push({
-        time: labelTime, price: lev, text: str.tostring(math.round_to_mintick(lev, MINTICK)), color: LIME, textColor: BLACK,
+        time: labelTime, price: lev, text: str.tostring(math.round_to_mintick(lev, mintickOf(chart))), color: LIME, textColor: BLACK,
         style: ge(close, lev) ? 'label_up' : 'label_down',
       });
     }

@@ -15,15 +15,16 @@
  *
  * Notes on the port:
  * - The original reads the clock of the bars, the session hours and the days in the exchange time zone, and adds
- *   4 hours to every hour input when that time zone is UTC. The bars do not carry the exchange time zone: the port
- *   uses UTC (so it adds the 4 hours). It is equal on symbols with a UTC exchange time zone (e.g. crypto). On other
- *   symbols the port sessions are the input hours + 4 in UTC all year: for a New York symbol that is New York time
- *   in summer and one hour off in winter.
+ *   4 hours to every hour input when that time zone is UTC (the day labels are then made at 00:00, else at 20:00).
+ *   The port reads the exchange time zone from the chart context (third argument). Without it the port uses UTC (so
+ *   it adds the 4 hours): this is equal on symbols with a UTC exchange time zone (e.g. crypto); on other symbols
+ *   the sessions are then the input hours + 4 in UTC all year (for a New York symbol: New York time in summer, one
+ *   hour off in winter).
  * - Session strings without days are Monday to Friday in this version of the language: no session on weekends.
- * - The range in pips and the average daily range divide by the price tick of the symbol. The bars carry no price
- *   tick: the port uses 0.01.
+ * - The range in pips and the average daily range divide by the price tick of the symbol: read from the chart
+ *   context, 0.01 without it.
  * - The average daily range is shown on the labels of the last days before the current time (timenow in the
- *   original): the port uses the clock of the computer (Date.now()).
+ *   original): read from the chart context, the clock of the computer without it.
  * - The previous day, week and average daily range come from the daily and weekly bars built from the chart bars
  *   (UTC days, weeks from Monday): they need bars from the start of the previous week (22 days for the average).
  * - The six plots are hidden in the original (white, transparency 100, only the last 5 bars): only the fills between
@@ -36,6 +37,7 @@
 import { ta, Series, color, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, LineDrawingData, LabelData, PineSize } from '../types';
 import { chartTimeframe, periodStarts } from '../anchor-period';
+import { mintickOf, nowOf, timezoneOf, type ChartContext } from '../chart-context';
 
 type StyleName = 'solid' | 'dashed' | 'dotted';
 type SizeName = 'tiny' | 'small' | 'normal' | 'large';
@@ -277,12 +279,8 @@ const COLORS: Record<string, string> = {
   lime: '#00E676', maroon: '#880E4F', navy: '#311B92', olive: '#808000', orange: '#FF9800', purple: '#9C27B0',
   red: '#FF5252', silver: '#B2B5BE', teal: '#00897B', white: '#FFFFFF', yellow: '#FFEB3B',
 };
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
-/** The exchange time zone (syminfo.timezone) of the port */
-const TZ = 'UTC';
 /** tickerExchangeOffset: hours added to the inputs when the exchange time zone is UTC */
-const EXCHANGE_OFFSET = 4;
+const UTC_EXCHANGE_OFFSET = 4;
 /** Days of a session string without days in this version of the language: Monday to Friday */
 const WEEKDAYS = ':23456';
 /** max_labels_count of the script (default) */
@@ -291,10 +289,13 @@ const ONE_DAY = 1000 * 60 * 60 * 24;
 
 interface ScriptLabel { time: number; price: number; text: string; style: 'label_up' | 'none'; textColor?: string; size?: PineSize; noColor: boolean }
 
-/** An hour input ("00" .. "23") moved to the exchange time zone: its number (24 and more are kept) and its string */
-function exchangeHour(input: string): { hour: number; text: string } {
+/**
+ * An hour input ("00" .. "23") moved to the exchange time zone (`offset` hours added): its number (24 and more are
+ * kept) and its string
+ */
+function exchangeHour(input: string, offset: number): { hour: number; text: string } {
   const n = HOURS.indexOf(input);
-  const hour = (n < 0 ? 0 : n) + EXCHANGE_OFFSET;
+  const hour = (n < 0 ? 0 : n) + offset;
   let text: string;
   if (hour >= 24) text = hour === 24 ? '00' : `0${str.tostring(hour - 24)}`;
   else text = hour < 10 ? `0${str.tostring(hour)}` : str.tostring(hour);
@@ -329,8 +330,15 @@ function timeframeBars(bars: Bar[], tf: string): { high: number[]; low: number[]
 export function calculate(
   bars: Bar[],
   inputs: Partial<FxnAsianSessionRangeInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { bgColors: BgColorData[]; lines: LineDrawingData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  // syminfo.mintick, and syminfo.timezone: the clock of the bars, the session hours and the days are read in the
+  // exchange time zone; when it is UTC the original adds 4 hours to every hour input
+  const MINTICK = mintickOf(chart);
+  const TZ = timezoneOf(chart);
+  const utcExchange = TZ === 'Etc/UTC' || TZ === 'UTC';
+  const EXCHANGE_OFFSET = utcExchange ? UTC_EXCHANGE_OFFSET : 0;
   const n = bars.length;
   const inMs = n > 0 && bars[0].time >= 1e12;
   const ms = (t: number) => (inMs ? t : t * 1000);
@@ -359,8 +367,8 @@ export function calculate(
 
   // The three sessions: hours moved to the exchange time zone, session strings
   const session = (ssth: string, sstm: string, esth: string, estm: string) => {
-    const start = exchangeHour(ssth);
-    const end = exchangeHour(esth);
+    const start = exchangeHour(ssth, EXCHANGE_OFFSET);
+    const end = exchangeHour(esth, EXCHANGE_OFFSET);
     const endMinute = minuteOf(estm);
     const offsetMinute = endMinute + chartPeriodInt;
     return {
@@ -374,7 +382,7 @@ export function calculate(
   const asian = session(cfg.userSsth, cfg.userSstm, cfg.userEsth, cfg.userEstm);
   const london = session(cfg.londonSsth, cfg.londonSstm, cfg.londonEsth, cfg.londonEstm);
   const ny = session(cfg.nySsth, cfg.nySstm, cfg.nyEsth, cfg.nyEstm);
-  const endLineHour = exchangeHour(cfg.userElth).hour;
+  const endLineHour = exchangeHour(cfg.userElth, EXCHANGE_OFFSET).hour;
   const endLineMinute = minuteOf(cfg.userEltm);
   const supportHour = 17 + EXCHANGE_OFFSET;
 
@@ -431,7 +439,8 @@ export function calculate(
     addLabel({ time: labelOffset(i), price: s.prevLow, text, style: 'label_up', textColor, size: labelSize, noColor: true });
   };
 
-  const now = Date.now();
+  // timenow
+  const now = nowOf(chart);
   const plots: Record<string, Array<{ time: number; value: number }>> = {};
   for (let k = 0; k < 6; k++) plots[`plot${k}`] = [];
   const bgColors: BgColorData[] = [];
@@ -577,7 +586,8 @@ export function calculate(
     }
 
     // Labels of the previous day, the current week and the previous week, at the start of a day (is_new_day())
-    if (day && week && hour === 0 && minute === 0) {
+    // is_new_day(): 00:00 when the exchange time zone is UTC, else 20:00
+    if (day && week && hour === (utcExchange ? 0 : 20) && minute === 0) {
       const d = day.group[i];
       const w = week.group[i];
       const prev = (a: number[], k: number) => (k > 0 ? a[k - 1] : NaN);

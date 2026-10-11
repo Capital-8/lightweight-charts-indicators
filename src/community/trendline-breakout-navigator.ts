@@ -17,8 +17,8 @@
  * bar of that timeframe (every bar is a closed bar). A timeframe below the chart timeframe needs data that the
  * chart bars do not have: the port throws an Error.
  *
- * The HH / LL labels use the chart foreground colour. A port has no chart theme: it uses the colour of the
- * reference run (#DBDBDB).
+ * Chart values (third argument): the port reads the chart foreground colour for the HH / LL labels (without it:
+ * #DBDBDB, a dark chart).
  *
  * Reference: "Trendline Breakout Navigator [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -28,6 +28,7 @@
 import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, BgColorData, LabelData, LineDrawingData } from '../types';
 import { barInterval } from '../bar-time';
+import { foregroundColorOf, type ChartContext } from '../chart-context';
 import { periodStarts, chartTimeframe } from '../anchor-period';
 
 export interface TrendlineBreakoutNavigatorInputs {
@@ -104,8 +105,6 @@ export const metadata = {
 const MAX_OBJECTS = 500;
 /** Longest look-back of the script (max_bars_back = 5000) */
 const MAX_BACK = 5000;
-/** Chart foreground colour of the reference run (chart.fg_color) */
-const CHART_FG = '#DBDBDB';
 
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
@@ -240,8 +239,11 @@ function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; latest: number[] 
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendlineBreakoutNavigatorInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  // chart.fg_color
+  const CHART_FG = foregroundColorOf(chart);
   const n = bars.length;
   const { cBull, cBear } = cfg;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);

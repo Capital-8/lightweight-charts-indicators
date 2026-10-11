@@ -19,9 +19,10 @@
  * at the first chart bar, and a daily or longer bar built from intraday bars of a stock can differ from the exchange
  * bar (auction prices and volume). The VWAP anchor periods use the same calendar rule.
  *
- * Limits of the port: the panel title starts with the symbol name in the original; the port has no symbol
- * information and leaves the name out. The chart foreground colour is taken as #DBDBDB (dark theme), the port has no
- * chart theme. The oscillator line width input is not applied to the plot (static plot width).
+ * Chart values read from the optional third argument (see src/chart-context.ts): the symbol name at the start of the
+ * panel title (left out without it) and the chart foreground colour of the panel and the meter (#DBDBDB, the value
+ * of a dark chart, without it).
+ * Limit of the port: the oscillator line width input is not applied to the plot (static plot width).
  *
  * Reference: "Market Sentiment Technicals [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -35,6 +36,7 @@ import {
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PolylineData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { periodStarts, chartTimeframe } from '../anchor-period';
+import { foregroundColorOf, tickerOf, type ChartContext } from '../chart-context';
 
 type MaType = 'SMA' | 'EMA' | 'HMA' | 'RMA' | 'WMA' | 'VWMA';
 
@@ -191,10 +193,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** chart.fg_color: the port has no chart theme (value of a dark chart) */
-const CHART_FG = '#DBDBDB';
-/** syminfo.ticker is not available to the port (Bar has no symbol info) */
-const TICKER = '';
 /** color.black of Pine v5, the default text colour of a label */
 const LABEL_TEXT = '#363A45';
 
@@ -297,19 +295,23 @@ function scoreRight(value: number): number {
 export function calculate(
   bars: Bar[],
   inputs: Partial<MarketSentimentTechnicalsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'boxes' | 'labels' | 'lines' | 'polylines'> & {
   markers: MarkerData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[]; polylines: PolylineData[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  // chart.fg_color, and syminfo.ticker (the ticker id without its exchange prefix)
+  const CHART_FG = foregroundColorOf(chart);
+  const TICKER = tickerOf(chart);
   const { bullColor, bearColor, hOffset } = cfg;
   const height = cfg.mrktOscHeight;
 
   // timeframe(): the timeframe of the indicators, never below the chart timeframe
-  const chart = chartTimeframe(bars);
-  const period = chart.replace(/^1([DWM])$/, '$1'); // timeframe.period
-  const chartInfo = chart === '' ? null : timeframe.info(chart);
-  const chartMinutes = chart === '' ? NaN : timeframe.in_seconds(chart) / 60;
+  const chartTf = chartTimeframe(bars);
+  const period = chartTf.replace(/^1([DWM])$/, '$1'); // timeframe.period
+  const chartInfo = chartTf === '' ? null : timeframe.info(chartTf);
+  const chartMinutes = chartTf === '' ? NaN : timeframe.in_seconds(chartTf) / 60;
   const intraday = chartInfo !== null && chartInfo.isintraday;
   const daily = chartInfo !== null && chartInfo.isdaily;
   const weekly = chartInfo !== null && chartInfo.isweekly;
@@ -322,7 +324,7 @@ export function calculate(
   else if (cfg.indiTf === '1 Week' && (daily || intraday)) tf = 'W';
   else if (cfg.indiTf === '1 Month' && (weekly || daily || intraday)) tf = 'M';
 
-  const sameTf = chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart);
+  const sameTf = chartTf === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chartTf);
   const { htf: hb, latest } = sameTf ? { htf: bars, latest: bars.map((_b, i) => i) } : timeframeBars(bars, tf);
   const m = hb.length;
 
@@ -421,7 +423,7 @@ export function calculate(
   const maValue = normalize((k) => gt(hClose[k], maBasis[k]), (k) => lt(hClose[k], maBasis[k]));
 
   // vwapBands(): ta.vwap(close, timeframe.change(autoAnchor(anchor)), stdev)
-  const tfInfo = chart === '' ? null : timeframe.info(sameTf ? chart : tf);
+  const tfInfo = chartTf === '' ? null : timeframe.info(sameTf ? chartTf : tf);
   let anchorTf = '';
   switch (cfg.vwapAnchor) {
     case 'Auto':

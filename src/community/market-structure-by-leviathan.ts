@@ -10,7 +10,8 @@
  * of the first swing to the bar of the second.
  *
  * At most 500 lines and 500 labels are kept (the oldest are removed first).
- * The swing texts use the chart foreground colour. A port has no chart theme: it uses #DBDBDB (dark chart).
+ * The swing texts use the chart foreground colour, read from the optional third argument (see
+ * src/chart-context.ts); without it the port uses #DBDBDB (dark chart).
  *
  * Reference: "Market Structure - By Leviathan" by LeviathanCapital
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -20,6 +21,7 @@
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { foregroundColorOf, type ChartContext } from '../chart-context';
 
 type LineStyleOption = 'Solid' | 'Dashed' | 'Dotted';
 
@@ -79,8 +81,6 @@ export const metadata = {
 
 /** indicator(max_labels_count = 500, max_lines_count = 500) */
 const MAX_OBJECTS = 500;
-/** chart.fg_color of a dark chart (the port has no chart theme) */
-const CHART_FG = '#DBDBDB';
 /** color.rgb(0, 0, 0, 100) */
 const CLEAR = '#00000000';
 
@@ -102,9 +102,12 @@ function push<T>(list: T[], item: T): void {
 export function calculate(
   bars: Bar[],
   inputs: Partial<MarketStructureByLeviathanInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'labels' | 'lines'> & { labels: LabelData[]; lines: LineDrawingData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  // chart.fg_color
+  const CHART_FG = foregroundColorOf(chart);
   const swingSize = Math.trunc(cfg.swingSize);
   const byClose = cfg.bosConfType === 'Candle Close';
 

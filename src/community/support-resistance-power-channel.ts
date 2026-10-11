@@ -8,8 +8,8 @@
  * leaves the support zone upwards or whose high leaves the resistance zone downwards.
  *
  * All outputs are drawings of the last bar (lines, boxes, labels). The script keeps at most 12 labels.
- * The original uses the chart foreground colour for the texts: the port has no chart theme and uses #DBDBDB
- * (the foreground colour of a dark chart).
+ * The original uses the chart foreground colour for the texts: the port reads it from the chart context (third
+ * argument of calculate) and uses #DBDBDB, the foreground colour of a dark chart, without it.
  *
  * Reference: "Support and Resistance Power Channel [ChartPrime]" by ChartPrime
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,6 +19,7 @@
 import { ta, str, color, compare, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, BoxData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface SupportResistancePowerChannelInputs {
   /** Window in bars */
@@ -55,15 +56,16 @@ export const metadata = {
 
 /** Pine: indicator(max_labels_count = 12) */
 const MAX_LABELS = 12;
-/** chart.fg_color: the port has no chart theme (foreground colour of a dark chart) */
-const FG_COLOR = '#DBDBDB';
 /** Pine color.gray */
 const GRAY = '#787B86';
 
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistancePowerChannelInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { labels: LabelData[]; lines: LineDrawingData[]; boxes: BoxData[] } {
+  /** chart.fg_color (#DBDBDB, the foreground colour of a dark chart, without a chart context) */
+  const FG_COLOR = foregroundColorOf(chart);
   const { length, extend, topColor, bottomColor } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const labels: LabelData[] = [];

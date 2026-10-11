@@ -8,8 +8,7 @@
  * percent. Lines and labels take the resistance colour when the level is at or above the close, else the support
  * colour. Optional 'H' / 'L' marks on the pivot bars.
  *
- * The original rounds the levels with the symbol price tick (syminfo.mintick). Bars carry no symbol info: the port
- * uses a tick of 0.01.
+ * Chart values read: the symbol price tick (the levels are rounded to it). Without a chart context the tick is 0.01.
  *
  * Reference: "Support Resistance - Dynamic v2" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +17,7 @@
 
 import { ta, str, math, compare, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LabelData, LineDrawingData } from '../types';
+import { mintickOf, type ChartContext } from '../chart-context';
 import { barInterval, barTime } from '../bar-time';
 
 export interface SupportResistanceDynamicV2Inputs {
@@ -52,8 +52,6 @@ const RED = '#FF5252';
 const LIME = '#00E676';
 const WHITE = '#FFFFFF';
 const BLACK = '#363A45';
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 
 export const defaultInputs: SupportResistanceDynamicV2Inputs = {
   prd: 10,
@@ -99,11 +97,14 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceDynamicV2Inputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { markers: MarkerData[]; labels: LabelData[]; lines: LineDrawingData[] } {
   const {
     prd, ppsrc, maxNumPP, channelW, maxNumSR, minStrength, labelLoc, lineStyle, lineWidth, resistanceColor, supportColor, showPP,
   } = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  // syminfo.mintick
+  const mintick = mintickOf(chart);
 
   const src1 = new Series(bars, (b) => (ppsrc === 'High/Low' ? b.high : Math.max(b.close, b.open)));
   const src2 = new Series(bars, (b) => (ppsrc === 'High/Low' ? b.low : Math.min(b.close, b.open)));
@@ -197,7 +198,7 @@ export function calculate(
       }
     }
 
-    levels = srUp.map((up, x) => math.round_to_mintick((up + srDn[x]) / 2, MINTICK));
+    levels = srUp.map((up, x) => math.round_to_mintick((up + srDn[x]) / 2, mintick));
     levelsBar = i;
   }
 

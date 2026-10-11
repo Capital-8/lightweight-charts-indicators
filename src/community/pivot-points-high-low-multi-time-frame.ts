@@ -13,8 +13,8 @@
  * drawn on the first chart bar of the bar of the higher timeframe that confirms it. A timeframe below the chart
  * timeframe (the default 240 on a daily chart) needs data that the chart bars do not have: the port throws an Error.
  *
- * The label text is the price rounded to the price tick of the symbol; the port has no symbol information and uses
- * a tick of 0.01.
+ * Chart context (optional third argument): the label text is the price rounded to the price tick of the symbol,
+ * read from the context (`mintick`). Without it the tick is 0.01.
  *
  * Reference: "Pivot Points High Low Multi Time Frame" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -24,6 +24,7 @@
 import { ta, Series, str, math, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData } from '../types';
 import { periodStarts, chartTimeframe } from '../anchor-period';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface PivotPointsHighLowMultiTimeFrameInputs {
   /** Timeframe of the pivots */
@@ -70,8 +71,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 /** indicator(max_lines_count = 500, max_labels_count = 500) */
 const MAX_OBJECTS = 500;
 
@@ -84,12 +83,12 @@ const truthy = (v: number) => !isNaN(v) && v !== 0;
  * timeframe.
  */
 function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; group: number[] } {
-  const chart = chartTimeframe(bars);
-  if (tf.trim() === '' || chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
+  const chartTf = chartTimeframe(bars);
+  if (tf.trim() === '' || chartTf === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chartTf)) {
     return { htf: bars, group: bars.map((_b, i) => i) };
   }
-  if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
-    throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
+  if (timeframe.in_seconds(tf) < timeframe.in_seconds(chartTf)) {
+    throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chartTf}": the chart bars do not have that data`);
   }
   const starts = periodStarts(bars, tf);
   const htf: Bar[] = [];
@@ -112,6 +111,7 @@ function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; group: number[] }
 export function calculate(
   bars: Bar[],
   inputs: Partial<PivotPointsHighLowMultiTimeFrameInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -140,7 +140,9 @@ export function calculate(
     labels.push(label);
     if (labels.length > MAX_OBJECTS + 5) labels = labels.slice(labels.length - MAX_OBJECTS);
   };
-  const text = (price: number) => str.tostring(math.round_to_mintick(price, MINTICK) as number);
+  // syminfo.mintick: the symbol tick of the chart context (0.01 without it)
+  const mintick = mintickOf(chart);
+  const text = (price: number) => str.tostring(math.round_to_mintick(price, mintick) as number);
 
   const indexOfTime = new Map<number, number>();
   let ph1 = NaN;

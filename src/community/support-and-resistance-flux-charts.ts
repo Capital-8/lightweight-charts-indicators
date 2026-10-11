@@ -25,9 +25,11 @@
  * or the break of a level of the lower one to one of its own bars before the chart reads it (the level objects are
  * shared between the requests): such a level starts or ends on another bar. The original places its drawings by time:
  * a time between two bars is on the next bar; a time after the last bar is on the bar slot that holds it (slots of
- * the weekdays, with the bar times of the trading day before, on symbols without weekend bars). Prices in the texts
- * use a tick of 0.01 (the original uses the tick of the symbol). The original redraws on closed bars only: every
- * bar of the port is a closed bar.
+ * the weekdays, with the bar times of the trading day before, on symbols without weekend bars).
+ *
+ * Chart context (optional third argument): the prices in the texts use the price tick of the symbol (`mintick`;
+ * 0.01 without it). The original redraws on closed bars only: when the context says that the last bar is still open
+ * (`lastBarConfirmed` false), the drawings are those of the bar before it; without it every bar is a closed bar.
  *
  * Reference: "Support & Resistance (MTF) | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -38,6 +40,7 @@ import { ta, str, color, timeframe, Series, type IndicatorResult, type InputConf
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe, periodStarts } from '../anchor-period';
+import { mintickOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface SupportAndResistanceFluxChartsInputs {
   srPivotLength: number;
@@ -150,8 +153,6 @@ const LABEL_OFFSET_BARS = 20;
 const ATR_LEN = 20;
 /** max_lines_count / max_labels_count / max_boxes_count */
 const MAX_DRAWINGS = 500;
-/** Price tick of the texts (the original uses the tick of the symbol) */
-const MINTICK = 0.01;
 const DAY = 86400000;
 
 /** Pine float comparisons: a > b only when a - b > 1e-10 (a == b within 1e-10; na compares false) */
@@ -394,6 +395,7 @@ function higherTimeframeLevels(bars: Bar[], tf: string, cfg: SupportAndResistanc
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupportAndResistanceFluxChartsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'lines' | 'labels'> & { boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -411,11 +413,11 @@ export function calculate(
   if (n === 0) return result();
 
   const timeMs = timeMsOf(bars);
-  const chart = chartTimeframe(bars);
-  const chartSeconds = chart === '' ? NaN : timeframe.in_seconds(chart);
+  const chartTf = chartTimeframe(bars);
+  const chartSeconds = chartTf === '' ? NaN : timeframe.in_seconds(chartTf);
   const curTFMS = chartSeconds * 1000;
   // timeframe.period
-  const chartPeriod = chart.replace(/^1([DWM])$/, '$1');
+  const chartPeriod = chartTf.replace(/^1([DWM])$/, '$1');
   const zoneSizeATR = cfg.zoneSize * 0.075;
   const atr = ta.atr(bars, ATR_LEN).toArray().map((v) => v ?? NaN);
 
@@ -439,7 +441,7 @@ export function calculate(
   const higher = tfs.map(({ tf, enabled }) => {
     if (!enabled || tf.trim() === '' || timeframe.in_seconds(tf) === chartSeconds) return null;
     if (timeframe.in_seconds(tf) < chartSeconds) {
-      throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the bars do not carry that data.`);
+      throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chartTf}": the bars do not carry that data.`);
     }
     return higherTimeframeLevels(bars, tf, cfg);
   });
@@ -536,8 +538,11 @@ export function calculate(
 
   const lineStyle = cfg.lineStyle === '----' ? 'dashed' : cfg.lineStyle === '....' ? 'dotted' : 'solid';
   const opaqueText = String(color.new(cfg.textColor, 0));
-  // The original redraws on closed bars only: every bar of the port is closed
-  const lastClosed = last;
+  // The original redraws on closed bars only (barstate.isconfirmed): an open last bar draws nothing, the drawings
+  // are those of the bar before it. Without a chart context every bar is closed.
+  const lastClosed = lastBarConfirmedOf(chart) ? last : last - 1;
+  // syminfo.mintick (format.mintick)
+  const mintick = mintickOf(chart);
 
   levelLists(bars, chartPeriod, cfg, (i, own) => {
     if (i > lastClosed) return;
@@ -610,7 +615,7 @@ export function calculate(
         }
         const resistance = info.srType === 'Resistance';
         const levelColor = resistance ? cfg.resistanceColor : cfg.supportColor;
-        const title = () => `${sr.combinedTimeframeStr ?? formatTimeframe(info.timeframeStr)} | ${str.tostring(info.price, 'mintick', MINTICK)}`;
+        const title = () => `${sr.combinedTimeframeStr ?? formatTimeframe(info.timeframeStr)} | ${str.tostring(info.price, 'mintick', mintick)}`;
         if (cfg.styleMode === 'Lines') {
           addLine(sr, final ? {
             time1: place(info.startTime), price1: info.price, time2: place(endTime), price2: info.price, color: levelColor,

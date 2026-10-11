@@ -16,9 +16,9 @@
  * At most 500 lines, 500 labels and 500 boxes are kept. Every short-term swing has a label without colour (it only
  * shows when it becomes a long-term swing and "Swing Levels" is on): these labels are part of the output.
  *
- * A disabled structure side is drawn in the chart background colour. A port has no chart theme: it uses the colour of
- * the reference run (dark theme, #0F0F0F). Price labels use a price tick of 0.01 (the port does not get the tick of
- * the symbol).
+ * Chart values read from the optional third argument:
+ * - the background colour of the chart: the colour of a disabled structure side. Without it: #0F0F0F (dark chart).
+ * - the symbol tick: the price labels are rounded to it. Without it: 0.01.
  *
  * Reference: "Fibonacci Confluence Toolkit [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -28,6 +28,7 @@
 import { ta, str, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { backgroundColorOf, mintickOf, type ChartContext } from '../chart-context';
 
 type SizeText = 'Tiny' | 'Small' | 'Normal' | 'Large';
 
@@ -136,10 +137,6 @@ export const metadata = {
 
 /** indicator(max_labels_count = 500, max_boxes_count = 500, max_lines_count = 500) */
 const MAX_OBJECTS = 500;
-/** chart.bg_color of the reference run (dark theme) */
-const CHART_BG = '#0F0F0F';
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 
 const TT_BEAR = 'A bearish engulfing pattern is a two-candle reversal pattern that often signals a potential shift from an uptrend to a downtrend.';
 const TT_BULL = 'A bullish engulfing pattern is a two-candle reversal pattern that typically signals a potential shift from a downtrend to an uptrend in price.';
@@ -222,8 +219,12 @@ const lineStyle = (s: string): Style => (s === 'Dotted' ? 'dotted' : s === 'Dash
 export function calculate(
   bars: Bar[],
   inputs: Partial<FibonacciConfluenceToolkitInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & { boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  // chart.bg_color, syminfo.mintick
+  const CHART_BG = backgroundColorOf(chart);
+  const MINTICK = mintickOf(chart);
   const n = bars.length;
   const bullColor = cfg.bullCHoCHs ? cfg.ltBullMSColor : CHART_BG;
   const bearColor = cfg.bearCHoCHs ? cfg.ltBearMSColor : CHART_BG;

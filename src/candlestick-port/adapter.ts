@@ -1,11 +1,12 @@
 /**
  * Adapter: fits the oakscriptjs candlestick port (PatternDef + patternScript)
- * to this repo's `calculate(bars, inputs): IndicatorResult` registry convention.
+ * to this repo's `calculate(bars, inputs, chart): IndicatorResult` registry convention.
  *
  * Each pattern runs through `executeScript(() => patternScript(def), bars, inputs)`, which returns the
  * IndicatorResult shape of this package (markers, bgColors, barColors); the result is passed through.
  */
 import { executeScript, type ScriptRunResult } from 'oakscriptjs/script';
+import type { ChartContext } from '../chart-context';
 import type { Bar, IndicatorResult, InputConfig, PlotConfig } from 'oakscriptjs';
 import type { BarColorData, BgColorData, MarkerData } from '../types';
 import { patternScript } from './pattern-runner';
@@ -30,7 +31,7 @@ export interface PortIndicator {
   inputConfig: InputConfig[];
   plotConfig: PlotConfig[];
   defaultInputs: Record<string, unknown>;
-  calculate: (bars: Bar[], inputs?: Record<string, unknown>) => PortResult;
+  calculate: (bars: Bar[], inputs?: Record<string, unknown>, chart?: ChartContext) => PortResult;
 }
 
 /** Two synthetic bars are enough to harvest the declared inputs/plots/metadata. */
@@ -50,7 +51,7 @@ function buildIndicator(body: () => void, shortName: string): PortIndicator {
     inputConfig: probe.inputConfig as InputConfig[],
     plotConfig: probe.plotConfig as PlotConfig[],
     defaultInputs: probe.defaultInputs,
-    calculate: (bars, inputs = {}) => convert(executeScript(body, bars, inputs)),
+    calculate: (bars, inputs = {}, chart) => convert(executeScript(body, bars, inputs, chart)),
   };
 }
 

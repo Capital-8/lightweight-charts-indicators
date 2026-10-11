@@ -11,8 +11,8 @@
  *
  * These are the drawings of the last bar: they move when a bar is added. Nothing is drawn with fewer bars than
  * "Number of Bars".
- * The POC label rounds the price to the tick of the symbol; the port has no symbol information and uses a tick of
- * 0.01.
+ * Chart values read: the symbol price tick (the POC label rounds the price to it). Without a chart context the tick
+ * is 0.01.
  *
  * Reference: "Volume Profile / Fixed Range" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -22,6 +22,7 @@
 import { array, compare, math, str, nz, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { barTime } from '../bar-time';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface VolumeProfileFixedRangeInputs {
   /** Number of Bars */
@@ -76,8 +77,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 /** Default label text colour of the original Pine version (color.black of Pine v5) */
 const LABEL_TEXT = '#363A45';
 
@@ -98,6 +97,7 @@ function check(arr: number[], i: number): number {
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeProfileFixedRangeInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { bbars, cnum, percent } = cfg;
@@ -234,7 +234,7 @@ export function calculate(
     labels.push({
       time: barTime(bars, last + 15),
       price: pocLevel,
-      text: 'POC: ' + str.tostring(math.round_to_mintick(pocLevel, MINTICK)),
+      text: 'POC: ' + str.tostring(math.round_to_mintick(pocLevel, mintickOf(chart))),
       style: compare.ge(bars[last].close, pocLevel) ? 'label_up' : 'label_down',
       textColor: LABEL_TEXT,
     });

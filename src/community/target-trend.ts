@@ -11,8 +11,10 @@
  * entry and third target. While the trend lasts the levels follow the last bar; a level that a bar touches becomes a
  * dashed line with a check mark (a cross for the stop). The levels are removed when the trend changes.
  *
- * The port has no chart theme: the chart foreground and background colours used by the original are those of the
- * reference run (dark theme: foreground #DBDBDB, background #0F0F0F).
+ * Chart values (third argument): the port reads the chart foreground and background colours (levels, labels, band
+ * and fill colours; without them: #DBDBDB and #0F0F0F, a dark chart) and the state of the last bar: the trend
+ * changes on a closed bar only, so a last bar that is still open does not change it (without it: the last bar is
+ * closed). `plotConfig` has the band colour of the dark chart.
  *
  * Reference: "Target Trend [BigBeluga]" by BigBeluga
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -22,6 +24,7 @@
 import { ta, str, math, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData, LineDrawingData, LabelData, LinefillData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { backgroundColorOf, foregroundColorOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface TargetTrendInputs {
   /** Length of the SMAs of the highs and of the lows */
@@ -40,17 +43,14 @@ export const inputConfig: InputConfig[] = [
   { id: 'target', type: 'int', title: 'Set Targets', defval: 0 },
 ];
 
-/** chart.fg_color / chart.bg_color of the reference run (dark theme) */
-const CHART_FG = '#DBDBDB';
-const CHART_BG = '#0F0F0F';
 const UP_COLOR = '#06B690';
 const DN_COLOR = String(color.rgb(182, 112, 6));
-const PLOT_COLOR = String(color.new(CHART_FG, 80));
-const FILL_COLOR = String(color.new(CHART_FG, 90));
+/** color.new(chart.fg_color, 80) without a chart context (dark chart) */
+const PLOT_COLOR_DEFAULT = String(color.new(foregroundColorOf(), 80));
 
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Trailing Stop Up', color: PLOT_COLOR, lineWidth: 1, style: 'linebr' },
-  { id: 'plot1', title: 'Trailing Stop Down', color: PLOT_COLOR, lineWidth: 1, style: 'linebr' },
+  { id: 'plot0', title: 'Trailing Stop Up', color: PLOT_COLOR_DEFAULT, lineWidth: 1, style: 'linebr' },
+  { id: 'plot1', title: 'Trailing Stop Down', color: PLOT_COLOR_DEFAULT, lineWidth: 1, style: 'linebr' },
   { id: 'plot2', title: 'HL2', color: '#2962FF', lineWidth: 1, display: 'none' },
 ];
 
@@ -87,6 +87,7 @@ interface Targets {
 export function calculate(
   bars: Bar[],
   inputs: Partial<TargetTrendInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'lines' | 'labels' | 'linefills'> & {
   markers: MarkerData[];
   plotCandles: Record<string, PlotCandleData[]>;
@@ -96,6 +97,13 @@ export function calculate(
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  // chart.fg_color / chart.bg_color
+  const CHART_FG = foregroundColorOf(chart);
+  const CHART_BG = backgroundColorOf(chart);
+  const PLOT_COLOR = String(color.new(CHART_FG, 80));
+  const FILL_COLOR = String(color.new(CHART_FG, 90));
+  // barstate.isconfirmed: false on a last bar that is still open
+  const lastConfirmed = lastBarConfirmedOf(chart);
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
 
   const closeSeries = new Series(bars, (b) => b.close);
@@ -179,9 +187,10 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     const { open, high, low, close, time } = bars[i];
     const trendPrev = trend;
-    // historical bars are confirmed (barstate.isconfirmed)
-    if (crossUp[i]) trend = true;
-    if (crossDown[i]) trend = false;
+    // `and barstate.isconfirmed`: every bar but a last bar that is still open
+    const confirmed = i < n - 1 || lastConfirmed;
+    if (crossUp[i] && confirmed) trend = true;
+    if (crossDown[i] && confirmed) trend = false;
     const value = trend ? smaLowArr[i] : smaHighArr[i];
     trendValue[i] = value;
     hl2Arr[i] = (high + low) / 2;

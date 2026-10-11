@@ -20,12 +20,16 @@
  * those created on the last bar.
  *
  * Limits of the port:
- * - The range uses the current time (Date.now()), as the original: the result changes with the time of the call.
+ * - The range uses the current time, as the original: the result changes with the time of the call. The port reads
+ *   the current time from the chart context (third argument of calculate, `now`) and uses the clock of the computer
+ *   (Date.now()) without it.
  * - The bar period is read from the bars (the most frequent gap between two bars): minutes on intraday bars, days,
  *   weeks (a gap of a multiple of 7 days), months (30 days per month). At least 2 bars are needed.
  * - The bar index is the index in the bars given to calculate.
- * - "vwap" mode: daily and higher timeframes only. The VWAP restarts on each new trading day, so on these bars it
- *   is the source of the bar; on intraday bars it needs the exchange time zone and session (an Error is thrown).
+ * - "vwap" mode: the VWAP restarts on each new trading day, so on daily and higher bars it is the source of the
+ *   bar. On intraday bars the port needs the exchange time zone of the chart context: the trading day of a bar is
+ *   its day in that time zone, counted from the session start of the context ("1700-1600": from 17:00; no session:
+ *   from 00:00). Without the time zone an Error is thrown on intraday bars.
  * - The "Auto Ext Max Volume Override" source can only be a price source (not the output of another indicator).
  * - Static plot settings (line width of the levels and of the zero line, histogram base of the side cover and of the
  *   zero line) keep the values of the default inputs.
@@ -35,10 +39,11 @@
  */
 
 import {
-  ta, Series, color, barInterval, barTime, getSourceSeries,
+  ta, Series, color, barInterval, barTime, getSourceSeries, time as pineTime,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { MarkerData, BgColorData, LineDrawingData } from '../types';
+import { nowOf, type ChartContext } from '../chart-context';
 
 export type VolumeProfileSource = 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4';
 export type VolumeProfileColorName = '' | 'black' | 'silver' | 'gray' | 'white' | 'maroon' | 'red' | 'purple'
@@ -281,6 +286,22 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 /** Pine na(): na and +-infinity */
 const isNa = (v: number) => !Number.isFinite(v);
 
+/**
+ * Trading day number of an intraday bar (time in seconds), for the daily restart of vwap(): the day of the bar in the
+ * exchange time zone, counted from the session start ("1700-1600": a day runs from 17:00 to 17:00; "24x7" or no
+ * session: from 00:00).
+ */
+function tradingDayOf(timeSec: number, chart: ChartContext): number {
+  const tMs = timeSec * 1000;
+  const tz = chart.timezone ?? 'Etc/UTC';
+  const local = Date.UTC(pineTime.year(tMs, tz), pineTime.month(tMs, tz) - 1, pineTime.dayofmonth(tMs, tz),
+    pineTime.hour(tMs, tz), pineTime.minute(tMs, tz));
+  const session = typeof chart.session === 'string' ? chart.session : chart.session?.session ?? '';
+  const m = /^([0-9]{2})([0-9]{2})-/.exec(session);
+  const startMs = m ? (Number(m[1]) * 60 + Number(m[2])) * 60000 : 0;
+  return Math.floor((local - startMs) / 86400000);
+}
+
 /** Minutes of one bar: the Pine timeframe of the bars read from the most frequent gap (in seconds) between bars */
 function barMinutes(intervalSeconds: number): number {
   const DAY = 86400;
@@ -314,6 +335,7 @@ function colorTr(name: string, transp: number): string | undefined {
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeProfileFreeUltraSliInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'bgColors'> & {
   markers: MarkerData[]; bgColors: BgColorData[]; lines: LineDrawingData[];
 } {
@@ -322,7 +344,9 @@ export function calculate(
   const last = n - 1;
   const interval = barInterval(bars);
 
-  if (cfg.levelsMode === 'vwap' && interval > 0 && interval < 86400) {
+  // "vwap" mode on intraday bars: the daily restart of the VWAP needs the exchange time zone of the chart context
+  const intradayVwap = cfg.levelsMode === 'vwap' && interval > 0 && interval < 86400;
+  if (intradayVwap && chart?.timezone === undefined) {
     throw new Error(
       'Volume Profile Free Ultra SLI: the "vwap" mode supports daily and higher timeframes only: on intraday bars '
       + 'the VWAP resets on each trading day, which needs the exchange time zone and session.',
@@ -336,7 +360,8 @@ export function calculate(
   const volumeType = cfg.volumeType;
 
   // Range: bars whose age (current time - bar time) is within [start_bar, start_bar + range] bar periods
-  const timenow = Date.now();
+  // timenow: the current time of the chart context, or the clock of the computer
+  const timenow = nowOf(chart);
   const barRange = 1000 * 60 * barMinutes(interval);
   const lastTime = cfg.startBar * barRange;
   const ph = cfg.maxLevel;
@@ -472,9 +497,18 @@ export function calculate(
   // VWAP mode: developing POC -> VWAP, value area high / low -> VWAP +- stdev * multiplier
   if (cfg.levelsMode === 'vwap') {
     const src = bars.map((b) => priceOf(b, cfg.vwapSrc));
-    // the VWAP restarts on each daily or higher bar: sum(src * volume) / sum(volume) over the bar alone
-    const v = lastBar.volume ?? NaN;
-    const vwapLevel = (src[last] * v) / v;
+    // the VWAP restarts on each trading day: sum(src * volume) / sum(volume) over the bars of the trading day of the
+    // last bar (on daily and higher bars: over the bar alone)
+    let pv = 0;
+    let vol = 0;
+    const day = intradayVwap && chart ? tradingDayOf(lastBar.time, chart) : NaN;
+    for (let k = last; k >= 0; k--) {
+      const v = bars[k].volume ?? NaN;
+      pv += src[k] * v;
+      vol += v;
+      if (!(intradayVwap && chart) || k === 0 || tradingDayOf(bars[k - 1].time, chart) !== day) break;
+    }
+    const vwapLevel = pv / vol;
     const sd = ta.stdev(Series.fromArray(bars, src), cfg.vwapLen).toArray()[last] ?? NaN;
     const vwapStdev = sd * cfg.stddev;
     poc2Level = vwapLevel;

@@ -15,6 +15,10 @@
  * The arrows are markers below (up) and above (down) the bars; the fixed arrow height of the original is not
  * ported. The debug options of the original (constant DEBUG = false) have no input and are left out.
  *
+ * Chart context (optional third argument): the original draws arrows and labels on closed bars only. When the
+ * context says that the last bar is still open (`lastBarConfirmed` false), the last bar has no arrow and no label
+ * (the dashboard still shows its values). Without it every bar is a closed bar.
+ *
  * Reference: "RSI (Kernel Optimized) | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Flux Charts®
@@ -22,6 +26,7 @@
 
 import { ta, array, str, color, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { LabelData, MarkerData, TableData, TableCellData, TablePosition } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface RsiFluxChartsInputs {
   rsiLength: number;
@@ -160,6 +165,7 @@ interface Side {
 export function calculate(
   bars: Bar[],
   inputs: Partial<RsiFluxChartsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'labels' | 'tables'> & { markers: MarkerData[]; labels: LabelData[]; tables: TableData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -237,9 +243,12 @@ export function calculate(
   let lastBearishLabel = 0;
   let lowProb = NaN;
   let highProb = NaN;
+  const lastConfirmed = lastBarConfirmedOf(chart);
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
+    // barstate.isconfirmed: false on an open last bar
+    const confirmed = i < n - 1 || lastConfirmed;
     if (!isNaN(highPivot[i])) addPivot(high, i >= highLen ? rsi[i - highLen] : NaN);
     if (!isNaN(lowPivot[i])) addPivot(low, i >= lowLen ? rsi[i - lowLen] : NaN);
 
@@ -265,10 +274,10 @@ export function calculate(
     prevColor = cur;
 
     // plotarrow(): up arrows below the bar, down arrows above the bar
-    if (isBull) markers.push({ time: b.time, position: 'belowBar', shape: 'arrowUp', color: bullFaint });
-    if (isBear) markers.push({ time: b.time, position: 'aboveBar', shape: 'arrowDown', color: bearFaint });
-    const possibleBull = cur === 0 && wasBull;
-    const possibleBear = cur === 0 && wasBear;
+    if (isBull && confirmed) markers.push({ time: b.time, position: 'belowBar', shape: 'arrowUp', color: bullFaint });
+    if (isBear && confirmed) markers.push({ time: b.time, position: 'aboveBar', shape: 'arrowDown', color: bearFaint });
+    const possibleBull = cur === 0 && wasBull && confirmed;
+    const possibleBear = cur === 0 && wasBear && confirmed;
     if (possibleBull) markers.push({ time: b.time, position: 'belowBar', shape: 'arrowUp', color: bullishColor });
     if (possibleBear) markers.push({ time: b.time, position: 'aboveBar', shape: 'arrowDown', color: bearishColor });
 

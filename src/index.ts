@@ -8,6 +8,7 @@
  */
 
 import type { Bar, InputConfig, PlotConfig, HLineConfig, FillConfig, ArrowConfig } from 'oakscriptjs';
+import type { ChartContext } from './chart-context';
 export type { InputConfig, PlotConfig, HLineConfig, FillConfig } from 'oakscriptjs';
 
 // SMA - Simple Moving Average
@@ -5792,7 +5793,8 @@ export interface IndicatorRegistryEntry {
   /** plotarrow settings by arrow id (minheight / maxheight / forceOverlay) of the `arrows` of the result */
   arrowConfig?: ArrowConfig[];
   defaultInputs: Record<string, unknown>;
-  calculate: (bars: Bar[], inputs?: any) => any;
+  /** `chart`: what the caller knows about the chart and its symbol (tick, time zone, ...), see ChartContext */
+  calculate: (bars: Bar[], inputs?: any, chart?: ChartContext) => any;
 }
 
 /**
@@ -23993,6 +23995,13 @@ const registryPart7: IndicatorRegistryEntry[] = [
 ];
 
 export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7];
+
+// Chart context (third argument of calculate)
+export type { ChartContext } from './chart-context';
+export {
+  mintickOf, timezoneOf, tickeridOf, tickerOf, symbolTypeOf, currencyOf, foregroundColorOf, backgroundColorOf,
+  lastBarConfirmedOf, nowOf,
+} from './chart-context';
 
 // Package version
 export const version = '0.10.0';

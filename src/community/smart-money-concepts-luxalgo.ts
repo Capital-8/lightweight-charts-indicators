@@ -16,8 +16,9 @@
  * - Previous day / week / month high and low (optional), premium / discount / equilibrium zones (optional),
  *   candles coloured by the internal trend (optional), swing point labels HH / LH / HL / LL (optional).
  *
- * The drawings are those alive after the last bar. Every bar given to calculate() is a closed bar: the last bar is
- * the last confirmed bar (order blocks and the day / week / month levels are drawn on it).
+ * The drawings are those alive after the last bar. The day / week / month levels are drawn on the last closed bar,
+ * the order blocks on the last closed bar and on the last bar. The port reads the state of the last bar from the
+ * chart context (third argument, lastBarConfirmed); without it every bar given to calculate() is a closed bar.
  * Line and label ends after the last bar are times (last bar time + 20 bar durations), as in the original.
  * Other timeframes (fair value gaps, day / week / month levels): the bars of that timeframe are built from the chart
  * bars (periods from the UTC calendar and the bars, see src/anchor-period.ts). Exact on UTC 24x7 symbols and on
@@ -38,6 +39,7 @@ import {
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, PlotCandleData } from '../types';
 import { periodStarts, chartTimeframe } from '../anchor-period';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 type Show = 'All' | 'BOS' | 'CHoCH';
 type LabelSize = 'tiny' | 'small' | 'normal';
@@ -381,10 +383,13 @@ function timeframeBars(bars: Bar[], tf: string): { htf: Bar[]; group: number[] }
 export function calculate(
   bars: Bar[],
   inputs: Partial<SmartMoneyConceptsLuxalgoInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; plotCandles: Record<string, PlotCandleData[]> } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
+  // barstate.islastconfirmedhistory: the last bar, or the bar before it when the last bar is still open
+  const lastConfirmed = lastBarConfirmedOf(chart) ? last : last - 1;
   const present = cfg.mode === 'Present';
   const mono = cfg.style === 'Monochrome';
 
@@ -879,11 +884,12 @@ export function calculate(
     }
 
     // barstate.islastconfirmedhistory or barstate.islast
-    if (i === last) {
+    if (i === lastConfirmed || i === last) {
       if (cfg.showInternalOrderBlocks) drawOrderBlocks(true);
       if (cfg.showSwingOrderBlocks) drawOrderBlocks(false);
-
-      // barstate.islastconfirmedhistory: previous day / week / month levels
+    }
+    // barstate.islastconfirmedhistory: previous day / week / month levels
+    if (i === lastConfirmed) {
       if (chartInfo) {
         if (cfg.showDailyLevels && !higherTimeframe('D')) drawLevels('D', chartInfo.isdaily, cfg.dailyLevelsStyle, cfg.dailyLevelsColor, i);
         if (cfg.showWeeklyLevels && !higherTimeframe('W')) drawLevels('W', chartInfo.isweekly, cfg.weeklyLevelsStyle, cfg.weeklyLevelsColor, i);

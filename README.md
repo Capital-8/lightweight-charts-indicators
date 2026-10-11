@@ -34,6 +34,34 @@ const macdResult = MACD.calculate(bars, { fastLength: 12, slowLength: 26, signal
 const bbResult = BollingerBands.calculate(bars, { length: 20, mult: 2 });
 ```
 
+## Chart Context
+
+Some indicators read values of the chart and its symbol: the price tick, the exchange time zone, the symbol name and
+type, the chart colours, the current time, or whether the last bar is still open. Give them in the optional third
+argument of `calculate`:
+
+```typescript
+import { indicatorRegistry, type ChartContext } from 'lightweight-charts-indicators';
+
+const chart: ChartContext = {
+  timeframe: '15',                 // chart timeframe
+  timezone: 'America/New_York',    // exchange time zone
+  session: '0930-1600',            // session hours of the symbol
+  tickerid: 'NASDAQ:AAPL',
+  mintick: 0.01,                   // price tick
+  symbolType: 'stock',
+  currency: 'USD',
+  lastBarConfirmed: false,         // the last bar is still open
+};
+
+const entry = indicatorRegistry.find((e) => e.id === 'ict-killzones-pivots-tfo')!;
+const result = entry.calculate(bars, {}, chart);
+```
+
+Every value is optional. Without a value an indicator uses a fallback: tick 0.01, UTC, no symbol name, "USD", the
+dark theme colours, the computer clock, and all bars closed. The type is the oakscriptjs `ChartContext` with
+`symbolType`, `currency`, `foregroundColor`, `backgroundColor` and `now` added (see `src/chart-context.ts`).
+
 ## Drawing Results with the Renderer
 
 `lightweight-charts-indicators/render` draws a complete indicator result (plots, fills, hlines, markers, arrows, bar

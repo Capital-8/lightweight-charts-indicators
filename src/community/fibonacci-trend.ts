@@ -8,8 +8,9 @@
  * a dashed diagonal between the low and the high, labels on the high and the low, and a filled area between the
  * levels 0.5 / 0.618 and 0.786. Lines and labels run "Extend" bars after the current bar.
  *
- * The lines and labels use the chart foreground and background colours. A port has no chart theme: it uses the
- * colours of the reference run (dark theme: foreground #DBDBDB, background #0F0F0F).
+ * Chart context (optional third argument): the lines and labels use the foreground and background colours of the
+ * chart, read from the context (`foregroundColor`, `backgroundColor`). Without them the colours are those of a dark
+ * chart (foreground #DBDBDB, background #0F0F0F).
  *
  * Reference: "Fibonacci Trend [ChartPrime]" by ChartPrime
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,6 +20,7 @@
 import { ta, str, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, LinefillData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { foregroundColorOf, backgroundColorOf, type ChartContext } from '../chart-context';
 
 export interface FibonacciTrendInputs {
   trendOn: boolean;
@@ -71,8 +73,6 @@ export const metadata = {
 };
 
 /** chart.fg_color and chart.bg_color of the reference run (dark theme) */
-const CHART_FG = '#DBDBDB';
-const CHART_BG = '#0F0F0F';
 
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
@@ -101,6 +101,7 @@ interface Lb {
 export function calculate(
   bars: Bar[],
   inputs: Partial<FibonacciTrendInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'labels' | 'lines' | 'linefills'> & { labels: LabelData[]; lines: LineDrawingData[]; linefills: LinefillData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -133,8 +134,11 @@ export function calculate(
   let val0 = NaN;
   let val1 = NaN;
 
-  const fg50 = String(color.new(CHART_FG, 50));
-  const flat = (x1: number, y: number, x2: number, width: number, lineColor = CHART_FG, style: Ln['style'] = 'solid'): Ln =>
+  // chart.fg_color / chart.bg_color
+  const chartFg = foregroundColorOf(chart);
+  const chartBg = backgroundColorOf(chart);
+  const fg50 = String(color.new(chartFg, 50));
+  const flat = (x1: number, y: number, x2: number, width: number, lineColor = chartFg, style: Ln['style'] = 'solid'): Ln =>
     ({ x1, y1: y, x2, y2: y, color: lineColor, width, style });
 
   const plot0: Array<{ time: number; value: number; color: string }> = [];
@@ -164,7 +168,7 @@ export function calculate(
       } else if (trend === 1) {
         fibLow = flat(i, bar.high, i, 2);
         fib0 = flat(i, bar.low - a * 3, i, 2);
-        fibDi = { x1: li, y1: l, x2: hi, y2: h, color: CHART_FG, width: 1, style: 'dashed' };
+        fibDi = { x1: li, y1: l, x2: hi, y2: h, color: chartFg, width: 1, style: 'dashed' };
       }
     }
 
@@ -186,7 +190,7 @@ export function calculate(
       if (fibLow) fibLow.x2 = i + extend;
       if (fib0) fib0.x2 = i + extend;
 
-      fibDi = { x1: li, y1: l, x2: hi, y2: h, color: CHART_FG, width: 1, style: 'dashed' };
+      fibDi = { x1: li, y1: l, x2: hi, y2: h, color: chartFg, width: 1, style: 'dashed' };
       const start = fib0 ? fib0.x1 : NaN;
       if (fibDi.x1 < start || fibDi.x2 < start) fibDi = null;
 
@@ -212,7 +216,7 @@ export function calculate(
       const fib786 = flat(x1, level(v786), x2, 1);
       levels = [fib236, fib382, fib05, fib618, fib786];
 
-      const side = (y: number, text: string): Lb => ({ x: i + extend, y, text, color: CHART_BG, textColor: CHART_FG, style: 'label_left' });
+      const side = (y: number, text: string): Lb => ({ x: i + extend, y, text, color: chartBg, textColor: chartFg, style: 'label_left' });
       const priced = (v: number, line: Ln) => side(line.y1, str.tostring(v / 100) + str.tostring(line.y1, ' (#,###.####)'));
       levelLabels = [
         side(val0, '0 ' + str.tostring(val0, '(#,###.####)')),

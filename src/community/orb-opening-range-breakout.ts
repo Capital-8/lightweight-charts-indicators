@@ -7,8 +7,8 @@
  * only shown on intraday bars whose timeframe (in minutes) is not above "ORB total time (minutes)". A line has no
  * colour on the bar where its level changes.
  *
- * Limit of the port: the original reads the session hours in the exchange time zone of the symbol, which the bars do
- * not carry. The port reads them in UTC: equal on symbols with a UTC exchange time zone (e.g. crypto).
+ * The session hours are read in the exchange time zone of the symbol, given by the optional third argument (see
+ * src/chart-context.ts); without it they are read in UTC.
  *
  * Reference: "ORB" by zzzcrypto123
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +16,7 @@
 
 import { time as pineTime, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { chartTimeframe } from '../anchor-period';
+import { timezoneOf, type ChartContext } from '../chart-context';
 
 export interface OrbOpeningRangeBreakoutInputs {
   /** Highest chart timeframe (minutes) that shows the levels */
@@ -53,7 +54,11 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const ne = (a: number, b: number) => Math.abs(a - b) > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<OrbOpeningRangeBreakoutInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<OrbOpeningRangeBreakoutInputs> = {},
+  chart?: ChartContext,
+): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const inMs = n > 0 && bars[0].time >= 1e12;
@@ -63,6 +68,7 @@ export function calculate(bars: Bar[], inputs: Partial<OrbOpeningRangeBreakoutIn
   const hide = info !== null && info.isintraday && info.multiplier <= cfg.inputMax;
   // t = time(timeframe.period, sess + ":1234567")
   const session = `${cfg.sess}:1234567`;
+  const timezone = timezoneOf(chart);
 
   const plot0: Array<{ time: number; value: number; color?: string }> = [];
   const plot1: Array<{ time: number; value: number; color?: string }> = [];
@@ -71,7 +77,7 @@ export function calculate(bars: Bar[], inputs: Partial<OrbOpeningRangeBreakoutIn
   let prevLow = NaN;
   for (let i = 0; i < n; i++) {
     const { time, high, low } = bars[i];
-    const inSession = pineTime.inSession(inMs ? time : time * 1000, session, 'UTC');
+    const inSession = pineTime.inSession(inMs ? time : time * 1000, session, timezone);
     const isFirst = inSession && !prevIn;
     let orbHigh = isFirst ? high : prevHigh;
     let orbLow = isFirst ? low : prevLow;

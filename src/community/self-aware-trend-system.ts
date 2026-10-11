@@ -17,13 +17,17 @@
  *   signal, the entry / stop / target lines and labels of the latest trade, the dashboard, the trader card and the
  *   watermark (tables of the last bar). At most 500 labels are kept.
  *
- * Limits of the port:
- * - Tick size: the bars carry no symbol information, so the tick of the price levels and of the "mintick" texts is
- *   0.01. On a symbol with another tick the stop, the targets, their texts and, on some bars, the trades differ.
- * - Exchange time zone: the times of the trader card are written in UTC.
- * - Chart theme: "Auto" takes the dark theme (a chart background with a red channel below 128).
- * - Every bar is taken as closed, the last one too.
- * - The alerts (22 alert conditions, the event messages and their trade id) give no output.
+ * Chart context (optional third argument):
+ * - `chart.mintick`: the symbol tick of the price levels and of the "mintick" texts. Without it 0.01. With another
+ *   tick the stop, the targets, their texts and, on some bars, the trades differ.
+ * - `chart.timezone`: the exchange time zone of the times of the trader card. Without it UTC.
+ * - `chart.backgroundColor`: theme "Auto" is dark when the red channel of the chart background is below 128.
+ *   Without it the dark theme.
+ * - `chart.lastBarConfirmed`: when the last bar is still open, there is no exit and no entry on it and the trader
+ *   card says "current bar provisional". Without it every bar is taken as closed.
+ * - `chart.timeframe`: the chart timeframe, for the preset "Auto". Without it, it is taken from the bars.
+ *
+ * Limit of the port: the alerts (22 alert conditions, the event messages and their trade id) give no output.
  *
  * Reference: "Self-Aware Trend System [WillyAlgoTrader]" by WillyAlgoTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -35,6 +39,7 @@ import {
 } from 'oakscriptjs';
 import type { BgColorData, LabelData, LabelStyle, LineDrawingData, TableCellData, TableData, TablePosition } from '../types';
 import { chartTimeframe } from '../anchor-period';
+import { backgroundColorOf, lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
 
 type Preset = 'Auto' | 'Custom' | 'Scalping' | 'Default' | 'Swing' | 'Crypto 24/7';
 type Corner = 'Top Left' | 'Top Right' | 'Bottom Left' | 'Bottom Right' | 'Middle Right';
@@ -359,12 +364,6 @@ const ASYM_WIDEN_MAX = 0.4;
 
 /** max_labels_count of the script */
 const MAX_LABELS = 500;
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
-/** syminfo.timezone is not available to the port: the times of the trader card are in UTC */
-const TIMEZONE = 'UTC';
-/** chart.bg_color is not available to the port: a dark chart (red channel below 128) */
-const CHART_IS_DARK = true;
 
 /** Pine float comparisons: a > b only when a - b > 1e-10, a == b within 1e-10 (na compares false) */
 const EPS = 1e-10;
@@ -382,11 +381,7 @@ const mapClamp = (v: number, inLo: number, inHi: number, outLo: number, outHi: n
   outLo + clamp(safeDiv(v - inLo, inHi - inLo, 0.0), 0.0, 1.0) * (outHi - outLo);
 const mapClampInv = (v: number, inLo: number, inHi: number, outHigh: number, outLow: number) =>
   outHigh - clamp(safeDiv(v - inLo, inHi - inLo, 0.0), 0.0, 1.0) * (outHigh - outLow);
-const roundDownTick = (v: number) => Math.floor(v / MINTICK + 1e-9) * MINTICK;
-const roundUpTick = (v: number) => Math.ceil(v / MINTICK - 1e-9) * MINTICK;
-const roundTick = (v: number) => math.round_to_mintick(v, MINTICK) as number;
 const signedR = (v: number) => (Number.isNaN(v) ? '—' : (gt(v, 0) ? '+' : '') + str.tostring(v, '0.00'));
-const tickText = (v: number) => str.tostring(v, 'mintick', MINTICK);
 const cornerOf = (s: string): TablePosition => {
   switch (s) {
     case 'Top Left': return 'top_left';
@@ -428,9 +423,19 @@ class LiveLabels {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SelfAwareTrendSystemInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[]; bgColors: BgColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  // syminfo.mintick, syminfo.timezone, chart.bg_color (dark: red channel below 128), barstate.isconfirmed
+  const MINTICK = mintickOf(chart);
+  const TIMEZONE = timezoneOf(chart);
+  const CHART_IS_DARK = (color.r(backgroundColorOf(chart)) as number) < 128;
+  const lastConfirmed = lastBarConfirmedOf(chart);
+  const roundDownTick = (v: number) => Math.floor(v / MINTICK + 1e-9) * MINTICK;
+  const roundUpTick = (v: number) => Math.ceil(v / MINTICK - 1e-9) * MINTICK;
+  const roundTick = (v: number) => math.round_to_mintick(v, MINTICK) as number;
+  const tickText = (v: number) => str.tostring(v, 'mintick', MINTICK);
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
 
@@ -449,7 +454,7 @@ export function calculate(
   }
 
   // Preset resolution: tfMinutes = timeframe.in_seconds(timeframe.period) / 60
-  const chartTf = chartTimeframe(bars);
+  const chartTf = chart?.timeframe ?? chartTimeframe(bars);
   const tfMinutes = chartTf === '' ? NaN : timeframe.in_seconds(chartTf) / 60.0;
   const resolvedPreset: Preset = cfg.preset === 'Auto' ? (tfMinutes <= 5 ? 'Scalping' : tfMinutes <= 240 ? 'Default' : 'Swing') : cfg.preset;
   const pick = <T,>(scalping: T, def: T, swing: T, crypto: T, custom: T): T => {
@@ -829,12 +834,14 @@ export function calculate(
     let tp2Event = false;
     let tp3Event = false;
     let closedThisBar = false;
-    const rawBuy = flipUp && isWarmedUp;
-    const rawSell = flipDown && isWarmedUp;
+    // barstate.isconfirmed: false on a last bar that is still open
+    const isConfirmed = i < n - 1 || lastConfirmed;
+    const rawBuy = flipUp && isConfirmed && isWarmedUp;
+    const rawSell = flipDown && isConfirmed && isWarmedUp;
     const calculationEpoch = learn.epoch;
 
     // First settle the old trade with the full bar. The stop wins an ambiguous bar.
-    if (trade.dir !== 0 && i > trade.entryBar) {
+    if (trade.dir !== 0 && isConfirmed && i > trade.entryBar) {
       const stopHit = trade.side === 1 ? le(low[i], trade.sl) : ge(high[i], trade.sl);
       const opposite = trade.side !== trend;
       const timedOut = i - trade.entryBar >= cfg.tradeMaxAge;
@@ -1254,6 +1261,7 @@ export function calculate(
     healthText += !hasVolume[last] ? ' | volume n/a' : '';
     healthText += !(trend === 1 ? validLowPivot : validHighPivot) ? ' | no recent pivot' : '';
     healthText += ge(recentFlipCount, cfg.chopCount) ? ' | frequent flips' : '';
+    healthText += !lastConfirmed ? ' | current bar provisional' : '';
     const planText = havePlan ? tickText(trade.entry) + ' / ' + tickText(trade.sl) : '—';
     const riskText = havePlan
       ? tickText(trade.risk) + ' | ' + str.tostring(trade.risk / MINTICK, '0') + ' ticks | '

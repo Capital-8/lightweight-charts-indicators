@@ -14,9 +14,9 @@
  *
  * These are the drawings of the last bar: they move when a bar is added. Nothing is drawn when the last bar has no
  * volume.
- * The port has no symbol information: prices are shown with a tick size of 0.01 and the currency of the amounts is
- * "USD". The text of the boxes uses the chart foreground colour (chart.fg_color): the port has no chart theme and
- * uses the colour of a dark chart.
+ * The port reads three values from the chart context (third argument): the price tick of the symbol for the price
+ * texts (0.01 without it), the currency of the amounts ("USD" without it) and the chart foreground colour for the
+ * text of the boxes (#DBDBDB, the colour of a dark chart, without it).
  *
  * Reference: "Money Flow Profile [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -26,6 +26,7 @@
 import { array, color, compare, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, PineSize, PolylineData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { currencyOf, foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
 
 export interface MoneyFlowProfileInputs {
   /** Lookback Length / Fixed Range */
@@ -191,11 +192,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** syminfo.mintick and syminfo.currency are not available to the port (no symbol information) */
-const MINTICK = 0.01;
-const CURRENCY = 'USD';
-/** chart.fg_color of a dark chart (the port has no chart theme) */
-const CHART_FG = '#DBDBDB';
 /** indicator(max_boxes_count = 500): the original stops adding rows at 500 boxes */
 const MAX_BOXES = 500;
 
@@ -216,7 +212,12 @@ const SIZES: Record<string, PineSize> = { Tiny: 'tiny', Small: 'small', Normal: 
 export function calculate(
   bars: Bar[],
   inputs: Partial<MoneyFlowProfileInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { boxes: BoxData[]; labels: LabelData[]; polylines: PolylineData[] } {
+  // syminfo.mintick, syminfo.currency and chart.fg_color (text of the boxes)
+  const MINTICK = mintickOf(chart);
+  const CURRENCY = currencyOf(chart);
+  const CHART_FG = foregroundColorOf(chart);
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;

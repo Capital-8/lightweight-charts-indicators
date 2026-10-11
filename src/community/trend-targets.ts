@@ -11,7 +11,8 @@
  * the targets are lines with a price label, extended 40 bars after the last bar, with a fill from the entry to the
  * stop and to the third target. Only the levels of the last trend change are kept.
  *
- * The prices of the label texts are rounded to the price tick, which the port does not get: it uses 0.01.
+ * The prices of the label texts are rounded to the price tick of the symbol: the port reads it from the chart
+ * context (third argument) and uses 0.01 without it.
  *
  * Reference: "Trend Targets [AlgoAlpha]" by AlgoAlpha
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -21,6 +22,7 @@
 import { ta, str, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, LineDrawingData, LabelData, LinefillData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface TrendTargetsInputs {
   /** Multiplier for the ATR of the Supertrend bands */
@@ -82,9 +84,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
-
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
@@ -103,6 +102,7 @@ interface Level {
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendTargetsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'barColors' | 'lines' | 'labels' | 'linefills'> & {
   markers: MarkerData[];
   barColors: BarColorData[];
@@ -165,7 +165,8 @@ export function calculate(
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
   const plot0: Array<{ time: number; value: number; color: string }> = [];
-  const priceText = (v: number) => str.tostring(v, 'mintick', MINTICK);
+  const mintick = mintickOf(chart);
+  const priceText = (v: number) => str.tostring(v, 'mintick', mintick);
 
   let rejcount = 0;
   // entry, stop loss, TP1, TP2, TP3 (var lines and labels: na before the first signal)

@@ -17,7 +17,9 @@
  *   session starts at 00:00 UTC; on other symbols the session starts on the first bar of each UTC day. Equal on UTC
  *   24x7 symbols and on symbols whose session is inside one UTC day without extended hours (e.g. US stocks). The
  *   first bar of the bars is a session start only when it is not later in the day than the first bar of the next day.
- * - Tooltips of the labels are prices printed with the price tick of the symbol; the port uses a tick of 0.01.
+ * - Tooltips of the labels are prices printed with the price tick of the symbol: the port reads the tick from the
+ *   chart context (third argument of calculate) and uses 0.01 without it. The session rule above does not read the
+ *   chart context.
  * - The moving average type WMA needs a weighted average with a length that changes on each bar, which the
  *   library does not have: the port throws an Error for it.
  * - The Pine script stops with an error on daily and higher bars; the port throws the same error.
@@ -34,6 +36,7 @@ import {
 import type { LineDrawingData, BoxData, LabelData, LinefillData, PineSize } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { periodStarts, chartTimeframe } from '../anchor-period';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface OpeningRangeBreakoutsTargetsInputs {
   /** Keep the drawings of the previous sessions */
@@ -157,8 +160,6 @@ export const metadata = {
 
 /** max_lines_count / max_labels_count / max_boxes_count of the script */
 const MAX_OBJECTS = 500;
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 /** invis = color.rgb(0, 0, 0, 100) */
 const INVIS = 'rgba(0, 0, 0, 0)';
 
@@ -213,6 +214,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<OpeningRangeBreakoutsTargetsInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; linefills: LinefillData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -236,6 +238,8 @@ export function calculate(
   const orText = String(color.new(cfg.orColor, 0));
   const interval = barInterval(bars);
   const inMs = n > 0 && bars[0].time >= 1e12;
+  /** syminfo.mintick, the tick size of format.mintick (0.01 without a chart context) */
+  const MINTICK = mintickOf(chart);
   const tick = (v: number) => str.tostring(v, 'mintick', MINTICK);
 
   // Opening range session: or_sesh

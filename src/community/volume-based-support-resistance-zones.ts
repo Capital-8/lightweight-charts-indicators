@@ -22,8 +22,9 @@
  * calendar), and on intraday charts of stocks the daily and weekly bars of the exchange (official open and close,
  * consolidated volume) differ from the bars built from the chart bars, so the zones of these timeframes can differ.
  *
- * Not ported: the table shown when the symbol has no volume includes the symbol name in the original; the port has
- * no symbol name and leaves it out of the text. The 32 alert() calls have no output.
+ * Chart values read: the ticker id of the symbol, for the table shown when the symbol has no volume ("... for this
+ * symbol (EXCHANGE:NAME)"). Without a chart context the name and its brackets are left out of the text. The 32
+ * alert() calls have no output.
  *
  * Reference: "Volume-based Support & Resistance Zones V2" by tommyf1001
  * Original notice: Original script is thanks to synapticex and additional modifications is thanks to Lij_MC.
@@ -33,6 +34,7 @@
 import { ta, Series, color, timeframe, barInterval, barTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LineDrawingData, LabelData, LinefillData, TableData } from '../types';
 import { periodStarts, chartTimeframe } from '../anchor-period';
+import { tickeridOf, type ChartContext } from '../chart-context';
 
 type Menu = 'S/R' | 'S/R Zones' | 'Disable';
 type StyleName = 'Solid' | 'Dotted' | 'Dashed';
@@ -380,6 +382,7 @@ function higherTimeframe(bars: Bar[], starts: number[], tf: string): { tfBars: B
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeBasedSupportResistanceZonesInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -675,11 +678,14 @@ export function calculate(
   const tables: TableData[] = [];
   const lastVolume = bars[n - 1].volume;
   if (lastVolume === undefined || lastVolume === null || Number.isNaN(lastVolume) || (n > 1 && bars[n - 2].volume === 0)) {
+    // syminfo.tickerid
+    const tickerid = tickeridOf(chart);
     tables.push({
       position: 'middle_right', columns: 1, rows: 1, frameColor: '#FF5252', frameWidth: 1,
       cells: [{
         column: 0, row: 0, textColor: '#FF5252',
-        text: 'There is no volume data for this symbol\n Please use a different symbol with volume data',
+        text: 'There is no volume data for this symbol' + (tickerid === '' ? '' : ` (${tickerid})`)
+          + '\n Please use a different symbol with volume data',
       }],
     });
   }

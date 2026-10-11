@@ -20,20 +20,23 @@
  * zone and risk levels, the panel table (Classic or Detailed), the table of the last outcomes, the watermark, BUY /
  * SELL marks, five values for the data window and the previous day / previous session levels.
  *
- * Limits of a port (it gets the bars only):
- * - The bars are closed bars: the model also runs on the last bar (the original skips it while that bar is open).
- * - Price tick: the port has no symbol tick and uses 0.01 (rounding of entry, stop and target, tolerances, price
- *   texts).
+ * Chart values (third argument of calculate):
+ * - Symbol tick: rounding of entry, stop and target, tolerances, price texts. Without it: 0.01.
+ * - State of the last bar: the model does not run on a last bar that is still open (the panel then says "Last
+ *   closed state", and the adaptive grid follows the open bar). Without it: the last bar is closed.
+ * - Exchange time zone: the dates of the Detailed panel and of the outcome table. Without it: UTC.
+ * - Session hours of the symbol ("0930-1600"): the close time of the last higher-timeframe bar in the Detailed
+ *   panel is the close of its last chart bar (intraday and daily charts). Without them, and for a symbol that
+ *   trades around the clock: the end of the period.
+ * - Chart background colour (theme 'Auto': dark below 128 of red). Without it: #0F0F0F, a dark chart.
+ *
+ * Limits of the port:
  * - The bars of the higher timeframe and the days (previous day high / low) are built from the chart bars with the
- *   UTC calendar rule of src/anchor-period.ts. The close time of a bar is its time plus its timeframe (exact on
- *   symbols that trade around the clock and on intraday bars). A timeframe at or below the chart timeframe is not
- *   used by the script.
- * - The dates of the Detailed panel and of the outcome table are written in UTC (the original uses the time zone of
- *   the exchange).
+ *   UTC calendar rule of src/anchor-period.ts. The close time of a chart bar is its time plus its timeframe (exact
+ *   on symbols that trade around the clock and on intraday bars). A timeframe at or below the chart timeframe is
+ *   not used by the script.
  * - Session levels: one session period ("HHmm-HHmm") in the session time zone; several periods throw an Error when
  *   the session is used.
- * - The script reads the chart background colour (theme 'Auto'). A port has no chart theme: it uses the colour of
- *   the reference run (#0F0F0F, a dark theme).
  * - A time between two bars is given as the time of the next bar, where it is drawn. Objects without a price and
  *   tables without a cell are not returned (nothing is drawn).
  * - The alert inputs are kept but alerts have no output.
@@ -45,6 +48,7 @@
 import { ta, Series, color, math, str, timeframe, time as pineTime, barTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PineSize, TableCellData, TableData, TablePosition } from '../types';
 import { periodStarts, chartTimeframe } from '../anchor-period';
+import { backgroundColorOf, lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
 
 export interface FibonacciStructureEngineInputs {
   swingLen: number;
@@ -315,14 +319,6 @@ export const inputConfig: InputConfig[] = [
   { id: 'alertLiquidity', type: 'bool', title: 'Liquidity sweep events', defval: false, group: G_ALERT },
 ];
 
-/** Chart background of the reference run (chart.bg_color) */
-const CHART_BG = '#0F0F0F';
-/** Price tick used by the port (syminfo.mintick) */
-const MINTICK = 0.01;
-/** The bars given to a port are closed bars (barstate.isconfirmed on the last bar too) */
-const LAST_BAR_CLOSED = true;
-/** Time zone of the date texts (the original uses the time zone of the exchange) */
-const TEXT_TZ = 'UTC';
 const VERSION = '2.1.0';
 const BLUE = '#2962FF';
 const RATIOS = [0.236, 0.382, 0.5, 0.618, 0.786, -0.5, -0.618];
@@ -369,7 +365,6 @@ const outcome = (direction: number, stop: number, target: number, h: number, l: 
 const engulfBounds = (strict: boolean, o: number, c: number, po: number, pc: number, direction: number) => (direction === 1
   ? gt(c, o) && lt(pc, po) && (strict ? lt(o, pc) && gt(c, po) : le(o, pc) && ge(c, po) && (lt(o, pc) || gt(c, po)))
   : lt(c, o) && gt(pc, po) && (strict ? gt(o, pc) && lt(c, po) : ge(o, pc) && le(c, po) && (gt(o, pc) || lt(c, po))));
-const px = (value: number) => (na(value) ? '—' : str.tostring(value, 'mintick', MINTICK));
 const rrText = (value: number) => (na(value) ? '—' : `${str.tostring(value, '0.00')}R`);
 function stateText(state: number): string {
   switch (state) {
@@ -475,8 +470,14 @@ function periodEnd(start: number, tf: string): number {
   return start + timeframe.in_seconds(tf) * 1000;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineInputs> = {}, chart?: ChartContext): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
+  // syminfo.mintick, barstate.isconfirmed on the last bar, syminfo.timezone (date texts), chart.bg_color
+  const MINTICK = mintickOf(chart);
+  const LAST_BAR_CLOSED = lastBarConfirmedOf(chart);
+  const TEXT_TZ = timezoneOf(chart);
+  const CHART_BG = backgroundColorOf(chart);
+  const px = (value: number) => (na(value) ? '—' : str.tostring(value, 'mintick', MINTICK));
   const { swingLen, bullColor, bearColor, fibColor, zoneColor, liqColor } = cfg;
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -518,6 +519,7 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
     const starts = periodStarts(bars, cfg.htf);
     const htf: Bar[] = [];
     const group: number[] = [];
+    const lastOf: number[] = [];
     bars.forEach((b, i) => {
       if (i === 0 || starts[i] !== starts[i - 1]) {
         htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
@@ -528,7 +530,27 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
         last.close = b.close;
       }
       group.push(htf.length - 1);
+      lastOf[htf.length - 1] = i;
     });
+    // time_close of a bar of the higher timeframe. With the session hours of the symbol (a symbol that does not
+    // trade around the clock) it is the close of its last chart bar: the end of an intraday bar, the end of the
+    // session of a daily bar. Without them: the end of the period.
+    const symbolSession = typeof chart?.session === 'string' ? chart.session : chart?.session?.session ?? '';
+    const sessionHours = /^(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(symbolSession);
+    const sessionEnd = sessionHours && sessionHours[1] + sessionHours[2] !== sessionHours[3] + sessionHours[4]
+      ? { hour: Number(sessionHours[3]), minute: Number(sessionHours[4]) } : null;
+    const htfClose = (g: number): number => {
+      const last = lastOf[g];
+      if (sessionEnd !== null && isIntraday) return closeMs(last);
+      if (sessionEnd !== null && chartTf !== '' && timeframe.in_seconds(chartTf) === 86400) {
+        const t = tMs(last);
+        const at = (shift: number) => pineTime.timestamp(
+          TEXT_TZ, pineTime.year(t, TEXT_TZ), pineTime.month(t, TEXT_TZ), pineTime.dayofmonth(t, TEXT_TZ) + shift, sessionEnd.hour, sessionEnd.minute,
+        );
+        return at(0) > t ? at(0) : at(1);
+      }
+      return periodEnd(ms ? htf[g].time : htf[g].time * 1000, cfg.htf);
+    };
     const ph = A(ta.pivothigh(Series.fromArray(htf, htf.map((b) => b.high)), swingLen, swingLen));
     const pl = A(ta.pivotlow(Series.fromArray(htf, htf.map((b) => b.low)), swingLen, swingLen));
     let lastHigh = NaN;
@@ -551,7 +573,7 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
       const g = group[i] - 1;
       if (g < 0) continue;
       htfBias[i] = biasOf[g];
-      htfCloseTime[i] = periodEnd(ms ? htf[g].time : htf[g].time * 1000, cfg.htf);
+      htfCloseTime[i] = htfClose(g);
     }
   }
 

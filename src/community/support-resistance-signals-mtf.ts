@@ -15,8 +15,9 @@
  * The detection timeframe is not another data series: it only scales the detection length by
  * (timeframe minutes / chart timeframe minutes). The chart timeframe is the most frequent gap
  * between two bars; a daily chart counts 1440 minutes, a weekly one 10080, a monthly one 302400, as the original.
- * All outputs are drawings (at most 500 boxes, 500 lines and 500 labels). The swing label tooltips use the symbol
- * price tick (syminfo.mintick): bars carry no symbol info, the port uses a tick of 0.01.
+ * All outputs are drawings (at most 500 boxes, 500 lines and 500 labels). The swing label tooltips print the price
+ * with the symbol tick (syminfo.mintick): the port reads it from the chart context (third argument of calculate),
+ * and uses a tick of 0.01 without it.
  *
  * Reference: "Support and Resistance Signals MTF [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -26,6 +27,7 @@
 import { ta, str, compare, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, BoxData, PineSize } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 type SignalSize = 'Auto' | 'Tiny' | 'Small' | 'Normal' | 'None';
 
@@ -96,8 +98,6 @@ const RED_ZONE = 'rgba(242,54,69,0.17)';
 const TEAL_SIG = 'rgba(8,153,129,0.67)';
 const RED_SIG = 'rgba(242,54,69,0.67)';
 const WHITE = '#FFFFFF';
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 /** Pine: indicator(max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500) */
 const MAX_COUNT = 500;
 
@@ -221,8 +221,11 @@ function chartMinutes(bars: Bar[]): number {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceSignalsMtfInputs> = {},
+  chart?: ChartContext,
 ): IndicatorResult & { labels: LabelData[]; lines: LineDrawingData[]; boxes: BoxData[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  /** syminfo.mintick (0.01 without a chart context) */
+  const MINTICK = mintickOf(chart);
   const { srTF, srMR, srSLC, srSZC, srRLC, srRZC, srHST, mnSH, mnMR, mnSZC, mnRZC, srFBO, srBS, srTS, srRS, srPS, srPUC, srPDC, swSH, swHC, swLC } = cfg;
   const n = bars.length;
   const empty = {

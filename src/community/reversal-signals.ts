@@ -16,7 +16,8 @@
  * kept.
  *
  * The two "Overall Trend Mark" shapes are hidden in the original (display.none) and are not drawn. The prices in
- * the label tooltips use a tick of 0.01 (the port has no symbol tick).
+ * the label tooltips use the price tick of the symbol: the port reads it from the chart context (third argument)
+ * and uses 0.01 without it.
  *
  * Reference: "Reversal Signals [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -25,6 +26,7 @@
 
 import { ta, Series, color, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, MarkerData } from '../types';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface ReversalSignalsInputs {
   /** Display of the momentum phases */
@@ -104,8 +106,6 @@ export const metadata = {
 
 /** indicator(max_labels_count = 500) */
 const MAX_LABELS = 500;
-/** syminfo.mintick is not available to the port (Bar has no symbol info) */
-const MINTICK = 0.01;
 
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
@@ -122,6 +122,7 @@ const DIGITS = ['₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉', '
 export function calculate(
   bars: Bar[],
   inputs: Partial<ReversalSignalsInputs> = {},
+  chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'labels'> & { markers: MarkerData[]; labels: LabelData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -204,7 +205,8 @@ export function calculate(
     labels.push(l);
     if (labels.length > MAX_LABELS + 5) labels = labels.slice(labels.length - MAX_LABELS);
   };
-  const tick = (v: number) => str.tostring(v, 'mintick', MINTICK);
+  const mintick = mintickOf(chart);
+  const tick = (v: number) => str.tostring(v, 'mintick', mintick);
 
   type Point = { time: number; value: number };
   const plot0: Point[] = [];
