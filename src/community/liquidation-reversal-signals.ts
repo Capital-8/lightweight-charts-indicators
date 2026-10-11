@@ -1,0 +1,269 @@
+/**
+ * Liquidation Reversal Signals [AlgoAlpha]
+ *
+ * The up volume and the down volume of each bar are turned into z-scores over 'Z Score Length' bars. A bar is a
+ * short liquidation when the Supertrend (factor 2, ATR 10) is in an uptrend and the z-score of the up volume is
+ * above 'Z-Score Threshold'; it is a long liquidation when the Supertrend is in a downtrend and the z-score of the
+ * down volume is above the threshold. Each one is marked with a dot one ATR(14) above the high / below the low,
+ * more opaque for a larger z-score. When the Supertrend then turns against the last liquidation within
+ * 'Liquidation Timeout Bars' bars, the Supertrend line is shown until its next turn, with a start label, a fill to
+ * the middle of the candle body and tinted candles. A table shows "No Volume" when the last bar has no volume.
+ *
+ * Limit, lower-timeframe volume: the original reads the up volume and the down volume of each bar from the bars of
+ * 'Lower Timeframe' (default 15 minutes) with `requestUpAndDownVolume()` of the ta library of the platform. The bars
+ * passed to a port are the chart bars only, so the port ESTIMATES both values from the chart bars
+ * (src/lower-tf-volume.ts): all the volume of a bar is up volume or down volume by the library rule (up when
+ * close > open, down when close < open, else by the close against the previous close, else as the previous bar).
+ * Every visible output depends on these values (the dots, and through them the trend lines, labels, fills and
+ * candle colours), so on a chart above the lower timeframe the output is NOT the output of the original. Also, the
+ * original has the values only on the bars where data of the lower timeframe exists, while the port has the
+ * estimate on every bar.
+ * The timeframe input is kept. In the port it only does this: equal to the chart timeframe, the chart bars are the
+ * bars of the request and the output is the original one; below the chart timeframe, the estimate is used whatever
+ * its value; above the chart timeframe, the error of the library is thrown.
+ *
+ * Chart values read (optional third argument of calculate): the chart timeframe (without it, read from the bar
+ * spacing), the chart background colour (candle tint, table; without it #0F0F0F) and the chart foreground colour
+ * (label texts, table; without it #DBDBDB).
+ * The candles are drawn in front of the chart candles (behind_chart = false). The 4 alert conditions of the script
+ * have no output.
+ *
+ * Reference: "Liquidation Reversal Signals [AlgoAlpha]" by AlgoAlpha
+ * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
+ * Original notice: © AlgoAlpha
+ */
+
+import { ta, Series, color, math, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar } from 'oakscriptjs';
+import type { MarkerData, PlotCandleData, TableData } from '../types';
+import { chartTimeframe } from '../anchor-period';
+import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
+import { upDownVolumeOfChartBars } from '../lower-tf-volume';
+
+export interface LiquidationReversalSignalsInputs {
+  /** Lower Timeframe (see the file header for what it does in the port) */
+  lowerTF: string;
+  /** Z Score Length */
+  length: number;
+  /** Z-Score Threshold */
+  zThresh: number;
+  /** Liquidation Timeout Bars (0 = none) */
+  timeoutBars: number;
+  green: string;
+  red: string;
+}
+
+export const defaultInputs: LiquidationReversalSignalsInputs = {
+  lowerTF: '15',
+  length: 200,
+  zThresh: 3.0,
+  timeoutBars: 50,
+  green: '#00ffbb',
+  red: '#ff1100',
+};
+
+export const inputConfig: InputConfig[] = [
+  {
+    id: 'lowerTF', type: 'timeframe', title: 'Lower Timeframe', defval: '15', group: 'Data',
+    tooltip: 'Lower timeframe used by the up/down volume request.',
+  },
+  {
+    id: 'length', type: 'int', title: 'Z Score Length', defval: 200, min: 1, group: 'Z-Score',
+    tooltip: 'Lookback length for mean and standard deviation when computing z-scores of up/down volume.',
+  },
+  {
+    id: 'zThresh', type: 'float', title: 'Z-Score Threshold', defval: 3.0, min: 0.0, step: 0.1, group: 'Z-Score',
+    tooltip: 'Minimum z-score required to register a liquidation spike.',
+  },
+  {
+    id: 'timeoutBars', type: 'int', title: 'Liquidation Timeout Bars (0 = none)', defval: 50, min: 0, group: 'Detection',
+    tooltip: 'Maximum bars between a qualifying liquidation and the Supertrend flip. Set 0 to disable the timeout.',
+  },
+  {
+    id: 'green', type: 'color', title: 'Bullish Colour', defval: '#00ffbb', group: 'Appearance',
+    tooltip: 'Color used for bullish visuals and positive sentiment texts.',
+  },
+  {
+    id: 'red', type: 'color', title: 'Bearish Colour', defval: '#ff1100', group: 'Appearance',
+    tooltip: 'Color used for bearish visuals and negative sentiment texts.',
+  },
+];
+
+export const plotConfig: PlotConfig[] = [
+  { id: 'plot0', title: 'Mid Body', color: '#2962FF', display: 'none' },
+  { id: 'plot1', title: 'Bullish Trend', color: '#ff1100', style: 'linebr' },
+  { id: 'plot2', title: 'Bearish Trend', color: '#00ffbb', style: 'linebr' },
+];
+
+/** The two fills with the default colours (the result `fills` carry the input colours) */
+export const fillConfig: FillConfig[] = [
+  { id: 'fill_bull', plot1: 'plot0', plot2: 'plot1', color: String(color.new('#ff1100', 90)), title: 'Bullish Fill' },
+  { id: 'fill_bear', plot1: 'plot0', plot2: 'plot2', color: String(color.new('#00ffbb', 90)), title: 'Bearish Fill' },
+];
+
+export const metadata = {
+  title: 'Liquidation Reversal Signals [AlgoAlpha]',
+  shortTitle: 'AlgoAlpha - Liquidation Reversal',
+  overlay: true,
+};
+
+/** Pine float comparisons: a > b only when a - b > 1e-10, a != b when they differ by more than 1e-10 (na: false) */
+const EPS = 1e-10;
+const gt = (a: number, b: number) => a - b > EPS;
+const ne = (a: number, b: number) => Math.abs(a - b) > EPS;
+
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<LiquidationReversalSignalsInputs> = {},
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & {
+    markers: MarkerData[];
+    plotCandles: Record<string, PlotCandleData[]>;
+    tables: TableData[];
+  } {
+  const cfg = { ...defaultInputs, ...inputs };
+  const { length, zThresh, timeoutBars, green, red } = cfg;
+  // chart.fg_color, chart.bg_color
+  const chartFg = foregroundColorOf(chart);
+  const chartBg = backgroundColorOf(chart);
+  const n = bars.length;
+  const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
+  const S = (a: number[]) => Series.fromArray(bars, a);
+
+  // [u, d, _] = ta.requestUpAndDownVolume(lowerTF): checkLTF() of the library first
+  const chartTf = chartTimeframe(bars, chart);
+  if (chartTf !== '' && cfg.lowerTF.trim() !== '' && timeframe.in_seconds(cfg.lowerTF) > timeframe.in_seconds(chartTf)) {
+    throw new Error(`Invalid lower timeframe: '${cfg.lowerTF}'. The timeframe must be lower than or equal to '${chartTf}'`);
+  }
+  // The timeframe is the chart timeframe: the chart bars are the requested bars and the values are the original
+  // ones. Below it, the same computation on the chart bars is the estimate of the port (see the file header).
+  const volumes = upDownVolumeOfChartBars(bars);
+  const u = volumes.up;
+  // d := -d
+  const d = volumes.down.map((v) => -v);
+
+  const meanU = A(ta.sma(S(u), length));
+  const stdevU = A(ta.stdev(S(u), length));
+  const meanD = A(ta.sma(S(d), length));
+  const stdevD = A(ta.stdev(S(d), length));
+
+  const [supertrendSeries, directionSeries] = ta.supertrend(bars, 2, 10);
+  const supertrend = A(supertrendSeries);
+  const direction = A(directionSeries);
+  const dirCross = A(ta.cross(directionSeries, 0) as unknown as Series).map((v) => Boolean(v));
+  const dirUnder = A(ta.crossunder(directionSeries, 0) as unknown as Series).map((v) => Boolean(v));
+  const dirOver = A(ta.crossover(directionSeries, 0) as unknown as Series).map((v) => Boolean(v));
+  const vola = A(ta.atr(bars, 14));
+
+  const transpMax = 70;
+  const transpMin = 30;
+  const bullCandle = String(color.from_gradient(50, 0, 100, red, chartBg));
+  const bearCandle = String(color.from_gradient(50, 0, 100, green, chartBg));
+  const noCandle = String(color.new(green, 100));
+  const bullLabel = String(color.new(red, 30));
+  const bearLabel = String(color.new(green, 30));
+
+  let lastliqdir = 0;
+  let lastliqindex = 0;
+  let valid = 0;
+  let plottrnd = 0;
+  let prevPlottrnd = NaN;
+
+  const midPlot: Array<{ time: number; value: number }> = [];
+  const bullPlot: Array<{ time: number; value: number; color: string }> = [];
+  const bearPlot: Array<{ time: number; value: number; color: string }> = [];
+  const markers: MarkerData[] = [];
+  const candles: PlotCandleData[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const bar = bars[i];
+    const zU = ne(stdevU[i], 0) ? (u[i] - meanU[i]) / stdevU[i] : NaN;
+    const zD = ne(stdevD[i], 0) ? (d[i] - meanD[i]) / stdevD[i] : NaN;
+    const shortLiq = gt(0, direction[i]) && gt(zU, zThresh);
+    const longLiq = gt(direction[i], 0) && gt(zD, zThresh);
+
+    if (dirCross[i]) plottrnd = 0;
+    if (dirUnder[i] && lastliqdir === 1 && valid === 1) {
+      if (i - lastliqindex < timeoutBars) plottrnd = 1;
+      valid = 0;
+    }
+    if (dirOver[i] && lastliqdir === -1 && valid === 1) {
+      if (i - lastliqindex < timeoutBars) plottrnd = -1;
+      valid = 0;
+    }
+    if (shortLiq) {
+      lastliqdir = -1;
+      lastliqindex = i;
+      valid = 1;
+    }
+    if (longLiq) {
+      lastliqdir = 1;
+      lastliqindex = i;
+      valid = 1;
+    }
+
+    // plottrnd[1] is na on the first bar: `na != -1` is false
+    const newBullSt = plottrnd === -1 && !Number.isNaN(prevPlottrnd) && prevPlottrnd !== -1;
+    const newBearSt = plottrnd === 1 && !Number.isNaN(prevPlottrnd) && prevPlottrnd !== 1;
+    prevPlottrnd = plottrnd;
+
+    midPlot.push({ time: bar.time, value: (bar.open + bar.close) / 2 });
+    bullPlot.push({ time: bar.time, value: plottrnd === -1 ? supertrend[i] : NaN, color: red });
+    bearPlot.push({ time: bar.time, value: plottrnd === 1 ? supertrend[i] : NaN, color: green });
+
+    if (newBullSt) {
+      markers.push({ time: bar.time, position: 'aboveBar', shape: 'labelDown', color: bullLabel, text: '▼', textColor: chartFg, size: 'tiny' });
+    }
+    if (newBearSt) {
+      markers.push({ time: bar.time, position: 'belowBar', shape: 'labelUp', color: bearLabel, text: '▲', textColor: chartFg, size: 'tiny' });
+    }
+    // plotchar(shortLiq ? high + vola : na, "Short Liquidation", "●", location.absolute, colShort, size = size.tiny)
+    if (shortLiq && Number.isFinite(bar.high + vola[i])) {
+      const norm = math.min(math.max((Math.abs(zU) - zThresh) / 5, 0), 1) as number;
+      const transp = math.round(transpMax - norm * (transpMax - transpMin)) as number;
+      markers.push({
+        time: bar.time, position: 'atPriceMiddle', price: bar.high + vola[i], shape: 'circle', color: 'transparent', text: '●',
+        textColor: String(color.new(green, transp)), size: 'tiny',
+      });
+    }
+    if (longLiq && Number.isFinite(bar.low - vola[i])) {
+      const norm = math.min(math.max((Math.abs(zD) - zThresh) / 5, 0), 1) as number;
+      const transp = math.round(transpMax - norm * (transpMax - transpMin)) as number;
+      markers.push({
+        time: bar.time, position: 'atPriceMiddle', price: bar.low - vola[i], shape: 'circle', color: 'transparent', text: '●',
+        textColor: String(color.new(red, transp)), size: 'tiny',
+      });
+    }
+
+    const candleCol = plottrnd === -1 ? bullCandle : plottrnd === 1 ? bearCandle : noCandle;
+    candles.push({
+      time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close,
+      color: candleCol, wickColor: candleCol, borderColor: candleCol,
+    });
+  }
+
+  // var table warnTbl: its cell is written on every bar (the state of the last bar is kept)
+  const tables: TableData[] = [{ position: 'middle_right', columns: 1, rows: 1, cells: [] }];
+  if (n > 0) {
+    const volume = bars[n - 1].volume ?? NaN;
+    const noVol = Number.isNaN(volume) || Math.abs(volume) <= EPS || (Number.isNaN(u[n - 1]) && Number.isNaN(d[n - 1]));
+    tables[0].cells.push({
+      column: 0, row: 0, text: noVol ? 'No Volume' : '',
+      textColor: noVol ? String(color.white) : String(color.new(chartFg, 100)),
+      bgColor: noVol ? String(color.new(red, 0)) : String(color.new(chartBg, 100)),
+    });
+  }
+
+  return {
+    metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
+    plots: { plot0: midPlot, plot1: bullPlot, plot2: bearPlot },
+    fills: [
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'Bullish Fill' }, colors: new Array<string>(n).fill(String(color.new(red, 90))) },
+      { plot1: 'plot0', plot2: 'plot2', options: { title: 'Bearish Fill' }, colors: new Array<string>(n).fill(String(color.new(green, 90))) },
+    ],
+    markers,
+    plotCandles: { candles },
+    tables,
+  };
+}
+
+export const LiquidationReversalSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig, fillConfig };

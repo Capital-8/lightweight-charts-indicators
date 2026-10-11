@@ -5758,6 +5758,507 @@ export type { FibonacciStructureEngineInputs } from './community/fibonacci-struc
 import * as threeBarReversalPatternIndicator from './community/three-bar-reversal-pattern';
 export { ThreeBarReversalPattern, calculate as calculateThreeBarReversalPattern } from './community/three-bar-reversal-pattern';
 export type { ThreeBarReversalPatternInputs } from './community/three-bar-reversal-pattern';
+// ── Community top-500 ports ──
+// Higher High Lower Low Strategy (With Source Code)
+import * as higherHighLowerLowStrategyIndicator from './community/higher-high-lower-low-strategy';
+export { HigherHighLowerLowStrategy, calculate as calculateHigherHighLowerLowStrategy } from './community/higher-high-lower-low-strategy';
+export type { HigherHighLowerLowStrategyInputs } from './community/higher-high-lower-low-strategy';
+// Support and Resistance Logistic Regression | Flux Charts
+import * as supportAndResistanceLogisticRegressionIndicator from './community/support-and-resistance-logistic-regression';
+export { SupportAndResistanceLogisticRegression, calculate as calculateSupportAndResistanceLogisticRegression } from './community/support-and-resistance-logistic-regression';
+export type { SupportAndResistanceLogisticRegressionInputs } from './community/support-and-resistance-logistic-regression';
+// Hourly Trading System
+import * as hourlyTradingSystemIndicator from './community/hourly-trading-system';
+export { HourlyTradingSystem, calculate as calculateHourlyTradingSystem } from './community/hourly-trading-system';
+export type { HourlyTradingSystemInputs } from './community/hourly-trading-system';
+// Scalping Swing Trading Tool R1-4 by JustUncleL
+import * as scalpingSwingTradingToolR14ByJustunclelIndicator from './community/scalping-swing-trading-tool-r1-4-by-justunclel';
+export { ScalpingSwingTradingTool, calculate as calculateScalpingSwingTradingTool } from './community/scalping-swing-trading-tool-r1-4-by-justunclel';
+export type { ScalpingSwingTradingToolInputs } from './community/scalping-swing-trading-tool-r1-4-by-justunclel';
+// Fractals V9
+import * as fractalsV9Indicator from './community/fractals-v9';
+export { FractalsV9, calculate as calculateFractalsV9 } from './community/fractals-v9';
+export type { FractalsV9Inputs } from './community/fractals-v9';
+// Liquidity Heatmap
+import * as liquidityHeatmapIndicator from './community/liquidity-heatmap';
+export { LiquidityHeatmap, calculate as calculateLiquidityHeatmap } from './community/liquidity-heatmap';
+export type { LiquidityHeatmapInputs } from './community/liquidity-heatmap';
+// Smarter SNR (Support and Ressistance, Trendline, MTF OSC)
+import * as smarterSnrIndicator from './community/smarter-snr';
+export { SmarterSnr, calculate as calculateSmarterSnr } from './community/smarter-snr';
+export type { SmarterSnrInputs } from './community/smarter-snr';
+// Support Resistance MTF
+import * as supportResistanceMtfIndicator from './community/support-resistance-mtf';
+export { SupportResistanceMtf, calculate as calculateSupportResistanceMtf } from './community/support-resistance-mtf';
+export type { SupportResistanceMtfInputs } from './community/support-resistance-mtf';
+// RSI Swing Indicator v2
+import * as rsiSwingIndicatorV2Indicator from './community/rsi-swing-indicator-v2';
+export { RsiSwingIndicatorV2, calculate as calculateRsiSwingIndicatorV2 } from './community/rsi-swing-indicator-v2';
+export type { RsiSwingIndicatorV2Inputs } from './community/rsi-swing-indicator-v2';
+// SuperBollingerTrend (Expo)
+import * as superbollingertrendIndicator from './community/superbollingertrend';
+export { SuperBollingerTrend, calculate as calculateSuperBollingerTrend } from './community/superbollingertrend';
+export type { SuperBollingerTrendInputs } from './community/superbollingertrend';
+// Supply and Demand Zones
+import * as supplyAndDemandZonesIndicator from './community/supply-and-demand-zones';
+export { SupplyAndDemandZones, calculate as calculateSupplyAndDemandZones } from './community/supply-and-demand-zones';
+export type { SupplyAndDemandZonesInputs } from './community/supply-and-demand-zones';
+// DR/IDR V1
+import * as drIdrV1Indicator from './community/dr-idr-v1';
+export { DrIdrV1, calculate as calculateDrIdrV1 } from './community/dr-idr-v1';
+export type { DrIdrV1Inputs } from './community/dr-idr-v1';
+// Trading ABC
+import * as tradingAbcIndicator from './community/trading-abc';
+export { TradingAbc, calculate as calculateTradingAbc } from './community/trading-abc';
+export type { TradingAbcInputs } from './community/trading-abc';
+// Change in State of Delivery CISD
+import * as changeInStateOfDeliveryCisdIndicator from './community/change-in-state-of-delivery-cisd';
+export { ChangeInStateOfDeliveryCisd, calculate as calculateChangeInStateOfDeliveryCisd } from './community/change-in-state-of-delivery-cisd';
+export type { ChangeInStateOfDeliveryCisdInputs } from './community/change-in-state-of-delivery-cisd';
+// Trend Channels With Liquidity Breaks
+import * as trendChannelsWithLiquidityBreaksIndicator from './community/trend-channels-with-liquidity-breaks';
+export { TrendChannelsWithLiquidityBreaks, calculate as calculateTrendChannelsWithLiquidityBreaks } from './community/trend-channels-with-liquidity-breaks';
+export type { TrendChannelsWithLiquidityBreaksInputs } from './community/trend-channels-with-liquidity-breaks';
+// 3rd Wave
+import * as p3rdWaveIndicator from './community/3rd-wave';
+export { ThirdWave, calculate as calculateThirdWave } from './community/3rd-wave';
+export type { ThirdWaveInputs } from './community/3rd-wave';
+// Liquidity Delta Profiler
+import * as liquidityDeltaProfilerIndicator from './community/liquidity-delta-profiler';
+export { LiquidityDeltaProfiler, calculate as calculateLiquidityDeltaProfiler } from './community/liquidity-delta-profiler';
+export type { LiquidityDeltaProfilerInputs } from './community/liquidity-delta-profiler';
+// Market Structure with Inducements & Sweeps
+import * as marketStructureWithInducementsSweepsIndicator from './community/market-structure-with-inducements-sweeps';
+export { MarketStructureWithInducementsSweeps, calculate as calculateMarketStructureWithInducementsSweeps } from './community/market-structure-with-inducements-sweeps';
+export type { MarketStructureWithInducementsSweepsInputs } from './community/market-structure-with-inducements-sweeps';
+// PMax on RSI with Tillson T3
+import * as pmaxOnRsiWithTillsonT3Indicator from './community/pmax-on-rsi-with-tillson-t3';
+export { PmaxOnRsiWithTillsonT3, calculate as calculatePmaxOnRsiWithTillsonT3 } from './community/pmax-on-rsi-with-tillson-t3';
+export type { PmaxOnRsiWithTillsonT3Inputs } from './community/pmax-on-rsi-with-tillson-t3';
+// Predictive Ranges
+import * as predictiveRangesIndicator from './community/predictive-ranges';
+export { PredictiveRanges, calculate as calculatePredictiveRanges } from './community/predictive-ranges';
+export type { PredictiveRangesInputs } from './community/predictive-ranges';
+// Ghost Tangent Crossings
+import * as ghostTangentCrossingsIndicator from './community/ghost-tangent-crossings';
+export { GhostTangentCrossings, calculate as calculateGhostTangentCrossings } from './community/ghost-tangent-crossings';
+export type { GhostTangentCrossingsInputs } from './community/ghost-tangent-crossings';
+// ZigZag Multi Time Frame with Fibonacci Retracement
+import * as zigzagMultiTimeFrameWithFibonacciIndicator from './community/zigzag-multi-time-frame-with-fibonacci';
+export { ZigzagMultiTimeFrameWithFibonacci, calculate as calculateZigzagMultiTimeFrameWithFibonacci } from './community/zigzag-multi-time-frame-with-fibonacci';
+export type { ZigzagMultiTimeFrameWithFibonacciInputs } from './community/zigzag-multi-time-frame-with-fibonacci';
+// Pure Price Action Structures
+import * as purePriceActionStructuresIndicator from './community/pure-price-action-structures';
+export { PurePriceActionStructures, calculate as calculatePurePriceActionStructures } from './community/pure-price-action-structures';
+export type { PurePriceActionStructuresInputs } from './community/pure-price-action-structures';
+// TTM Squeeze
+import * as ttmSqueezeGreenyIndicator from './community/ttm-squeeze-greeny';
+export { TtmSqueezeGreeny, calculate as calculateTtmSqueezeGreeny } from './community/ttm-squeeze-greeny';
+export type { TtmSqueezeGreenyInputs } from './community/ttm-squeeze-greeny';
+// Daily Weekly Monthly Yearly Opens
+import * as dailyWeeklyMonthlyYearlyOpensIndicator from './community/daily-weekly-monthly-yearly-opens';
+export { DailyWeeklyMonthlyYearlyOpens, calculate as calculateDailyWeeklyMonthlyYearlyOpens } from './community/daily-weekly-monthly-yearly-opens';
+export type { DailyWeeklyMonthlyYearlyOpensInputs } from './community/daily-weekly-monthly-yearly-opens';
+// Opening Range Breakout with 2 Profit Targets.
+import * as openingRangeBreakoutWith2ProfitTargetsIndicator from './community/opening-range-breakout-with-2-profit-targets';
+export { OpeningRangeBreakoutWith2ProfitTargets, calculate as calculateOpeningRangeBreakoutWith2ProfitTargets } from './community/opening-range-breakout-with-2-profit-targets';
+export type { OpeningRangeBreakoutWith2ProfitTargetsInputs } from './community/opening-range-breakout-with-2-profit-targets';
+// Market Structure Dashboard | Flux Charts
+import * as marketStructureDashboardFluxChartsIndicator from './community/market-structure-dashboard-flux-charts';
+export { MarketStructureDashboardFluxCharts, calculate as calculateMarketStructureDashboardFluxCharts } from './community/market-structure-dashboard-flux-charts';
+export type { MarketStructureDashboardFluxChartsInputs } from './community/market-structure-dashboard-flux-charts';
+// Harmonic Pattern Detection, Prediction, and Backtesting Tool
+import * as harmonicPatternDetectionPredictionAndIndicator from './community/harmonic-pattern-detection-prediction-and';
+export { HarmonicPatternDetectionPredictionAnd, calculate as calculateHarmonicPatternDetectionPredictionAnd } from './community/harmonic-pattern-detection-prediction-and';
+export type { HarmonicPatternDetectionPredictionAndInputs } from './community/harmonic-pattern-detection-prediction-and';
+// FVG & IFVG ICT Inversion Fair Value Gap Signal
+import * as fvgIfvgIctInversionFairValueGapSignalIndicator from './community/fvg-ifvg-ict-inversion-fair-value-gap-signal';
+export { FvgIfvgIctInversionFairValueGapSignal, calculate as calculateFvgIfvgIctInversionFairValueGapSignal } from './community/fvg-ifvg-ict-inversion-fair-value-gap-signal';
+export type { FvgIfvgIctInversionFairValueGapSignalInputs } from './community/fvg-ifvg-ict-inversion-fair-value-gap-signal';
+// RSI Support & Resistance by DGT
+import * as rsiSupportResistanceByDgtIndicator from './community/rsi-support-resistance-by-dgt';
+export { RsiSupportResistanceByDgt, calculate as calculateRsiSupportResistanceByDgt } from './community/rsi-support-resistance-by-dgt';
+export type { RsiSupportResistanceByDgtInputs } from './community/rsi-support-resistance-by-dgt';
+// Relative Strength Index - Divergences - Libertus
+import * as relativeStrengthIndexDivergencesLibertusIndicator from './community/relative-strength-index-divergences-libertus';
+export { RelativeStrengthIndexDivergencesLibertus, calculate as calculateRelativeStrengthIndexDivergencesLibertus } from './community/relative-strength-index-divergences-libertus';
+export type { RelativeStrengthIndexDivergencesLibertusInputs } from './community/relative-strength-index-divergences-libertus';
+// Higher order Orderblocks + Breakerblocks + Range + Alerts
+import * as higherOrderOrderblocksBreakerblocksRangeIndicator from './community/higher-order-orderblocks-breakerblocks-range';
+export { HigherOrderOrderblocksBreakerblocksRange, calculate as calculateHigherOrderOrderblocksBreakerblocksRange } from './community/higher-order-orderblocks-breakerblocks-range';
+export type { HigherOrderOrderblocksBreakerblocksRangeInputs } from './community/higher-order-orderblocks-breakerblocks-range';
+// Volume Order Blocks
+import * as volumeOrderBlocksIndicator from './community/volume-order-blocks';
+export { VolumeOrderBlocks, calculate as calculateVolumeOrderBlocks } from './community/volume-order-blocks';
+export type { VolumeOrderBlocksInputs } from './community/volume-order-blocks';
+// Trend Lines
+import * as trendLinesIndicator from './community/trend-lines';
+export { TrendLines, calculate as calculateTrendLines } from './community/trend-lines';
+export type { TrendLinesInputs } from './community/trend-lines';
+// Trending Market Toolkit
+import * as trendingMarketToolkitIndicator from './community/trending-market-toolkit';
+export { TrendingMarketToolkit, calculate as calculateTrendingMarketToolkit } from './community/trending-market-toolkit';
+export type { TrendingMarketToolkitInputs } from './community/trending-market-toolkit';
+// Fibonacci Auto Trend Scouter
+import * as fibonacciAutoTrendScouterIndicator from './community/fibonacci-auto-trend-scouter';
+export { FibonacciAutoTrendScouter, calculate as calculateFibonacciAutoTrendScouter } from './community/fibonacci-auto-trend-scouter';
+export type { FibonacciAutoTrendScouterInputs } from './community/fibonacci-auto-trend-scouter';
+// Trend Indicator A-V2 (Smoothed Heikin Ashi Cloud)
+import * as trendIndicatorAV2Indicator from './community/trend-indicator-a-v2';
+export { TrendIndicatorAV2, calculate as calculateTrendIndicatorAV2 } from './community/trend-indicator-a-v2';
+export type { TrendIndicatorAV2Inputs } from './community/trend-indicator-a-v2';
+// Session Sweeps
+import * as sessionSweepsIndicator from './community/session-sweeps';
+export { SessionSweeps, calculate as calculateSessionSweeps } from './community/session-sweeps';
+export type { SessionSweepsInputs } from './community/session-sweeps';
+// Ultimate Opening Range Breakout
+import * as ultimateOpeningRangeBreakoutIndicator from './community/ultimate-opening-range-breakout';
+export { UltimateOpeningRangeBreakout, calculate as calculateUltimateOpeningRangeBreakout } from './community/ultimate-opening-range-breakout';
+export type { UltimateOpeningRangeBreakoutInputs } from './community/ultimate-opening-range-breakout';
+// Liquidity Levels MTF - Sonarlab
+import * as liquidityLevelsMtfSonarlabIndicator from './community/liquidity-levels-mtf-sonarlab';
+export { LiquidityLevelsMtfSonarlab, calculate as calculateLiquidityLevelsMtfSonarlab } from './community/liquidity-levels-mtf-sonarlab';
+export type { LiquidityLevelsMtfSonarlabInputs } from './community/liquidity-levels-mtf-sonarlab';
+// Traders Reality Main
+import * as tradersRealityMainIndicator from './community/traders-reality-main';
+export { TradersRealityMain, calculate as calculateTradersRealityMain } from './community/traders-reality-main';
+export type { TradersRealityMainInputs } from './community/traders-reality-main';
+// Delta Flow Profile
+import * as deltaFlowProfileIndicator from './community/delta-flow-profile';
+export { DeltaFlowProfile, calculate as calculateDeltaFlowProfile } from './community/delta-flow-profile';
+export type { DeltaFlowProfileInputs } from './community/delta-flow-profile';
+// 2B Reversal Pattern (Expo)
+import * as p2bReversalPatternIndicator from './community/2b-reversal-pattern';
+export { TwoBReversalPattern, calculate as calculateTwoBReversalPattern } from './community/2b-reversal-pattern';
+export type { TwoBReversalPatternInputs } from './community/2b-reversal-pattern';
+// Cup Finder
+import * as cupFinderIndicator from './community/cup-finder';
+export { CupFinder, calculate as calculateCupFinder } from './community/cup-finder';
+export type { CupFinderInputs } from './community/cup-finder';
+// Auto Fib Retracement Alerts
+import * as autoFibRetracementAlertsIndicator from './community/auto-fib-retracement-alerts';
+export { AutoFibRetracementAlerts, calculate as calculateAutoFibRetracementAlerts } from './community/auto-fib-retracement-alerts';
+export type { AutoFibRetracementAlertsInputs } from './community/auto-fib-retracement-alerts';
+// Volume Profile per day with support/resistance lines
+import * as volumeProfilePerDayWithSupportIndicator from './community/volume-profile-per-day-with-support';
+export { VolumeProfilePerDayWithSupport, calculate as calculateVolumeProfilePerDayWithSupport } from './community/volume-profile-per-day-with-support';
+export type { VolumeProfilePerDayWithSupportInputs } from './community/volume-profile-per-day-with-support';
+// Volume Profile + Pivot Levels
+import * as volumeProfilePivotLevelsIndicator from './community/volume-profile-pivot-levels';
+export { VolumeProfilePivotLevels, calculate as calculateVolumeProfilePivotLevels } from './community/volume-profile-pivot-levels';
+export type { VolumeProfilePivotLevelsInputs } from './community/volume-profile-pivot-levels';
+// ICT Liquidity Sweep/Swing Fail Pattern V.1
+import * as ictLiquiditySweepSwingFailPatternV1Indicator from './community/ict-liquidity-sweep-swing-fail-pattern-v-1';
+export { IctLiquiditySweepSwingFailPatternV1, calculate as calculateIctLiquiditySweepSwingFailPatternV1 } from './community/ict-liquidity-sweep-swing-fail-pattern-v-1';
+export type { IctLiquiditySweepSwingFailPatternV1Inputs } from './community/ict-liquidity-sweep-swing-fail-pattern-v-1';
+// HTF Candles & Mini Charts by DGT
+import * as htfCandlesMiniChartsByDgtIndicator from './community/htf-candles-mini-charts-by-dgt';
+export { HtfCandlesMiniChartsByDgt, calculate as calculateHtfCandlesMiniChartsByDgt } from './community/htf-candles-mini-charts-by-dgt';
+export type { HtfCandlesMiniChartsByDgtInputs } from './community/htf-candles-mini-charts-by-dgt';
+// Reversal Probability Zone & Levels
+import * as reversalProbabilityZoneLevelsIndicator from './community/reversal-probability-zone-levels';
+export { ReversalProbabilityZoneLevels, calculate as calculateReversalProbabilityZoneLevels } from './community/reversal-probability-zone-levels';
+export type { ReversalProbabilityZoneLevelsInputs } from './community/reversal-probability-zone-levels';
+// Elliott Wave Oscillator Signals by DGT
+import * as elliottWaveOscillatorSignalsByDgtIndicator from './community/elliott-wave-oscillator-signals-by-dgt';
+export { ElliottWaveOscillatorSignalsByDgt, calculate as calculateElliottWaveOscillatorSignalsByDgt } from './community/elliott-wave-oscillator-signals-by-dgt';
+export type { ElliottWaveOscillatorSignalsByDgtInputs } from './community/elliott-wave-oscillator-signals-by-dgt';
+// ICT Power Of Three | Flux Charts
+import * as ictPowerOfThreeFluxChartsIndicator from './community/ict-power-of-three-flux-charts';
+export { IctPowerOfThreeFluxCharts, calculate as calculateIctPowerOfThreeFluxCharts } from './community/ict-power-of-three-flux-charts';
+export type { IctPowerOfThreeFluxChartsInputs } from './community/ict-power-of-three-flux-charts';
+// Liquidity Zones
+import * as liquidityZonesIndicator from './community/liquidity-zones';
+export { LiquidityZones, calculate as calculateLiquidityZones } from './community/liquidity-zones';
+export type { LiquidityZonesInputs } from './community/liquidity-zones';
+// Nadaraya-Watson Smoothers
+import * as nadarayaWatsonSmoothersIndicator from './community/nadaraya-watson-smoothers';
+export { NadarayaWatsonSmoothers, calculate as calculateNadarayaWatsonSmoothers } from './community/nadaraya-watson-smoothers';
+export type { NadarayaWatsonSmoothersInputs } from './community/nadaraya-watson-smoothers';
+// Supply and Demand Daily
+import * as supplyAndDemandDailyIndicator from './community/supply-and-demand-daily';
+export { SupplyAndDemandDaily, calculate as calculateSupplyAndDemandDaily } from './community/supply-and-demand-daily';
+export type { SupplyAndDemandDailyInputs } from './community/supply-and-demand-daily';
+// Power Of 3 ICT 01 AMD ICT & SMC Accumulations
+import * as powerOf3Ict01AmdIctSmcAccumulationsIndicator from './community/power-of-3-ict-01-amd-ict-smc-accumulations';
+export { PowerOf3Ict01AmdIctSmcAccumulations, calculate as calculatePowerOf3Ict01AmdIctSmcAccumulations } from './community/power-of-3-ict-01-amd-ict-smc-accumulations';
+export type { PowerOf3Ict01AmdIctSmcAccumulationsInputs } from './community/power-of-3-ict-01-amd-ict-smc-accumulations';
+// Swing Volume Profiles
+import * as swingVolumeProfilesIndicator from './community/swing-volume-profiles';
+export { SwingVolumeProfiles, calculate as calculateSwingVolumeProfiles } from './community/swing-volume-profiles';
+export type { SwingVolumeProfilesInputs } from './community/swing-volume-profiles';
+// Trend Duration Forecast
+import * as trendDurationForecastIndicator from './community/trend-duration-forecast';
+export { TrendDurationForecast, calculate as calculateTrendDurationForecast } from './community/trend-duration-forecast';
+export type { TrendDurationForecastInputs } from './community/trend-duration-forecast';
+// Slow Stochastic
+import * as slowStochasticIndicator from './community/slow-stochastic';
+export { SlowStochastic, calculate as calculateSlowStochastic } from './community/slow-stochastic';
+export type { SlowStochasticInputs } from './community/slow-stochastic';
+// Double Zig Zag with HHLL
+import * as doubleZigZagWithHhllIndicator from './community/double-zig-zag-with-hhll';
+export { DoubleZigZagWithHhll, calculate as calculateDoubleZigZagWithHhll } from './community/double-zig-zag-with-hhll';
+export type { DoubleZigZagWithHhllInputs } from './community/double-zig-zag-with-hhll';
+// Fibo Levels with Volume Profile and Targets
+import * as fiboLevelsWithVolumeProfileAndTargetsIndicator from './community/fibo-levels-with-volume-profile-and-targets';
+export { FiboLevelsWithVolumeProfileAndTargets, calculate as calculateFiboLevelsWithVolumeProfileAndTargets } from './community/fibo-levels-with-volume-profile-and-targets';
+export type { FiboLevelsWithVolumeProfileAndTargetsInputs } from './community/fibo-levels-with-volume-profile-and-targets';
+// Mean Reversion Channel - (fareid's MRI Variant)
+import * as meanReversionChannelIndicator from './community/mean-reversion-channel';
+export { MeanReversionChannel, calculate as calculateMeanReversionChannel } from './community/mean-reversion-channel';
+export type { MeanReversionChannelInputs } from './community/mean-reversion-channel';
+// ICT Concept Order Block | FVG | Liquidity Sweeps
+import * as ictConceptOrderBlockFvgLiquiditySweepsIndicator from './community/ict-concept-order-block-fvg-liquidity-sweeps';
+export { IctConceptOrderBlockFvgLiquiditySweeps, calculate as calculateIctConceptOrderBlockFvgLiquiditySweeps } from './community/ict-concept-order-block-fvg-liquidity-sweeps';
+export type { IctConceptOrderBlockFvgLiquiditySweepsInputs } from './community/ict-concept-order-block-fvg-liquidity-sweeps';
+// Signal Forge
+import * as signalForgeIndicator from './community/signal-forge';
+export { SignalForge, calculate as calculateSignalForge } from './community/signal-forge';
+export type { SignalForgeInputs } from './community/signal-forge';
+// Multi Kernel Regression
+import * as multiKernelRegressionIndicator from './community/multi-kernel-regression';
+export { MultiKernelRegression, calculate as calculateMultiKernelRegression } from './community/multi-kernel-regression';
+export type { MultiKernelRegressionInputs } from './community/multi-kernel-regression';
+// ICT Immediate Rebalance Toolkit
+import * as ictImmediateRebalanceToolkitIndicator from './community/ict-immediate-rebalance-toolkit';
+export { IctImmediateRebalanceToolkit, calculate as calculateIctImmediateRebalanceToolkit } from './community/ict-immediate-rebalance-toolkit';
+export type { IctImmediateRebalanceToolkitInputs } from './community/ict-immediate-rebalance-toolkit';
+// Liquidity Thermal Map
+import * as liquidityThermalMapIndicator from './community/liquidity-thermal-map';
+export { LiquidityThermalMap, calculate as calculateLiquidityThermalMap } from './community/liquidity-thermal-map';
+export type { LiquidityThermalMapInputs } from './community/liquidity-thermal-map';
+// Universal Signal Backtester
+import * as universalSignalBacktesterIndicator from './community/universal-signal-backtester';
+export { UniversalSignalBacktester, calculate as calculateUniversalSignalBacktester } from './community/universal-signal-backtester';
+export type { UniversalSignalBacktesterInputs } from './community/universal-signal-backtester';
+// Support Resistance with Breaks and Retests
+import * as supportResistanceWithBreaksAndRetestsIndicator from './community/support-resistance-with-breaks-and-retests';
+export { SupportResistanceWithBreaksAndRetests, calculate as calculateSupportResistanceWithBreaksAndRetests } from './community/support-resistance-with-breaks-and-retests';
+export type { SupportResistanceWithBreaksAndRetestsInputs } from './community/support-resistance-with-breaks-and-retests';
+// Dynamic Liquidity HeatMap Profile
+import * as dynamicLiquidityHeatmapProfileIndicator from './community/dynamic-liquidity-heatmap-profile';
+export { DynamicLiquidityHeatmapProfile, calculate as calculateDynamicLiquidityHeatmapProfile } from './community/dynamic-liquidity-heatmap-profile';
+export type { DynamicLiquidityHeatmapProfileInputs } from './community/dynamic-liquidity-heatmap-profile';
+// Scalp Pro
+import * as scalpProIndicator from './community/scalp-pro';
+export { ScalpPro, calculate as calculateScalpPro } from './community/scalp-pro';
+export type { ScalpProInputs } from './community/scalp-pro';
+// Swing Failure Pattern (SFP)
+import * as swingFailurePatternIndicator from './community/swing-failure-pattern';
+export { SwingFailurePattern, calculate as calculateSwingFailurePattern } from './community/swing-failure-pattern';
+export type { SwingFailurePatternInputs } from './community/swing-failure-pattern';
+// Reversal Candlestick Structure
+import * as reversalCandlestickStructureIndicator from './community/reversal-candlestick-structure';
+export { ReversalCandlestickStructure, calculate as calculateReversalCandlestickStructure } from './community/reversal-candlestick-structure';
+export type { ReversalCandlestickStructureInputs } from './community/reversal-candlestick-structure';
+// MTF Order Block Finder
+import * as mtfOrderBlockFinderIndicator from './community/mtf-order-block-finder';
+export { MtfOrderBlockFinder, calculate as calculateMtfOrderBlockFinder } from './community/mtf-order-block-finder';
+export type { MtfOrderBlockFinderInputs } from './community/mtf-order-block-finder';
+// Smart Money Breakout Signals
+import * as smartMoneyBreakoutSignalsIndicator from './community/smart-money-breakout-signals';
+export { SmartMoneyBreakoutSignals, calculate as calculateSmartMoneyBreakoutSignals } from './community/smart-money-breakout-signals';
+export type { SmartMoneyBreakoutSignalsInputs } from './community/smart-money-breakout-signals';
+// Fibonacci Projection with Volume & Delta Profile
+import * as fibonacciProjectionWithVolumeDeltaProfileIndicator from './community/fibonacci-projection-with-volume-delta-profile';
+export { FibonacciProjectionWithVolumeDeltaProfile, calculate as calculateFibonacciProjectionWithVolumeDeltaProfile } from './community/fibonacci-projection-with-volume-delta-profile';
+export type { FibonacciProjectionWithVolumeDeltaProfileInputs } from './community/fibonacci-projection-with-volume-delta-profile';
+// Renko Candles Overlay
+import * as renkoCandlesOverlayIndicator from './community/renko-candles-overlay';
+export { RenkoCandlesOverlay, calculate as calculateRenkoCandlesOverlay } from './community/renko-candles-overlay';
+export type { RenkoCandlesOverlayInputs } from './community/renko-candles-overlay';
+// Market Profile with TPO
+import * as marketProfileWithTpoIndicator from './community/market-profile-with-tpo';
+export { MarketProfileWithTpo, calculate as calculateMarketProfileWithTpo } from './community/market-profile-with-tpo';
+export type { MarketProfileWithTpoInputs } from './community/market-profile-with-tpo';
+// Fibonacci Ranges (Real-Time)
+import * as fibonacciRangesIndicator from './community/fibonacci-ranges';
+export { FibonacciRanges, calculate as calculateFibonacciRanges } from './community/fibonacci-ranges';
+export type { FibonacciRangesInputs } from './community/fibonacci-ranges';
+// TTrades Daily Bias
+import * as ttradesDailyBiasIndicator from './community/ttrades-daily-bias';
+export { TtradesDailyBias, calculate as calculateTtradesDailyBias } from './community/ttrades-daily-bias';
+export type { TtradesDailyBiasInputs } from './community/ttrades-daily-bias';
+// Breakout Targets
+import * as breakoutTargetsIndicator from './community/breakout-targets';
+export { BreakoutTargets, calculate as calculateBreakoutTargets } from './community/breakout-targets';
+export type { BreakoutTargetsInputs } from './community/breakout-targets';
+// Imbalance Detector
+import * as imbalanceDetectorIndicator from './community/imbalance-detector';
+export { ImbalanceDetector, calculate as calculateImbalanceDetector } from './community/imbalance-detector';
+export type { ImbalanceDetectorInputs } from './community/imbalance-detector';
+// MACD Based Price Forecasting
+import * as macdBasedPriceForecastingIndicator from './community/macd-based-price-forecasting';
+export { MacdBasedPriceForecasting, calculate as calculateMacdBasedPriceForecasting } from './community/macd-based-price-forecasting';
+export type { MacdBasedPriceForecastingInputs } from './community/macd-based-price-forecasting';
+// Market Structure Oscillator
+import * as marketStructureOscillatorIndicator from './community/market-structure-oscillator';
+export { MarketStructureOscillator, calculate as calculateMarketStructureOscillator } from './community/market-structure-oscillator';
+export type { MarketStructureOscillatorInputs } from './community/market-structure-oscillator';
+// MA Sabres
+import * as maSabresIndicator from './community/ma-sabres';
+export { MaSabres, calculate as calculateMaSabres } from './community/ma-sabres';
+export type { MaSabresInputs } from './community/ma-sabres';
+// Bjorgum MTF MA
+import * as bjorgumMtfMaIndicator from './community/bjorgum-mtf-ma';
+export { BjorgumMtfMa, calculate as calculateBjorgumMtfMa } from './community/bjorgum-mtf-ma';
+export type { BjorgumMtfMaInputs } from './community/bjorgum-mtf-ma';
+// AMD Po3 with Live Edge Stats
+import * as amdPo3WithLiveEdgeStatsIndicator from './community/amd-po3-with-live-edge-stats';
+export { AmdPo3WithLiveEdgeStats, calculate as calculateAmdPo3WithLiveEdgeStats } from './community/amd-po3-with-live-edge-stats';
+export type { AmdPo3WithLiveEdgeStatsInputs } from './community/amd-po3-with-live-edge-stats';
+// Ranges With Targets
+import * as rangesWithTargetsIndicator from './community/ranges-with-targets';
+export { RangesWithTargets, calculate as calculateRangesWithTargets } from './community/ranges-with-targets';
+export type { RangesWithTargetsInputs } from './community/ranges-with-targets';
+// Trendlines - JD
+import * as trendlinesJdIndicator from './community/trendlines-jd';
+export { TrendlinesJd, calculate as calculateTrendlinesJd } from './community/trendlines-jd';
+export type { TrendlinesJdInputs } from './community/trendlines-jd';
+// Volume-Trend Order Block Engine
+import * as volumeTrendOrderBlockEngineIndicator from './community/volume-trend-order-block-engine';
+export { VolumeTrendOrderBlockEngine, calculate as calculateVolumeTrendOrderBlockEngine } from './community/volume-trend-order-block-engine';
+export type { VolumeTrendOrderBlockEngineInputs } from './community/volume-trend-order-block-engine';
+// Mirage Liquidity Sweep Pro
+import * as mirageLiquiditySweepProIndicator from './community/mirage-liquidity-sweep-pro';
+export { MirageLiquiditySweepPro, calculate as calculateMirageLiquiditySweepPro } from './community/mirage-liquidity-sweep-pro';
+export type { MirageLiquiditySweepProInputs } from './community/mirage-liquidity-sweep-pro';
+// Volume Gaps & Imbalances
+import * as volumeGapsImbalancesIndicator from './community/volume-gaps-imbalances';
+export { VolumeGapsImbalances, calculate as calculateVolumeGapsImbalances } from './community/volume-gaps-imbalances';
+export type { VolumeGapsImbalancesInputs } from './community/volume-gaps-imbalances';
+// CM_Williams_Vix_Fix_V3_Upper_Text Plots
+import * as cmVixFixV3UpperTextPlotsIndicator from './community/cm-vix-fix-v3-upper-text-plots';
+export { CmVixFixV3UpperTextPlots, calculate as calculateCmVixFixV3UpperTextPlots } from './community/cm-vix-fix-v3-upper-text-plots';
+export type { CmVixFixV3UpperTextPlotsInputs } from './community/cm-vix-fix-v3-upper-text-plots';
+// Pivot Hilo Support n Resistance Levels R3-3 by JustUncleL
+import * as pivotHiloSupportNResistanceLevelsR33Indicator from './community/pivot-hilo-support-n-resistance-levels-r3-3';
+export { PivotHiloSupportNResistanceLevelsR33, calculate as calculatePivotHiloSupportNResistanceLevelsR33 } from './community/pivot-hilo-support-n-resistance-levels-r3-3';
+export type { PivotHiloSupportNResistanceLevelsR33Inputs } from './community/pivot-hilo-support-n-resistance-levels-r3-3';
+// Volume Sentiment Breakout Channels
+import * as volumeSentimentBreakoutChannelsIndicator from './community/volume-sentiment-breakout-channels';
+export { VolumeSentimentBreakoutChannels, calculate as calculateVolumeSentimentBreakoutChannels } from './community/volume-sentiment-breakout-channels';
+export type { VolumeSentimentBreakoutChannelsInputs } from './community/volume-sentiment-breakout-channels';
+// ITG Scalper
+import * as itgScalperIndicator from './community/itg-scalper';
+export { ItgScalper, calculate as calculateItgScalper } from './community/itg-scalper';
+export type { ItgScalperInputs } from './community/itg-scalper';
+// RSI Entry Engine
+import * as rsiEntryEngineIndicator from './community/rsi-entry-engine';
+export { RsiEntryEngine, calculate as calculateRsiEntryEngine } from './community/rsi-entry-engine';
+export type { RsiEntryEngineInputs } from './community/rsi-entry-engine';
+// Liquidation Reversal Signals
+import * as liquidationReversalSignalsIndicator from './community/liquidation-reversal-signals';
+export { LiquidationReversalSignals, calculate as calculateLiquidationReversalSignals } from './community/liquidation-reversal-signals';
+export type { LiquidationReversalSignalsInputs } from './community/liquidation-reversal-signals';
+// ICT Institutional Order Flow (fadi)
+import * as ictInstitutionalOrderFlowIndicator from './community/ict-institutional-order-flow';
+export { IctInstitutionalOrderFlow, calculate as calculateIctInstitutionalOrderFlow } from './community/ict-institutional-order-flow';
+export type { IctInstitutionalOrderFlowInputs } from './community/ict-institutional-order-flow';
+// ZigZag Percent Reversal - Forecast - patterns - labels
+import * as zigzagPercentReversalForecastPatternsIndicator from './community/zigzag-percent-reversal-forecast-patterns';
+export { ZigzagPercentReversalForecastPatterns, calculate as calculateZigzagPercentReversalForecastPatterns } from './community/zigzag-percent-reversal-forecast-patterns';
+export type { ZigzagPercentReversalForecastPatternsInputs } from './community/zigzag-percent-reversal-forecast-patterns';
+// Liquidity Sweep Filter
+import * as liquiditySweepFilterIndicator from './community/liquidity-sweep-filter';
+export { LiquiditySweepFilter, calculate as calculateLiquiditySweepFilter } from './community/liquidity-sweep-filter';
+export type { LiquiditySweepFilterInputs } from './community/liquidity-sweep-filter';
+// The Echo Forecast
+import * as theEchoForecastIndicator from './community/the-echo-forecast';
+export { TheEchoForecast, calculate as calculateTheEchoForecast } from './community/the-echo-forecast';
+export type { TheEchoForecastInputs } from './community/the-echo-forecast';
+// Momentum Shift
+import * as momentumShiftIndicator from './community/momentum-shift';
+export { MomentumShift, calculate as calculateMomentumShift } from './community/momentum-shift';
+export type { MomentumShiftInputs } from './community/momentum-shift';
+// Absorption Bubbles
+import * as absorptionBubblesIndicator from './community/absorption-bubbles';
+export { AbsorptionBubbles, calculate as calculateAbsorptionBubbles } from './community/absorption-bubbles';
+export type { AbsorptionBubblesInputs } from './community/absorption-bubbles';
+// Indicators: Volume-Weighted MACD Histogram & Sentiment Zone Osc
+import * as indicatorsVolumeWeightedMacdHistogramIndicator from './community/indicators-volume-weighted-macd-histogram';
+export { IndicatorsVolumeWeightedMacdHistogram, calculate as calculateIndicatorsVolumeWeightedMacdHistogram } from './community/indicators-volume-weighted-macd-histogram';
+export type { IndicatorsVolumeWeightedMacdHistogramInputs } from './community/indicators-volume-weighted-macd-histogram';
+// Volume Suite - By Leviathan (CVD, Volume Delta, Relative Volume)
+import * as volumeSuiteByLeviathanIndicator from './community/volume-suite-by-leviathan';
+export { VolumeSuiteByLeviathan, calculate as calculateVolumeSuiteByLeviathan } from './community/volume-suite-by-leviathan';
+export type { VolumeSuiteByLeviathanInputs } from './community/volume-suite-by-leviathan';
+// Support & Resistance Pro Toolkit
+import * as supportResistanceProToolkitIndicator from './community/support-resistance-pro-toolkit';
+export { SupportResistanceProToolkit, calculate as calculateSupportResistanceProToolkit } from './community/support-resistance-pro-toolkit';
+export type { SupportResistanceProToolkitInputs } from './community/support-resistance-pro-toolkit';
+// Money Flow Index + Alerts
+import * as moneyFlowIndexAlertsIndicator from './community/money-flow-index-alerts';
+export { MoneyFlowIndexAlerts, calculate as calculateMoneyFlowIndexAlerts } from './community/money-flow-index-alerts';
+export type { MoneyFlowIndexAlertsInputs } from './community/money-flow-index-alerts';
+// FXN - Week and Day Separator
+import * as fxnWeekAndDaySeparatorIndicator from './community/fxn-week-and-day-separator';
+export { FxnWeekAndDaySeparator, calculate as calculateFxnWeekAndDaySeparator } from './community/fxn-week-and-day-separator';
+export type { FxnWeekAndDaySeparatorInputs } from './community/fxn-week-and-day-separator';
+// DonAlt - Smart Money Toolkit
+import * as donaltSmartMoneyToolkitIndicator from './community/donalt-smart-money-toolkit';
+export { DonaltSmartMoneyToolkit, calculate as calculateDonaltSmartMoneyToolkit } from './community/donalt-smart-money-toolkit';
+export type { DonaltSmartMoneyToolkitInputs } from './community/donalt-smart-money-toolkit';
+// Cumulative Volume Delta Divergence Periodic EMA
+import * as cumulativeVolumeDeltaDivergencePeriodicIndicator from './community/cumulative-volume-delta-divergence-periodic';
+export { CumulativeVolumeDeltaDivergencePeriodic, calculate as calculateCumulativeVolumeDeltaDivergencePeriodic } from './community/cumulative-volume-delta-divergence-periodic';
+export type { CumulativeVolumeDeltaDivergencePeriodicInputs } from './community/cumulative-volume-delta-divergence-periodic';
+// Liquidity Pools Pro
+import * as liquidityPoolsProIndicator from './community/liquidity-pools-pro';
+export { LiquidityPoolsPro, calculate as calculateLiquidityPoolsPro } from './community/liquidity-pools-pro';
+export type { LiquidityPoolsProInputs } from './community/liquidity-pools-pro';
+// Breaker Blocks + Order Blocks confirm BBOB Alert
+import * as breakerBlocksOrderBlocksConfirmBbobAlertIndicator from './community/breaker-blocks-order-blocks-confirm-bbob-alert';
+export { BreakerBlocksOrderBlocksConfirmBbobAlert, calculate as calculateBreakerBlocksOrderBlocksConfirmBbobAlert } from './community/breaker-blocks-order-blocks-confirm-bbob-alert';
+export type { BreakerBlocksOrderBlocksConfirmBbobAlertInputs } from './community/breaker-blocks-order-blocks-confirm-bbob-alert';
+// Multitimeframe Fair Value Gap – FVG
+import * as multitimeframeFairValueGapFvgIndicator from './community/multitimeframe-fair-value-gap-fvg';
+export { MultitimeframeFairValueGap, calculate as calculateMultitimeframeFairValueGap } from './community/multitimeframe-fair-value-gap-fvg';
+export type { MultitimeframeFairValueGapInputs } from './community/multitimeframe-fair-value-gap-fvg';
+// ICT Macros
+import * as ictMacrosIndicator from './community/ict-macros';
+export { IctMacros, calculate as calculateIctMacros } from './community/ict-macros';
+export type { IctMacrosInputs } from './community/ict-macros';
+// Pullback Trading Tool ALT R1.0 by JustUncleL
+import * as pullbackTradingToolAltR10ByJustunclelIndicator from './community/pullback-trading-tool-alt-r1-0-by-justunclel';
+export { PullbackTradingToolAlt, calculate as calculatePullbackTradingToolAlt } from './community/pullback-trading-tool-alt-r1-0-by-justunclel';
+export type { PullbackTradingToolAltInputs } from './community/pullback-trading-tool-alt-r1-0-by-justunclel';
+// Harmonic Pattern Detection
+import * as harmonicPatternDetectionIndicator from './community/harmonic-pattern-detection';
+export { HarmonicPatternDetection, calculate as calculateHarmonicPatternDetection } from './community/harmonic-pattern-detection';
+export type { HarmonicPatternDetectionInputs } from './community/harmonic-pattern-detection';
+// MFI
+import * as mfiSeiglerjIndicator from './community/mfi-seiglerj';
+export { MfiSeiglerj, calculate as calculateMfiSeiglerj } from './community/mfi-seiglerj';
+export type { MfiSeiglerjInputs } from './community/mfi-seiglerj';
+// Smart Money Volume Index
+import * as smartMoneyVolumeIndexIndicator from './community/smart-money-volume-index';
+export { SmartMoneyVolumeIndex, calculate as calculateSmartMoneyVolumeIndex } from './community/smart-money-volume-index';
+export type { SmartMoneyVolumeIndexInputs } from './community/smart-money-volume-index';
+// Linear Regression Channel / Curve / Slope by DGT
+import * as linearRegressionChannelCurveSlopeByDgtIndicator from './community/linear-regression-channel-curve-slope-by-dgt';
+export { LinearRegressionChannelCurveSlopeByDgt, calculate as calculateLinearRegressionChannelCurveSlopeByDgt } from './community/linear-regression-channel-curve-slope-by-dgt';
+export type { LinearRegressionChannelCurveSlopeByDgtInputs } from './community/linear-regression-channel-curve-slope-by-dgt';
+// Auto PitchFan, Fib Extension/Retracement and ZigZag by DGT
+import * as autoPitchfanFibExtensionRetracementAndIndicator from './community/auto-pitchfan-fib-extension-retracement-and';
+export { AutoPitchfanFibExtensionRetracementAnd, calculate as calculateAutoPitchfanFibExtensionRetracementAnd } from './community/auto-pitchfan-fib-extension-retracement-and';
+export type { AutoPitchfanFibExtensionRetracementAndInputs } from './community/auto-pitchfan-fib-extension-retracement-and';
+// Trend Levels
+import * as trendLevelsIndicator from './community/trend-levels';
+export { TrendLevels, calculate as calculateTrendLevels } from './community/trend-levels';
+export type { TrendLevelsInputs } from './community/trend-levels';
+// Initial Balance Breakout Signals
+import * as initialBalanceBreakoutSignalsIndicator from './community/initial-balance-breakout-signals';
+export { InitialBalanceBreakoutSignals, calculate as calculateInitialBalanceBreakoutSignals } from './community/initial-balance-breakout-signals';
+export type { InitialBalanceBreakoutSignalsInputs } from './community/initial-balance-breakout-signals';
+// Ichimoku Theories
+import * as ichimokuTheoriesIndicator from './community/ichimoku-theories';
+export { IchimokuTheories, calculate as calculateIchimokuTheories } from './community/ichimoku-theories';
+export type { IchimokuTheoriesInputs } from './community/ichimoku-theories';
+// Liquidity Voids (FVG)
+import * as liquidityVoidsIndicator from './community/liquidity-voids';
+export { LiquidityVoids, calculate as calculateLiquidityVoids } from './community/liquidity-voids';
+export type { LiquidityVoidsInputs } from './community/liquidity-voids';
 
 export type IndicatorCategory =
   | 'Moving Averages'
@@ -23994,7 +24495,1650 @@ const registryPart7: IndicatorRegistryEntry[] = [
   },
 ];
 
-export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7];
+const registryPart8: IndicatorRegistryEntry[] = [
+  {
+    id: 'higher-high-lower-low-strategy',
+    group: 'community',
+    name: 'Higher High Lower Low Strategy (With Source Code)',
+    shortName: higherHighLowerLowStrategyIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: higherHighLowerLowStrategyIndicator.metadata,
+    inputConfig: higherHighLowerLowStrategyIndicator.inputConfig as InputConfig[],
+    plotConfig: higherHighLowerLowStrategyIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...higherHighLowerLowStrategyIndicator.defaultInputs },
+    calculate: higherHighLowerLowStrategyIndicator.calculate,
+  },
+  {
+    id: 'support-and-resistance-logistic-regression',
+    group: 'community',
+    name: 'Support and Resistance Logistic Regression | Flux Charts',
+    shortName: supportAndResistanceLogisticRegressionIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: supportAndResistanceLogisticRegressionIndicator.metadata,
+    inputConfig: supportAndResistanceLogisticRegressionIndicator.inputConfig as InputConfig[],
+    plotConfig: supportAndResistanceLogisticRegressionIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...supportAndResistanceLogisticRegressionIndicator.defaultInputs },
+    calculate: supportAndResistanceLogisticRegressionIndicator.calculate,
+  },
+  {
+    id: 'hourly-trading-system',
+    group: 'community',
+    name: 'Hourly Trading System',
+    shortName: hourlyTradingSystemIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: hourlyTradingSystemIndicator.metadata,
+    inputConfig: hourlyTradingSystemIndicator.inputConfig as InputConfig[],
+    plotConfig: hourlyTradingSystemIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...hourlyTradingSystemIndicator.defaultInputs },
+    calculate: hourlyTradingSystemIndicator.calculate,
+  },
+  {
+    id: 'scalping-swing-trading-tool-r1-4-by-justunclel',
+    group: 'community',
+    name: 'Scalping Swing Trading Tool R1-4 by JustUncleL',
+    shortName: scalpingSwingTradingToolR14ByJustunclelIndicator.metadata.shortTitle,
+    category: 'Moving Averages',
+    overlay: true,
+    metadata: scalpingSwingTradingToolR14ByJustunclelIndicator.metadata,
+    inputConfig: scalpingSwingTradingToolR14ByJustunclelIndicator.inputConfig as InputConfig[],
+    plotConfig: scalpingSwingTradingToolR14ByJustunclelIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...scalpingSwingTradingToolR14ByJustunclelIndicator.defaultInputs },
+    calculate: scalpingSwingTradingToolR14ByJustunclelIndicator.calculate,
+  },
+  {
+    id: 'fractals-v9',
+    group: 'community',
+    name: 'Fractals V9',
+    shortName: fractalsV9Indicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: fractalsV9Indicator.metadata,
+    inputConfig: fractalsV9Indicator.inputConfig as InputConfig[],
+    plotConfig: fractalsV9Indicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...fractalsV9Indicator.defaultInputs },
+    calculate: fractalsV9Indicator.calculate,
+  },
+  {
+    id: 'liquidity-heatmap',
+    group: 'community',
+    name: 'Liquidity Heatmap',
+    shortName: liquidityHeatmapIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: liquidityHeatmapIndicator.metadata,
+    inputConfig: liquidityHeatmapIndicator.inputConfig as InputConfig[],
+    plotConfig: liquidityHeatmapIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...liquidityHeatmapIndicator.defaultInputs },
+    calculate: liquidityHeatmapIndicator.calculate,
+  },
+  {
+    id: 'smarter-snr',
+    group: 'community',
+    name: 'Smarter SNR (Support and Ressistance, Trendline, MTF OSC)',
+    shortName: smarterSnrIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: smarterSnrIndicator.metadata,
+    inputConfig: smarterSnrIndicator.inputConfig as InputConfig[],
+    plotConfig: smarterSnrIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...smarterSnrIndicator.defaultInputs },
+    calculate: smarterSnrIndicator.calculate,
+  },
+  {
+    id: 'support-resistance-mtf',
+    group: 'community',
+    name: 'Support Resistance MTF',
+    shortName: supportResistanceMtfIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: supportResistanceMtfIndicator.metadata,
+    inputConfig: supportResistanceMtfIndicator.inputConfig as InputConfig[],
+    plotConfig: supportResistanceMtfIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...supportResistanceMtfIndicator.defaultInputs },
+    calculate: supportResistanceMtfIndicator.calculate,
+  },
+  {
+    id: 'rsi-swing-indicator-v2',
+    group: 'community',
+    name: 'RSI Swing Indicator v2',
+    shortName: rsiSwingIndicatorV2Indicator.metadata.shortTitle,
+    category: 'Momentum',
+    overlay: true,
+    metadata: rsiSwingIndicatorV2Indicator.metadata,
+    inputConfig: rsiSwingIndicatorV2Indicator.inputConfig as InputConfig[],
+    plotConfig: rsiSwingIndicatorV2Indicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...rsiSwingIndicatorV2Indicator.defaultInputs },
+    calculate: rsiSwingIndicatorV2Indicator.calculate,
+  },
+  {
+    id: 'superbollingertrend',
+    group: 'community',
+    name: 'SuperBollingerTrend (Expo)',
+    shortName: superbollingertrendIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: superbollingertrendIndicator.metadata,
+    inputConfig: superbollingertrendIndicator.inputConfig as InputConfig[],
+    plotConfig: superbollingertrendIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...superbollingertrendIndicator.defaultInputs },
+    calculate: superbollingertrendIndicator.calculate,
+  },
+  {
+    id: 'supply-and-demand-zones',
+    group: 'community',
+    name: 'Supply and Demand Zones',
+    shortName: supplyAndDemandZonesIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: supplyAndDemandZonesIndicator.metadata,
+    inputConfig: supplyAndDemandZonesIndicator.inputConfig as InputConfig[],
+    plotConfig: supplyAndDemandZonesIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...supplyAndDemandZonesIndicator.defaultInputs },
+    calculate: supplyAndDemandZonesIndicator.calculate,
+  },
+  {
+    id: 'dr-idr-v1',
+    group: 'community',
+    name: 'DR/IDR V1',
+    shortName: drIdrV1Indicator.metadata.shortTitle,
+    category: 'Volatility',
+    overlay: true,
+    metadata: drIdrV1Indicator.metadata,
+    inputConfig: drIdrV1Indicator.inputConfig as InputConfig[],
+    plotConfig: drIdrV1Indicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...drIdrV1Indicator.defaultInputs },
+    calculate: drIdrV1Indicator.calculate,
+  },
+  {
+    id: 'trading-abc',
+    group: 'community',
+    name: 'Trading ABC',
+    shortName: tradingAbcIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: tradingAbcIndicator.metadata,
+    inputConfig: tradingAbcIndicator.inputConfig as InputConfig[],
+    plotConfig: tradingAbcIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...tradingAbcIndicator.defaultInputs },
+    calculate: tradingAbcIndicator.calculate,
+  },
+  {
+    id: 'change-in-state-of-delivery-cisd',
+    group: 'community',
+    name: 'Change in State of Delivery CISD',
+    shortName: changeInStateOfDeliveryCisdIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: changeInStateOfDeliveryCisdIndicator.metadata,
+    inputConfig: changeInStateOfDeliveryCisdIndicator.inputConfig as InputConfig[],
+    plotConfig: changeInStateOfDeliveryCisdIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...changeInStateOfDeliveryCisdIndicator.defaultInputs },
+    calculate: changeInStateOfDeliveryCisdIndicator.calculate,
+  },
+  {
+    id: 'trend-channels-with-liquidity-breaks',
+    group: 'community',
+    name: 'Trend Channels With Liquidity Breaks',
+    shortName: trendChannelsWithLiquidityBreaksIndicator.metadata.shortTitle,
+    category: 'Channels & Bands',
+    overlay: true,
+    metadata: trendChannelsWithLiquidityBreaksIndicator.metadata,
+    inputConfig: trendChannelsWithLiquidityBreaksIndicator.inputConfig as InputConfig[],
+    plotConfig: trendChannelsWithLiquidityBreaksIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...trendChannelsWithLiquidityBreaksIndicator.defaultInputs },
+    calculate: trendChannelsWithLiquidityBreaksIndicator.calculate,
+  },
+  {
+    id: '3rd-wave',
+    group: 'community',
+    name: '3rd Wave',
+    shortName: p3rdWaveIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: p3rdWaveIndicator.metadata,
+    inputConfig: p3rdWaveIndicator.inputConfig as InputConfig[],
+    plotConfig: p3rdWaveIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...p3rdWaveIndicator.defaultInputs },
+    calculate: p3rdWaveIndicator.calculate,
+  },
+  {
+    id: 'liquidity-delta-profiler',
+    group: 'community',
+    name: 'Liquidity Delta Profiler',
+    shortName: liquidityDeltaProfilerIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: liquidityDeltaProfilerIndicator.metadata,
+    inputConfig: liquidityDeltaProfilerIndicator.inputConfig as InputConfig[],
+    plotConfig: liquidityDeltaProfilerIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...liquidityDeltaProfilerIndicator.defaultInputs },
+    calculate: liquidityDeltaProfilerIndicator.calculate,
+  },
+  {
+    id: 'market-structure-with-inducements-sweeps',
+    group: 'community',
+    name: 'Market Structure with Inducements & Sweeps',
+    shortName: marketStructureWithInducementsSweepsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: marketStructureWithInducementsSweepsIndicator.metadata,
+    inputConfig: marketStructureWithInducementsSweepsIndicator.inputConfig as InputConfig[],
+    plotConfig: marketStructureWithInducementsSweepsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...marketStructureWithInducementsSweepsIndicator.defaultInputs },
+    calculate: marketStructureWithInducementsSweepsIndicator.calculate,
+  },
+  {
+    id: 'pmax-on-rsi-with-tillson-t3',
+    group: 'community',
+    name: 'PMax on RSI with Tillson T3',
+    shortName: pmaxOnRsiWithTillsonT3Indicator.metadata.shortTitle,
+    category: 'Oscillators',
+    overlay: false,
+    metadata: pmaxOnRsiWithTillsonT3Indicator.metadata,
+    inputConfig: pmaxOnRsiWithTillsonT3Indicator.inputConfig as InputConfig[],
+    plotConfig: pmaxOnRsiWithTillsonT3Indicator.plotConfig as PlotConfig[],
+    hlineConfig: pmaxOnRsiWithTillsonT3Indicator.hlineConfig,
+    fillConfig: pmaxOnRsiWithTillsonT3Indicator.fillConfig,
+    defaultInputs: { ...pmaxOnRsiWithTillsonT3Indicator.defaultInputs },
+    calculate: pmaxOnRsiWithTillsonT3Indicator.calculate,
+  },
+  {
+    id: 'predictive-ranges',
+    group: 'community',
+    name: 'Predictive Ranges',
+    shortName: predictiveRangesIndicator.metadata.shortTitle,
+    category: 'Channels & Bands',
+    overlay: true,
+    metadata: predictiveRangesIndicator.metadata,
+    inputConfig: predictiveRangesIndicator.inputConfig as InputConfig[],
+    plotConfig: predictiveRangesIndicator.plotConfig as PlotConfig[],
+    fillConfig: predictiveRangesIndicator.fillConfig,
+    defaultInputs: { ...predictiveRangesIndicator.defaultInputs },
+    calculate: predictiveRangesIndicator.calculate,
+  },
+  {
+    id: 'ghost-tangent-crossings',
+    group: 'community',
+    name: 'Ghost Tangent Crossings',
+    shortName: ghostTangentCrossingsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: ghostTangentCrossingsIndicator.metadata,
+    inputConfig: ghostTangentCrossingsIndicator.inputConfig as InputConfig[],
+    plotConfig: ghostTangentCrossingsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...ghostTangentCrossingsIndicator.defaultInputs },
+    calculate: ghostTangentCrossingsIndicator.calculate,
+  },
+  {
+    id: 'zigzag-multi-time-frame-with-fibonacci',
+    group: 'community',
+    name: 'ZigZag Multi Time Frame with Fibonacci Retracement',
+    shortName: zigzagMultiTimeFrameWithFibonacciIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: zigzagMultiTimeFrameWithFibonacciIndicator.metadata,
+    inputConfig: zigzagMultiTimeFrameWithFibonacciIndicator.inputConfig as InputConfig[],
+    plotConfig: zigzagMultiTimeFrameWithFibonacciIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...zigzagMultiTimeFrameWithFibonacciIndicator.defaultInputs },
+    calculate: zigzagMultiTimeFrameWithFibonacciIndicator.calculate,
+  },
+  {
+    id: 'pure-price-action-structures',
+    group: 'community',
+    name: 'Pure Price Action Structures',
+    shortName: purePriceActionStructuresIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: purePriceActionStructuresIndicator.metadata,
+    inputConfig: purePriceActionStructuresIndicator.inputConfig as InputConfig[],
+    plotConfig: purePriceActionStructuresIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...purePriceActionStructuresIndicator.defaultInputs },
+    calculate: purePriceActionStructuresIndicator.calculate,
+  },
+  {
+    id: 'ttm-squeeze-greeny',
+    group: 'community',
+    name: 'TTM Squeeze',
+    shortName: ttmSqueezeGreenyIndicator.metadata.shortTitle,
+    category: 'Momentum',
+    overlay: false,
+    metadata: ttmSqueezeGreenyIndicator.metadata,
+    inputConfig: ttmSqueezeGreenyIndicator.inputConfig as InputConfig[],
+    plotConfig: ttmSqueezeGreenyIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...ttmSqueezeGreenyIndicator.defaultInputs },
+    calculate: ttmSqueezeGreenyIndicator.calculate,
+  },
+  {
+    id: 'daily-weekly-monthly-yearly-opens',
+    group: 'community',
+    name: 'Daily Weekly Monthly Yearly Opens',
+    shortName: dailyWeeklyMonthlyYearlyOpensIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: dailyWeeklyMonthlyYearlyOpensIndicator.metadata,
+    inputConfig: dailyWeeklyMonthlyYearlyOpensIndicator.inputConfig as InputConfig[],
+    plotConfig: dailyWeeklyMonthlyYearlyOpensIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...dailyWeeklyMonthlyYearlyOpensIndicator.defaultInputs },
+    calculate: dailyWeeklyMonthlyYearlyOpensIndicator.calculate,
+  },
+  {
+    id: 'opening-range-breakout-with-2-profit-targets',
+    group: 'community',
+    name: 'Opening Range Breakout with 2 Profit Targets.',
+    shortName: openingRangeBreakoutWith2ProfitTargetsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: openingRangeBreakoutWith2ProfitTargetsIndicator.metadata,
+    inputConfig: openingRangeBreakoutWith2ProfitTargetsIndicator.inputConfig as InputConfig[],
+    plotConfig: openingRangeBreakoutWith2ProfitTargetsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...openingRangeBreakoutWith2ProfitTargetsIndicator.defaultInputs },
+    calculate: openingRangeBreakoutWith2ProfitTargetsIndicator.calculate,
+  },
+  {
+    id: 'market-structure-dashboard-flux-charts',
+    group: 'community',
+    name: 'Market Structure Dashboard | Flux Charts',
+    shortName: marketStructureDashboardFluxChartsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: marketStructureDashboardFluxChartsIndicator.metadata,
+    inputConfig: marketStructureDashboardFluxChartsIndicator.inputConfig as InputConfig[],
+    plotConfig: marketStructureDashboardFluxChartsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...marketStructureDashboardFluxChartsIndicator.defaultInputs },
+    calculate: marketStructureDashboardFluxChartsIndicator.calculate,
+  },
+  {
+    id: 'harmonic-pattern-detection-prediction-and',
+    group: 'community',
+    name: 'Harmonic Pattern Detection, Prediction, and Backtesting Tool',
+    shortName: harmonicPatternDetectionPredictionAndIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: harmonicPatternDetectionPredictionAndIndicator.metadata,
+    inputConfig: harmonicPatternDetectionPredictionAndIndicator.inputConfig as InputConfig[],
+    plotConfig: harmonicPatternDetectionPredictionAndIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...harmonicPatternDetectionPredictionAndIndicator.defaultInputs },
+    calculate: harmonicPatternDetectionPredictionAndIndicator.calculate,
+  },
+  {
+    id: 'fvg-ifvg-ict-inversion-fair-value-gap-signal',
+    group: 'community',
+    name: 'FVG & IFVG ICT Inversion Fair Value Gap Signal',
+    shortName: fvgIfvgIctInversionFairValueGapSignalIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: fvgIfvgIctInversionFairValueGapSignalIndicator.metadata,
+    inputConfig: fvgIfvgIctInversionFairValueGapSignalIndicator.inputConfig as InputConfig[],
+    plotConfig: fvgIfvgIctInversionFairValueGapSignalIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...fvgIfvgIctInversionFairValueGapSignalIndicator.defaultInputs },
+    calculate: fvgIfvgIctInversionFairValueGapSignalIndicator.calculate,
+  },
+  {
+    id: 'rsi-support-resistance-by-dgt',
+    group: 'community',
+    name: 'RSI Support & Resistance by DGT',
+    shortName: rsiSupportResistanceByDgtIndicator.metadata.shortTitle,
+    category: 'Momentum',
+    overlay: true,
+    metadata: rsiSupportResistanceByDgtIndicator.metadata,
+    inputConfig: rsiSupportResistanceByDgtIndicator.inputConfig as InputConfig[],
+    plotConfig: rsiSupportResistanceByDgtIndicator.plotConfig as PlotConfig[],
+    fillConfig: rsiSupportResistanceByDgtIndicator.fillConfig,
+    defaultInputs: { ...rsiSupportResistanceByDgtIndicator.defaultInputs },
+    calculate: rsiSupportResistanceByDgtIndicator.calculate,
+  },
+  {
+    id: 'relative-strength-index-divergences-libertus',
+    group: 'community',
+    name: 'Relative Strength Index - Divergences - Libertus',
+    shortName: relativeStrengthIndexDivergencesLibertusIndicator.metadata.shortTitle,
+    category: 'Momentum',
+    overlay: false,
+    metadata: relativeStrengthIndexDivergencesLibertusIndicator.metadata,
+    inputConfig: relativeStrengthIndexDivergencesLibertusIndicator.inputConfig as InputConfig[],
+    plotConfig: relativeStrengthIndexDivergencesLibertusIndicator.plotConfig as PlotConfig[],
+    hlineConfig: relativeStrengthIndexDivergencesLibertusIndicator.hlineConfig,
+    fillConfig: relativeStrengthIndexDivergencesLibertusIndicator.fillConfig,
+    defaultInputs: { ...relativeStrengthIndexDivergencesLibertusIndicator.defaultInputs },
+    calculate: relativeStrengthIndexDivergencesLibertusIndicator.calculate,
+  },
+  {
+    id: 'higher-order-orderblocks-breakerblocks-range',
+    group: 'community',
+    name: 'Higher order Orderblocks + Breakerblocks + Range + Alerts',
+    shortName: higherOrderOrderblocksBreakerblocksRangeIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: higherOrderOrderblocksBreakerblocksRangeIndicator.metadata,
+    inputConfig: higherOrderOrderblocksBreakerblocksRangeIndicator.inputConfig as InputConfig[],
+    plotConfig: higherOrderOrderblocksBreakerblocksRangeIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...higherOrderOrderblocksBreakerblocksRangeIndicator.defaultInputs },
+    calculate: higherOrderOrderblocksBreakerblocksRangeIndicator.calculate,
+  },
+  {
+    id: 'volume-order-blocks',
+    group: 'community',
+    name: 'Volume Order Blocks',
+    shortName: volumeOrderBlocksIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: volumeOrderBlocksIndicator.metadata,
+    inputConfig: volumeOrderBlocksIndicator.inputConfig as InputConfig[],
+    plotConfig: volumeOrderBlocksIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...volumeOrderBlocksIndicator.defaultInputs },
+    calculate: volumeOrderBlocksIndicator.calculate,
+  },
+  {
+    id: 'trend-lines',
+    group: 'community',
+    name: 'Trend Lines',
+    shortName: trendLinesIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: trendLinesIndicator.metadata,
+    inputConfig: trendLinesIndicator.inputConfig as InputConfig[],
+    plotConfig: trendLinesIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...trendLinesIndicator.defaultInputs },
+    calculate: trendLinesIndicator.calculate,
+  },
+  {
+    id: 'trending-market-toolkit',
+    group: 'community',
+    name: 'Trending Market Toolkit',
+    shortName: trendingMarketToolkitIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: trendingMarketToolkitIndicator.metadata,
+    inputConfig: trendingMarketToolkitIndicator.inputConfig as InputConfig[],
+    plotConfig: trendingMarketToolkitIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...trendingMarketToolkitIndicator.defaultInputs },
+    calculate: trendingMarketToolkitIndicator.calculate,
+  },
+  {
+    id: 'fibonacci-auto-trend-scouter',
+    group: 'community',
+    name: 'Fibonacci Auto Trend Scouter',
+    shortName: fibonacciAutoTrendScouterIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: fibonacciAutoTrendScouterIndicator.metadata,
+    inputConfig: fibonacciAutoTrendScouterIndicator.inputConfig as InputConfig[],
+    plotConfig: fibonacciAutoTrendScouterIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...fibonacciAutoTrendScouterIndicator.defaultInputs },
+    calculate: fibonacciAutoTrendScouterIndicator.calculate,
+  },
+  {
+    id: 'trend-indicator-a-v2',
+    group: 'community',
+    name: 'Trend Indicator A-V2 (Smoothed Heikin Ashi Cloud)',
+    shortName: trendIndicatorAV2Indicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: trendIndicatorAV2Indicator.metadata,
+    inputConfig: trendIndicatorAV2Indicator.inputConfig as InputConfig[],
+    plotConfig: trendIndicatorAV2Indicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...trendIndicatorAV2Indicator.defaultInputs },
+    calculate: trendIndicatorAV2Indicator.calculate,
+  },
+  {
+    id: 'session-sweeps',
+    group: 'community',
+    name: 'Session Sweeps',
+    shortName: sessionSweepsIndicator.metadata.shortTitle,
+    category: 'Volatility',
+    overlay: true,
+    metadata: sessionSweepsIndicator.metadata,
+    inputConfig: sessionSweepsIndicator.inputConfig as InputConfig[],
+    plotConfig: sessionSweepsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...sessionSweepsIndicator.defaultInputs },
+    calculate: sessionSweepsIndicator.calculate,
+  },
+  {
+    id: 'ultimate-opening-range-breakout',
+    group: 'community',
+    name: 'Ultimate Opening Range Breakout',
+    shortName: ultimateOpeningRangeBreakoutIndicator.metadata.shortTitle,
+    category: 'Volatility',
+    overlay: true,
+    metadata: ultimateOpeningRangeBreakoutIndicator.metadata,
+    inputConfig: ultimateOpeningRangeBreakoutIndicator.inputConfig as InputConfig[],
+    plotConfig: ultimateOpeningRangeBreakoutIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...ultimateOpeningRangeBreakoutIndicator.defaultInputs },
+    calculate: ultimateOpeningRangeBreakoutIndicator.calculate,
+  },
+  {
+    id: 'liquidity-levels-mtf-sonarlab',
+    group: 'community',
+    name: 'Liquidity Levels MTF - Sonarlab',
+    shortName: liquidityLevelsMtfSonarlabIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: liquidityLevelsMtfSonarlabIndicator.metadata,
+    inputConfig: liquidityLevelsMtfSonarlabIndicator.inputConfig as InputConfig[],
+    plotConfig: liquidityLevelsMtfSonarlabIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...liquidityLevelsMtfSonarlabIndicator.defaultInputs },
+    calculate: liquidityLevelsMtfSonarlabIndicator.calculate,
+  },
+  {
+    id: 'traders-reality-main',
+    group: 'community',
+    name: 'Traders Reality Main',
+    shortName: tradersRealityMainIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: tradersRealityMainIndicator.metadata,
+    inputConfig: tradersRealityMainIndicator.inputConfig as InputConfig[],
+    plotConfig: tradersRealityMainIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...tradersRealityMainIndicator.defaultInputs },
+    calculate: tradersRealityMainIndicator.calculate,
+  },
+  {
+    id: 'delta-flow-profile',
+    group: 'community',
+    name: 'Delta Flow Profile',
+    shortName: deltaFlowProfileIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: deltaFlowProfileIndicator.metadata,
+    inputConfig: deltaFlowProfileIndicator.inputConfig as InputConfig[],
+    plotConfig: deltaFlowProfileIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...deltaFlowProfileIndicator.defaultInputs },
+    calculate: deltaFlowProfileIndicator.calculate,
+  },
+  {
+    id: '2b-reversal-pattern',
+    group: 'community',
+    name: '2B Reversal Pattern (Expo)',
+    shortName: p2bReversalPatternIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: p2bReversalPatternIndicator.metadata,
+    inputConfig: p2bReversalPatternIndicator.inputConfig as InputConfig[],
+    plotConfig: p2bReversalPatternIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...p2bReversalPatternIndicator.defaultInputs },
+    calculate: p2bReversalPatternIndicator.calculate,
+  },
+  {
+    id: 'cup-finder',
+    group: 'community',
+    name: 'Cup Finder',
+    shortName: cupFinderIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: cupFinderIndicator.metadata,
+    inputConfig: cupFinderIndicator.inputConfig as InputConfig[],
+    plotConfig: cupFinderIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...cupFinderIndicator.defaultInputs },
+    calculate: cupFinderIndicator.calculate,
+  },
+  {
+    id: 'auto-fib-retracement-alerts',
+    group: 'community',
+    name: 'Auto Fib Retracement Alerts',
+    shortName: autoFibRetracementAlertsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: autoFibRetracementAlertsIndicator.metadata,
+    inputConfig: autoFibRetracementAlertsIndicator.inputConfig as InputConfig[],
+    plotConfig: autoFibRetracementAlertsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...autoFibRetracementAlertsIndicator.defaultInputs },
+    calculate: autoFibRetracementAlertsIndicator.calculate,
+  },
+  {
+    id: 'volume-profile-per-day-with-support',
+    group: 'community',
+    name: 'Volume Profile per day with support/resistance lines',
+    shortName: volumeProfilePerDayWithSupportIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: volumeProfilePerDayWithSupportIndicator.metadata,
+    inputConfig: volumeProfilePerDayWithSupportIndicator.inputConfig as InputConfig[],
+    plotConfig: volumeProfilePerDayWithSupportIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...volumeProfilePerDayWithSupportIndicator.defaultInputs },
+    calculate: volumeProfilePerDayWithSupportIndicator.calculate,
+  },
+  {
+    id: 'volume-profile-pivot-levels',
+    group: 'community',
+    name: 'Volume Profile + Pivot Levels',
+    shortName: volumeProfilePivotLevelsIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: volumeProfilePivotLevelsIndicator.metadata,
+    inputConfig: volumeProfilePivotLevelsIndicator.inputConfig as InputConfig[],
+    plotConfig: volumeProfilePivotLevelsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...volumeProfilePivotLevelsIndicator.defaultInputs },
+    calculate: volumeProfilePivotLevelsIndicator.calculate,
+  },
+  {
+    id: 'ict-liquidity-sweep-swing-fail-pattern-v-1',
+    group: 'community',
+    name: 'ICT Liquidity Sweep/Swing Fail Pattern V.1',
+    shortName: ictLiquiditySweepSwingFailPatternV1Indicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: ictLiquiditySweepSwingFailPatternV1Indicator.metadata,
+    inputConfig: ictLiquiditySweepSwingFailPatternV1Indicator.inputConfig as InputConfig[],
+    plotConfig: ictLiquiditySweepSwingFailPatternV1Indicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...ictLiquiditySweepSwingFailPatternV1Indicator.defaultInputs },
+    calculate: ictLiquiditySweepSwingFailPatternV1Indicator.calculate,
+  },
+  {
+    id: 'htf-candles-mini-charts-by-dgt',
+    group: 'community',
+    name: 'HTF Candles & Mini Charts by DGT',
+    shortName: htfCandlesMiniChartsByDgtIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: htfCandlesMiniChartsByDgtIndicator.metadata,
+    inputConfig: htfCandlesMiniChartsByDgtIndicator.inputConfig as InputConfig[],
+    plotConfig: htfCandlesMiniChartsByDgtIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...htfCandlesMiniChartsByDgtIndicator.defaultInputs },
+    calculate: htfCandlesMiniChartsByDgtIndicator.calculate,
+  },
+  {
+    id: 'reversal-probability-zone-levels',
+    group: 'community',
+    name: 'Reversal Probability Zone & Levels',
+    shortName: reversalProbabilityZoneLevelsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: reversalProbabilityZoneLevelsIndicator.metadata,
+    inputConfig: reversalProbabilityZoneLevelsIndicator.inputConfig as InputConfig[],
+    plotConfig: reversalProbabilityZoneLevelsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...reversalProbabilityZoneLevelsIndicator.defaultInputs },
+    calculate: reversalProbabilityZoneLevelsIndicator.calculate,
+  },
+  {
+    id: 'elliott-wave-oscillator-signals-by-dgt',
+    group: 'community',
+    name: 'Elliott Wave Oscillator Signals by DGT',
+    shortName: elliottWaveOscillatorSignalsByDgtIndicator.metadata.shortTitle,
+    category: 'Oscillators',
+    overlay: true,
+    metadata: elliottWaveOscillatorSignalsByDgtIndicator.metadata,
+    inputConfig: elliottWaveOscillatorSignalsByDgtIndicator.inputConfig as InputConfig[],
+    plotConfig: elliottWaveOscillatorSignalsByDgtIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...elliottWaveOscillatorSignalsByDgtIndicator.defaultInputs },
+    calculate: elliottWaveOscillatorSignalsByDgtIndicator.calculate,
+  },
+  {
+    id: 'ict-power-of-three-flux-charts',
+    group: 'community',
+    name: 'ICT Power Of Three | Flux Charts',
+    shortName: ictPowerOfThreeFluxChartsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: ictPowerOfThreeFluxChartsIndicator.metadata,
+    inputConfig: ictPowerOfThreeFluxChartsIndicator.inputConfig as InputConfig[],
+    plotConfig: ictPowerOfThreeFluxChartsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...ictPowerOfThreeFluxChartsIndicator.defaultInputs },
+    calculate: ictPowerOfThreeFluxChartsIndicator.calculate,
+  },
+  {
+    id: 'liquidity-zones',
+    group: 'community',
+    name: 'Liquidity Zones',
+    shortName: liquidityZonesIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: liquidityZonesIndicator.metadata,
+    inputConfig: liquidityZonesIndicator.inputConfig as InputConfig[],
+    plotConfig: liquidityZonesIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...liquidityZonesIndicator.defaultInputs },
+    calculate: liquidityZonesIndicator.calculate,
+  },
+  {
+    id: 'nadaraya-watson-smoothers',
+    group: 'community',
+    name: 'Nadaraya-Watson Smoothers',
+    shortName: nadarayaWatsonSmoothersIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: nadarayaWatsonSmoothersIndicator.metadata,
+    inputConfig: nadarayaWatsonSmoothersIndicator.inputConfig as InputConfig[],
+    plotConfig: nadarayaWatsonSmoothersIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...nadarayaWatsonSmoothersIndicator.defaultInputs },
+    calculate: nadarayaWatsonSmoothersIndicator.calculate,
+  },
+  {
+    id: 'supply-and-demand-daily',
+    group: 'community',
+    name: 'Supply and Demand Daily',
+    shortName: supplyAndDemandDailyIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: supplyAndDemandDailyIndicator.metadata,
+    inputConfig: supplyAndDemandDailyIndicator.inputConfig as InputConfig[],
+    plotConfig: supplyAndDemandDailyIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...supplyAndDemandDailyIndicator.defaultInputs },
+    calculate: supplyAndDemandDailyIndicator.calculate,
+  },
+  {
+    id: 'power-of-3-ict-01-amd-ict-smc-accumulations',
+    group: 'community',
+    name: 'Power Of 3 ICT 01 AMD ICT & SMC Accumulations',
+    shortName: powerOf3Ict01AmdIctSmcAccumulationsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: powerOf3Ict01AmdIctSmcAccumulationsIndicator.metadata,
+    inputConfig: powerOf3Ict01AmdIctSmcAccumulationsIndicator.inputConfig as InputConfig[],
+    plotConfig: powerOf3Ict01AmdIctSmcAccumulationsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...powerOf3Ict01AmdIctSmcAccumulationsIndicator.defaultInputs },
+    calculate: powerOf3Ict01AmdIctSmcAccumulationsIndicator.calculate,
+  },
+  {
+    id: 'swing-volume-profiles',
+    group: 'community',
+    name: 'Swing Volume Profiles',
+    shortName: swingVolumeProfilesIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: swingVolumeProfilesIndicator.metadata,
+    inputConfig: swingVolumeProfilesIndicator.inputConfig as InputConfig[],
+    plotConfig: swingVolumeProfilesIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...swingVolumeProfilesIndicator.defaultInputs },
+    calculate: swingVolumeProfilesIndicator.calculate,
+  },
+  {
+    id: 'trend-duration-forecast',
+    group: 'community',
+    name: 'Trend Duration Forecast',
+    shortName: trendDurationForecastIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: trendDurationForecastIndicator.metadata,
+    inputConfig: trendDurationForecastIndicator.inputConfig as InputConfig[],
+    plotConfig: trendDurationForecastIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...trendDurationForecastIndicator.defaultInputs },
+    calculate: trendDurationForecastIndicator.calculate,
+  },
+  {
+    id: 'slow-stochastic',
+    group: 'community',
+    name: 'Slow Stochastic',
+    shortName: slowStochasticIndicator.metadata.shortTitle,
+    category: 'Oscillators',
+    overlay: false,
+    metadata: slowStochasticIndicator.metadata,
+    inputConfig: slowStochasticIndicator.inputConfig as InputConfig[],
+    plotConfig: slowStochasticIndicator.plotConfig as PlotConfig[],
+    hlineConfig: slowStochasticIndicator.hlineConfig,
+    fillConfig: slowStochasticIndicator.fillConfig,
+    defaultInputs: { ...slowStochasticIndicator.defaultInputs },
+    calculate: slowStochasticIndicator.calculate,
+  },
+  {
+    id: 'double-zig-zag-with-hhll',
+    group: 'community',
+    name: 'Double Zig Zag with HHLL',
+    shortName: doubleZigZagWithHhllIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: doubleZigZagWithHhllIndicator.metadata,
+    inputConfig: doubleZigZagWithHhllIndicator.inputConfig as InputConfig[],
+    plotConfig: doubleZigZagWithHhllIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...doubleZigZagWithHhllIndicator.defaultInputs },
+    calculate: doubleZigZagWithHhllIndicator.calculate,
+  },
+  {
+    id: 'fibo-levels-with-volume-profile-and-targets',
+    group: 'community',
+    name: 'Fibo Levels with Volume Profile and Targets',
+    shortName: fiboLevelsWithVolumeProfileAndTargetsIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: fiboLevelsWithVolumeProfileAndTargetsIndicator.metadata,
+    inputConfig: fiboLevelsWithVolumeProfileAndTargetsIndicator.inputConfig as InputConfig[],
+    plotConfig: fiboLevelsWithVolumeProfileAndTargetsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...fiboLevelsWithVolumeProfileAndTargetsIndicator.defaultInputs },
+    calculate: fiboLevelsWithVolumeProfileAndTargetsIndicator.calculate,
+  },
+  {
+    id: 'mean-reversion-channel',
+    group: 'community',
+    name: 'Mean Reversion Channel - (fareid\'s MRI Variant)',
+    shortName: meanReversionChannelIndicator.metadata.shortTitle,
+    category: 'Channels & Bands',
+    overlay: true,
+    metadata: meanReversionChannelIndicator.metadata,
+    inputConfig: meanReversionChannelIndicator.inputConfig as InputConfig[],
+    plotConfig: meanReversionChannelIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...meanReversionChannelIndicator.defaultInputs },
+    calculate: meanReversionChannelIndicator.calculate,
+  },
+  {
+    id: 'ict-concept-order-block-fvg-liquidity-sweeps',
+    group: 'community',
+    name: 'ICT Concept Order Block | FVG | Liquidity Sweeps',
+    shortName: ictConceptOrderBlockFvgLiquiditySweepsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: ictConceptOrderBlockFvgLiquiditySweepsIndicator.metadata,
+    inputConfig: ictConceptOrderBlockFvgLiquiditySweepsIndicator.inputConfig as InputConfig[],
+    plotConfig: ictConceptOrderBlockFvgLiquiditySweepsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...ictConceptOrderBlockFvgLiquiditySweepsIndicator.defaultInputs },
+    calculate: ictConceptOrderBlockFvgLiquiditySweepsIndicator.calculate,
+  },
+  {
+    id: 'signal-forge',
+    group: 'community',
+    name: 'Signal Forge',
+    shortName: signalForgeIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: signalForgeIndicator.metadata,
+    inputConfig: signalForgeIndicator.inputConfig as InputConfig[],
+    plotConfig: signalForgeIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...signalForgeIndicator.defaultInputs },
+    calculate: signalForgeIndicator.calculate,
+  },
+  {
+    id: 'multi-kernel-regression',
+    group: 'community',
+    name: 'Multi Kernel Regression',
+    shortName: multiKernelRegressionIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: multiKernelRegressionIndicator.metadata,
+    inputConfig: multiKernelRegressionIndicator.inputConfig as InputConfig[],
+    plotConfig: multiKernelRegressionIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...multiKernelRegressionIndicator.defaultInputs },
+    calculate: multiKernelRegressionIndicator.calculate,
+  },
+  {
+    id: 'ict-immediate-rebalance-toolkit',
+    group: 'community',
+    name: 'ICT Immediate Rebalance Toolkit',
+    shortName: ictImmediateRebalanceToolkitIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: ictImmediateRebalanceToolkitIndicator.metadata,
+    inputConfig: ictImmediateRebalanceToolkitIndicator.inputConfig as InputConfig[],
+    plotConfig: ictImmediateRebalanceToolkitIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...ictImmediateRebalanceToolkitIndicator.defaultInputs },
+    calculate: ictImmediateRebalanceToolkitIndicator.calculate,
+  },
+  {
+    id: 'liquidity-thermal-map',
+    group: 'community',
+    name: 'Liquidity Thermal Map',
+    shortName: liquidityThermalMapIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: liquidityThermalMapIndicator.metadata,
+    inputConfig: liquidityThermalMapIndicator.inputConfig as InputConfig[],
+    plotConfig: liquidityThermalMapIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...liquidityThermalMapIndicator.defaultInputs },
+    calculate: liquidityThermalMapIndicator.calculate,
+  },
+  {
+    id: 'universal-signal-backtester',
+    group: 'community',
+    name: 'Universal Signal Backtester',
+    shortName: universalSignalBacktesterIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: universalSignalBacktesterIndicator.metadata,
+    inputConfig: universalSignalBacktesterIndicator.inputConfig as InputConfig[],
+    plotConfig: universalSignalBacktesterIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...universalSignalBacktesterIndicator.defaultInputs },
+    calculate: universalSignalBacktesterIndicator.calculate,
+  },
+  {
+    id: 'support-resistance-with-breaks-and-retests',
+    group: 'community',
+    name: 'Support Resistance with Breaks and Retests',
+    shortName: supportResistanceWithBreaksAndRetestsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: supportResistanceWithBreaksAndRetestsIndicator.metadata,
+    inputConfig: supportResistanceWithBreaksAndRetestsIndicator.inputConfig as InputConfig[],
+    plotConfig: supportResistanceWithBreaksAndRetestsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...supportResistanceWithBreaksAndRetestsIndicator.defaultInputs },
+    calculate: supportResistanceWithBreaksAndRetestsIndicator.calculate,
+  },
+  {
+    id: 'dynamic-liquidity-heatmap-profile',
+    group: 'community',
+    name: 'Dynamic Liquidity HeatMap Profile',
+    shortName: dynamicLiquidityHeatmapProfileIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: dynamicLiquidityHeatmapProfileIndicator.metadata,
+    inputConfig: dynamicLiquidityHeatmapProfileIndicator.inputConfig as InputConfig[],
+    plotConfig: dynamicLiquidityHeatmapProfileIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...dynamicLiquidityHeatmapProfileIndicator.defaultInputs },
+    calculate: dynamicLiquidityHeatmapProfileIndicator.calculate,
+  },
+  {
+    id: 'scalp-pro',
+    group: 'community',
+    name: 'Scalp Pro',
+    shortName: scalpProIndicator.metadata.shortTitle,
+    category: 'Momentum',
+    overlay: false,
+    metadata: scalpProIndicator.metadata,
+    inputConfig: scalpProIndicator.inputConfig as InputConfig[],
+    plotConfig: scalpProIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...scalpProIndicator.defaultInputs },
+    calculate: scalpProIndicator.calculate,
+  },
+  {
+    id: 'swing-failure-pattern',
+    group: 'community',
+    name: 'Swing Failure Pattern (SFP)',
+    shortName: swingFailurePatternIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: swingFailurePatternIndicator.metadata,
+    inputConfig: swingFailurePatternIndicator.inputConfig as InputConfig[],
+    plotConfig: swingFailurePatternIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...swingFailurePatternIndicator.defaultInputs },
+    calculate: swingFailurePatternIndicator.calculate,
+  },
+  {
+    id: 'reversal-candlestick-structure',
+    group: 'community',
+    name: 'Reversal Candlestick Structure',
+    shortName: reversalCandlestickStructureIndicator.metadata.shortTitle,
+    category: 'Candlestick Patterns',
+    overlay: true,
+    metadata: reversalCandlestickStructureIndicator.metadata,
+    inputConfig: reversalCandlestickStructureIndicator.inputConfig as InputConfig[],
+    plotConfig: reversalCandlestickStructureIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...reversalCandlestickStructureIndicator.defaultInputs },
+    calculate: reversalCandlestickStructureIndicator.calculate,
+  },
+  {
+    id: 'mtf-order-block-finder',
+    group: 'community',
+    name: 'MTF Order Block Finder',
+    shortName: mtfOrderBlockFinderIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: mtfOrderBlockFinderIndicator.metadata,
+    inputConfig: mtfOrderBlockFinderIndicator.inputConfig as InputConfig[],
+    plotConfig: mtfOrderBlockFinderIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...mtfOrderBlockFinderIndicator.defaultInputs },
+    calculate: mtfOrderBlockFinderIndicator.calculate,
+  },
+  {
+    id: 'smart-money-breakout-signals',
+    group: 'community',
+    name: 'Smart Money Breakout Signals',
+    shortName: smartMoneyBreakoutSignalsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: smartMoneyBreakoutSignalsIndicator.metadata,
+    inputConfig: smartMoneyBreakoutSignalsIndicator.inputConfig as InputConfig[],
+    plotConfig: smartMoneyBreakoutSignalsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...smartMoneyBreakoutSignalsIndicator.defaultInputs },
+    calculate: smartMoneyBreakoutSignalsIndicator.calculate,
+  },
+  {
+    id: 'fibonacci-projection-with-volume-delta-profile',
+    group: 'community',
+    name: 'Fibonacci Projection with Volume & Delta Profile',
+    shortName: fibonacciProjectionWithVolumeDeltaProfileIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: fibonacciProjectionWithVolumeDeltaProfileIndicator.metadata,
+    inputConfig: fibonacciProjectionWithVolumeDeltaProfileIndicator.inputConfig as InputConfig[],
+    plotConfig: fibonacciProjectionWithVolumeDeltaProfileIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...fibonacciProjectionWithVolumeDeltaProfileIndicator.defaultInputs },
+    calculate: fibonacciProjectionWithVolumeDeltaProfileIndicator.calculate,
+  },
+  {
+    id: 'renko-candles-overlay',
+    group: 'community',
+    name: 'Renko Candles Overlay',
+    shortName: renkoCandlesOverlayIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: renkoCandlesOverlayIndicator.metadata,
+    inputConfig: renkoCandlesOverlayIndicator.inputConfig as InputConfig[],
+    plotConfig: renkoCandlesOverlayIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...renkoCandlesOverlayIndicator.defaultInputs },
+    calculate: renkoCandlesOverlayIndicator.calculate,
+  },
+  {
+    id: 'market-profile-with-tpo',
+    group: 'community',
+    name: 'Market Profile with TPO',
+    shortName: marketProfileWithTpoIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: marketProfileWithTpoIndicator.metadata,
+    inputConfig: marketProfileWithTpoIndicator.inputConfig as InputConfig[],
+    plotConfig: marketProfileWithTpoIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...marketProfileWithTpoIndicator.defaultInputs },
+    calculate: marketProfileWithTpoIndicator.calculate,
+  },
+  {
+    id: 'fibonacci-ranges',
+    group: 'community',
+    name: 'Fibonacci Ranges (Real-Time)',
+    shortName: fibonacciRangesIndicator.metadata.shortTitle,
+    category: 'Channels & Bands',
+    overlay: true,
+    metadata: fibonacciRangesIndicator.metadata,
+    inputConfig: fibonacciRangesIndicator.inputConfig as InputConfig[],
+    plotConfig: fibonacciRangesIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...fibonacciRangesIndicator.defaultInputs },
+    calculate: fibonacciRangesIndicator.calculate,
+  },
+  {
+    id: 'ttrades-daily-bias',
+    group: 'community',
+    name: 'TTrades Daily Bias',
+    shortName: ttradesDailyBiasIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: ttradesDailyBiasIndicator.metadata,
+    inputConfig: ttradesDailyBiasIndicator.inputConfig as InputConfig[],
+    plotConfig: ttradesDailyBiasIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...ttradesDailyBiasIndicator.defaultInputs },
+    calculate: ttradesDailyBiasIndicator.calculate,
+  },
+  {
+    id: 'breakout-targets',
+    group: 'community',
+    name: 'Breakout Targets',
+    shortName: breakoutTargetsIndicator.metadata.shortTitle,
+    category: 'Channels & Bands',
+    overlay: true,
+    metadata: breakoutTargetsIndicator.metadata,
+    inputConfig: breakoutTargetsIndicator.inputConfig as InputConfig[],
+    plotConfig: breakoutTargetsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...breakoutTargetsIndicator.defaultInputs },
+    calculate: breakoutTargetsIndicator.calculate,
+  },
+  {
+    id: 'imbalance-detector',
+    group: 'community',
+    name: 'Imbalance Detector',
+    shortName: imbalanceDetectorIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: imbalanceDetectorIndicator.metadata,
+    inputConfig: imbalanceDetectorIndicator.inputConfig as InputConfig[],
+    plotConfig: imbalanceDetectorIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...imbalanceDetectorIndicator.defaultInputs },
+    calculate: imbalanceDetectorIndicator.calculate,
+  },
+  {
+    id: 'macd-based-price-forecasting',
+    group: 'community',
+    name: 'MACD Based Price Forecasting',
+    shortName: macdBasedPriceForecastingIndicator.metadata.shortTitle,
+    category: 'Momentum',
+    overlay: true,
+    metadata: macdBasedPriceForecastingIndicator.metadata,
+    inputConfig: macdBasedPriceForecastingIndicator.inputConfig as InputConfig[],
+    plotConfig: macdBasedPriceForecastingIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...macdBasedPriceForecastingIndicator.defaultInputs },
+    calculate: macdBasedPriceForecastingIndicator.calculate,
+  },
+  {
+    id: 'market-structure-oscillator',
+    group: 'community',
+    name: 'Market Structure Oscillator',
+    shortName: marketStructureOscillatorIndicator.metadata.shortTitle,
+    category: 'Oscillators',
+    overlay: false,
+    metadata: marketStructureOscillatorIndicator.metadata,
+    inputConfig: marketStructureOscillatorIndicator.inputConfig as InputConfig[],
+    plotConfig: marketStructureOscillatorIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...marketStructureOscillatorIndicator.defaultInputs },
+    calculate: marketStructureOscillatorIndicator.calculate,
+  },
+  {
+    id: 'ma-sabres',
+    group: 'community',
+    name: 'MA Sabres',
+    shortName: maSabresIndicator.metadata.shortTitle,
+    category: 'Moving Averages',
+    overlay: true,
+    metadata: maSabresIndicator.metadata,
+    inputConfig: maSabresIndicator.inputConfig as InputConfig[],
+    plotConfig: maSabresIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...maSabresIndicator.defaultInputs },
+    calculate: maSabresIndicator.calculate,
+  },
+  {
+    id: 'bjorgum-mtf-ma',
+    group: 'community',
+    name: 'Bjorgum MTF MA',
+    shortName: bjorgumMtfMaIndicator.metadata.shortTitle,
+    category: 'Moving Averages',
+    overlay: true,
+    metadata: bjorgumMtfMaIndicator.metadata,
+    inputConfig: bjorgumMtfMaIndicator.inputConfig as InputConfig[],
+    plotConfig: bjorgumMtfMaIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...bjorgumMtfMaIndicator.defaultInputs },
+    calculate: bjorgumMtfMaIndicator.calculate,
+  },
+  {
+    id: 'amd-po3-with-live-edge-stats',
+    group: 'community',
+    name: 'AMD Po3 with Live Edge Stats',
+    shortName: amdPo3WithLiveEdgeStatsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: amdPo3WithLiveEdgeStatsIndicator.metadata,
+    inputConfig: amdPo3WithLiveEdgeStatsIndicator.inputConfig as InputConfig[],
+    plotConfig: amdPo3WithLiveEdgeStatsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...amdPo3WithLiveEdgeStatsIndicator.defaultInputs },
+    calculate: amdPo3WithLiveEdgeStatsIndicator.calculate,
+  },
+  {
+    id: 'ranges-with-targets',
+    group: 'community',
+    name: 'Ranges With Targets',
+    shortName: rangesWithTargetsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: rangesWithTargetsIndicator.metadata,
+    inputConfig: rangesWithTargetsIndicator.inputConfig as InputConfig[],
+    plotConfig: rangesWithTargetsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...rangesWithTargetsIndicator.defaultInputs },
+    calculate: rangesWithTargetsIndicator.calculate,
+  },
+  {
+    id: 'trendlines-jd',
+    group: 'community',
+    name: 'Trendlines - JD',
+    shortName: trendlinesJdIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: trendlinesJdIndicator.metadata,
+    inputConfig: trendlinesJdIndicator.inputConfig as InputConfig[],
+    plotConfig: trendlinesJdIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...trendlinesJdIndicator.defaultInputs },
+    calculate: trendlinesJdIndicator.calculate,
+  },
+  {
+    id: 'volume-trend-order-block-engine',
+    group: 'community',
+    name: 'Volume-Trend Order Block Engine',
+    shortName: volumeTrendOrderBlockEngineIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: volumeTrendOrderBlockEngineIndicator.metadata,
+    inputConfig: volumeTrendOrderBlockEngineIndicator.inputConfig as InputConfig[],
+    plotConfig: volumeTrendOrderBlockEngineIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...volumeTrendOrderBlockEngineIndicator.defaultInputs },
+    calculate: volumeTrendOrderBlockEngineIndicator.calculate,
+  },
+  {
+    id: 'mirage-liquidity-sweep-pro',
+    group: 'community',
+    name: 'Mirage Liquidity Sweep Pro',
+    shortName: mirageLiquiditySweepProIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: mirageLiquiditySweepProIndicator.metadata,
+    inputConfig: mirageLiquiditySweepProIndicator.inputConfig as InputConfig[],
+    plotConfig: mirageLiquiditySweepProIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...mirageLiquiditySweepProIndicator.defaultInputs },
+    calculate: mirageLiquiditySweepProIndicator.calculate,
+  },
+  {
+    id: 'volume-gaps-imbalances',
+    group: 'community',
+    name: 'Volume Gaps & Imbalances',
+    shortName: volumeGapsImbalancesIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: volumeGapsImbalancesIndicator.metadata,
+    inputConfig: volumeGapsImbalancesIndicator.inputConfig as InputConfig[],
+    plotConfig: volumeGapsImbalancesIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...volumeGapsImbalancesIndicator.defaultInputs },
+    calculate: volumeGapsImbalancesIndicator.calculate,
+  },
+  {
+    id: 'cm-vix-fix-v3-upper-text-plots',
+    group: 'community',
+    name: 'CM_Williams_Vix_Fix_V3_Upper_Text Plots',
+    shortName: cmVixFixV3UpperTextPlotsIndicator.metadata.shortTitle,
+    category: 'Volatility',
+    overlay: true,
+    metadata: cmVixFixV3UpperTextPlotsIndicator.metadata,
+    inputConfig: cmVixFixV3UpperTextPlotsIndicator.inputConfig as InputConfig[],
+    plotConfig: cmVixFixV3UpperTextPlotsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...cmVixFixV3UpperTextPlotsIndicator.defaultInputs },
+    calculate: cmVixFixV3UpperTextPlotsIndicator.calculate,
+  },
+  {
+    id: 'pivot-hilo-support-n-resistance-levels-r3-3',
+    group: 'community',
+    name: 'Pivot Hilo Support n Resistance Levels R3-3 by JustUncleL',
+    shortName: pivotHiloSupportNResistanceLevelsR33Indicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: pivotHiloSupportNResistanceLevelsR33Indicator.metadata,
+    inputConfig: pivotHiloSupportNResistanceLevelsR33Indicator.inputConfig as InputConfig[],
+    plotConfig: pivotHiloSupportNResistanceLevelsR33Indicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...pivotHiloSupportNResistanceLevelsR33Indicator.defaultInputs },
+    calculate: pivotHiloSupportNResistanceLevelsR33Indicator.calculate,
+  },
+  {
+    id: 'volume-sentiment-breakout-channels',
+    group: 'community',
+    name: 'Volume Sentiment Breakout Channels',
+    shortName: volumeSentimentBreakoutChannelsIndicator.metadata.shortTitle,
+    category: 'Channels & Bands',
+    overlay: true,
+    metadata: volumeSentimentBreakoutChannelsIndicator.metadata,
+    inputConfig: volumeSentimentBreakoutChannelsIndicator.inputConfig as InputConfig[],
+    plotConfig: volumeSentimentBreakoutChannelsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...volumeSentimentBreakoutChannelsIndicator.defaultInputs },
+    calculate: volumeSentimentBreakoutChannelsIndicator.calculate,
+  },
+  {
+    id: 'itg-scalper',
+    group: 'community',
+    name: 'ITG Scalper',
+    shortName: itgScalperIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: itgScalperIndicator.metadata,
+    inputConfig: itgScalperIndicator.inputConfig as InputConfig[],
+    plotConfig: itgScalperIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...itgScalperIndicator.defaultInputs },
+    calculate: itgScalperIndicator.calculate,
+  },
+  {
+    id: 'rsi-entry-engine',
+    group: 'community',
+    name: 'RSI Entry Engine',
+    shortName: rsiEntryEngineIndicator.metadata.shortTitle,
+    category: 'Oscillators',
+    overlay: false,
+    metadata: rsiEntryEngineIndicator.metadata,
+    inputConfig: rsiEntryEngineIndicator.inputConfig as InputConfig[],
+    plotConfig: rsiEntryEngineIndicator.plotConfig as PlotConfig[],
+    hlineConfig: rsiEntryEngineIndicator.hlineConfig,
+    fillConfig: rsiEntryEngineIndicator.fillConfig,
+    defaultInputs: { ...rsiEntryEngineIndicator.defaultInputs },
+    calculate: rsiEntryEngineIndicator.calculate,
+  },
+  {
+    id: 'liquidation-reversal-signals',
+    group: 'community',
+    name: 'Liquidation Reversal Signals',
+    shortName: liquidationReversalSignalsIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: liquidationReversalSignalsIndicator.metadata,
+    inputConfig: liquidationReversalSignalsIndicator.inputConfig as InputConfig[],
+    plotConfig: liquidationReversalSignalsIndicator.plotConfig as PlotConfig[],
+    fillConfig: liquidationReversalSignalsIndicator.fillConfig,
+    defaultInputs: { ...liquidationReversalSignalsIndicator.defaultInputs },
+    calculate: liquidationReversalSignalsIndicator.calculate,
+  },
+  {
+    id: 'ict-institutional-order-flow',
+    group: 'community',
+    name: 'ICT Institutional Order Flow (fadi)',
+    shortName: ictInstitutionalOrderFlowIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: ictInstitutionalOrderFlowIndicator.metadata,
+    inputConfig: ictInstitutionalOrderFlowIndicator.inputConfig as InputConfig[],
+    plotConfig: ictInstitutionalOrderFlowIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...ictInstitutionalOrderFlowIndicator.defaultInputs },
+    calculate: ictInstitutionalOrderFlowIndicator.calculate,
+  },
+  {
+    id: 'zigzag-percent-reversal-forecast-patterns',
+    group: 'community',
+    name: 'ZigZag Percent Reversal - Forecast - patterns - labels',
+    shortName: zigzagPercentReversalForecastPatternsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: zigzagPercentReversalForecastPatternsIndicator.metadata,
+    inputConfig: zigzagPercentReversalForecastPatternsIndicator.inputConfig as InputConfig[],
+    plotConfig: zigzagPercentReversalForecastPatternsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...zigzagPercentReversalForecastPatternsIndicator.defaultInputs },
+    calculate: zigzagPercentReversalForecastPatternsIndicator.calculate,
+  },
+  {
+    id: 'liquidity-sweep-filter',
+    group: 'community',
+    name: 'Liquidity Sweep Filter',
+    shortName: liquiditySweepFilterIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: liquiditySweepFilterIndicator.metadata,
+    inputConfig: liquiditySweepFilterIndicator.inputConfig as InputConfig[],
+    plotConfig: liquiditySweepFilterIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...liquiditySweepFilterIndicator.defaultInputs },
+    calculate: liquiditySweepFilterIndicator.calculate,
+  },
+  {
+    id: 'the-echo-forecast',
+    group: 'community',
+    name: 'The Echo Forecast',
+    shortName: theEchoForecastIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: theEchoForecastIndicator.metadata,
+    inputConfig: theEchoForecastIndicator.inputConfig as InputConfig[],
+    plotConfig: theEchoForecastIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...theEchoForecastIndicator.defaultInputs },
+    calculate: theEchoForecastIndicator.calculate,
+  },
+  {
+    id: 'momentum-shift',
+    group: 'community',
+    name: 'Momentum Shift',
+    shortName: momentumShiftIndicator.metadata.shortTitle,
+    category: 'Momentum',
+    overlay: false,
+    metadata: momentumShiftIndicator.metadata,
+    inputConfig: momentumShiftIndicator.inputConfig as InputConfig[],
+    plotConfig: momentumShiftIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...momentumShiftIndicator.defaultInputs },
+    calculate: momentumShiftIndicator.calculate,
+  },
+  {
+    id: 'absorption-bubbles',
+    group: 'community',
+    name: 'Absorption Bubbles',
+    shortName: absorptionBubblesIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: absorptionBubblesIndicator.metadata,
+    inputConfig: absorptionBubblesIndicator.inputConfig as InputConfig[],
+    plotConfig: absorptionBubblesIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...absorptionBubblesIndicator.defaultInputs },
+    calculate: absorptionBubblesIndicator.calculate,
+  },
+  {
+    id: 'indicators-volume-weighted-macd-histogram',
+    group: 'community',
+    name: 'Indicators: Volume-Weighted MACD Histogram & Sentiment Zone Osc',
+    shortName: indicatorsVolumeWeightedMacdHistogramIndicator.metadata.shortTitle,
+    category: 'Momentum',
+    overlay: false,
+    metadata: indicatorsVolumeWeightedMacdHistogramIndicator.metadata,
+    inputConfig: indicatorsVolumeWeightedMacdHistogramIndicator.inputConfig as InputConfig[],
+    plotConfig: indicatorsVolumeWeightedMacdHistogramIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...indicatorsVolumeWeightedMacdHistogramIndicator.defaultInputs },
+    calculate: indicatorsVolumeWeightedMacdHistogramIndicator.calculate,
+  },
+  {
+    id: 'volume-suite-by-leviathan',
+    group: 'community',
+    name: 'Volume Suite - By Leviathan (CVD, Volume Delta, Relative Volume)',
+    shortName: volumeSuiteByLeviathanIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: false,
+    metadata: volumeSuiteByLeviathanIndicator.metadata,
+    inputConfig: volumeSuiteByLeviathanIndicator.inputConfig as InputConfig[],
+    plotConfig: volumeSuiteByLeviathanIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...volumeSuiteByLeviathanIndicator.defaultInputs },
+    calculate: volumeSuiteByLeviathanIndicator.calculate,
+  },
+  {
+    id: 'support-resistance-pro-toolkit',
+    group: 'community',
+    name: 'Support & Resistance Pro Toolkit',
+    shortName: supportResistanceProToolkitIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: supportResistanceProToolkitIndicator.metadata,
+    inputConfig: supportResistanceProToolkitIndicator.inputConfig as InputConfig[],
+    plotConfig: supportResistanceProToolkitIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...supportResistanceProToolkitIndicator.defaultInputs },
+    calculate: supportResistanceProToolkitIndicator.calculate,
+  },
+  {
+    id: 'money-flow-index-alerts',
+    group: 'community',
+    name: 'Money Flow Index + Alerts',
+    shortName: moneyFlowIndexAlertsIndicator.metadata.shortTitle,
+    category: 'Oscillators',
+    overlay: false,
+    metadata: moneyFlowIndexAlertsIndicator.metadata,
+    inputConfig: moneyFlowIndexAlertsIndicator.inputConfig as InputConfig[],
+    plotConfig: moneyFlowIndexAlertsIndicator.plotConfig as PlotConfig[],
+    hlineConfig: moneyFlowIndexAlertsIndicator.hlineConfig,
+    fillConfig: moneyFlowIndexAlertsIndicator.fillConfig,
+    defaultInputs: { ...moneyFlowIndexAlertsIndicator.defaultInputs },
+    calculate: moneyFlowIndexAlertsIndicator.calculate,
+  },
+  {
+    id: 'fxn-week-and-day-separator',
+    group: 'community',
+    name: 'FXN - Week and Day Separator',
+    shortName: fxnWeekAndDaySeparatorIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: fxnWeekAndDaySeparatorIndicator.metadata,
+    inputConfig: fxnWeekAndDaySeparatorIndicator.inputConfig as InputConfig[],
+    plotConfig: fxnWeekAndDaySeparatorIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...fxnWeekAndDaySeparatorIndicator.defaultInputs },
+    calculate: fxnWeekAndDaySeparatorIndicator.calculate,
+  },
+  {
+    id: 'donalt-smart-money-toolkit',
+    group: 'community',
+    name: 'DonAlt - Smart Money Toolkit',
+    shortName: donaltSmartMoneyToolkitIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: donaltSmartMoneyToolkitIndicator.metadata,
+    inputConfig: donaltSmartMoneyToolkitIndicator.inputConfig as InputConfig[],
+    plotConfig: donaltSmartMoneyToolkitIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...donaltSmartMoneyToolkitIndicator.defaultInputs },
+    calculate: donaltSmartMoneyToolkitIndicator.calculate,
+  },
+  {
+    id: 'cumulative-volume-delta-divergence-periodic',
+    group: 'community',
+    name: 'Cumulative Volume Delta Divergence Periodic EMA',
+    shortName: cumulativeVolumeDeltaDivergencePeriodicIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: false,
+    metadata: cumulativeVolumeDeltaDivergencePeriodicIndicator.metadata,
+    inputConfig: cumulativeVolumeDeltaDivergencePeriodicIndicator.inputConfig as InputConfig[],
+    plotConfig: cumulativeVolumeDeltaDivergencePeriodicIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...cumulativeVolumeDeltaDivergencePeriodicIndicator.defaultInputs },
+    calculate: cumulativeVolumeDeltaDivergencePeriodicIndicator.calculate,
+  },
+  {
+    id: 'liquidity-pools-pro',
+    group: 'community',
+    name: 'Liquidity Pools Pro',
+    shortName: liquidityPoolsProIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: liquidityPoolsProIndicator.metadata,
+    inputConfig: liquidityPoolsProIndicator.inputConfig as InputConfig[],
+    plotConfig: liquidityPoolsProIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...liquidityPoolsProIndicator.defaultInputs },
+    calculate: liquidityPoolsProIndicator.calculate,
+  },
+  {
+    id: 'breaker-blocks-order-blocks-confirm-bbob-alert',
+    group: 'community',
+    name: 'Breaker Blocks + Order Blocks confirm BBOB Alert',
+    shortName: breakerBlocksOrderBlocksConfirmBbobAlertIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: breakerBlocksOrderBlocksConfirmBbobAlertIndicator.metadata,
+    inputConfig: breakerBlocksOrderBlocksConfirmBbobAlertIndicator.inputConfig as InputConfig[],
+    plotConfig: breakerBlocksOrderBlocksConfirmBbobAlertIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...breakerBlocksOrderBlocksConfirmBbobAlertIndicator.defaultInputs },
+    calculate: breakerBlocksOrderBlocksConfirmBbobAlertIndicator.calculate,
+  },
+  {
+    id: 'multitimeframe-fair-value-gap-fvg',
+    group: 'community',
+    name: 'Multitimeframe Fair Value Gap – FVG',
+    shortName: multitimeframeFairValueGapFvgIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: multitimeframeFairValueGapFvgIndicator.metadata,
+    inputConfig: multitimeframeFairValueGapFvgIndicator.inputConfig as InputConfig[],
+    plotConfig: multitimeframeFairValueGapFvgIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...multitimeframeFairValueGapFvgIndicator.defaultInputs },
+    calculate: multitimeframeFairValueGapFvgIndicator.calculate,
+  },
+  {
+    id: 'ict-macros',
+    group: 'community',
+    name: 'ICT Macros',
+    shortName: ictMacrosIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: ictMacrosIndicator.metadata,
+    inputConfig: ictMacrosIndicator.inputConfig as InputConfig[],
+    plotConfig: ictMacrosIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...ictMacrosIndicator.defaultInputs },
+    calculate: ictMacrosIndicator.calculate,
+  },
+  {
+    id: 'pullback-trading-tool-alt-r1-0-by-justunclel',
+    group: 'community',
+    name: 'Pullback Trading Tool ALT R1.0 by JustUncleL',
+    shortName: pullbackTradingToolAltR10ByJustunclelIndicator.metadata.shortTitle,
+    category: 'Moving Averages',
+    overlay: true,
+    metadata: pullbackTradingToolAltR10ByJustunclelIndicator.metadata,
+    inputConfig: pullbackTradingToolAltR10ByJustunclelIndicator.inputConfig as InputConfig[],
+    plotConfig: pullbackTradingToolAltR10ByJustunclelIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...pullbackTradingToolAltR10ByJustunclelIndicator.defaultInputs },
+    calculate: pullbackTradingToolAltR10ByJustunclelIndicator.calculate,
+  },
+  {
+    id: 'harmonic-pattern-detection',
+    group: 'community',
+    name: 'Harmonic Pattern Detection',
+    shortName: harmonicPatternDetectionIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: harmonicPatternDetectionIndicator.metadata,
+    inputConfig: harmonicPatternDetectionIndicator.inputConfig as InputConfig[],
+    plotConfig: harmonicPatternDetectionIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...harmonicPatternDetectionIndicator.defaultInputs },
+    calculate: harmonicPatternDetectionIndicator.calculate,
+  },
+  {
+    id: 'mfi-seiglerj',
+    group: 'community',
+    name: 'MFI',
+    shortName: mfiSeiglerjIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: false,
+    metadata: mfiSeiglerjIndicator.metadata,
+    inputConfig: mfiSeiglerjIndicator.inputConfig as InputConfig[],
+    plotConfig: mfiSeiglerjIndicator.plotConfig as PlotConfig[],
+    hlineConfig: mfiSeiglerjIndicator.hlineConfig,
+    fillConfig: mfiSeiglerjIndicator.fillConfig,
+    defaultInputs: { ...mfiSeiglerjIndicator.defaultInputs },
+    calculate: mfiSeiglerjIndicator.calculate,
+  },
+  {
+    id: 'smart-money-volume-index',
+    group: 'community',
+    name: 'Smart Money Volume Index',
+    shortName: smartMoneyVolumeIndexIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: false,
+    metadata: smartMoneyVolumeIndexIndicator.metadata,
+    inputConfig: smartMoneyVolumeIndexIndicator.inputConfig as InputConfig[],
+    plotConfig: smartMoneyVolumeIndexIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...smartMoneyVolumeIndexIndicator.defaultInputs },
+    calculate: smartMoneyVolumeIndexIndicator.calculate,
+  },
+  {
+    id: 'linear-regression-channel-curve-slope-by-dgt',
+    group: 'community',
+    name: 'Linear Regression Channel / Curve / Slope by DGT',
+    shortName: linearRegressionChannelCurveSlopeByDgtIndicator.metadata.shortTitle,
+    category: 'Channels & Bands',
+    overlay: true,
+    metadata: linearRegressionChannelCurveSlopeByDgtIndicator.metadata,
+    inputConfig: linearRegressionChannelCurveSlopeByDgtIndicator.inputConfig as InputConfig[],
+    plotConfig: linearRegressionChannelCurveSlopeByDgtIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...linearRegressionChannelCurveSlopeByDgtIndicator.defaultInputs },
+    calculate: linearRegressionChannelCurveSlopeByDgtIndicator.calculate,
+  },
+  {
+    id: 'auto-pitchfan-fib-extension-retracement-and',
+    group: 'community',
+    name: 'Auto PitchFan, Fib Extension/Retracement and ZigZag by DGT',
+    shortName: autoPitchfanFibExtensionRetracementAndIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: autoPitchfanFibExtensionRetracementAndIndicator.metadata,
+    inputConfig: autoPitchfanFibExtensionRetracementAndIndicator.inputConfig as InputConfig[],
+    plotConfig: autoPitchfanFibExtensionRetracementAndIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...autoPitchfanFibExtensionRetracementAndIndicator.defaultInputs },
+    calculate: autoPitchfanFibExtensionRetracementAndIndicator.calculate,
+  },
+  {
+    id: 'trend-levels',
+    group: 'community',
+    name: 'Trend Levels',
+    shortName: trendLevelsIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: trendLevelsIndicator.metadata,
+    inputConfig: trendLevelsIndicator.inputConfig as InputConfig[],
+    plotConfig: trendLevelsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...trendLevelsIndicator.defaultInputs },
+    calculate: trendLevelsIndicator.calculate,
+  },
+  {
+    id: 'initial-balance-breakout-signals',
+    group: 'community',
+    name: 'Initial Balance Breakout Signals',
+    shortName: initialBalanceBreakoutSignalsIndicator.metadata.shortTitle,
+    category: 'Volatility',
+    overlay: true,
+    metadata: initialBalanceBreakoutSignalsIndicator.metadata,
+    inputConfig: initialBalanceBreakoutSignalsIndicator.inputConfig as InputConfig[],
+    plotConfig: initialBalanceBreakoutSignalsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...initialBalanceBreakoutSignalsIndicator.defaultInputs },
+    calculate: initialBalanceBreakoutSignalsIndicator.calculate,
+  },
+  {
+    id: 'ichimoku-theories',
+    group: 'community',
+    name: 'Ichimoku Theories',
+    shortName: ichimokuTheoriesIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: ichimokuTheoriesIndicator.metadata,
+    inputConfig: ichimokuTheoriesIndicator.inputConfig as InputConfig[],
+    plotConfig: ichimokuTheoriesIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...ichimokuTheoriesIndicator.defaultInputs },
+    calculate: ichimokuTheoriesIndicator.calculate,
+  },
+  {
+    id: 'liquidity-voids',
+    group: 'community',
+    name: 'Liquidity Voids (FVG)',
+    shortName: liquidityVoidsIndicator.metadata.shortTitle,
+    category: 'Volatility',
+    overlay: true,
+    metadata: liquidityVoidsIndicator.metadata,
+    inputConfig: liquidityVoidsIndicator.inputConfig as InputConfig[],
+    plotConfig: liquidityVoidsIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...liquidityVoidsIndicator.defaultInputs },
+    calculate: liquidityVoidsIndicator.calculate,
+  },
+];
+
+export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8];
 
 // Chart context (third argument of calculate)
 export type { ChartContext } from './chart-context';

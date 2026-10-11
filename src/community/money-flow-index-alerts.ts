@@ -1,0 +1,228 @@
+/**
+ * Money Flow Index + Alerts
+ *
+ * Money Flow Index from simple averages: the money flow of a bar is its typical price (hlc3) times its volume; it is
+ * positive when the typical price rises and negative when it falls. Index = 100 - 100 / (1 + sma(positive flow,
+ * length) / sma(negative flow, length)). A circle marks the bar where the index crosses below the oversold level
+ * (green) or above the overbought level (red). Bands at 80 / 60 / 40 / 20 with three zones: uptrend (60 to 80),
+ * transition (40 to 60) and downtrend (20 to 40).
+ *
+ * Other timeframe ("Use Current Chart Resolution?" off): the bars of that timeframe are built from the chart bars, so
+ * its averages start at the first chart bar. A chart bar shows the value of the latest completed bar of the
+ * timeframe. A timeframe below the chart timeframe needs data that the bars do not carry: the port throws an Error.
+ *
+ * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
+ * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar, see src/anchor-period.ts;
+ * without them the port uses the UTC calendar and the bars. `timeframe`, when given, is the chart timeframe; without
+ * it the chart timeframe is read from the bar spacing.
+ *
+ * Reference: "Money Flow Index + Alerts" by DreamsDefined
+ * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
+ */
+
+import {
+  ta, Series, color, timeframe, barInterval,
+  type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar,
+} from 'oakscriptjs';
+import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import type { ChartContext } from '../chart-context';
+
+export interface MoneyFlowIndexAlertsInputs {
+  length: number;
+  /** Oversold level */
+  os: number;
+  /** Overbought level */
+  ob: number;
+  /** Use the chart timeframe (the timeframe input is ignored) */
+  currentRes: boolean;
+  /** Timeframe used when `currentRes` is false ("240", "D", "W", ...) */
+  customRes: string;
+}
+
+export const defaultInputs: MoneyFlowIndexAlertsInputs = {
+  length: 14,
+  os: 20,
+  ob: 80,
+  currentRes: true,
+  customRes: '240',
+};
+
+export const inputConfig: InputConfig[] = [
+  { id: 'length', type: 'int', title: 'Length', defval: 14 },
+  { id: 'os', type: 'int', title: 'Oversold', defval: 20 },
+  { id: 'ob', type: 'int', title: 'Overbought', defval: 80 },
+  { id: 'currentRes', type: 'bool', title: 'Use Current Chart Resolution?', defval: true },
+  { id: 'customRes', type: 'string', title: 'Custom Timeframe? Uncheck Box Above (E.g. 1M, 5D, 240 = 4Hours)', defval: '240' },
+];
+
+// Colour constants of this version of the language, with its default plot transparency (35)
+const PLOT = (hex: string) => String(color.new(hex, 35));
+const BLACK = PLOT('#000000');
+const GREEN = PLOT('#008000');
+const RED = PLOT('#FF0000');
+// Default fill transparency (90)
+const FILL = (hex: string) => String(color.new(hex, 90));
+const HLINE = '#787B86';
+
+export const plotConfig: PlotConfig[] = [
+  { id: 'plot0', title: 'Plot', color: BLACK, lineWidth: 2 },
+  { id: 'plot1', title: 'Oversold/Overbought Cross', color: RED, lineWidth: 6, style: 'circles' },
+];
+
+export const hlineConfig: HLineConfig[] = [
+  { id: 'hline_0', price: 80, title: 'Overbought', color: HLINE, linestyle: 'dashed' },
+  { id: 'hline_1', price: 20, title: 'Oversold', color: HLINE, linestyle: 'dashed' },
+  { id: 'hline_2', price: 40, title: 'Bears', color: HLINE, linestyle: 'dashed' },
+  { id: 'hline_3', price: 60, title: 'Bulls', color: HLINE, linestyle: 'dashed' },
+];
+
+export const fillConfig: FillConfig[] = [
+  { id: 'fill_0', plot1: 'hline_3', plot2: 'hline_0', color: FILL('#008000'), title: 'Uptrend' },
+  { id: 'fill_1', plot1: 'hline_2', plot2: 'hline_1', color: FILL('#FF0000'), title: 'Downtrend' },
+  { id: 'fill_2', plot1: 'hline_2', plot2: 'hline_3', color: FILL('#808080'), title: 'Transition Zone' },
+];
+
+export const metadata = {
+  title: 'Money Flow Index MTF + Alerts',
+  shortTitle: 'Money Flow Index MTF + Alerts',
+  overlay: false,
+};
+
+/** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
+const EPS = 1e-10;
+const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
+
+interface TimeframeBars {
+  /** Bars of the timeframe built from the chart bars (the chart bars themselves for the chart timeframe) */
+  htf: Bar[];
+  /** For each chart bar, the index of the latest completed bar of the timeframe (-1: none yet) */
+  latest: number[];
+}
+
+/**
+ * security(tickerid, tf, ...) without lookahead: the bars of timeframe `tf` built from the chart bars, and for each
+ * chart bar the index of the latest completed bar of that timeframe.
+ */
+function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): TimeframeBars {
+  const chart = chartTimeframe(bars, context);
+  if (tf.trim() === '' || chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
+    return { htf: bars, latest: bars.map((_b, i) => i) };
+  }
+  if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
+    throw new Error(`Money Flow Index + Alerts: the timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
+  }
+  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
+  // complete them come from the library rule (see anchor-period.ts)
+  const exchange = securityBars(bars, tf, context);
+  if (exchange) return { htf: exchange.htf, latest: exchange.latest };
+  const n = bars.length;
+  const starts = periodStarts(bars, tf);
+  const htf: Bar[] = [];
+  const group: number[] = [];
+  bars.forEach((b, i) => {
+    if (i === 0 || starts[i] !== starts[i - 1]) {
+      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
+    } else {
+      const last = htf[htf.length - 1];
+      last.high = Math.max(last.high, b.high);
+      last.low = Math.min(last.low, b.low);
+      last.close = b.close;
+      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
+    }
+    group.push(htf.length - 1);
+  });
+
+  // A bar completes its period when its close reaches the end of the period. Symbols that trade every day follow
+  // the UTC calendar: the period of the close time is another period. Other symbols: the last bar of a period.
+  const ms = n > 0 && bars[0].time >= 1e12;
+  const weekend = (t: number) => {
+    const wd = new Date(ms ? t : t * 1000).getUTCDay();
+    return wd === 0 || wd === 6;
+  };
+  const interval = barInterval(bars);
+  const closes = bars.map((b) => ({ time: b.time + interval }));
+  const calendar = bars.some((b) => weekend(b.time)) && closes.some((b) => weekend(b.time));
+  const closeStarts = calendar ? periodStarts(closes, tf) : [];
+  // The last bar of a symbol that does not trade every day: its period is complete when the next possible bar is in
+  // another period. The next bar is on the same day while the bar is earlier in the day than the last bar of the
+  // trading day before; else it is on the next weekday.
+  let lastEnds = true;
+  if (!calendar && n > 1) {
+    const DAY = 86400000;
+    const toMs = (t: number) => (ms ? t : t * 1000);
+    const lastMs = toMs(bars[n - 1].time);
+    const day = Math.floor(lastMs / DAY) * DAY;
+    let next = lastMs + toMs(interval);
+    let sessionOver = true;
+    if (toMs(interval) < DAY) {
+      let j = n - 2;
+      while (j >= 0 && toMs(bars[j].time) >= day) j--;
+      sessionOver = j < 0 || lastMs - day >= toMs(bars[j].time) % DAY;
+    }
+    if (sessionOver) {
+      next = day + DAY;
+      while (weekend(ms ? next : next / 1000)) next += DAY;
+    }
+    const withNext = periodStarts([...bars, { time: ms ? next : next / 1000 }], tf);
+    lastEnds = withNext[n] !== withNext[n - 1];
+  }
+  const latest: number[] = [];
+  for (let i = 0; i < n; i++) {
+    let done = i === 0 ? -1 : latest[i - 1];
+    if (i > 0 && group[i] !== group[i - 1]) done = Math.max(done, group[i] - 1);
+    const ends = i === n - 1 ? lastEnds : starts[i + 1] !== starts[i];
+    const reaches = !calendar || closeStarts[i] !== starts[i];
+    if (ends && reaches) done = Math.max(done, group[i]);
+    latest.push(done);
+  }
+  return { htf, latest };
+}
+
+export function calculate(bars: Bar[], inputs: Partial<MoneyFlowIndexAlertsInputs> = {}, chart?: ChartContext): IndicatorResult {
+  const cfg = { ...defaultInputs, ...inputs };
+  const n = bars.length;
+  const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
+
+  // res = CurrentRes ? period : CustomRes
+  const { htf, latest } = timeframeBars(bars, cfg.currentRes ? '' : cfg.customRes, chart);
+  const hlc3 = htf.map((b) => (b.high + b.low + b.close) / 3);
+  // rawMoneyFlow = hlc3 * volume, kept on bars where hlc3 rises (positive) or falls (negative), else 0
+  const positive = hlc3.map((v, i) => (i > 0 && gt(v, hlc3[i - 1]) ? v * (htf[i].volume ?? NaN) : 0));
+  const negative = hlc3.map((v, i) => (i > 0 && lt(v, hlc3[i - 1]) ? v * (htf[i].volume ?? NaN) : 0));
+  const posAvg = A(ta.sma(Series.fromArray(htf, positive), cfg.length));
+  const negAvg = A(ta.sma(Series.fromArray(htf, negative), cfg.length));
+  // a non-zero value / 0 is infinite (index 100), 0 / 0 is na
+  const index = posAvg.map((p, i) => 100 - 100 / (1 + p / negAvg[i]));
+  const mfi = latest.map((g) => (g >= 0 ? index[g] : NaN));
+
+  const plot0: Array<{ time: number; value: number }> = [];
+  const plot1: Array<{ time: number; value: number; color: string }> = [];
+  for (let i = 0; i < n; i++) {
+    const v = Number.isFinite(mfi[i]) ? mfi[i] : NaN;
+    const prev = i > 0 && Number.isFinite(mfi[i - 1]) ? mfi[i - 1] : NaN;
+    // oversold = moneyFlowIndex[1] > os[1] and moneyFlowIndex < os
+    const oversold = gt(prev, cfg.os) && lt(v, cfg.os);
+    const overbought = lt(prev, cfg.ob) && gt(v, cfg.ob);
+    plot0.push({ time: bars[i].time, value: v });
+    plot1.push({ time: bars[i].time, value: oversold || overbought ? v : NaN, color: oversold ? GREEN : RED });
+  }
+
+  return {
+    metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
+    plots: { plot0, plot1 },
+    hlines: [
+      { value: 80, options: { title: 'Overbought', color: HLINE, linestyle: 'dashed' } },
+      { value: 20, options: { title: 'Oversold', color: HLINE, linestyle: 'dashed' } },
+      { value: 40, options: { title: 'Bears', color: HLINE, linestyle: 'dashed' } },
+      { value: 60, options: { title: 'Bulls', color: HLINE, linestyle: 'dashed' } },
+    ],
+    fills: [
+      { plot1: 'hline_3', plot2: 'hline_0', options: { title: 'Uptrend', color: FILL('#008000') } },
+      { plot1: 'hline_2', plot2: 'hline_1', options: { title: 'Downtrend', color: FILL('#FF0000') } },
+      { plot1: 'hline_2', plot2: 'hline_3', options: { title: 'Transition Zone', color: FILL('#808080') } },
+    ],
+  };
+}
+
+export const MoneyFlowIndexAlerts = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig };
