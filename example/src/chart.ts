@@ -81,9 +81,18 @@ export class ChartManager {
     this.chart.timeScale().fitContent();
   }
 
-  /** Draw one indicator result (replaces the previous one) */
-  renderIndicator(indicator: RenderableIndicator, result: IndicatorResult, bars: Bar[], inputs: Record<string, unknown>): void {
-    this.renderer.render(indicator, result, bars, { inputs });
+  /**
+   * Draw one indicator result (replaces the previous one). `reuseSeries`: the same indicator calculated again (the
+   * visible range changed), its series are kept instead of being removed and created again.
+   */
+  renderIndicator(
+    indicator: RenderableIndicator,
+    result: IndicatorResult,
+    bars: Bar[],
+    inputs: Record<string, unknown>,
+    reuseSeries = false
+  ): void {
+    this.renderer.render(indicator, result, bars, { inputs, reuseSeries });
   }
 
   /** Remove the indicator */

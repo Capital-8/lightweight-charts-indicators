@@ -21,6 +21,17 @@ export interface ChartContext extends ScriptChartContext {
   backgroundColor?: string;
   /** Current time in ms (PineScript `timenow`); fallback: the clock of the computer */
   now?: number;
+  /**
+   * Time of the first bar visible on the chart, in ms (PineScript `chart.left_visible_bar_time`); fallback: the
+   * first bar given to the indicator
+   */
+  leftVisibleBarTime?: number;
+  /**
+   * Time of the last bar visible on the chart, in ms (PineScript `chart.right_visible_bar_time`); fallback: the
+   * last bar given to the indicator. An indicator that reads the visible range (`usesVisibleRange` in its registry
+   * entry) must be calculated again when the user scrolls or zooms the chart.
+   */
+  rightVisibleBarTime?: number;
 }
 
 /** Symbol tick (PineScript `syminfo.mintick`); fallback 0.01 */
@@ -77,4 +88,34 @@ export function lastBarConfirmedOf(chart?: ChartContext): boolean {
 /** PineScript `timenow` (ms); fallback: the clock of the computer */
 export function nowOf(chart?: ChartContext): number {
   return chart?.now ?? Date.now();
+}
+
+/** The bars visible on the chart: indexes in `bars` and times in ms. */
+export interface VisibleRange {
+  /** Index of the first visible bar */
+  left: number;
+  /** Index of the last visible bar */
+  right: number;
+  /** PineScript `chart.left_visible_bar_time` (ms) */
+  leftTime: number;
+  /** PineScript `chart.right_visible_bar_time` (ms) */
+  rightTime: number;
+}
+
+/**
+ * Visible range of the chart (PineScript `chart.left_visible_bar_time` / `chart.right_visible_bar_time`); fallback:
+ * all the bars. The times of the context are in ms; `Bar.time` is in seconds unless `chart.timeUnit` is 'ms'. A
+ * visible time between two bars is taken as the next bar on the left side and the previous bar on the right side.
+ */
+export function visibleRangeOf(bars: ReadonlyArray<{ time: number }>, chart?: ChartContext): VisibleRange {
+  const toMs = chart?.timeUnit === 'ms' ? 1 : 1000;
+  const last = bars.length - 1;
+  if (last < 0) return { left: 0, right: -1, leftTime: NaN, rightTime: NaN };
+  const leftTime = chart?.leftVisibleBarTime ?? bars[0].time * toMs;
+  const rightTime = chart?.rightVisibleBarTime ?? bars[last].time * toMs;
+  let left = 0;
+  while (left < last && bars[left].time * toMs < leftTime) left++;
+  let right = last;
+  while (right > 0 && bars[right].time * toMs > rightTime) right--;
+  return { left, right, leftTime, rightTime };
 }

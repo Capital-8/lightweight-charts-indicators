@@ -5,15 +5,22 @@
 
 import { isInputActive, type Bar, type InputConfig } from 'oakscriptjs';
 import { ChartManager } from './chart';
-import { buildChartContext } from './chart-context';
+import { buildChartContext, visibleBarsOf } from './chart-context';
+import { visibleRangeDemo } from './visible-range-demo';
 import { parseColor } from '../../src/render/color';
 import { indicatorRegistry, type IndicatorRegistryEntry, type IndicatorCategory } from '../../src/index';
 
 /**
  * Use the indicator registry from indicators/index.ts
  * Adding new indicators to the registry will automatically make them available in the UI
+ * (`?visibleRangeDemo=1` adds the demo indicator of visible-range-demo.ts, which is not in the registry)
  */
-const indicators: IndicatorRegistryEntry[] = indicatorRegistry;
+const indicators: IndicatorRegistryEntry[] = new URLSearchParams(location.search).has('visibleRangeDemo')
+  ? [...indicatorRegistry, visibleRangeDemo]
+  : indicatorRegistry;
+
+/** Wait after the last scroll / zoom before an indicator that reads the visible range is calculated again (ms) */
+const VISIBLE_RANGE_DEBOUNCE = 100;
 
 type IndicatorGroup = 'standard' | 'candlestick' | 'community';
 
@@ -74,6 +81,11 @@ export class IndicatorUI {
   private container: HTMLElement;
   private currentIndicatorId: string | null = null;
   private currentInputs: Record<string, unknown> = {};
+  /** True while the visible range of the chart is watched (the indicator shown has `usesVisibleRange`) */
+  private watchingVisibleRange = false;
+  private visibleRangeTimer = 0;
+  /** First and last visible bar of the last calculation ("left:right") */
+  private visibleRangeKey = '';
 
   constructor(container: HTMLElement, chartManager: ChartManager) {
     this.container = container;
@@ -253,13 +265,15 @@ export class IndicatorUI {
     this.currentInputs = {};
 
     const inputsContainer = this.container.querySelector('#indicator-inputs') as HTMLElement;
+    const indicator = indicatorId ? indicators.find(ind => ind.id === indicatorId) : undefined;
+    this.watchVisibleRange(indicator?.usesVisibleRange === true);
 
     if (!indicatorId) {
       inputsContainer.innerHTML = '';
+      this.recalculate(); // removes the indicator that was shown
       return;
     }
 
-    const indicator = indicators.find(ind => ind.id === indicatorId);
     if (!indicator) {
       inputsContainer.innerHTML = '';
       return;
@@ -504,7 +518,7 @@ export class IndicatorUI {
   /**
    * Recalculate and update the indicator display
    */
-  private recalculate(): void {
+  private recalculate(visibleRangeChanged = false): void {
     if (!this.currentIndicatorId || this.bars.length === 0) {
       this.chartManager.clearIndicators();
       return;
@@ -516,13 +530,48 @@ export class IndicatorUI {
     }
 
     try {
+      this.visibleRangeKey = this.readVisibleRangeKey();
       const chart = buildChartContext(this.bars, this.chartManager.getChart());
       const result = indicator.calculate(this.bars, this.currentInputs, chart);
-      this.chartManager.renderIndicator(indicator, result, this.bars, this.currentInputs);
+      // after a scroll / zoom the series of the indicator are kept (no removal and creation: less flicker)
+      this.chartManager.renderIndicator(indicator, result, this.bars, this.currentInputs, visibleRangeChanged);
     } catch (error) {
       console.error('Error calculating indicator:', error);
     }
   }
+
+  // ─── Visible range ────────────────────────────────────────────────────────
+
+  private readVisibleRangeKey(): string {
+    const visible = visibleBarsOf(this.bars, this.chartManager.getChart());
+    return visible ? `${visible.left}:${visible.right}` : '';
+  }
+
+  /**
+   * Watch the visible range of the chart while the indicator shown reads it (`usesVisibleRange` of its entry); other
+   * indicators are not calculated again on scroll / zoom.
+   */
+  private watchVisibleRange(watch: boolean): void {
+    clearTimeout(this.visibleRangeTimer);
+    this.visibleRangeTimer = 0;
+    this.visibleRangeKey = '';
+    if (watch === this.watchingVisibleRange) return;
+    this.watchingVisibleRange = watch;
+    const timeScale = this.chartManager.getChart().timeScale();
+    if (watch) timeScale.subscribeVisibleLogicalRangeChange(this.onVisibleRangeChange);
+    else timeScale.unsubscribeVisibleLogicalRangeChange(this.onVisibleRangeChange);
+  }
+
+  /** Scroll / zoom: calculate again once the range has been still for VISIBLE_RANGE_DEBOUNCE ms */
+  private onVisibleRangeChange = (): void => {
+    clearTimeout(this.visibleRangeTimer);
+    this.visibleRangeTimer = window.setTimeout(() => {
+      this.visibleRangeTimer = 0;
+      // same first and last visible bar (a move of less than one bar, or the redraw itself): nothing to do
+      if (this.readVisibleRangeKey() === this.visibleRangeKey) return;
+      this.recalculate(true);
+    }, VISIBLE_RANGE_DEBOUNCE);
+  };
 }
 
 function escapeHtml(text: string): string {

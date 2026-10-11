@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   indicatorRegistry, mintickOf, timezoneOf, tickeridOf, tickerOf, symbolTypeOf, currencyOf, foregroundColorOf,
-  backgroundColorOf, lastBarConfirmedOf, nowOf,
+  backgroundColorOf, lastBarConfirmedOf, nowOf, visibleRangeOf,
 } from '../../src/index';
 import { makeBars } from './community-top100.helpers';
 
@@ -65,3 +65,42 @@ describe('calculate(bars, inputs, chart)', () => {
     expect(sma.calculate(bars, {}, { mintick: 1, timezone: 'America/New_York' })).toEqual(sma.calculate(bars, {}));
   });
 });
+
+describe('visible chart range', () => {
+  const bars = makeBars(3200, 86400);
+  const ms = (i: number) => bars[i].time * 1000;
+
+  it('is all the bars without a context', () => {
+    expect(visibleRangeOf(bars)).toEqual({ left: 0, right: 3199, leftTime: ms(0), rightTime: ms(3199) });
+  });
+
+  it('gives the bars of the visible times, and takes a time between two bars as the bar inside the range', () => {
+    const chart = { leftVisibleBarTime: ms(2900), rightVisibleBarTime: ms(3100) };
+    expect(visibleRangeOf(bars, chart)).toMatchObject({ left: 2900, right: 3100 });
+    expect(visibleRangeOf(bars, { leftVisibleBarTime: ms(2900) + 1, rightVisibleBarTime: ms(3100) + 1 }))
+      .toMatchObject({ left: 2901, right: 3100 });
+  });
+
+  const flagged = indicatorRegistry.filter((e) => e.usesVisibleRange).map((e) => e.id).sort();
+
+  it('flags the indicators that read it', () => {
+    expect(flagged).toEqual([
+      'liquidity-price-depth-chart', 'signal-table-autofib-sma-ema-rsi-atr-vol', 'supply-and-demand-visible-range',
+      'support-resistance-channels-mtf', 'volume-profile-kv4coins',
+    ]);
+  });
+
+  it.each(flagged)('%s runs with a visible range and its output follows the range', (id) => {
+    const entry = indicatorRegistry.find((e) => e.id === id)!;
+    const inputs = id === 'volume-profile-kv4coins' ? { ...entry.defaultInputs, ...visibleRangeInput(entry) } : {};
+    const a = entry.calculate(bars, inputs, { leftVisibleBarTime: ms(2900), rightVisibleBarTime: ms(3199) });
+    const b = entry.calculate(bars, inputs, { leftVisibleBarTime: ms(2000), rightVisibleBarTime: ms(2400) });
+    expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
+  });
+});
+
+/** The bool input that switches the visible range on in an indicator where it is off by default */
+function visibleRangeInput(entry: { inputConfig: Array<{ id: string; title?: string; type: string }> }): Record<string, boolean> {
+  const input = entry.inputConfig.find((c) => c.type === 'bool' && /visible/i.test(c.title ?? ''));
+  return input ? { [input.id]: true } : {};
+}

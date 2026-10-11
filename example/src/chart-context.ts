@@ -51,15 +51,36 @@ export function timeframeOf(bars: Bar[]): string {
 }
 
 /**
- * Build the context for the loaded bars. The colours are read from the chart options, so they follow its theme.
+ * First and last bar visible on the chart (indexes in `bars`), from the visible logical range of the time scale: the
+ * bars whose centre is in view, as the visible time range of lightweight-charts. Logical index i is bar i (the
+ * candlestick series holds every bar; the slots the renderer adds are after the last bar). Clamped to the loaded
+ * bars. Null when the chart has no range yet (no data).
+ */
+export function visibleBarsOf(bars: Bar[], chart: IChartApi): { left: number; right: number } | null {
+  const range = chart.timeScale().getVisibleLogicalRange();
+  if (!range || bars.length === 0) return null;
+  const last = bars.length - 1;
+  const left = Math.min(Math.max(Math.ceil(range.from), 0), last);
+  const right = Math.max(Math.min(Math.floor(range.to), last), left);
+  return { left, right };
+}
+
+/**
+ * Build the context for the loaded bars. The colours are read from the chart options, so they follow its theme; the
+ * visible range is the one of the chart at the time of the call (bar times in seconds, the context takes ms).
  */
 export function buildChartContext(bars: Bar[], chart: IChartApi): ChartContext {
   const { background, textColor } = chart.options().layout;
+  const visible = visibleBarsOf(bars, chart);
 
   return {
     ...symbol,
     timeframe: timeframeOf(bars),
     foregroundColor: textColor,
     backgroundColor: background.type === ColorType.Solid ? background.color : background.topColor,
+    ...(visible && {
+      leftVisibleBarTime: bars[visible.left].time * 1000,
+      rightVisibleBarTime: bars[visible.right].time * 1000,
+    }),
   };
 }

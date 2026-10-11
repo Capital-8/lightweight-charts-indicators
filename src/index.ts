@@ -6259,6 +6259,27 @@ export type { IchimokuTheoriesInputs } from './community/ichimoku-theories';
 import * as liquidityVoidsIndicator from './community/liquidity-voids';
 export { LiquidityVoids, calculate as calculateLiquidityVoids } from './community/liquidity-voids';
 export type { LiquidityVoidsInputs } from './community/liquidity-voids';
+// ── Community ports that read the visible chart range ──
+// Supply and Demand Visible Range
+import * as supplyAndDemandVisibleRangeIndicator from './community/supply-and-demand-visible-range';
+export { SupplyAndDemandVisibleRange, calculate as calculateSupplyAndDemandVisibleRange } from './community/supply-and-demand-visible-range';
+export type { SupplyAndDemandVisibleRangeInputs } from './community/supply-and-demand-visible-range';
+// Volume Profile (kv4coins)
+import * as volumeProfileKv4coinsIndicator from './community/volume-profile-kv4coins';
+export { VolumeProfileKv4coins, calculate as calculateVolumeProfileKv4coins } from './community/volume-profile-kv4coins';
+export type { VolumeProfileKv4coinsInputs } from './community/volume-profile-kv4coins';
+// Support Resistance Channels/Zones Multi Time Frame
+import * as supportResistanceChannelsMtfIndicator from './community/support-resistance-channels-mtf';
+export { SupportResistanceChannelsMtf, calculate as calculateSupportResistanceChannelsMtf } from './community/support-resistance-channels-mtf';
+export type { SupportResistanceChannelsMtfInputs } from './community/support-resistance-channels-mtf';
+// Liquidity Price Depth Chart
+import * as liquidityPriceDepthChartIndicator from './community/liquidity-price-depth-chart';
+export { LiquidityPriceDepthChart, calculate as calculateLiquidityPriceDepthChart } from './community/liquidity-price-depth-chart';
+export type { LiquidityPriceDepthChartInputs } from './community/liquidity-price-depth-chart';
+// Multicator Table
+import * as signalTableAutofibSmaEmaRsiAtrVolIndicator from './community/signal-table-autofib-sma-ema-rsi-atr-vol';
+export { MulticatorTable, calculate as calculateMulticatorTable } from './community/signal-table-autofib-sma-ema-rsi-atr-vol';
+export type { MulticatorTableInputs } from './community/signal-table-autofib-sma-ema-rsi-atr-vol';
 
 export type IndicatorCategory =
   | 'Moving Averages'
@@ -6294,6 +6315,11 @@ export interface IndicatorRegistryEntry {
   /** plotarrow settings by arrow id (minheight / maxheight / forceOverlay) of the `arrows` of the result */
   arrowConfig?: ArrowConfig[];
   defaultInputs: Record<string, unknown>;
+  /**
+   * True when the output depends on the bars visible on the chart (`leftVisibleBarTime` / `rightVisibleBarTime` of
+   * the chart context): calculate it again when the user scrolls or zooms
+   */
+  usesVisibleRange?: boolean;
   /** `chart`: what the caller knows about the chart and its symbol (tick, time zone, ...), see ChartContext */
   calculate: (bars: Bar[], inputs?: any, chart?: ChartContext) => any;
 }
@@ -26136,15 +26162,85 @@ const registryPart8: IndicatorRegistryEntry[] = [
     defaultInputs: { ...liquidityVoidsIndicator.defaultInputs },
     calculate: liquidityVoidsIndicator.calculate,
   },
+  {
+    id: 'supply-and-demand-visible-range',
+    group: 'community',
+    name: 'Supply and Demand Visible Range',
+    shortName: supplyAndDemandVisibleRangeIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: supplyAndDemandVisibleRangeIndicator.metadata,
+    inputConfig: supplyAndDemandVisibleRangeIndicator.inputConfig as InputConfig[],
+    plotConfig: supplyAndDemandVisibleRangeIndicator.plotConfig as PlotConfig[],
+    usesVisibleRange: true,
+    defaultInputs: { ...supplyAndDemandVisibleRangeIndicator.defaultInputs },
+    calculate: supplyAndDemandVisibleRangeIndicator.calculate,
+  },
+  {
+    id: 'volume-profile-kv4coins',
+    group: 'community',
+    name: 'Volume Profile (kv4coins)',
+    shortName: volumeProfileKv4coinsIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: volumeProfileKv4coinsIndicator.metadata,
+    inputConfig: volumeProfileKv4coinsIndicator.inputConfig as InputConfig[],
+    plotConfig: volumeProfileKv4coinsIndicator.plotConfig as PlotConfig[],
+    usesVisibleRange: true,
+    defaultInputs: { ...volumeProfileKv4coinsIndicator.defaultInputs },
+    calculate: volumeProfileKv4coinsIndicator.calculate,
+  },
+  {
+    id: 'support-resistance-channels-mtf',
+    group: 'community',
+    name: 'Support Resistance Channels/Zones Multi Time Frame',
+    shortName: supportResistanceChannelsMtfIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: supportResistanceChannelsMtfIndicator.metadata,
+    inputConfig: supportResistanceChannelsMtfIndicator.inputConfig as InputConfig[],
+    plotConfig: supportResistanceChannelsMtfIndicator.plotConfig as PlotConfig[],
+    usesVisibleRange: true,
+    defaultInputs: { ...supportResistanceChannelsMtfIndicator.defaultInputs },
+    calculate: supportResistanceChannelsMtfIndicator.calculate,
+  },
+  {
+    id: 'liquidity-price-depth-chart',
+    group: 'community',
+    name: 'Liquidity Price Depth Chart',
+    shortName: liquidityPriceDepthChartIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: liquidityPriceDepthChartIndicator.metadata,
+    inputConfig: liquidityPriceDepthChartIndicator.inputConfig as InputConfig[],
+    plotConfig: liquidityPriceDepthChartIndicator.plotConfig as PlotConfig[],
+    usesVisibleRange: true,
+    defaultInputs: { ...liquidityPriceDepthChartIndicator.defaultInputs },
+    calculate: liquidityPriceDepthChartIndicator.calculate,
+  },
+  {
+    id: 'signal-table-autofib-sma-ema-rsi-atr-vol',
+    group: 'community',
+    name: 'Multicator Table',
+    shortName: signalTableAutofibSmaEmaRsiAtrVolIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: signalTableAutofibSmaEmaRsiAtrVolIndicator.metadata,
+    inputConfig: signalTableAutofibSmaEmaRsiAtrVolIndicator.inputConfig as InputConfig[],
+    plotConfig: signalTableAutofibSmaEmaRsiAtrVolIndicator.plotConfig as PlotConfig[],
+    usesVisibleRange: true,
+    defaultInputs: { ...signalTableAutofibSmaEmaRsiAtrVolIndicator.defaultInputs },
+    calculate: signalTableAutofibSmaEmaRsiAtrVolIndicator.calculate,
+  },
 ];
 
 export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8];
 
 // Chart context (third argument of calculate)
-export type { ChartContext } from './chart-context';
+export type { ChartContext, VisibleRange } from './chart-context';
 export {
   mintickOf, timezoneOf, tickeridOf, tickerOf, symbolTypeOf, currencyOf, foregroundColorOf, backgroundColorOf,
-  lastBarConfirmedOf, nowOf,
+  lastBarConfirmedOf, nowOf, visibleRangeOf,
 } from './chart-context';
 
 // Package version
