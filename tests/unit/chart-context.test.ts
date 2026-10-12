@@ -8,6 +8,7 @@ import {
   backgroundColorOf, lastBarConfirmedOf, nowOf, visibleRangeOf,
 } from '../../src/index';
 import { makeBars } from './community-top100.helpers';
+import { fixtureContext } from './community-other-symbols.helpers';
 
 describe('chart context helpers', () => {
   it('give the fallbacks without a context', () => {
@@ -85,17 +86,20 @@ describe('visible chart range', () => {
 
   it('flags the indicators that read it', () => {
     expect(flagged).toEqual([
-      'liquidity-price-depth-chart', 'order-blocks-volume-delta-3d-flux-charts', 'signal-table-autofib-sma-ema-rsi-atr-vol',
-      'supply-and-demand-visible-range', 'support-resistance-channels-mtf', 'support-resistance-classification',
-      'volume-profile-kv4coins',
+      'liquidity-price-depth-chart', 'open-interest-suite-by-leviathan', 'order-blocks-volume-delta-3d-flux-charts',
+      'signal-table-autofib-sma-ema-rsi-atr-vol', 'supply-and-demand-visible-range', 'support-resistance-channels-mtf',
+      'support-resistance-classification', 'volume-open-interest-footprint-by-leviathan', 'volume-profile-kv4coins',
     ]);
   });
 
   it.each(flagged)('%s runs with a visible range and its output follows the range', (id) => {
     const entry = indicatorRegistry.find((e) => e.id === id)!;
-    const inputs = id === 'volume-profile-kv4coins' ? { ...entry.defaultInputs, ...visibleRangeInput(entry) } : {};
-    const a = entry.calculate(bars, inputs, { leftVisibleBarTime: ms(2900), rightVisibleBarTime: ms(3199) });
-    const b = entry.calculate(bars, inputs, { leftVisibleBarTime: ms(2000), rightVisibleBarTime: ms(2400) });
+    const inputs = id === 'volume-profile-kv4coins' ? { ...entry.defaultInputs, ...visibleRangeInput(entry) }
+      : id === 'open-interest-suite-by-leviathan' ? { prof: true } : {};
+    // the bars of other symbols, for the ports that read them
+    const ctx = entry.requiredSymbols ? fixtureContext(bars.length) : {};
+    const a = entry.calculate(bars, inputs, { ...ctx, leftVisibleBarTime: ms(2900), rightVisibleBarTime: ms(3199) });
+    const b = entry.calculate(bars, inputs, { ...ctx, leftVisibleBarTime: ms(2000), rightVisibleBarTime: ms(2400) });
     expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
   });
 });

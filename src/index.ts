@@ -6286,6 +6286,63 @@ export type { MachineLearningRsiBullvisionInputs } from './community/machine-lea
 import * as wedgeAndFlagFinderIndicator from './community/wedge-and-flag-finder';
 export { WedgeAndFlagFinder, calculate as calculateWedgeAndFlagFinder } from './community/wedge-and-flag-finder';
 export type { WedgeAndFlagFinderInputs } from './community/wedge-and-flag-finder';
+// ── Community other-symbol ports ──
+// Hash Ribbons
+import * as hashRibbonsIndicator from './community/hash-ribbons';
+export { HashRibbons, calculate as calculateHashRibbons } from './community/hash-ribbons';
+export type { HashRibbonsInputs } from './community/hash-ribbons';
+// Global Liquidity Index
+import * as globalLiquidityIndexIndicator from './community/global-liquidity-index';
+export { GlobalLiquidityIndex, calculate as calculateGlobalLiquidityIndex } from './community/global-liquidity-index';
+export type { GlobalLiquidityIndexInputs } from './community/global-liquidity-index';
+// Volume / Open Interest "Footprint" - By Leviathan
+import * as volumeOpenInterestFootprintByLeviathanIndicator from './community/volume-open-interest-footprint-by-leviathan';
+export { VolumeOpenInterestFootprintByLeviathan, calculate as calculateVolumeOpenInterestFootprintByLeviathan } from './community/volume-open-interest-footprint-by-leviathan';
+export type { VolumeOpenInterestFootprintByLeviathanInputs } from './community/volume-open-interest-footprint-by-leviathan';
+// SMT Divergences
+import * as smtDivergencesIndicator from './community/smt-divergences';
+export { SmtDivergences, calculate as calculateSmtDivergences } from './community/smt-divergences';
+export type { SmtDivergencesInputs } from './community/smt-divergences';
+// BTCUSDSHORTS BTCUSDLONGS - Bitfinex BTC Shorts & Longs
+import * as btcusdshortsBtcusdlongsBitfinexBtcShortsIndicator from './community/btcusdshorts-btcusdlongs-bitfinex-btc-shorts';
+export { BitfinexBtcShortsLongs, calculate as calculateBitfinexBtcShortsLongs } from './community/btcusdshorts-btcusdlongs-bitfinex-btc-shorts';
+export type { BitfinexBtcShortsLongsInputs } from './community/btcusdshorts-btcusdlongs-bitfinex-btc-shorts';
+// DecisionPoint Volume Swenlin Trading Oscillator
+import * as decisionpointVolumeSwenlinTradingIndicator from './community/decisionpoint-volume-swenlin-trading';
+export { DecisionPointVolumeSwenlin, calculate as calculateDecisionPointVolumeSwenlin } from './community/decisionpoint-volume-swenlin-trading';
+export type { DecisionPointVolumeSwenlinInputs } from './community/decisionpoint-volume-swenlin-trading';
+// AlphaTrend - Screener
+import * as alphatrendScreenerIndicator from './community/alphatrend-screener';
+export { AlphaTrendScreener, calculate as calculateAlphaTrendScreener } from './community/alphatrend-screener';
+export type { AlphaTrendScreenerInputs } from './community/alphatrend-screener';
+// Global (World) Monetary Supply M2 (measured in USD)
+import * as globalMonetarySupplyM2Indicator from './community/global-monetary-supply-m2';
+export { GlobalMonetarySupplyM2, calculate as calculateGlobalMonetarySupplyM2 } from './community/global-monetary-supply-m2';
+export type { GlobalMonetarySupplyM2Inputs } from './community/global-monetary-supply-m2';
+// Open Interest Suite - By Leviathan
+import * as openInterestSuiteByLeviathanIndicator from './community/open-interest-suite-by-leviathan';
+export { OpenInterestSuiteByLeviathan, calculate as calculateOpenInterestSuiteByLeviathan } from './community/open-interest-suite-by-leviathan';
+export type { OpenInterestSuiteByLeviathanInputs } from './community/open-interest-suite-by-leviathan';
+// MOST + Moving Average Screener
+import * as mostMovingAverageScreenerIndicator from './community/most-moving-average-screener';
+export { MOSTScreener, calculate as calculateMOSTScreener } from './community/most-moving-average-screener';
+export type { MOSTScreenerInputs } from './community/most-moving-average-screener';
+// Godmode 4.0.2
+import * as godmode402Indicator from './community/godmode-4-0-2';
+export { Godmode402, calculate as calculateGodmode402 } from './community/godmode-4-0-2';
+export type { Godmode402Inputs } from './community/godmode-4-0-2';
+// Screener - Mean Reversion Channel
+import * as screenerMeanReversionChannelIndicator from './community/screener-mean-reversion-channel';
+export { ScreenerMeanReversionChannel, calculate as calculateScreenerMeanReversionChannel } from './community/screener-mean-reversion-channel';
+export type { ScreenerMeanReversionChannelInputs } from './community/screener-mean-reversion-channel';
+// HalfTrend Long/Short Signal Engine
+import * as halftrendLongShortSignalEngineIndicator from './community/halftrend-long-short-signal-engine';
+export { HalftrendLongShortSignalEngine, calculate as calculateHalftrendLongShortSignalEngine } from './community/halftrend-long-short-signal-engine';
+export type { HalftrendLongShortSignalEngineInputs } from './community/halftrend-long-short-signal-engine';
+// Open Interest Stochastic Money Flow Index
+import * as openInterestStochasticMoneyFlowIndexIndicator from './community/open-interest-stochastic-money-flow-index';
+export { OpenInterestStochasticMoneyFlowIndex, calculate as calculateOpenInterestStochasticMoneyFlowIndex } from './community/open-interest-stochastic-money-flow-index';
+export type { OpenInterestStochasticMoneyFlowIndexInputs } from './community/open-interest-stochastic-money-flow-index';
 // ── Community top-750 ports ──
 // Angle Attack Follow Line Indicator
 import * as angleAttackFollowLineIndicatorIndicator from './community/angle-attack-follow-line-indicator';
@@ -28438,7 +28495,210 @@ const registryPart9: IndicatorRegistryEntry[] = [
   },
 ];
 
-export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9];
+const registryPart10: IndicatorRegistryEntry[] = [
+  {
+    id: 'hash-ribbons',
+    group: 'community',
+    name: 'Hash Ribbons',
+    shortName: hashRibbonsIndicator.metadata.shortTitle,
+    category: 'Moving Averages',
+    overlay: false,
+    metadata: hashRibbonsIndicator.metadata,
+    inputConfig: hashRibbonsIndicator.inputConfig as InputConfig[],
+    plotConfig: hashRibbonsIndicator.plotConfig as PlotConfig[],
+    requiredSymbols: hashRibbonsIndicator.requiredSymbols,
+    defaultInputs: { ...hashRibbonsIndicator.defaultInputs },
+    calculate: hashRibbonsIndicator.calculate,
+  },
+  {
+    id: 'global-liquidity-index',
+    group: 'community',
+    name: 'Global Liquidity Index',
+    shortName: globalLiquidityIndexIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: globalLiquidityIndexIndicator.metadata,
+    inputConfig: globalLiquidityIndexIndicator.inputConfig as InputConfig[],
+    plotConfig: globalLiquidityIndexIndicator.plotConfig as PlotConfig[],
+    requiredSymbols: globalLiquidityIndexIndicator.requiredSymbols,
+    defaultInputs: { ...globalLiquidityIndexIndicator.defaultInputs },
+    calculate: globalLiquidityIndexIndicator.calculate,
+  },
+  {
+    id: 'volume-open-interest-footprint-by-leviathan',
+    group: 'community',
+    name: 'Volume / Open Interest "Footprint" - By Leviathan',
+    shortName: volumeOpenInterestFootprintByLeviathanIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: true,
+    metadata: volumeOpenInterestFootprintByLeviathanIndicator.metadata,
+    inputConfig: volumeOpenInterestFootprintByLeviathanIndicator.inputConfig as InputConfig[],
+    plotConfig: volumeOpenInterestFootprintByLeviathanIndicator.plotConfig as PlotConfig[],
+    usesVisibleRange: true,
+    requiredSymbols: volumeOpenInterestFootprintByLeviathanIndicator.requiredSymbols,
+    defaultInputs: { ...volumeOpenInterestFootprintByLeviathanIndicator.defaultInputs },
+    calculate: volumeOpenInterestFootprintByLeviathanIndicator.calculate,
+  },
+  {
+    id: 'smt-divergences',
+    group: 'community',
+    name: 'SMT Divergences',
+    shortName: smtDivergencesIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: smtDivergencesIndicator.metadata,
+    inputConfig: smtDivergencesIndicator.inputConfig as InputConfig[],
+    plotConfig: smtDivergencesIndicator.plotConfig as PlotConfig[],
+    requiredSymbols: smtDivergencesIndicator.requiredSymbols,
+    defaultInputs: { ...smtDivergencesIndicator.defaultInputs },
+    calculate: smtDivergencesIndicator.calculate,
+  },
+  {
+    id: 'btcusdshorts-btcusdlongs-bitfinex-btc-shorts',
+    group: 'community',
+    name: 'BTCUSDSHORTS BTCUSDLONGS - Bitfinex BTC Shorts & Longs',
+    shortName: btcusdshortsBtcusdlongsBitfinexBtcShortsIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: false,
+    metadata: btcusdshortsBtcusdlongsBitfinexBtcShortsIndicator.metadata,
+    inputConfig: btcusdshortsBtcusdlongsBitfinexBtcShortsIndicator.inputConfig as InputConfig[],
+    plotConfig: btcusdshortsBtcusdlongsBitfinexBtcShortsIndicator.plotConfig as PlotConfig[],
+    requiredSymbols: btcusdshortsBtcusdlongsBitfinexBtcShortsIndicator.requiredSymbols,
+    defaultInputs: { ...btcusdshortsBtcusdlongsBitfinexBtcShortsIndicator.defaultInputs },
+    calculate: btcusdshortsBtcusdlongsBitfinexBtcShortsIndicator.calculate,
+  },
+  {
+    id: 'decisionpoint-volume-swenlin-trading',
+    group: 'community',
+    name: 'DecisionPoint Volume Swenlin Trading Oscillator',
+    shortName: decisionpointVolumeSwenlinTradingIndicator.metadata.shortTitle,
+    category: 'Oscillators',
+    overlay: false,
+    metadata: decisionpointVolumeSwenlinTradingIndicator.metadata,
+    inputConfig: decisionpointVolumeSwenlinTradingIndicator.inputConfig as InputConfig[],
+    plotConfig: decisionpointVolumeSwenlinTradingIndicator.plotConfig as PlotConfig[],
+    requiredSymbols: decisionpointVolumeSwenlinTradingIndicator.requiredSymbols,
+    defaultInputs: { ...decisionpointVolumeSwenlinTradingIndicator.defaultInputs },
+    calculate: decisionpointVolumeSwenlinTradingIndicator.calculate,
+  },
+  {
+    id: 'alphatrend-screener',
+    group: 'community',
+    name: 'AlphaTrend - Screener',
+    shortName: alphatrendScreenerIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: alphatrendScreenerIndicator.metadata,
+    inputConfig: alphatrendScreenerIndicator.inputConfig as InputConfig[],
+    plotConfig: alphatrendScreenerIndicator.plotConfig as PlotConfig[],
+    requiredSymbols: alphatrendScreenerIndicator.requiredSymbols,
+    defaultInputs: { ...alphatrendScreenerIndicator.defaultInputs },
+    calculate: alphatrendScreenerIndicator.calculate,
+  },
+  {
+    id: 'global-monetary-supply-m2',
+    group: 'community',
+    name: 'Global (World) Monetary Supply M2 (measured in USD)',
+    shortName: globalMonetarySupplyM2Indicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: false,
+    metadata: globalMonetarySupplyM2Indicator.metadata,
+    inputConfig: globalMonetarySupplyM2Indicator.inputConfig as InputConfig[],
+    plotConfig: globalMonetarySupplyM2Indicator.plotConfig as PlotConfig[],
+    requiredSymbols: globalMonetarySupplyM2Indicator.requiredSymbols,
+    defaultInputs: { ...globalMonetarySupplyM2Indicator.defaultInputs },
+    calculate: globalMonetarySupplyM2Indicator.calculate,
+  },
+  {
+    id: 'open-interest-suite-by-leviathan',
+    group: 'community',
+    name: 'Open Interest Suite - By Leviathan',
+    shortName: openInterestSuiteByLeviathanIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: false,
+    metadata: openInterestSuiteByLeviathanIndicator.metadata,
+    inputConfig: openInterestSuiteByLeviathanIndicator.inputConfig as InputConfig[],
+    plotConfig: openInterestSuiteByLeviathanIndicator.plotConfig as PlotConfig[],
+    usesVisibleRange: true,
+    requiredSymbols: openInterestSuiteByLeviathanIndicator.requiredSymbols,
+    defaultInputs: { ...openInterestSuiteByLeviathanIndicator.defaultInputs },
+    calculate: openInterestSuiteByLeviathanIndicator.calculate,
+  },
+  {
+    id: 'most-moving-average-screener',
+    group: 'community',
+    name: 'MOST + Moving Average Screener',
+    shortName: mostMovingAverageScreenerIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: mostMovingAverageScreenerIndicator.metadata,
+    inputConfig: mostMovingAverageScreenerIndicator.inputConfig as InputConfig[],
+    plotConfig: mostMovingAverageScreenerIndicator.plotConfig as PlotConfig[],
+    requiredSymbols: mostMovingAverageScreenerIndicator.requiredSymbols,
+    defaultInputs: { ...mostMovingAverageScreenerIndicator.defaultInputs },
+    calculate: mostMovingAverageScreenerIndicator.calculate,
+  },
+  {
+    id: 'godmode-4-0-2',
+    group: 'community',
+    name: 'Godmode 4.0.2',
+    shortName: godmode402Indicator.metadata.shortTitle,
+    category: 'Channels & Bands',
+    overlay: true,
+    metadata: godmode402Indicator.metadata,
+    inputConfig: godmode402Indicator.inputConfig as InputConfig[],
+    plotConfig: godmode402Indicator.plotConfig as PlotConfig[],
+    requiredSymbols: godmode402Indicator.requiredSymbols,
+    defaultInputs: { ...godmode402Indicator.defaultInputs },
+    calculate: godmode402Indicator.calculate,
+  },
+  {
+    id: 'screener-mean-reversion-channel',
+    group: 'community',
+    name: 'Screener - Mean Reversion Channel',
+    shortName: screenerMeanReversionChannelIndicator.metadata.shortTitle,
+    category: 'Channels & Bands',
+    overlay: true,
+    metadata: screenerMeanReversionChannelIndicator.metadata,
+    inputConfig: screenerMeanReversionChannelIndicator.inputConfig as InputConfig[],
+    plotConfig: screenerMeanReversionChannelIndicator.plotConfig as PlotConfig[],
+    requiredSymbols: screenerMeanReversionChannelIndicator.requiredSymbols,
+    defaultInputs: { ...screenerMeanReversionChannelIndicator.defaultInputs },
+    calculate: screenerMeanReversionChannelIndicator.calculate,
+  },
+  {
+    id: 'halftrend-long-short-signal-engine',
+    group: 'community',
+    name: 'HalfTrend Long/Short Signal Engine',
+    shortName: halftrendLongShortSignalEngineIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: halftrendLongShortSignalEngineIndicator.metadata,
+    inputConfig: halftrendLongShortSignalEngineIndicator.inputConfig as InputConfig[],
+    plotConfig: halftrendLongShortSignalEngineIndicator.plotConfig as PlotConfig[],
+    requiredSymbols: halftrendLongShortSignalEngineIndicator.requiredSymbols,
+    defaultInputs: { ...halftrendLongShortSignalEngineIndicator.defaultInputs },
+    calculate: halftrendLongShortSignalEngineIndicator.calculate,
+  },
+  {
+    id: 'open-interest-stochastic-money-flow-index',
+    group: 'community',
+    name: 'Open Interest Stochastic Money Flow Index',
+    shortName: openInterestStochasticMoneyFlowIndexIndicator.metadata.shortTitle,
+    category: 'Volume',
+    overlay: false,
+    metadata: openInterestStochasticMoneyFlowIndexIndicator.metadata,
+    inputConfig: openInterestStochasticMoneyFlowIndexIndicator.inputConfig as InputConfig[],
+    plotConfig: openInterestStochasticMoneyFlowIndexIndicator.plotConfig as PlotConfig[],
+    hlineConfig: openInterestStochasticMoneyFlowIndexIndicator.hlineConfig,
+    fillConfig: openInterestStochasticMoneyFlowIndexIndicator.fillConfig,
+    requiredSymbols: openInterestStochasticMoneyFlowIndexIndicator.requiredSymbols,
+    defaultInputs: { ...openInterestStochasticMoneyFlowIndexIndicator.defaultInputs },
+    calculate: openInterestStochasticMoneyFlowIndexIndicator.calculate,
+  },
+];
+
+export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10];
 
 // Chart context (third argument of calculate)
 export type { ChartContext, VisibleRange, SymbolRequest } from './chart-context';
@@ -28448,7 +28708,9 @@ export {
   lastBarConfirmedOf, nowOf, visibleRangeOf,
 } from './chart-context';
 // Other symbols (PineScript request.security of another ticker)
-export { securityOther, securityOtherValues, type OtherSymbolOptions } from './other-symbol';
+export {
+  securityOther, securityOtherValues, spreadSymbols, spreadBars, spreadOptions, type OtherSymbolOptions,
+} from './other-symbol';
 
 // Package version
 export const version = '0.11.0';

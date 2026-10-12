@@ -1,10 +1,14 @@
 /**
  * Unit tests for the bars of other symbols: `securityOther` (PineScript `request.security` of another ticker) on small
- * bar sets that cover the measured rules, and `symbolBarsOf` / `MissingSymbolDataError` of the chart context.
+ * bar sets that cover the measured rules, the spread symbols ("A * B", "A / B"), and `symbolBarsOf` /
+ * `MissingSymbolDataError` of the chart context.
  */
 
 import { describe, it, expect } from 'vitest';
-import { securityOther, securityOtherValues, symbolBarsOf, MissingSymbolDataError, type ChartContext } from '../../src/index';
+import {
+  securityOther, securityOtherValues, spreadSymbols, spreadBars, spreadOptions, symbolBarsOf, MissingSymbolDataError,
+  type ChartContext,
+} from '../../src/index';
 
 /** UNIX seconds of a UTC date and time (month 1-12). */
 const utc = (y: number, m: number, d: number, h = 0, mi = 0) => Date.UTC(y, m - 1, d, h, mi) / 1000;
@@ -140,6 +144,57 @@ describe('securityOtherValues', () => {
     const expected = [NaN, NaN, 100, 101, 102, 103, 104, 104, 104, 105];
     expect(securityOtherValues(bars(cryptoDays), stock, '', stock.map((b) => b.close), NY, chart)).toEqual(expected);
     expect(securityOtherValues(bars(cryptoDays), stock, '', (b) => b.map((x) => x.close), NY, chart)).toEqual(expected);
+  });
+});
+
+describe('spread symbols', () => {
+  // an economic series at 00:00 UTC (Thursday 01/10 and Tuesday 06/10/2026) and a rate whose trading day starts at
+  // 22:00 UTC the day before (bars of Monday 05/10 to Friday 09/10/2026 open on 04/10 to 08/10 at 22:00 UTC)
+  const closes = (times: number[], first: number) => bars(times).map((b, k) => ({ ...b, close: first + k }));
+  const series = closes([utc(2026, 10, 1), utc(2026, 10, 6)], 100);
+  const rate = closes(days(2026, 10, 4, 8, 22), 2);
+  const bySymbol = new Map([['ECONOMICS:XXM2', series], ['FX_IDC:XXXUSD', rate]]);
+  const spread = (b: Array<{ time: number; close: number }>) => b.map((x) => [x.time, x.close]);
+
+  it('gives the tickers of an expression and the options of its bars', () => {
+    expect(spreadSymbols('ECONOMICS:XXM2 * FX_IDC:XXXUSD')).toEqual(['ECONOMICS:XXM2', 'FX_IDC:XXXUSD']);
+    expect(spreadSymbols('ECONOMICS:FIM2/FX_IDC:USDFIM')).toEqual(['ECONOMICS:FIM2', 'FX_IDC:USDFIM']);
+    expect(spreadSymbols(' ECONOMICS:USM2 ')).toEqual(['ECONOMICS:USM2']);
+    expect(spreadOptions('ECONOMICS:USM2')).toEqual({ symbol: 'ECONOMICS:USM2' });
+    expect(spreadOptions('A * B')).toEqual({ timezone: 'Etc/UTC', session: '24x7' });
+  });
+
+  it('one bar per trading day of either part from the later first day, last closes of both parts', () => {
+    // without symbolInfo a bar that opens at 12:00 UTC or later belongs to the next UTC day
+    const expected = [5, 6, 7, 8, 9].map((d, k) => [utc(2026, 10, d), [200, 303, 404, 505, 606][k]]);
+    expect(spread(spreadBars('ECONOMICS:XXM2 * FX_IDC:XXXUSD', bySymbol))).toEqual(expected);
+    // the same days from the time zone and session of the rate, in ms with chart.timeUnit 'ms'
+    const ms = (b: typeof rate) => b.map((x) => ({ ...x, time: x.time * 1000 }));
+    const chart: ChartContext = {
+      timeUnit: 'ms',
+      symbolInfo: (s) => (s === 'FX_IDC:XXXUSD' ? { timezone: 'Etc/UTC', session: '2200-2200' } : undefined),
+    };
+    const get = (s: string) => (s === 'ECONOMICS:XXM2' ? ms(series) : s === 'FX_IDC:XXXUSD' ? ms(rate) : undefined);
+    expect(spread(spreadBars('ECONOMICS:XXM2*FX_IDC:XXXUSD', get, chart)))
+      .toEqual(expected.map(([t, c]) => [t * 1000, c]));
+    expect(spread(spreadBars('ECONOMICS:XXM2 / FX_IDC:XXXUSD', bySymbol)).map(([, c]) => c))
+      .toEqual([100 / 2, 101 / 3, 101 / 4, 101 / 5, 101 / 6]);
+  });
+
+  it('gives the bars of one ticker as they are, none without bars, and throws for a missing ticker', () => {
+    expect(spreadBars('ECONOMICS:XXM2', bySymbol)).toEqual(series);
+    expect(spreadBars('ECONOMICS:XXM2 * FX_IDC:XXXUSD', new Map([['ECONOMICS:XXM2', series], ['FX_IDC:XXXUSD', []]])))
+      .toEqual([]);
+    expect(() => spreadBars('ECONOMICS:XXM2 * FX_IDC:YYYUSD', bySymbol)).toThrow(RangeError);
+  });
+
+  it('merges with securityOtherValues on the 24x7 UTC calendar', () => {
+    const chart: ChartContext = { timeframe: '1D', ...CRYPTO };
+    // 24x7 chart from Saturday 03/10 to Sunday 11/10/2026: na before the first spread bar, repeated on the weekend
+    const chartBars = bars(days(2026, 10, 3, 11));
+    const expr = 'ECONOMICS:XXM2 * FX_IDC:XXXUSD';
+    expect(securityOtherValues(chartBars, spreadBars(expr, bySymbol, chart), 'D', (b) => b.map((x) => x.close),
+      spreadOptions(expr), chart)).toEqual([NaN, NaN, 200, 303, 404, 505, 606, 606, 606]);
   });
 });
 

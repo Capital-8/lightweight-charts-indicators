@@ -1,0 +1,118 @@
+{
+ "hash-ribbons": {
+  "plots": {
+   "plot0": 0,
+   "plot1": 3141,
+   "plot2": 3171,
+   "plot3": 0
+  },
+  "markers": 1792,
+  "bgColors": 10,
+  "tables": 1,
+  "fills": 1
+ },
+ "global-liquidity-index": {
+  "plots": {
+   "plot0": 3200
+  },
+  "tables": 1
+ },
+ "volume-open-interest-footprint-by-leviathan": {
+  "plots": {}
+ },
+ "smt-divergences": {
+  "plots": {},
+  "tables": 1
+ },
+ "btcusdshorts-btcusdlongs-bitfinex-btc-shorts": {
+  "plots": {
+   "plot0": 3200,
+   "plot1": 3200
+  }
+ },
+ "decisionpoint-volume-swenlin-trading": {
+  "plots": {
+   "plot0": 3200,
+   "plot1": 3193,
+   "plot2": 3193
+  }
+ },
+ "alphatrend-screener": {
+  "plots": {
+   "plot0": 3186,
+   "plot1": 3184
+  },
+  "markers": 15,
+  "labels": 21,
+  "fills": 1
+ },
+ "global-monetary-supply-m2": {
+  "plots": {
+   "plot0": 3200
+  },
+  "labels": 1
+ },
+ "open-interest-suite-by-leviathan": {
+  "plots": {
+   "plot0": 0,
+   "plot1": 0,
+   "plot2": 0,
+   "plot3": 0,
+   "plot4": 0
+  },
+  "plotCandles": 3200
+ },
+ "most-moving-average-screener": {
+  "plots": {
+   "plot0": 3200,
+   "plot1": 3200
+  },
+  "labels": 21
+ },
+ "godmode-4-0-2": {
+  "plots": {
+   "plot0": 3151,
+   "plot1": 3151,
+   "plot2": 3127,
+   "plot3": 3127,
+   "plot4": 3151,
+   "plot5": 3151
+  },
+  "fills": 3
+ },
+ "screener-mean-reversion-channel": {
+  "plots": {},
+  "labels": 1
+ },
+ "halftrend-long-short-signal-engine": {
+  "plots": {
+   "plot0": 3200,
+   "plot1": 3101,
+   "plot2": 3101,
+   "plot3": 104,
+   "plot4": 70,
+   "plot5": 174,
+   "plot6": 28,
+   "plot7": 59,
+   "plot8": 104,
+   "plot9": 48,
+   "plot10": 70,
+   "plot11": 70
+  },
+  "markers": 10,
+  "labels": 13,
+  "tables": 2,
+  "fills": 4
+ },
+ "open-interest-stochastic-money-flow-index": {
+  "plots": {
+   "plot0": 3186,
+   "plot1": 3186,
+   "plot2": 290,
+   "plot3": 289
+  },
+  "bgColors": 579,
+  "fills": 1,
+  "hlines": 2
+ }
+}
