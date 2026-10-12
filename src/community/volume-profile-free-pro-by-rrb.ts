@@ -24,7 +24,7 @@
  *   time from the chart context (third argument of calculate, `now`) and uses the clock of the computer without it.
  *   The bar period is the chart timeframe (from the context, else from the bars): minutes on intraday bars, days,
  *   weeks, months of 30 days.
- * - "vwap" mode: the VWAP restarts on each trading day, so on daily and higher bars it is the source of the bar. On
+ * - "vwap" mode: the VWAP restarts on each trading day, so on daily and higher bars it restarts on every bar. On
  *   intraday bars the port needs the exchange time zone and session of the chart context; without them it throws
  *   an Error.
  * - A range that reads more than 5,000 bars back (start bar + range length - 1 > 5000, the max_bars_back of the
@@ -455,18 +455,12 @@ export function calculate(
   // VWAP mode: developing POC -> VWAP, value area high / low -> VWAP +- stdev * multiplier
   if (cfg.levelsMode === 'vwap') {
     const src = getSourceSeries(bars, cfg.vwapSrc);
-    let vwapLevel: number;
-    if (intradayVwap) {
-      // vwap(): a new anchor on each trading day of the exchange (script API with the chart context)
-      let vwap: (number | null | undefined)[] = [];
-      executeScript(() => { vwap = scriptTa.vwap(src).toArray(); }, bars, {}, chart);
-      vwapLevel = vwap[last] ?? NaN;
-    } else {
-      // daily and higher bars: a new anchor on every bar, sum(src * volume) / sum(volume) of the bar alone
-      const s = src.toArray()[last] ?? NaN;
-      const v = bars[last].volume ?? NaN;
-      vwapLevel = (s * v) / v;
-    }
+    // vwap(): a new anchor on each trading day of the exchange on intraday bars, on every bar on daily and higher
+    // bars (script API; one bar alone is its own anchor)
+    let vwap: (number | null | undefined)[] = [];
+    const vwapChart = { ...chart, timeframe: chartTimeframe(bars, chart) || '1D' };
+    executeScript(() => { vwap = scriptTa.vwap(src).toArray(); }, bars, {}, vwapChart);
+    const vwapLevel = vwap[last] ?? NaN;
     const sd = ta.stdev(src, cfg.vwapLen).toArray()[last] ?? NaN;
     const vwapStdev = sd * cfg.stddev;
     poc2Level = vwapLevel;

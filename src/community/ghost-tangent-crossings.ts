@@ -16,14 +16,18 @@
  * The last `Max Zig-Zags` legs are kept.
  *
  * A leg is only added on a closed bar: the chart context says whether the last bar is closed (closed without it).
- * As in the original, a line that would end more than 500 bars after the last bar stops the script with an Error.
+ * As in the original, a line that would end more than 500 bars after the last bar stops the script with an Error
+ * (the library drawing registry: `setDrawingBar` with the last bar index). At most 100 lines are kept.
  *
  * Reference: "Ghost Tangent Crossings [ChartPrime]" by ChartPrime
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © ChartPrime
  */
 
-import { math, array, callsite, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  math, array, callsite, line, resetDrawings, setDrawingBar,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line,
+} from 'oakscriptjs';
 import type { LabelData, LineDrawingData, PolylineData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
@@ -87,8 +91,8 @@ export const metadata = {
   overlay: true,
 };
 
-/** A drawing cannot be placed more than this number of bars after the last bar */
-const MAX_FUTURE_BARS = 500;
+/** indicator(max_lines_count = 100) */
+const MAX_LINES = 100;
 /** Default text colour of a label in Pine version 5 */
 const LABEL_TEXT = '#363A45';
 
@@ -120,14 +124,6 @@ interface Lb {
   style: 'circle' | 'label_down' | 'label_up';
   size: 'auto' | 'normal';
   yloc: 'price' | 'abovebar' | 'belowbar';
-}
-interface Ln {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  color: string;
-  extend: 'none' | 'right' | 'both';
 }
 
 /** generate_ellipse(): the points of a quarter ellipse from (end_x, start_y) to (start_x, end_y), one per bar change */
@@ -202,20 +198,17 @@ export function calculate(
 
   const zigZags: Poly[] = [];
   const zigZagPoints: Lb[] = [];
-  const equipoints: Ln[] = [];
+  const equipoints: Line[] = [];
   const breakLabels: Array<Lb | null> = [];
   let ghostZigZags: Poly[] = [];
   let ghostZigZagPoints: Lb[] = [];
-  let ghostEquipoints: Ln[] = [];
+  let ghostEquipoints: Line[] = [];
 
-  const newLine = (i: number, l: Ln): Ln => {
-    if (l.x1 > n - 1 + MAX_FUTURE_BARS || l.x2 > n - 1 + MAX_FUTURE_BARS) {
-      throw new Error(
-        `Error on bar ${i}: Objects positioned using xloc.bar_index cannot be drawn further than ${MAX_FUTURE_BARS} bars into the future.`,
-      );
-    }
-    return l;
-  };
+  // line.new(..., xloc.bar_index, extend, color, line.style_dashed): the library throws RE10020 for a point more
+  // than 500 bars after the last bar
+  resetDrawings({ line: MAX_LINES });
+  const newLine = (x1: number, y1: number, x2: number, y2: number, css: string, extend: 'none' | 'right' | 'both'): Line =>
+    line.new(x1, y1, x2, y2, 'bar_index', extend, css, 'dashed');
 
   /** check_b(): the first bar after the leg that is on the other side of the tangent */
   const checkB = (i: number, startX: number, startY: number, forwardLength: number, slope: number, polarity: boolean) => {
@@ -236,7 +229,7 @@ export function calculate(
 
   const generateZigZag = (
     i: number, startX: number, endX: number, startY: number, endY: number, upColor: string, downColor: string,
-    points: Lb[], polys: Poly[], lines: Ln[], polarity: boolean, ghost: boolean,
+    points: Lb[], polys: Poly[], lines: Line[], polarity: boolean, ghost: boolean,
   ) => {
     const bullishColor = polarity ? upColor : downColor;
     const ellipsePoints = generateEllipse(startX, endX, startY, endY);
@@ -251,17 +244,17 @@ export function calculate(
       polys.push({ points: ellipsePoints, color: bullishColor });
     }
     if (cfg.equipointStyle === 'Directional') {
-      lines.push(newLine(i, cfg.extendLine
-        ? { x1: tangent.index, y1: tangent.price, x2: tangent.index + 1, y2: tangent.price + slope, color: bullishColor, extend: 'both' }
-        : {
-          x1: tangent.index - backLength, y1: tangent.price - slope * backLength,
-          x2: tangent.index + backLength, y2: tangent.price + slope * backLength, color: bullishColor, extend: 'none',
-        }));
+      lines.push(cfg.extendLine
+        ? newLine(tangent.index, tangent.price, tangent.index + 1, tangent.price + slope, bullishColor, 'both')
+        : newLine(
+          tangent.index - backLength, tangent.price - slope * backLength,
+          tangent.index + backLength, tangent.price + slope * backLength, bullishColor, 'none',
+        ));
     }
     if (cfg.equipointStyle === 'Horizontal') {
-      lines.push(newLine(i, cfg.extendLine
-        ? { x1: tangent.index, y1: tangent.price, x2: tangent.index + 1, y2: tangent.price, color: bullishColor, extend: 'right' }
-        : { x1: tangent.index, y1: tangent.price, x2: tangent.index + length * 2, y2: tangent.price, color: bullishColor, extend: 'none' }));
+      lines.push(cfg.extendLine
+        ? newLine(tangent.index, tangent.price, tangent.index + 1, tangent.price, bullishColor, 'right')
+        : newLine(tangent.index, tangent.price, tangent.index + length * 2, tangent.price, bullishColor, 'none'));
     }
     if (cfg.showBreak && !ghost) {
       const found = checkB(i, tangent.index, tangent.price, forwardLength, slope, polarity);
@@ -276,6 +269,7 @@ export function calculate(
   const dumpGhost = () => {
     ghostZigZags = [];
     ghostZigZagPoints = [];
+    for (const l of ghostEquipoints) line.delete(l);
     ghostEquipoints = [];
   };
 
@@ -293,106 +287,111 @@ export function calculate(
   const sincePlSite = callsite.barssince();
   const sincePhSite = callsite.barssince();
 
-  for (let i = 0; i < n; i++) {
-    const newPh = !isNaN(pivotHighSite(i, highSource[i], phBack, pivotForward));
-    if (newPh) {
-      pivotHigh.current = highSource[i - pivotForward];
-      pivotHigh.currentIdx = i - pivotForward;
-    }
-    const newPl = !isNaN(pivotLowSite(i, lowSource[i], plBack, pivotForward));
-    if (newPl) {
-      pivotLow.current = lowSource[i - pivotForward];
-      pivotLow.currentIdx = i - pivotForward;
-    }
-    const ph = pivotHigh;
-    const pl = pivotLow;
-    const polarityUp = ph.currentIdx > pl.currentIdx;
-    const polarityDown = ph.currentIdx < pl.currentIdx;
-    // not polarity: an na bool is false
-    const upWait = polarity !== true;
-    const downWait = polarity === true;
-    const confirmed = i < n - 1 || lastConfirmed;
+  try {
+    for (let i = 0; i < n; i++) {
+      setDrawingBar(i, i === n - 1, n - 1);
+      const newPh = !isNaN(pivotHighSite(i, highSource[i], phBack, pivotForward));
+      if (newPh) {
+        pivotHigh.current = highSource[i - pivotForward];
+        pivotHigh.currentIdx = i - pivotForward;
+      }
+      const newPl = !isNaN(pivotLowSite(i, lowSource[i], plBack, pivotForward));
+      if (newPl) {
+        pivotLow.current = lowSource[i - pivotForward];
+        pivotLow.currentIdx = i - pivotForward;
+      }
+      const ph = pivotHigh;
+      const pl = pivotLow;
+      const polarityUp = ph.currentIdx > pl.currentIdx;
+      const polarityDown = ph.currentIdx < pl.currentIdx;
+      // not polarity: an na bool is false
+      const upWait = polarity !== true;
+      const downWait = polarity === true;
+      const confirmed = i < n - 1 || lastConfirmed;
 
-    if (newPh && polarityUp && (lastUpStart < pl.currentIdx || isNaN(lastUpStart)) && upWait && confirmed) {
-      dumpGhost();
-      const connect = !isNaN(lastDownEnd) ? pl.currentIdx === lastDownEnd : true;
-      const startX = connect ? pl.currentIdx : lastDownEnd;
-      const endX = ph.currentIdx;
-      const startY = ph.current;
-      const endY = connect ? pl.current : lastLow;
-      lastUpStart = startX;
-      lastUpEnd = endX;
-      lastHigh = startY;
-      polarity = true;
-      generateZigZag(i, startX, endX, startY, endY, cfg.upColor, cfg.downColor, zigZagPoints, zigZags, equipoints, true, false);
-    }
-    if (newPl && polarityDown && (lastDownStart < ph.currentIdx || isNaN(lastDownStart)) && downWait && confirmed) {
-      dumpGhost();
-      const connect = !isNaN(lastUpEnd) ? ph.currentIdx === lastUpEnd : true;
-      const startX = connect ? ph.currentIdx : lastUpEnd;
-      const endX = pl.currentIdx;
-      const startY = pl.current;
-      const endY = connect ? ph.current : lastHigh;
-      lastDownStart = startX;
-      lastDownEnd = endX;
-      lastLow = startY;
-      polarity = false;
-      generateZigZag(i, startX, endX, startY, endY, cfg.upColor, cfg.downColor, zigZagPoints, zigZags, equipoints, false, false);
-    }
+      if (newPh && polarityUp && (lastUpStart < pl.currentIdx || isNaN(lastUpStart)) && upWait && confirmed) {
+        dumpGhost();
+        const connect = !isNaN(lastDownEnd) ? pl.currentIdx === lastDownEnd : true;
+        const startX = connect ? pl.currentIdx : lastDownEnd;
+        const endX = ph.currentIdx;
+        const startY = ph.current;
+        const endY = connect ? pl.current : lastLow;
+        lastUpStart = startX;
+        lastUpEnd = endX;
+        lastHigh = startY;
+        polarity = true;
+        generateZigZag(i, startX, endX, startY, endY, cfg.upColor, cfg.downColor, zigZagPoints, zigZags, equipoints, true, false);
+      }
+      if (newPl && polarityDown && (lastDownStart < ph.currentIdx || isNaN(lastDownStart)) && downWait && confirmed) {
+        dumpGhost();
+        const connect = !isNaN(lastUpEnd) ? ph.currentIdx === lastUpEnd : true;
+        const startX = connect ? ph.currentIdx : lastUpEnd;
+        const endX = pl.currentIdx;
+        const startY = pl.current;
+        const endY = connect ? ph.current : lastHigh;
+        lastDownStart = startX;
+        lastDownEnd = endX;
+        lastLow = startY;
+        polarity = false;
+        generateZigZag(i, startX, endX, startY, endY, cfg.upColor, cfg.downColor, zigZagPoints, zigZags, equipoints, false, false);
+      }
 
-    // Ghost up leg: from the latest pivot low (or the end of the latest down leg) to the highest bar since
-    const ghostUpConnect = !isNaN(lastDownEnd) ? pl.currentIdx === lastDownEnd : true;
-    const ghostUpStartX = ghostUpConnect ? pl.currentIdx : lastDownEnd;
-    const sincePl = sincePlSite(newPl);
-    const ghostUpRange = i - ghostUpStartX;
-    const ghostMax: number[] = [];
-    if (ghostUpRange >= 0) {
-      const to = ghostUpRange - sincePl;
-      for (let k = 0; to >= 0 ? k <= to : k >= to; k += to >= 0 ? 1 : -1) ghostMax.push(i - k >= 0 && k >= 0 ? highSource[i - k] : NaN);
-    }
-    const ghostUpStartY = array.max(ghostMax);
-    const ghostUpEndY = ghostUpConnect ? pl.current : lastLow;
-    const ghostUpSince = ghostMax.length > 0 ? array.indexof(ghostMax, ghostUpStartY) : 0;
-    const ghostUpEndX = i - ghostUpSince;
-    if (upWait && !newPh && cfg.showGhosts) {
-      dumpGhost();
-      generateZigZag(
-        i, ghostUpStartX, ghostUpEndX, ghostUpStartY, ghostUpEndY, cfg.ghostUpColor, cfg.ghostDownColor,
-        ghostZigZagPoints, ghostZigZags, ghostEquipoints, true, true,
-      );
-    }
+      // Ghost up leg: from the latest pivot low (or the end of the latest down leg) to the highest bar since
+      const ghostUpConnect = !isNaN(lastDownEnd) ? pl.currentIdx === lastDownEnd : true;
+      const ghostUpStartX = ghostUpConnect ? pl.currentIdx : lastDownEnd;
+      const sincePl = sincePlSite(newPl);
+      const ghostUpRange = i - ghostUpStartX;
+      const ghostMax: number[] = [];
+      if (ghostUpRange >= 0) {
+        const to = ghostUpRange - sincePl;
+        for (let k = 0; to >= 0 ? k <= to : k >= to; k += to >= 0 ? 1 : -1) ghostMax.push(i - k >= 0 && k >= 0 ? highSource[i - k] : NaN);
+      }
+      const ghostUpStartY = array.max(ghostMax);
+      const ghostUpEndY = ghostUpConnect ? pl.current : lastLow;
+      const ghostUpSince = ghostMax.length > 0 ? array.indexof(ghostMax, ghostUpStartY) : 0;
+      const ghostUpEndX = i - ghostUpSince;
+      if (upWait && !newPh && cfg.showGhosts) {
+        dumpGhost();
+        generateZigZag(
+          i, ghostUpStartX, ghostUpEndX, ghostUpStartY, ghostUpEndY, cfg.ghostUpColor, cfg.ghostDownColor,
+          ghostZigZagPoints, ghostZigZags, ghostEquipoints, true, true,
+        );
+      }
 
-    // Ghost down leg
-    const ghostDownConnect = !isNaN(lastUpEnd) ? ph.currentIdx === lastUpEnd : true;
-    const ghostDownStartX = ghostDownConnect ? ph.currentIdx : lastUpEnd;
-    const sincePh = sincePhSite(newPh);
-    const ghostDownRange = i - ghostDownStartX;
-    const ghostMin: number[] = [];
-    if (ghostDownRange >= 0) {
-      const to = ghostDownRange - sincePh;
-      for (let k = 0; to >= 0 ? k <= to : k >= to; k += to >= 0 ? 1 : -1) ghostMin.push(i - k >= 0 && k >= 0 ? lowSource[i - k] : NaN);
-    }
-    const ghostDownStartY = array.min(ghostMin);
-    const ghostDownEndY = ghostDownConnect ? ph.current : lastHigh;
-    const ghostDownSince = ghostMin.length > 0 ? array.indexof(ghostMin, ghostDownStartY) : 0;
-    const ghostDownEndX = i - ghostDownSince;
-    if (downWait && !newPl && cfg.showGhosts) {
-      dumpGhost();
-      generateZigZag(
-        i, ghostDownStartX, ghostDownEndX, ghostDownStartY, ghostDownEndY, cfg.ghostUpColor, cfg.ghostDownColor,
-        ghostZigZagPoints, ghostZigZags, ghostEquipoints, false, true,
-      );
-    }
+      // Ghost down leg
+      const ghostDownConnect = !isNaN(lastUpEnd) ? ph.currentIdx === lastUpEnd : true;
+      const ghostDownStartX = ghostDownConnect ? ph.currentIdx : lastUpEnd;
+      const sincePh = sincePhSite(newPh);
+      const ghostDownRange = i - ghostDownStartX;
+      const ghostMin: number[] = [];
+      if (ghostDownRange >= 0) {
+        const to = ghostDownRange - sincePh;
+        for (let k = 0; to >= 0 ? k <= to : k >= to; k += to >= 0 ? 1 : -1) ghostMin.push(i - k >= 0 && k >= 0 ? lowSource[i - k] : NaN);
+      }
+      const ghostDownStartY = array.min(ghostMin);
+      const ghostDownEndY = ghostDownConnect ? ph.current : lastHigh;
+      const ghostDownSince = ghostMin.length > 0 ? array.indexof(ghostMin, ghostDownStartY) : 0;
+      const ghostDownEndX = i - ghostDownSince;
+      if (downWait && !newPl && cfg.showGhosts) {
+        dumpGhost();
+        generateZigZag(
+          i, ghostDownStartX, ghostDownEndX, ghostDownStartY, ghostDownEndY, cfg.ghostUpColor, cfg.ghostDownColor,
+          ghostZigZagPoints, ghostZigZags, ghostEquipoints, false, true,
+        );
+      }
 
-    if (zigZags.length > maxZig) {
-      zigZags.shift();
-      zigZagPoints.shift();
-    }
-    if (equipoints.length > maxZig) equipoints.shift();
-    if (breakLabels.length > maxZig) breakLabels.shift();
+      if (zigZags.length > maxZig) {
+        zigZags.shift();
+        zigZagPoints.shift();
+      }
+      if (equipoints.length > maxZig) line.delete(equipoints.shift()!);
+      if (breakLabels.length > maxZig) breakLabels.shift();
 
-    phBack = Math.min(Math.max(nz(i - lastDownEnd - plBack + 1, 5), 0), 500);
-    plBack = Math.min(Math.max(nz(i - lastUpEnd - phBack + 1, 5), 0), 500);
+      phBack = Math.min(Math.max(nz(i - lastDownEnd - plBack + 1, 5), 0), 500);
+      plBack = Math.min(Math.max(nz(i - lastUpEnd - phBack + 1, 5), 0), 500);
+    }
+  } finally {
+    setDrawingBar(null);
   }
 
   const interval = barInterval(bars);
@@ -404,10 +403,10 @@ export function calculate(
       time: T(l.x), price: l.y, text: l.text, color: l.color, textColor: l.textColor, style: l.style, size: l.size,
       ...(l.yloc !== 'price' ? { yloc: l.yloc } : {}),
     }));
-  const lines: LineDrawingData[] = [...equipoints, ...ghostEquipoints]
+  const lines: LineDrawingData[] = line.all()
     .filter((l) => drawn(l.x1) && drawn(l.x2) && drawn(l.y1) && drawn(l.y2))
     .map((l) => ({
-      time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: l.color, style: 'dashed' as const,
+      time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: String(l.color), style: 'dashed' as const,
       ...(l.extend !== 'none' ? { extend: l.extend } : {}),
     }));
   const polylines: PolylineData[] = [...zigZags, ...ghostZigZags]

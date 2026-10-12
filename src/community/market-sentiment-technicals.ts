@@ -345,9 +345,7 @@ export function calculate(
     switch (type) {
       case 'SMA': return A(ta.sma(source, length));
       case 'EMA': return A(ta.ema(source, length));
-      case 'HMA':
-        if (length === 1) throw new Error("Invalid value of the 'length' argument (0.0) in the 'wma' function");
-        return A(ta.hma(source, length));
+      case 'HMA': return A(ta.hma(source, length));
       case 'RMA': return A(ta.rma(source, length));
       case 'WMA': return A(ta.wma(source, length));
       case 'VWMA': return A(ta.vwma(source, length, S(hVolume)));

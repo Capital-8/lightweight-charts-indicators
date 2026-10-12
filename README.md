@@ -10,6 +10,9 @@
 npm install lightweight-charts-indicators oakscriptjs lightweight-charts
 ```
 
+`oakscriptjs` is a peer dependency: version 0.11.1 or later, below 0.12. `lightweight-charts` 5 is only needed for
+the renderer.
+
 ## Quick Start
 
 ```typescript
@@ -94,8 +97,11 @@ async function run(entry: (typeof indicatorRegistry)[number], inputs: Record<str
 ```
 
 Give the exchange time zone and session of the other symbols with `symbolInfo(symbol)` in the context: the bars of a
-stock requested on a crypto chart close and change trading day by its exchange hours. Ports align the other bars on
-the chart bars with `securityOther(chartBars, otherBars, timeframe, options, chart)` (see `src/other-symbol.ts`).
+stock requested on a crypto chart close and change trading day by its exchange hours. `MissingSymbolDataError`, the
+context fields (`bars`, `symbolInfo`, `basecurrency`, `root`) and the merge come from oakscriptjs, so the same error
+class is thrown by the ports and by `executeScript`. Ports align the other bars on the chart bars with
+`securityOther(chartBars, otherBars, timeframe, otherSymbolChart(chartBars, chart), { other: chart.symbolInfo?.(symbol) })`
+(`securityLowerTf` for `request.security_lower_tf`; spread symbols "A * B": `spreadBars`, see `src/other-symbol.ts`).
 
 ## Drawing Results with the Renderer
 
@@ -211,7 +217,7 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
 });
 ```
 
-## Available Indicators (638)
+## Available Indicators (1,691)
 
 ### Moving Averages
 
@@ -347,7 +353,7 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
 | Colored Volume Bars | `ColoredVolume` | Volume colored by price/volume trend |
 | OBV MACD | `OBVMACD` | MACD applied to On Balance Volume |
 
-### Community Indicators (498)
+### Community Indicators (1,551)
 
 1551 community indicators ported from PineScript sources, covering trend systems, divergence detectors, multi-MA strategies, volume analysis, market structure, and more. Full list in [docs/INDICATOR_INVENTORY_COMMUNITY.md](docs/INDICATOR_INVENTORY_COMMUNITY.md).
 

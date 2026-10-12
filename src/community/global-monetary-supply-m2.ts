@@ -25,7 +25,7 @@ import {
 import type { LabelData } from '../types';
 import { chartTimeframe, timeAfterLastBar } from '../anchor-period';
 import { symbolBarsOf, type ChartContext, type SymbolRequest } from '../chart-context';
-import { securityOtherValues, spreadBars, spreadOptions, spreadSymbols } from '../other-symbol';
+import { otherSymbolChart, securityOtherValues, spreadBars, spreadOptions, spreadSymbols } from '../other-symbol';
 
 export interface GlobalMonetarySupplyM2Inputs {
   /** Label with the last value */
@@ -118,8 +118,9 @@ export function calculate(
   const glm2 = new Array<number>(n).fill(0);
   for (const expr of SERIES) {
     // a spread is built from its two tickers and trades around the clock on the UTC calendar
-    const values = securityOtherValues(bars, spreadBars(expr, bySymbol, chart), tf, (o) => o.map((x) => x.close),
-      spreadOptions(expr), chart);
+    const exprBars = spreadBars(expr, bySymbol, chart);
+    const values = securityOtherValues(bars, exprBars, tf, exprBars.map((x) => x.close), otherSymbolChart(bars, chart),
+      spreadOptions(expr, chart));
     for (let i = 0; i < n; i++) glm2[i] += values[i];
   }
 

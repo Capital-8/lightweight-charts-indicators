@@ -144,20 +144,6 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 const min = (a: number, b: number) => (isNaN(a) || isNaN(b) ? NaN : Math.min(a, b));
 const max = (a: number, b: number) => (isNaN(a) || isNaN(b) ? NaN : Math.max(a, b));
 
-/**
- * line.get_price(id, x): PineScript extends the line beyond its two points; oakscriptjs returns na there
- * (oakScriptJS #174). The lines of this script are horizontal and are read one bar after their end point.
- */
-function priceAt(l: Line | undefined, x: number): number {
-  if (!l) return NaN;
-  const x1 = line.get_x1(l);
-  const x2 = line.get_x2(l);
-  const y1 = line.get_y1(l);
-  const y2 = line.get_y2(l);
-  if (x1 === x2) return y1;
-  return y1 + ((y2 - y1) * (x - x1)) / (x2 - x1);
-}
-
 export function calculate(
   bars: Bar[],
   inputs: Partial<NBarReversalDetectorInputs> = {},
@@ -316,7 +302,7 @@ export function calculate(
       bullHigh = zone ? max(at(l, i - 1), l[i]) : bullLowArr[i];
     }
     if (bullProcess) {
-      if (gt(at(c, i - 1), priceAt(lnAT.value, i))) {
+      if (gt(at(c, i - 1), line.get_price(lnAT.value!, i))) {
         if (bull1 === true && bull1 !== bull2) {
           if (lbAT.value) label.set_tooltip(lbAT.value, 'enchanced pattern (confirmed at detection)\nprice activity above the pattern high');
         } else {
@@ -327,11 +313,11 @@ export function calculate(
             'confirmation bar\nprice activity above the pattern high');
         }
         bullProcess = false;
-        bxA.value = box.new(i, bullHigh, i, priceAt(lnAB.value, i), String(color.new(cfg.bullColor, zone ? 73 : 53)),
+        bxA.value = box.new(i, bullHigh, i, line.get_price(lnAB.value!, i), String(color.new(cfg.bullColor, zone ? 73 : 53)),
           undefined, undefined, undefined, undefined, bullFill);
         bullProcess2 = true;
       }
-      if (lt(at(c, i - 1), priceAt(lnAB.value, i)) || bearishReversal[i]) {
+      if (lt(at(c, i - 1), line.get_price(lnAB.value!, i)) || bearishReversal[i]) {
         if (lbAT.value) label.set_tooltip(lbAT.value, 'pattern failed\nthe low of the pattern breached');
         bullProcess = false;
       }
@@ -362,11 +348,11 @@ export function calculate(
       bearLow = zone ? min(at(h, i - 1), h[i]) : bearHighArr[i];
     }
     if (bearProcess) {
-      if (gt(at(c, i - 1), priceAt(lnST.value, i)) || bullishReversal[i]) {
+      if (gt(at(c, i - 1), line.get_price(lnST.value!, i)) || bullishReversal[i]) {
         if (lbST.value) label.set_tooltip(lbST.value, 'pattern failed\nthe high of the pattern breached');
         bearProcess = false;
       }
-      if (lt(at(c, i - 1), priceAt(lnSB.value, i))) {
+      if (lt(at(c, i - 1), line.get_price(lnSB.value!, i))) {
         if (bear1 === true && bear1 !== bear2) {
           if (lbST.value) label.set_tooltip(lbST.value, 'enchanced pattern (confirmed at detection)\nprice activity below the pattern low');
         } else {
@@ -377,7 +363,7 @@ export function calculate(
             'confirmation bar\nprice activity blow the pattern low');
         }
         bearProcess = false;
-        bxS.value = box.new(i, priceAt(lnST.value, i), i, bearLow, String(color.new(cfg.bearColor, zone ? 89 : 53)),
+        bxS.value = box.new(i, line.get_price(lnST.value!, i), i, bearLow, String(color.new(cfg.bearColor, zone ? 89 : 53)),
           undefined, undefined, undefined, undefined, bearFill);
         bearProcess2 = true;
       }

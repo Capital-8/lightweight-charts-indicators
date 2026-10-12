@@ -15,8 +15,9 @@
  *
  * Indicator rules of the original: EMA, DEMA, TEMA, the Keltner channel and MACD use an EMA seeded with the SMA of
  * the bar before; RMA and ATR start with an SMA; RSI and Supertrend use their own running averages; LINREG uses
- * x = 2 .. length + 1. "VWAP" restarts each trading day: on daily and higher bars it is the close; on intraday bars
- * it needs the exchange time zone and session of the chart context (third argument) and throws an Error without them.
+ * x = 2 .. length + 1. "VWAP" restarts each trading day: on daily and higher bars on every bar (the close); on
+ * intraday bars it needs the exchange time zone and session of the chart context (third argument) and throws an Error
+ * without them.
  *
  * Chart values read: the symbol tick (`syminfo.mintick`: "Ticks" distance and the label tooltips) and, for the
  * "VWAP" source on intraday bars, the time zone and session.
@@ -28,11 +29,12 @@
 
 import {
   taCore, getSourceSeries, color, str, math, line, label, table, resetDrawings, setDrawingBar, drawingOutputs,
+  timeframe,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Label, type Line, type SourceType,
 } from 'oakscriptjs';
 import { executeScript, ta as scriptTa, close as scriptClose } from 'oakscriptjs/script';
 import type { BarColorData, LabelData, LineDrawingData, TableData } from '../types';
-import { barInterval } from '../bar-time';
+import { chartTimeframe, hasCalendar } from '../anchor-period';
 import { mintickOf, type ChartContext } from '../chart-context';
 
 const SOURCES_A = ['External', 'ACCDIST', 'ATR', 'BB Middle', 'BB Upper', 'BB Lower', 'CCI', 'CMO', 'COG', 'DC High',
@@ -204,7 +206,6 @@ export const metadata = {
 
 /** indicator(max_lines_count = 500, max_labels_count = 500) */
 const MAX_OBJECTS = 500;
-const DAY_SECONDS = 86400;
 
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
@@ -429,23 +430,20 @@ function sourceValues(choice: string, setting: string[], txt: string, external: 
     }
     case 'Value': return new Array<number>(n).fill(targetValue);
     case 'VWAP': {
-      // ta.vwap(close), anchor timeframe.change("1D"): a new anchor on each trading day of the exchange
-      const interval = barInterval(bars);
-      if (interval > 0 && interval < DAY_SECONDS) {
-        if (c.chart?.timezone === undefined || c.chart.session === undefined) {
-          throw new Error(
-            'Targets For Many Indicators: the source "VWAP" works on daily and higher timeframes only without a chart '
-            + 'context: on intraday bars ta.vwap resets on each trading day, which needs the exchange time zone and session.',
-          );
-        }
-        let vwap: number[] = [];
-        executeScript(() => {
-          vwap = scriptTa.vwap(scriptClose).toArray().map((v) => v ?? NaN);
-        }, bars, {}, c.chart);
-        return vwap;
+      // ta.vwap(close), default anchor: each trading day of the exchange on intraday bars, every bar on daily and
+      // higher bars (script API; one bar alone is its own anchor)
+      const tf = chartTimeframe(bars, c.chart) || '1D';
+      if (timeframe.info(tf).isintraday && !hasCalendar(c.chart)) {
+        throw new Error(
+          'Targets For Many Indicators: the source "VWAP" works on daily and higher timeframes only without a chart '
+          + 'context: on intraday bars ta.vwap resets on each trading day, which needs the exchange time zone and session.',
+        );
       }
-      // daily and higher bars: one bar per anchor, sum(close * volume) / sum(volume) (0 / 0 = na without volume)
-      return close.map((v, i) => (v * volume[i]) / volume[i]);
+      let vwap: number[] = [];
+      executeScript(() => {
+        vwap = scriptTa.vwap(scriptClose).toArray().map((v) => v ?? NaN);
+      }, bars, {}, { ...c.chart, timeframe: tf });
+      return vwap;
     }
     case 'VWMA': return taCore.vwma(close, len, volume);
     case 'WAD': return taCore.wad(high, low, close);

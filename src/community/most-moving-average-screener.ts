@@ -19,8 +19,8 @@
  *
  * Other symbols: the bars of every symbol that is switched on come from the `bars` accessor of the chart context
  * (`requiredSymbols` lists them); without them `calculate` throws a `MissingSymbolDataError`. The exchange time zone
- * and session of each symbol come from `symbolInfo` of the context. A symbol timeframe below the chart timeframe is
- * not supported (an Error is thrown).
+ * and session of each symbol come from `symbolInfo` of the context. A symbol timeframe below the chart timeframe
+ * shows the last bar of that timeframe that closes by the close of the chart bar, as `request.security`.
  *
  * Chart context (optional third argument of calculate): the chart timeframe (`timeframe`, else read from the bar
  * spacing) is the timeframe of the symbols without their own; with the exchange calendar (`timezone` and
@@ -39,7 +39,7 @@ import type { LabelData, MarkerData } from '../types';
 import { barTime } from '../bar-time';
 import { chartTimeframe, timeAfterLastBar } from '../anchor-period';
 import { symbolBarsOf, type ChartContext, type SymbolRequest } from '../chart-context';
-import { securityOther } from '../other-symbol';
+import { otherSymbolChart, securityOther } from '../other-symbol';
 
 type MaType = 'SMA' | 'EMA' | 'WMA' | 'DEMA' | 'TMA' | 'VAR' | 'WWMA' | 'ZLEMA' | 'TSF' | 'HULL' | 'TILL';
 type Slot = '01' | '02' | '03' | '04' | '05' | '06' | '07' | '08' | '09' | '10'
@@ -125,7 +125,7 @@ export const inputConfig: InputConfig[] = [
   { id: 'downColor', type: 'color', title: '', defval: '#ff0000', group: GR_SC, inline: '0' },
   ...SLOTS.map((s, i): InputConfig => ({ id: `sh${s}`, type: 'bool', title: s, defval: i < 10, group: GR_SY, inline: s })),
   ...SLOTS.map((s): InputConfig => ({ id: `tf${s}`, type: 'timeframe', title: '', defval: '', group: GR_SY, inline: s })),
-  ...SLOTS.map((s, i): InputConfig => ({ id: `s${s}`, type: 'string', title: '', defval: DEFAULT_SYMBOLS[i], group: GR_SY, inline: s })),
+  ...SLOTS.map((s, i): InputConfig => ({ id: `s${s}`, type: 'symbol', title: '', defval: DEFAULT_SYMBOLS[i], group: GR_SY, inline: s })),
 ];
 
 export const plotConfig: PlotConfig[] = [
@@ -352,7 +352,7 @@ export function calculate(
     requests.forEach((r, k) => {
       const { direction } = mostOf(other[k], cfg);
       const since = barsSinceChange(direction);
-      const j = securityOther(bars, other[k], r.timeframe, { symbol: r.symbol }, chart)[last];
+      const j = securityOther(bars, other[k], r.timeframe, otherSymbolChart(bars, chart), { other: chart?.symbolInfo?.(r.symbol) })[last];
       lastValues.set(`${r.symbol}|${r.timeframe}`,
         j < 0 ? { x: NaN, y: NaN, onBar: false } : { x: direction[j], y: since[j], onBar: true });
     });

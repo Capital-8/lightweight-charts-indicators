@@ -35,12 +35,12 @@
  */
 
 import {
-  callsite, color, math, str, time as pineTime, timeframe,
+  callsite, color, math, str, time as pineTime, timeframe, SessionBars, TradingCalendar,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, PineSize, TableData, TableCellData } from '../types';
 import { barInterval, barTime } from '../bar-time';
-import { chartTimeframe, periodStarts } from '../anchor-period';
+import { chartTimeframe } from '../anchor-period';
 import { lastBarConfirmedOf, mintickOf, symbolTypeOf, timezoneOf, type ChartContext } from '../chart-context';
 
 export interface MarketProfileWithTpoInputs {
@@ -350,10 +350,19 @@ export function calculate(
   const tMs = (i: number) => (bars[i].time as number) * unit;
   // bar size for the clock-change rule of the session test (intraday bars)
   const barMs = tfInfo.isintraday ? timeframe.in_seconds(tfInfo.period) * 1000 : undefined;
-  // time("1440", session, tz): the time of the day of the bar when the bar is inside the session, else na (only
-  // compared with the value of the bar before: a new value is a new session)
-  const dayStarts = periodStarts(bars, 'D', chart);
-  const sessTime = (i: number, session: string) => (pineTime.inSession(tMs(i), session, tz, barMs) ? dayStarts[i] : NaN);
+  // time("1440", session, tz): na outside the session, else the start of the 1440-minute period counted from the
+  // start of the session run of the bar, from the session periods of the library calendar (only compared with the
+  // value of the bar before: a new value is a new session)
+  const sessionTimes = new Map<string, (t: number) => number>();
+  const sessTime = (i: number, session: string): number => {
+    let fn = sessionTimes.get(session);
+    if (!fn) {
+      const cal = new SessionBars(new TradingCalendar(tz, { session }, 'pine'), tfInfo.period);
+      fn = (t) => (pineTime.inSession(t, session, tz, barMs) ? cal.timeOf(t, '1440') : NaN);
+      sessionTimes.set(session, fn);
+    }
+    return fn(tMs(i));
+  };
   const sess24hr = `0000-0000:${cfg.sessDays}`;
   const sessions = [
     { session: `${cfg.sess1Time}:${cfg.sessDays}`, show: cfg.showSess1, name: cfg.sess1Name },

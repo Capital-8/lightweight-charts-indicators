@@ -31,7 +31,7 @@ import {
 import type { BgColorData, MarkerData, TableData } from '../types';
 import { chartTimeframe, higherTimeframeBars, periodChanges } from '../anchor-period';
 import { lastBarConfirmedOf, symbolBarsOf, timezoneOf, type ChartContext, type SymbolRequest } from '../chart-context';
-import { securityOtherValues } from '../other-symbol';
+import { otherSymbolChart, securityOtherValues } from '../other-symbol';
 
 type HashSource = 'QUANDL:BCHAIN/HRATE' | 'INTOTHEBLOCK:BTC_HASHRATE';
 
@@ -115,7 +115,7 @@ export function calculate(
   const hrShort = A(ta.sma(Series.fromArray(hr, hrClose), lenS));
   const hrLong = A(ta.sma(Series.fromArray(hr, hrClose), lenL));
   const sec = (values: number[], lookahead: boolean) =>
-    securityOtherValues(bars, hr, 'D', values, { lookahead, symbol: source }, chart);
+    securityOtherValues(bars, hr, 'D', values, otherSymbolChart(bars, chart), { lookahead, other: chart?.symbolInfo?.(source) });
   const live = { raw: sec(hrClose, true), short: sec(hrShort, true), long: sec(hrLong, true) };
   const hist = { raw: sec(hrClose, false), short: sec(hrShort, false), long: sec(hrLong, false) };
 

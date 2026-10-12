@@ -30,7 +30,7 @@
 import { ta, math, Series, color, type Bar, type IndicatorResult, type InputConfig, type PlotConfig } from 'oakscriptjs';
 import { symbolBarsOf, tickeridOf, type ChartContext, type SymbolRequest } from '../chart-context';
 import { chartTimeframe } from '../anchor-period';
-import { securityOtherValues } from '../other-symbol';
+import { otherSymbolChart, securityOtherValues } from '../other-symbol';
 
 type SourceName = 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4' | 'volume';
 
@@ -135,7 +135,8 @@ export function calculate(bars: Bar[], inputs: Partial<Godmode402Inputs> = {}, c
   if (other) {
     const tf = chartTimeframe(bars, chart);
     const [benchBars] = symbolBarsOf([{ symbol: cfg.ben0, timeframe: tf }], chart);
-    src = securityOtherValues(bars, benchBars, '', (b) => b.map((x) => sourceValue(x, cfg.src0)), { symbol: cfg.ben0 }, chart);
+    src = securityOtherValues(bars, benchBars, '', benchBars.map((x) => sourceValue(x, cfg.src0)), otherSymbolChart(bars, chart),
+      { other: chart?.symbolInfo?.(cfg.ben0) });
   } else {
     src = bars.map((b) => sourceValue(b, cfg.src0));
   }
@@ -151,7 +152,9 @@ export function calculate(bars: Bar[], inputs: Partial<Godmode402Inputs> = {}, c
     const volume = bars.map((b) => b.volume ?? NaN);
     const up = A(math.sum(S(src.map((v, i) => volume[i] * (le(change[i], 0) ? 0 : v))), len2) as Series);
     const down = A(math.sum(S(src.map((v, i) => volume[i] * (ge(change[i], 0) ? 0 : v))), len2) as Series);
-    // rsi(x, y) with two series: y == 0 ? 100 : x == 0 ? 0 : 100 - 100 / (1 + x / y) (== within 1e-10, as ta.rsi; the library has no two-series form: oakScriptJS #180)
+    // rsi(x, y) with two series: y == 0 ? 100 : x == 0 ? 0 : 100 - 100 / (1 + x / y) (== within 1e-10, as ta.rsi).
+    // Not the library ta.rsi(x, y): it gives na where 1 + x / y is 0 (x = -y, rounding residuals of the sums), the
+    // original -infinity, which sets the support levels on that bar
     return up.map((u, i) => (eq(down[i], 0) ? 100 : eq(u, 0) ? 0 : 100 - 100 / (1 + u / down[i])));
   };
   const rsi = () => A(ta.rsi(S(src), len2));

@@ -28701,16 +28701,17 @@ const registryPart10: IndicatorRegistryEntry[] = [
 export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10];
 
 // Chart context (third argument of calculate)
-export type { ChartContext, VisibleRange, SymbolRequest } from './chart-context';
+export type { ChartContext, VisibleRange, SymbolRequest, SymbolInfo } from './chart-context';
 export { MissingSymbolDataError, symbolBarsOf } from './chart-context';
 export {
-  mintickOf, timezoneOf, tickeridOf, tickerOf, symbolTypeOf, currencyOf, foregroundColorOf, backgroundColorOf,
-  lastBarConfirmedOf, nowOf, visibleRangeOf,
+  mintickOf, timezoneOf, tickeridOf, tickerOf, symbolTypeOf, currencyOf, basecurrencyOf, rootOf, foregroundColorOf,
+  backgroundColorOf, lastBarConfirmedOf, nowOf, visibleRangeOf,
 } from './chart-context';
-// Other symbols (PineScript request.security of another ticker)
+// Other symbols (PineScript request.security of another ticker): the oakscriptjs merge, its chart argument, spreads
 export {
-  securityOther, securityOtherValues, spreadSymbols, spreadBars, spreadOptions, type OtherSymbolOptions,
+  securityOther, securityOtherValues, securityLowerTf, otherSymbolChart, spreadSymbols, spreadBars, spreadOptions,
+  type OtherSymbolOptions, type OtherSymbolChart, type SymbolCalendar,
 } from './other-symbol';
 
 // Package version
-export const version = '0.11.0';
+export const version = '0.12.0';

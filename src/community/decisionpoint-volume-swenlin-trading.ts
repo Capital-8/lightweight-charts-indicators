@@ -20,7 +20,7 @@
 import { ta, Series, color, timeframe, type Bar, type IndicatorResult, type InputConfig, type PlotConfig } from 'oakscriptjs';
 import { symbolBarsOf, type ChartContext, type SymbolRequest } from '../chart-context';
 import { chartTimeframe } from '../anchor-period';
-import { securityOther } from '../other-symbol';
+import { otherSymbolChart, securityOther } from '../other-symbol';
 
 export interface DecisionPointVolumeSwenlinInputs {
   /** Market: 0 = AMEX / NASD / NYSE combined, 1 = NYSE, 2 = NASDAQ, 3 = AMEX, 4 = custom symbols */
@@ -42,8 +42,8 @@ export const defaultInputs: DecisionPointVolumeSwenlinInputs = {
 
 export const inputConfig: InputConfig[] = [
   { id: 'mkt', type: 'int', title: 'Market (0=>AMEX/NASD/NYSE Combined, 1=NYSE, 2=NASDAQ, 3=AMEX, 4=CUSTOM)', defval: 1, min: 0, max: 4 },
-  { id: 'aic', type: 'string', title: 'CUSTOM: Advancing Volume Symbol', defval: 'AVVD' },
-  { id: 'dic', type: 'string', title: 'CUSTOM: Declining Volume Symbol', defval: 'DVCD' },
+  { id: 'aic', type: 'symbol', title: 'CUSTOM: Advancing Volume Symbol', defval: 'AVVD' },
+  { id: 'dic', type: 'symbol', title: 'CUSTOM: Declining Volume Symbol', defval: 'DVCD' },
   { id: 'sh', type: 'bool', title: 'Show Histo', defval: true },
 ];
 
@@ -128,7 +128,7 @@ export function calculate(
   const closeOf = (parts: Bar[][], syms: string[]): number[] => {
     const other = parts.length === 1 ? parts[0] : spreadBars(parts);
     // a spread trades on the calendar of its first symbol
-    const index = securityOther(bars, other, res, { lookahead: true, symbol: syms[0] }, chart);
+    const index = securityOther(bars, other, res, otherSymbolChart(bars, chart), { lookahead: true, other: chart?.symbolInfo?.(syms[0]) });
     return index.map((j) => (j < 0 ? NaN : other[j].close));
   };
   const adv = closeOf(advParts, advSyms);

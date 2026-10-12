@@ -13,8 +13,8 @@
  *
  * Other symbols: the open interest of the Binance perpetual of the base currency (BINANCE:<base>USDT.P_OI; daily
  * values on an intraday futures chart) and, with "Aggregate Volume", the volume of the selected symbols on the chart
- * timeframe (divided by their close with "RQC"). The base currency (syminfo.basecurrency) is derived from the chart
- * context: for crypto and forex pairs the ticker without ".P" and without the quote currency, else none.
+ * timeframe (divided by their close with "RQC"). The base currency (syminfo.basecurrency) is `basecurrency` of the
+ * chart context (see `basecurrencyOf` for a context without it).
  *
  * Reference: "Volume / Open Interest Footprint - By Leviathan" by LeviathanCapital
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -24,9 +24,9 @@
 import { taCore, color, str, math, array, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData } from '../types';
 import {
-  symbolBarsOf, tickerOf, currencyOf, symbolTypeOf, foregroundColorOf, visibleRangeOf, type ChartContext, type SymbolRequest,
+  symbolBarsOf, basecurrencyOf, symbolTypeOf, foregroundColorOf, visibleRangeOf, type ChartContext, type SymbolRequest,
 } from '../chart-context';
-import { securityOtherValues } from '../other-symbol';
+import { otherSymbolChart, securityOtherValues } from '../other-symbol';
 import { chartTimeframe, timeAfterLastBar } from '../anchor-period';
 
 export interface VolumeOpenInterestFootprintByLeviathanInputs {
@@ -206,15 +206,6 @@ const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 const nz = (x: number) => (Number.isFinite(x) ? x : 0);
 
-/** PineScript `syminfo.basecurrency`: the base of a crypto or forex pair ("BTCUSDT.P" quoted in USDT -> "BTC"); else '' (na) */
-function baseCurrencyOf(chart?: ChartContext): string {
-  const type = symbolTypeOf(chart);
-  if (type !== 'crypto' && type !== 'forex') return '';
-  const pair = tickerOf(chart).replace(/\.P$/, '');
-  const quote = currencyOf(chart);
-  return pair.length > quote.length && pair.endsWith(quote) ? pair.slice(0, -quote.length) : '';
-}
-
 type Cfg = VolumeOpenInterestFootprintByLeviathanInputs;
 const AGGREGATED = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
@@ -225,7 +216,7 @@ function requests(cfg: Cfg, chartTf: string, chart?: ChartContext): Array<Symbol
     // timeframe = syminfo.type == "futures" and timeframe.isintraday ? "1D" : timeframe.period
     const intraday = chartTf !== '' && !/[DWM]$/.test(chartTf);
     const tf = symbolTypeOf(chart) === 'futures' && intraday ? '1D' : chartTf;
-    out.push({ symbol: `BINANCE:${baseCurrencyOf(chart)}USDT.P_OI`, timeframe: tf, k: 0 });
+    out.push({ symbol: `BINANCE:${basecurrencyOf(chart)}USDT.P_OI`, timeframe: tf, k: 0 });
   }
   if (cfg.aggr) {
     for (const k of AGGREGATED) {
@@ -276,12 +267,12 @@ export function calculate(
     if (r.k === 0) {
       // request.security(openInterestTicker, timeframe, close - close[1], ignore_invalid_symbol = true)
       deltaOi = securityOtherValues(bars, ob, r.timeframe === chartTf ? '' : r.timeframe,
-        (b) => b.map((x, i) => (i > 0 ? x.close - b[i - 1].close : NaN)), { symbol: r.symbol }, chart);
+        ob.map((x, i) => (i > 0 ? x.close - ob[i - 1].close : NaN)), otherSymbolChart(bars, chart), { other: chart?.symbolInfo?.(r.symbol) });
     } else {
       // request.security(Ak, timeframe.period, Akt ? volume / close : volume)
       const rqc = cfg[`A${r.k as (typeof AGGREGATED)[number]}t`];
-      aggVol.push(securityOtherValues(bars, ob, '', (b) => b.map((x) => (rqc ? (x.volume ?? NaN) / x.close : (x.volume ?? NaN))),
-        { symbol: r.symbol }, chart));
+      aggVol.push(securityOtherValues(bars, ob, '', ob.map((x) => (rqc ? (x.volume ?? NaN) / x.close : (x.volume ?? NaN))),
+        otherSymbolChart(bars, chart), { other: chart?.symbolInfo?.(r.symbol) }));
     }
   });
   // data = aggr ? (A0 ? volume : 0) + A1vol + ... : volume; vol(): deltaOi with the source "Open Interest"

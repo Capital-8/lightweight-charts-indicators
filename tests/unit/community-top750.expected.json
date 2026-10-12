@@ -2000,7 +2000,7 @@
     "plot27": 3188,
     "plot28": 0
    },
-   "tables": 2
+   "tables": 1
   },
   "m15": {
    "plots": {
@@ -2034,7 +2034,7 @@
     "plot27": 3988,
     "plot28": 0
    },
-   "tables": 2
+   "tables": 1
   }
  },
  "delta-zones-buy-sell-pressure": {
@@ -2332,9 +2332,9 @@
     "plot53": 0,
     "plot54": 0
    },
-   "lines": 41,
+   "lines": 37,
    "boxes": 2,
-   "labels": 41
+   "labels": 37
   },
   "m15": {
    "plots": {
@@ -2394,9 +2394,9 @@
     "plot53": 0,
     "plot54": 0
    },
-   "lines": 35,
+   "lines": 29,
    "boxes": 2,
-   "labels": 35
+   "labels": 29
   }
  },
  "zero-lag-ema": {

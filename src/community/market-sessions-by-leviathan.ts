@@ -32,6 +32,7 @@
 
 import {
   box, label, line, color, str, timeframe, time as pineTime, resetDrawings, setDrawingBar, varDrawing,
+  SessionBars, TradingCalendar,
   type DrawingVariable, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData, LineDrawingData, BoxData, LabelData, PineSize } from '../types';
@@ -266,27 +267,25 @@ export function calculate(
     active: false, prev: false, start: false,
   }));
 
-  // time(timeframe.period, session) counts the periods of the chart timeframe from the start of the session, so it
-  // is the bar time only when the bar opens a whole number of periods after the session start (session 0030-0900 on
-  // 60-minute bars: 00:30, 01:30, ... never a bar time; on daily and higher bars: only a bar that opens at the
-  // session start). The hours are read in the exchange time zone. (The session periods of the library calendar,
-  // TradingCalendar, place a session that ends at 0000 on the next day, unlike the session test: own parsing.)
-  const periodSeconds = isIntraday ? timeframe.in_seconds(chartTf) : 0;
   // bar size for the clock-change rule of the session test (intraday bars)
-  const barMs = isIntraday ? periodSeconds * 1000 : undefined;
-  const onSessionGrid = (tMs: number, hours: string): boolean => {
-    const second = pineTime.hour(tMs, exchangeZone) * 3600 + pineTime.minute(tMs, exchangeZone) * 60 + pineTime.second(tMs, exchangeZone);
-    for (const part of hours.split(',')) {
-      const m = /^\s*(\d{2})(\d{2})-(\d{2})(\d{2})\s*$/.exec(part);
-      if (!m) continue;
-      const start = (Number(m[1]) * 60 + Number(m[2])) * 60;
-      const end = (Number(m[3]) * 60 + Number(m[4])) * 60;
-      const inside = start < end ? second >= start && second < end : second >= start || second < end;
-      if (!inside) continue;
-      const since = (second - start + 86400) % 86400;
-      return periodSeconds > 0 ? since % periodSeconds === 0 : since === 0;
+  const barMs = isIntraday ? timeframe.in_seconds(chartTf) * 1000 : undefined;
+  // time(timeframe.period, session) in the exchange time zone, from the session periods of the library calendar:
+  // intraday, the chart periods counted from the start of the session run, na outside the session (session
+  // 0030-0900 on 60-minute bars: 00:30, 01:30, ... never a bar time); daily, the session period of the day, na
+  // outside it; weekly and monthly, the period time without a session test.
+  const tf = chartTf || '1D';
+  const dayTf = timeframe.info(tf).isdaily && timeframe.info(tf).multiplier === 1;
+  const sessionTimes = new Map<string, (tMs: number) => number>();
+  const sessionTime = (session: string): ((tMs: number) => number) => {
+    let fn = sessionTimes.get(session);
+    if (!fn) {
+      const cal = new SessionBars(new TradingCalendar(exchangeZone, { session }, 'pine', !isIntraday), tf);
+      fn = isIntraday
+        ? (tMs) => (pineTime.inSession(tMs, session, exchangeZone, barMs) ? cal.timeOf(tMs, tf) : NaN)
+        : dayTf ? (tMs) => (cal.inside(tMs) ? cal.timeOf(tMs, tf) : NaN) : (tMs) => cal.timeOf(tMs, tf);
+      sessionTimes.set(session, fn);
     }
-    return false;
+    return fn;
   };
 
   // max_boxes_count / max_lines_count / max_labels_count; objects of the registry placed by bar index
@@ -428,7 +427,7 @@ export function calculate(
       sessions.forEach((s, k) => {
         const next = sessions[(k + 1) % 4];
         if (!s.show || (cfg.merge && next.active)) return;
-        if (pineTime.inSession(tMs, s.session, exchangeZone, barMs) && onSessionGrid(tMs, s.hours)) bgColors.push({ time: t, color: s.col });
+        if (sessionTime(s.session)(tMs) === tMs) bgColors.push({ time: t, color: s.col });
       });
     }
 

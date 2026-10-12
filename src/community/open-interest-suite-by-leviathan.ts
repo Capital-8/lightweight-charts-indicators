@@ -12,8 +12,7 @@
  *
  * The open interest series are other symbols (EXCHANGE:<base><quote>.P_OI) on the chart timeframe; a symbol that
  * does not exist has no bars (ignore_invalid_symbol: na, counted as 0). The base currency (syminfo.basecurrency) is
- * derived from the chart context: for crypto and forex pairs the ticker without ".P" and without the quote currency,
- * else none, as the context has no such field.
+ * `basecurrency` of the chart context (see `basecurrencyOf` for a context without it).
  *
  * Reference: "Open Interest Suite [Aggregated] - By Leviathan" by LeviathanCapital
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -24,9 +23,9 @@
 import { ta, Series, color, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, BgColorData, BoxData, LineDrawingData, LinefillData, PlotCandleData, TableData } from '../types';
 import {
-  symbolBarsOf, tickerOf, currencyOf, symbolTypeOf, foregroundColorOf, visibleRangeOf, type ChartContext, type SymbolRequest,
+  symbolBarsOf, basecurrencyOf, foregroundColorOf, visibleRangeOf, type ChartContext, type SymbolRequest,
 } from '../chart-context';
-import { securityOther } from '../other-symbol';
+import { otherSymbolChart, securityOther } from '../other-symbol';
 import { chartTimeframe } from '../anchor-period';
 
 export interface OpenInterestSuiteByLeviathanInputs {
@@ -202,18 +201,9 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 const nz = (x: number) => (Number.isFinite(x) ? x : 0);
 
-/** PineScript `syminfo.basecurrency`: the base of a crypto or forex pair ("BTCUSDT.P" quoted in USDT -> "BTC"); else '' (na) */
-function baseCurrencyOf(chart?: ChartContext): string {
-  const type = symbolTypeOf(chart);
-  if (type !== 'crypto' && type !== 'forex') return '';
-  const pair = tickerOf(chart).replace(/\.P$/, '');
-  const quote = currencyOf(chart);
-  return pair.length > quote.length && pair.endsWith(quote) ? pair.slice(0, -quote.length) : '';
-}
-
 /** The six open interest symbols, with their switch and whether the value is divided by the close */
 function sources(cfg: OpenInterestSuiteByLeviathanInputs, chart?: ChartContext) {
-  const base = baseCurrencyOf(chart);
+  const base = basecurrencyOf(chart);
   const mex = base === 'BTC' ? 'XBT' : base;
   return [
     { on: cfg.binance, symbol: `BINANCE:${base}USDT.P_OI`, perClose: false },
@@ -265,7 +255,7 @@ export function calculate(
   const otherBars = symbolBarsOf(src.map((s) => ({ symbol: s.symbol, timeframe: tf })), chart);
   const series = src.map((s, k) => {
     const ob = otherBars[k];
-    const index = securityOther(bars, ob, '', { symbol: s.symbol }, chart);
+    const index = securityOther(bars, ob, '', otherSymbolChart(bars, chart), { other: chart?.symbolInfo?.(s.symbol) });
     const at = (j: number, f: (b: Bar) => number) => (j < 0 ? NaN : f(ob[j]));
     return {
       perClose: s.perClose,

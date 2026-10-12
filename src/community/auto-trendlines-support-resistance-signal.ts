@@ -142,21 +142,8 @@ const neq = (a: number, b: number) => Math.abs(a - b) > EPS; // na compares fals
 const RED = '#F23645';
 const GREEN = '#4CAF50';
 
-/**
- * PineScript `line.get_price`: the price of the line at bar x, the line taken as infinite (also outside its two
- * points, whatever its extend). oakscriptjs gives na outside the two points of a line without extend (oakScriptJS
- * #174): this local rule keeps the formula of the library and drops the bounds. na for a deleted line.
- */
-const getPrice = (l: Line | undefined, x: number): number => {
-  if (!l) return NaN;
-  const x1 = line.get_x1(l);
-  const x2 = line.get_x2(l);
-  const y1 = line.get_y1(l);
-  const y2 = line.get_y2(l);
-  if (x2 === x1) return NaN;
-  const slope = (y2 - y1) / (x2 - x1);
-  return y1 + slope * (x - x1);
-};
+/** `line.get_price(l, x)`; na for an na line (a `var line` not set yet) */
+const getPrice = (l: Line | undefined, x: number): number => (l ? line.get_price(l, x) : NaN);
 
 /** `str.substring(s, begin)` (na string: na) */
 const substr = (s: string | undefined, begin: number) => (s === undefined ? undefined : s.substring(begin));

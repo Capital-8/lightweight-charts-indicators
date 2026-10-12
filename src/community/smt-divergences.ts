@@ -27,7 +27,7 @@ import {
 import type { LabelData, LineDrawingData, TableCellData, TableData, TablePosition } from '../types';
 import { symbolBarsOf, type ChartContext, type SymbolRequest } from '../chart-context';
 import { chartTimeframe } from '../anchor-period';
-import { securityOther } from '../other-symbol';
+import { otherSymbolChart, securityOther } from '../other-symbol';
 import { barInterval, barTime } from '../bar-time';
 
 export interface SmtDivergencesInputs {
@@ -66,9 +66,9 @@ export const defaultInputs: SmtDivergencesInputs = {
 export const inputConfig: InputConfig[] = [
   { id: 'length', type: 'int', title: 'Pivot Lookback', defval: 3, min: 2 },
   { id: 'useSym1', type: 'bool', title: 'Comparison Symbol', defval: true, inline: 'symA' },
-  { id: 'sym1', type: 'string', title: '', defval: 'CME_MINI_DL:ES1!', inline: 'symA' },
+  { id: 'sym1', type: 'symbol', title: '', defval: 'CME_MINI_DL:ES1!', inline: 'symA' },
   { id: 'useSym2', type: 'bool', title: 'Comparison Symbol', defval: true, inline: 'symB' },
-  { id: 'sym2', type: 'string', title: '', defval: 'CBOT_MINI_DL:YM1!', inline: 'symB' },
+  { id: 'sym2', type: 'symbol', title: '', defval: 'CBOT_MINI_DL:YM1!', inline: 'symB' },
   { id: 'bullDivCss', type: 'color', title: 'Swing High', defval: '#ff1100', group: 'Style' },
   { id: 'bearDivCss', type: 'color', title: 'Swing Low', defval: '#2157f3', group: 'Style' },
   { id: 'showDash', type: 'bool', title: 'Show Dashboard', defval: false, group: 'Dashboard' },
@@ -169,7 +169,7 @@ export function calculate(
   /** Swing highs / lows of a comparison symbol and the two divergence call sites */
   const comparison = (k: number) => {
     const other = otherBars[k];
-    const index = securityOther(bars, other, '', { symbol: used[k] }, chart);
+    const index = securityOther(bars, other, '', otherSymbolChart(bars, chart), { other: chart?.symbolInfo?.(used[k]) });
     const h = index.map((j) => (j < 0 ? NaN : other[j].high));
     const l = index.map((j) => (j < 0 ? NaN : other[j].low));
     const symPh = fixnan(A(ta.pivothigh(S(h), length, length)));

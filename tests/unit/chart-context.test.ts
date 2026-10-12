@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   indicatorRegistry, mintickOf, timezoneOf, tickeridOf, tickerOf, symbolTypeOf, currencyOf, foregroundColorOf,
-  backgroundColorOf, lastBarConfirmedOf, nowOf, visibleRangeOf,
+  backgroundColorOf, lastBarConfirmedOf, nowOf, visibleRangeOf, basecurrencyOf, rootOf,
 } from '../../src/index';
 import { makeBars } from './community-top100.helpers';
 import { fixtureContext } from './community-other-symbols.helpers';
@@ -43,6 +43,23 @@ describe('chart context helpers', () => {
 
   it('take the tick from minmove / pricescale', () => {
     expect(mintickOf({ minmove: 25, pricescale: 100 })).toBe(0.25);
+  });
+
+  it('give the base currency and root of the context, else derive them from the ticker', () => {
+    expect(basecurrencyOf()).toBe('');
+    expect(rootOf()).toBe('');
+    // the values of the context win (CME:BTC1!: base BTC, root BTC)
+    const btcFutures = { tickerid: 'CME:BTC1!', symbolType: 'futures', currency: 'USD', basecurrency: 'BTC', root: 'BTC' };
+    expect(basecurrencyOf(btcFutures)).toBe('BTC');
+    expect(rootOf(btcFutures)).toBe('BTC');
+    expect(basecurrencyOf({ basecurrency: '', tickerid: 'BINANCE:BTCUSDT.P', symbolType: 'crypto', currency: 'USDT' })).toBe('');
+    // without them: a crypto or forex pair without ".P" and its quote currency; a futures ticker without its contract
+    expect(basecurrencyOf({ tickerid: 'BINANCE:BTCUSDT.P', symbolType: 'crypto', currency: 'USDT' })).toBe('BTC');
+    expect(basecurrencyOf({ tickerid: 'FX:EURUSD', symbolType: 'forex', currency: 'USD' })).toBe('EUR');
+    expect(basecurrencyOf({ tickerid: 'NASDAQ:AAPL', symbolType: 'stock', currency: 'USD' })).toBe('');
+    expect(rootOf({ tickerid: 'CME_MINI:ES1!', symbolType: 'futures' })).toBe('ES');
+    expect(rootOf({ tickerid: 'CME_MINI:ESH2025', symbolType: 'futures' })).toBe('ES');
+    expect(rootOf({ tickerid: 'NASDAQ:AAPL', symbolType: 'stock' })).toBe('AAPL');
   });
 });
 

@@ -134,14 +134,6 @@ const x1Of = (l: Line | null) => (l ? line.get_x1(l) : NaN);
 const y1Of = (l: Line | null) => (l ? line.get_y1(l) : NaN);
 const x2Of = (l: Line | null) => (l ? line.get_x2(l) : NaN);
 const y2Of = (l: Line | null) => (l ? line.get_y2(l) : NaN);
-/**
- * line.get_price(x): the price of the line at bar x, the line extended on both sides as PineScript reads it. Own
- * formula: the library `line.get_price` gives na outside the two points of a line without extension.
- */
-const priceAt = (l: Line | null, x: number) => {
-  const [x1, y1, x2, y2] = [x1Of(l), y1Of(l), x2Of(l), y2Of(l)];
-  return y1 + ((y2 - y1) / (x2 - x1)) * (x - x1);
-};
 const setXY1 = (l: Line | null, x: number, y: number) => {
   if (l) line.set_xy1(l, x, y);
 };
@@ -231,7 +223,7 @@ export function calculate(
         ? gt(v, y1Of(bn.lin) + slope) && (lt(v, y2Of(bn.lin) + slope) || eq(bn.slope, 0))
         : lt(v, y1Of(bn.lin) + slope) && (gt(v, y2Of(bn.lin) + slope) || eq(bn.slope, 0));
       if (!inside) return;
-      const priceLin = priceAt(bn.lin, i - idx);
+      const priceLin = line.get_price(bn.lin!, i - idx);
       if (bullish ? gt(c, priceLin) : lt(c, priceLin)) {
         // where the wick breaks the last line price
         if (ne(bn.slope, 0)) {
@@ -247,7 +239,7 @@ export function calculate(
             const arr: number[] = [];
             const span = i - x1Of(bn.lin);
             for (let k = 0; k <= span; k++) {
-              const lineY = priceAt(bn.lin, i - k);
+              const lineY = line.get_price(bn.lin!, i - k);
               arr.push(bullish ? lineY - bars[i - k].close : bars[i - k].close - lineY);
             }
             // array.max skips na and infinite values

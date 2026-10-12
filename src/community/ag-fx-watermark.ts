@@ -13,8 +13,10 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { time as pineTime, timeframe, barInterval, periodClose, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { PineSize, TableCellData, TableData, TablePosition } from '../types';
+import {
+  time as pineTime, timeframe, barInterval, periodClose, table, resetDrawings, setDrawingBar, drawingOutputs,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Table,
+} from 'oakscriptjs';
 import { chartTimeframe, hasCalendar } from '../anchor-period';
 import { tickerOf, timezoneOf, type ChartContext } from '../chart-context';
 
@@ -121,31 +123,28 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<AgFxWatermarkInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'tables'> & { tables: TableData[] } {
+): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
   const result = {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
   };
-  if (bars.length === 0) return { ...result, tables: [] };
+  const n = bars.length;
+  if (n === 0) return result;
 
-  const cell = (column: number, row: number, text: string, textColor: string, size: Size, align: Align): TableCellData => ({
-    column, row, text, width: cfg.width, height: cfg.height, textColor, textHAlign: align, textVAlign: 'center',
-    textSize: size as PineSize, bgColor: cfg.bgColor,
-  });
+  // The script makes both tables on every bar; a table made at the position of a live table deletes that table, so
+  // only the two of the last bar remain (one when both positions are the same): they are made on the last bar.
+  resetDrawings();
+  setDrawingBar(n - 1, true, n - 1);
+  const cell = (id: Table, column: number, row: number, text: string, textColor: string, size: Size, align: Align) =>
+    table.cell(id, column, row, text, cfg.width, cfg.height, textColor, align, undefined, size, cfg.bgColor);
 
   // table.new(textVPosition + "_" + textHPosition, 1, 3): title and subtitle
-  const textTable: TableData = {
-    position: `${cfg.textVPosition}_${cfg.textHPosition}` as TablePosition, columns: 1, rows: 3,
-    cells: [
-      cell(0, 0, cfg.title, cfg.titleColor, cfg.titleSize, cfg.titleAlign),
-      cell(0, 1, cfg.subtitle, cfg.subtitleColor, cfg.subtitleSize, cfg.subtitleAlign),
-    ],
-  };
+  const textWatermark = table.new(`${cfg.textVPosition}_${cfg.textHPosition}`, 1, 3);
+  cell(textWatermark, 0, 0, cfg.title, cfg.titleColor, cfg.titleSize, cfg.titleAlign);
+  cell(textWatermark, 0, 1, cfg.subtitle, cfg.subtitleColor, cfg.subtitleSize, cfg.subtitleAlign);
   // table.new(symVPosition + "_" + symHPosition, 5, 5): the symbol information
-  const symTable: TableData = {
-    position: `${cfg.symVPosition}_${cfg.symHPosition}` as TablePosition, columns: 5, rows: 5, cells: [],
-  };
+  const symWatermark = table.new(`${cfg.symVPosition}_${cfg.symHPosition}`, 5, 5);
   if (cfg.symInfoCheck) {
     // timeframe.period of this version of the language: "D", "W", "M" for one day / week / month
     const tf = chartTimeframe(bars, chart);
@@ -157,10 +156,11 @@ export function calculate(
     const close = lastCloseTime(bars, tf, chart);
     const tz = timezoneOf(chart);
     const date = `${pineTime.dayofmonth(close, tz)}/${pineTime.month(close, tz)}/${pineTime.year(close, tz)}`;
-    symTable.cells.push(cell(0, 1, symInfo, cfg.symInfoColor, cfg.symInfoSize, cfg.symInfoAlign));
-    symTable.cells.push(cell(0, 0, date, cfg.symInfoColor, cfg.symInfoSize, cfg.symInfoAlign));
+    cell(symWatermark, 0, 1, symInfo, cfg.symInfoColor, cfg.symInfoSize, cfg.symInfoAlign);
+    cell(symWatermark, 0, 0, date, cfg.symInfoColor, cfg.symInfoSize, cfg.symInfoAlign);
   }
-  return { ...result, tables: [textTable, symTable] };
+  setDrawingBar(null);
+  return { ...result, ...drawingOutputs(bars) };
 }
 
 export const AgFxWatermark = {

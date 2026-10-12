@@ -13,7 +13,8 @@
  * direction. Symbols that are switched off show a square and "NaN" with no text colour.
  *
  * The bars of the other symbols come from the chart context (`bars` accessor, `requiredSymbols` lists them); without
- * them `calculate` throws a MissingSymbolDataError. A timeframe below the chart timeframe is not supported (throws).
+ * them `calculate` throws a MissingSymbolDataError. A timeframe below the chart timeframe shows the last bar of that
+ * timeframe that closes by the close of the chart bar, as `request.security`.
  *
  * Reference: "AlphaTrend - Screener" by KivancOzbilgic
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -27,7 +28,7 @@ import {
 import type { LabelData, MarkerData } from '../types';
 import { symbolBarsOf, type ChartContext, type SymbolRequest } from '../chart-context';
 import { chartTimeframe, timeAfterLastBar } from '../anchor-period';
-import { securityOther } from '../other-symbol';
+import { otherSymbolChart, securityOther } from '../other-symbol';
 
 const COUNT = 20;
 type Size = 'Auto' | 'Tiny' | 'Small' | 'Normal' | 'Large' | 'Huge';
@@ -113,7 +114,7 @@ export const inputConfig: InputConfig[] = [
   { id: 'lbCs', type: 'color', title: '', defval: '#ff0000', group: GSC, inline: '0' },
   ...nums.map((n, k): InputConfig => ({ id: `sh${n}`, type: 'bool', title: n, defval: k < 10, group: GSY, inline: n })),
   ...nums.map((n): InputConfig => ({ id: `tf${n}`, type: 'timeframe', title: '', defval: '', group: GSY, inline: n })),
-  ...nums.map((n, k): InputConfig => ({ id: `s${n}`, type: 'string', title: '', defval: SYMBOLS[k], group: GSY, inline: n })),
+  ...nums.map((n, k): InputConfig => ({ id: `s${n}`, type: 'symbol', title: '', defval: SYMBOLS[k], group: GSY, inline: n })),
 ];
 
 export const plotConfig: PlotConfig[] = [
@@ -257,7 +258,7 @@ export function calculate(
       if (on[k]) {
         const other = otherBars[r++];
         const { x, y } = screener(other, cfg);
-        const idx = securityOther(bars, other, cfg[key('tf', k)] as string, { symbol: sym }, chart);
+        const idx = securityOther(bars, other, cfg[key('tf', k)] as string, otherSymbolChart(bars, chart), { other: chart?.symbolInfo?.(sym) });
         const j = idx[last];
         if (j >= 0) {
           a = x[j];

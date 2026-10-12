@@ -33,7 +33,7 @@ import {
 } from 'oakscriptjs';
 import type { TableCellData, TableData, TablePosition } from '../types';
 import { symbolBarsOf, symbolTypeOf, type ChartContext, type SymbolRequest } from '../chart-context';
-import { securityOtherValues, spreadBars, spreadOptions, spreadSymbols } from '../other-symbol';
+import { otherSymbolChart, securityOtherValues, spreadBars, spreadOptions, spreadSymbols } from '../other-symbol';
 
 type TrendType = 'EMA' | 'SMA' | 'RMA' | 'WMA';
 type BetaLength = '3M' | '6M' | '9M' | '1Y' | '3Y' | '5Y';
@@ -231,7 +231,8 @@ export function calculate(
     let v = values.get(expr);
     if (v) return v;
     // a spread is built from its two tickers and trades around the clock on the UTC calendar
-    v = securityOtherValues(bars, spreadBars(expr, bySymbol, chart), TF, (o) => o.map((x) => x.close), spreadOptions(expr), chart);
+    const exprBars = spreadBars(expr, bySymbol, chart);
+    v = securityOtherValues(bars, exprBars, TF, exprBars.map((x) => x.close), otherSymbolChart(bars, chart), spreadOptions(expr, chart));
     values.set(expr, v);
     return v;
   };

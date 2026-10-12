@@ -1,13 +1,15 @@
 /**
- * Unit tests for the bars of other symbols: `securityOther` (PineScript `request.security` of another ticker) on small
- * bar sets that cover the measured rules, the spread symbols ("A * B", "A / B"), and `symbolBarsOf` /
- * `MissingSymbolDataError` of the chart context.
+ * Unit tests for the bars of other symbols: `securityOther` / `securityLowerTf` (PineScript `request.security` and
+ * `request.security_lower_tf` of another ticker, from oakscriptjs) on small bar sets that cover the measured rules,
+ * `otherSymbolChart`, the spread symbols ("A * B", "A / B"), and `symbolBarsOf` / `MissingSymbolDataError` of the
+ * chart context.
  */
 
 import { describe, it, expect } from 'vitest';
+import { MissingSymbolDataError as ScriptMissingSymbolDataError } from 'oakscriptjs/script';
 import {
-  securityOther, securityOtherValues, spreadSymbols, spreadBars, spreadOptions, symbolBarsOf, MissingSymbolDataError,
-  type ChartContext,
+  securityOther, securityOtherValues, securityLowerTf, otherSymbolChart, spreadSymbols, spreadBars, spreadOptions,
+  symbolBarsOf, MissingSymbolDataError, type ChartContext, type OtherSymbolChart,
 } from '../../src/index';
 
 /** UNIX seconds of a UTC date and time (month 1-12). */
@@ -25,49 +27,64 @@ const cryptoDays = days(2026, 10, 3, 12);
 
 describe('securityOther: daily bars of symbols on other calendars', () => {
   it('a stock chart shows the 24x7 bar that closed before the stock bar closes (lookahead off), the same day with lookahead on', () => {
-    const chart: ChartContext = { timeframe: '1D', ...NY };
+    const chart: OtherSymbolChart = { timeframe: '1D', ...NY };
     // Monday's stock bar closes at 20:00 UTC: the 24x7 Monday bar closes at 00:00 the day after, Sunday's is shown
-    expect(securityOther(bars(stockDays), bars(cryptoDays), '', {}, chart)).toEqual([1, 2, 3, 4, 5, 8]);
-    expect(securityOther(bars(stockDays), bars(cryptoDays), '', { lookahead: true }, chart)).toEqual([2, 3, 4, 5, 6, 9]);
+    expect(securityOther(bars(stockDays), bars(cryptoDays), '', chart)).toEqual([1, 2, 3, 4, 5, 8]);
+    expect(securityOther(bars(stockDays), bars(cryptoDays), '', chart, { lookahead: true })).toEqual([2, 3, 4, 5, 6, 9]);
   });
 
   it('a 24x7 chart shows the stock bar of the same day, repeats it on weekends (gaps off), na with gaps on', () => {
-    const chart: ChartContext = { timeframe: '1D', ...CRYPTO };
+    const chart: OtherSymbolChart = { timeframe: '1D', ...CRYPTO };
     const stock = bars(stockDays);
     // Saturday 03 and Sunday 04 come before the first stock bar: na
-    expect(securityOther(bars(cryptoDays), stock, '', NY, chart)).toEqual([-1, -1, 0, 1, 2, 3, 4, 4, 4, 5]);
-    expect(securityOther(bars(cryptoDays), stock, '', { ...NY, gaps: true }, chart)).toEqual([-1, -1, 0, 1, 2, 3, 4, -1, -1, 5]);
-    expect(securityOther(bars(cryptoDays), stock, '', { ...NY, lookahead: true }, chart)).toEqual([-1, -1, 0, 1, 2, 3, 4, 4, 4, 5]);
-    expect(securityOther(bars(cryptoDays), stock, '', { ...NY, lookahead: true, gaps: true }, chart))
+    expect(securityOther(bars(cryptoDays), stock, '', chart, { other: NY })).toEqual([-1, -1, 0, 1, 2, 3, 4, 4, 4, 5]);
+    expect(securityOther(bars(cryptoDays), stock, '', chart, { other: NY, gaps: true }))
+      .toEqual([-1, -1, 0, 1, 2, 3, 4, -1, -1, 5]);
+    expect(securityOther(bars(cryptoDays), stock, '', chart, { other: NY, lookahead: true }))
+      .toEqual([-1, -1, 0, 1, 2, 3, 4, 4, 4, 5]);
+    expect(securityOther(bars(cryptoDays), stock, '', chart, { other: NY, lookahead: true, gaps: true }))
       .toEqual([-1, -1, 0, 1, 2, 3, 4, -1, -1, 5]);
   });
 
   it('takes the times in ms with chart.timeUnit "ms"', () => {
-    const chart: ChartContext = { timeframe: '1D', ...CRYPTO, timeUnit: 'ms' };
+    const chart: OtherSymbolChart = { timeframe: '1D', ...CRYPTO, timeUnit: 'ms' };
     const ms = (t: number[]) => bars(t.map((x) => x * 1000));
-    expect(securityOther(ms(cryptoDays), ms(stockDays), '', NY, chart)).toEqual([-1, -1, 0, 1, 2, 3, 4, 4, 4, 5]);
+    expect(securityOther(ms(cryptoDays), ms(stockDays), '', chart, { other: NY })).toEqual([-1, -1, 0, 1, 2, 3, 4, 4, 4, 5]);
   });
 
   it('dates the trading day in the exchange time zone (a session that opens on the previous UTC day)', () => {
     // Sydney, 10:00 to 16:00 (UTC+11 in October): the bar of Tuesday 13/10 opens on Monday 12/10 at 23:00 UTC
     const sydney = { timezone: 'Australia/Sydney', session: '1000-1600' };
     const other = bars([utc(2026, 10, 11, 23), utc(2026, 10, 12, 23), utc(2026, 10, 13, 23)]);
-    const chart: ChartContext = { timeframe: '1D', ...CRYPTO };
+    const chart: OtherSymbolChart = { timeframe: '1D', ...CRYPTO };
     const chartBars = bars(days(2026, 10, 12, 14));
-    expect(securityOther(chartBars, other, '', { ...sydney, lookahead: true }, chart)).toEqual([0, 1, 2]);
-    expect(securityOther(chartBars, other, '', sydney, chart)).toEqual([0, 1, 2]);
+    expect(securityOther(chartBars, other, '', chart, { other: sydney, lookahead: true })).toEqual([0, 1, 2]);
+    expect(securityOther(chartBars, other, '', chart, { other: sydney })).toEqual([0, 1, 2]);
   });
 
-  it('reads the time zone and session of the other symbol from chart.symbolInfo', () => {
+  it('takes the chart from the chart context and the calendar of the other symbol from chart.symbolInfo', () => {
     const sydney = { timezone: 'Australia/Sydney', session: '1000-1600' };
     const other = bars([utc(2026, 10, 11, 23), utc(2026, 10, 12, 23), utc(2026, 10, 13, 23)]);
     const chartBars = bars(days(2026, 10, 12, 14));
     const chart: ChartContext = { timeframe: '1D', ...CRYPTO, symbolInfo: (s) => (s === 'ASX:BHP' ? sydney : undefined) };
-    const given = securityOther(chartBars, other, '', { ...sydney, lookahead: true }, chart);
+    const given = securityOther(chartBars, other, '', { timeframe: '1D', ...CRYPTO }, { other: sydney, lookahead: true });
     expect(given).toEqual([0, 1, 2]);
-    expect(securityOther(chartBars, other, '', { symbol: 'ASX:BHP', lookahead: true }, chart)).toEqual(given);
+    const fromContext = (symbol: string) =>
+      securityOther(chartBars, other, '', otherSymbolChart(chartBars, chart), { other: chart.symbolInfo?.(symbol), lookahead: true });
+    expect(fromContext('ASX:BHP')).toEqual(given);
     // unknown symbol: the UTC fallback dates the Sydney bars one day early
-    expect(securityOther(chartBars, other, '', { symbol: 'ASX:XYZ', lookahead: true }, chart)).toEqual([1, 2, 2]);
+    expect(fromContext('ASX:XYZ')).toEqual([1, 2, 2]);
+  });
+
+  it('otherSymbolChart: the timeframe from the bar spacing without a context, ms bar times, state of the last bar', () => {
+    expect(otherSymbolChart(bars(cryptoDays))).toEqual({
+      timeframe: '1D', timezone: undefined, session: undefined, timeUnit: 's', lastBarConfirmed: undefined,
+    });
+    const hours = Array.from({ length: 5 }, (_, k) => utc(2026, 10, 5, k) * 1000);
+    expect(otherSymbolChart(bars(hours))).toMatchObject({ timeframe: '60', timeUnit: 'ms' });
+    expect(otherSymbolChart(bars(hours), { timeframe: '240', ...NY, timeUnit: 'ms', lastBarConfirmed: false }))
+      .toEqual({ timeframe: '240', ...NY, timeUnit: 'ms', lastBarConfirmed: false });
+    expect(otherSymbolChart([]).timeframe).toBe('1D');
   });
 });
 
@@ -77,28 +94,38 @@ describe('securityOther: intraday bars', () => {
   const cryptoHours = Array.from({ length: 10 }, (_, k) => utc(2026, 10, 5, 12 + k));
 
   it('a stock chart shows the 24x7 bar that closed before it closes, and the bar open at its open', () => {
-    const chart: ChartContext = { timeframe: '60', ...NY };
+    const chart: OtherSymbolChart = { timeframe: '60', ...NY };
     const expected = [1, 2, 3, 4, 5, 6, 7];
-    expect(securityOther(bars(stockHours), bars(cryptoHours), '', {}, chart)).toEqual(expected);
-    expect(securityOther(bars(stockHours), bars(cryptoHours), '', { lookahead: true }, chart)).toEqual(expected);
+    expect(securityOther(bars(stockHours), bars(cryptoHours), '', chart)).toEqual(expected);
+    expect(securityOther(bars(stockHours), bars(cryptoHours), '', chart, { lookahead: true })).toEqual(expected);
   });
 
   it('a 24x7 chart shows the short last stock bar of the day as soon as it closes', () => {
-    const chart: ChartContext = { timeframe: '60', ...CRYPTO };
+    const chart: OtherSymbolChart = { timeframe: '60', ...CRYPTO };
     // the 19:30 bar closes at 20:00 with the 19:00 bar of the chart: the 18:30 bar is never shown with gaps on
-    expect(securityOther(bars(cryptoHours), bars(stockHours), '', NY, chart)).toEqual([-1, -1, 0, 1, 2, 3, 4, 6, 6, 6]);
-    expect(securityOther(bars(cryptoHours), bars(stockHours), '', { ...NY, gaps: true }, chart))
+    expect(securityOther(bars(cryptoHours), bars(stockHours), '', chart, { other: NY }))
+      .toEqual([-1, -1, 0, 1, 2, 3, 4, 6, 6, 6]);
+    expect(securityOther(bars(cryptoHours), bars(stockHours), '', chart, { other: NY, gaps: true }))
       .toEqual([-1, -1, 0, 1, 2, 3, 4, 6, -1, -1]);
-    expect(securityOther(bars(cryptoHours), bars(stockHours), '', { ...NY, lookahead: true }, chart))
+    expect(securityOther(bars(cryptoHours), bars(stockHours), '', chart, { other: NY, lookahead: true }))
       .toEqual([-1, -1, 0, 1, 2, 3, 4, 5, 6, 6]);
   });
 
   it('a daily request on an intraday chart: the last completed day, or the day of the bar with lookahead on', () => {
-    const chart: ChartContext = { timeframe: '60', ...NY };
+    const chart: OtherSymbolChart = { timeframe: '60', ...NY };
     // 24x7 days from Saturday 03/10: Monday's stock hours show Sunday (lookahead off) or Monday (lookahead on)
-    expect(securityOther(bars(stockHours), bars(cryptoDays), 'D', {}, chart)).toEqual(new Array(7).fill(1));
-    expect(securityOther(bars(stockHours), bars(cryptoDays), 'D', { lookahead: true }, chart)).toEqual(new Array(7).fill(2));
-    expect(securityOther(bars(stockHours), bars(cryptoDays), 'D', { gaps: true }, chart)).toEqual([1, -1, -1, -1, -1, -1, -1]);
+    expect(securityOther(bars(stockHours), bars(cryptoDays), 'D', chart)).toEqual(new Array(7).fill(1));
+    expect(securityOther(bars(stockHours), bars(cryptoDays), 'D', chart, { lookahead: true })).toEqual(new Array(7).fill(2));
+    expect(securityOther(bars(stockHours), bars(cryptoDays), 'D', chart, { gaps: true })).toEqual([1, -1, -1, -1, -1, -1, -1]);
+  });
+
+  it('a lower timeframe: the last lower bar that closes by the close of the chart bar; the lower bars inside it', () => {
+    // a stock daily chart (the Monday bar opens at 13:30 and closes at 20:00 UTC) and the 24x7 hours of that Monday
+    const chart: OtherSymbolChart = { timeframe: '1D', ...NY };
+    expect(securityOther(bars(stockDays), bars(cryptoHours), '60', chart)).toEqual([7, 9, 9, 9, 9, 9]);
+    // request.security_lower_tf: the hours that close after 13:30 and by 20:00 (13:00 to 19:00), none on the other days
+    expect(securityLowerTf(bars(stockDays), bars(cryptoHours), '60', chart))
+      .toEqual([[1, 8], [10, 10], [10, 10], [10, 10], [10, 10], [10, 10]]);
   });
 });
 
@@ -107,43 +134,38 @@ describe('securityOther: higher timeframes', () => {
     const stock = { timezone: 'America/New_York', session: { session: '0930-1600', holidays: '20260119' } };
     // weeks of 12/01/2026 (opens Monday 14:30 UTC) and of 19/01/2026 (Monday is a holiday: opens Tuesday)
     const weeks = bars([utc(2026, 1, 12, 14, 30), utc(2026, 1, 20, 14, 30)]);
-    const chart: ChartContext = { timeframe: '1D', ...CRYPTO };
+    const chart: OtherSymbolChart = { timeframe: '1D', ...CRYPTO };
     const chartBars = bars(days(2026, 1, 17, 21));
-    expect(securityOther(chartBars, weeks, 'W', { ...stock, lookahead: true }, chart)).toEqual([0, 0, 1, 1, 1]);
+    expect(securityOther(chartBars, weeks, 'W', chart, { other: stock, lookahead: true })).toEqual([0, 0, 1, 1, 1]);
     // lookahead off: the week of 12/01 closed on Friday 16/01, the week of 19/01 is not closed yet
-    expect(securityOther(chartBars, weeks, 'W', stock, chart)).toEqual([0, 0, 0, 0, 0]);
+    expect(securityOther(chartBars, weeks, 'W', chart, { other: stock })).toEqual([0, 0, 0, 0, 0]);
   });
 
   it('a week of the same calendar appears on the bar that closes it; the open last bar shows the open week', () => {
-    const chart: ChartContext = { timeframe: '1D', ...NY };
+    const chart: OtherSymbolChart = { timeframe: '1D', ...NY };
     const weeks = bars([utc(2026, 9, 28, 13, 30), utc(2026, 10, 5, 13, 30), utc(2026, 10, 12, 13, 30)]);
     // no calendar for the other symbol: its bars open at the week starts of the chart calendar, which is used
-    expect(securityOther(bars(stockDays), weeks, 'W', {}, chart)).toEqual([0, 0, 0, 0, 1, 1]);
-    expect(securityOther(bars(stockDays), weeks, 'W', { gaps: true }, chart)).toEqual([0, -1, -1, -1, 1, -1]);
-    expect(securityOther(bars(stockDays), weeks, 'W', { lookahead: true }, chart)).toEqual([1, 1, 1, 1, 1, 2]);
+    expect(securityOther(bars(stockDays), weeks, 'W', chart)).toEqual([0, 0, 0, 0, 1, 1]);
+    expect(securityOther(bars(stockDays), weeks, 'W', chart, { gaps: true })).toEqual([0, -1, -1, -1, 1, -1]);
+    expect(securityOther(bars(stockDays), weeks, 'W', chart, { lookahead: true })).toEqual([1, 1, 1, 1, 1, 2]);
     // realtime updates of the open last bar (gaps off): the open week
-    const open: ChartContext = { ...chart, lastBarConfirmed: false };
-    expect(securityOther(bars(stockDays), weeks, 'W', {}, open)).toEqual([0, 0, 0, 0, 1, 2]);
-    expect(securityOther(bars(stockDays), weeks, 'W', { gaps: true }, open)).toEqual([0, -1, -1, -1, 1, -1]);
-  });
-
-  it('rejects a timeframe lower than the chart timeframe', () => {
-    expect(() => securityOther(bars(stockDays), bars(cryptoDays), '60', {}, { timeframe: '1D', ...NY })).toThrow(RangeError);
+    const open: OtherSymbolChart = { ...chart, lastBarConfirmed: false };
+    expect(securityOther(bars(stockDays), weeks, 'W', open)).toEqual([0, 0, 0, 0, 1, 2]);
+    expect(securityOther(bars(stockDays), weeks, 'W', open, { gaps: true })).toEqual([0, -1, -1, -1, 1, -1]);
   });
 
   it('gives na everywhere without bars of the other symbol', () => {
-    expect(securityOther(bars(stockDays), [], 'D', {}, { timeframe: '1D', ...NY })).toEqual(new Array(6).fill(-1));
-    expect(securityOther([], bars(stockDays), 'D')).toEqual([]);
+    expect(securityOther(bars(stockDays), [], 'D', { timeframe: '1D', ...NY })).toEqual(new Array(6).fill(-1));
+    expect(securityOther([], bars(stockDays), 'D', { timeframe: '1D' })).toEqual([]);
   });
 });
 
 describe('securityOtherValues', () => {
   it('maps the values of an expression on the other bars to the chart bars, NaN for na', () => {
-    const chart: ChartContext = { timeframe: '1D', ...CRYPTO };
+    const chart: OtherSymbolChart = { timeframe: '1D', ...CRYPTO };
     const stock = bars(stockDays).map((b, k) => ({ ...b, close: 100 + k }));
-    const expected = [NaN, NaN, 100, 101, 102, 103, 104, 104, 104, 105];
-    expect(securityOtherValues(bars(cryptoDays), stock, '', stock.map((b) => b.close), NY, chart)).toEqual(expected);
-    expect(securityOtherValues(bars(cryptoDays), stock, '', (b) => b.map((x) => x.close), NY, chart)).toEqual(expected);
+    expect(securityOtherValues(bars(cryptoDays), stock, '', stock.map((b) => b.close), chart, { other: NY }))
+      .toEqual([NaN, NaN, 100, 101, 102, 103, 104, 104, 104, 105]);
   });
 });
 
@@ -160,8 +182,11 @@ describe('spread symbols', () => {
     expect(spreadSymbols('ECONOMICS:XXM2 * FX_IDC:XXXUSD')).toEqual(['ECONOMICS:XXM2', 'FX_IDC:XXXUSD']);
     expect(spreadSymbols('ECONOMICS:FIM2/FX_IDC:USDFIM')).toEqual(['ECONOMICS:FIM2', 'FX_IDC:USDFIM']);
     expect(spreadSymbols(' ECONOMICS:USM2 ')).toEqual(['ECONOMICS:USM2']);
-    expect(spreadOptions('ECONOMICS:USM2')).toEqual({ symbol: 'ECONOMICS:USM2' });
-    expect(spreadOptions('A * B')).toEqual({ timezone: 'Etc/UTC', session: '24x7' });
+    // one ticker: its calendar from chart.symbolInfo; a spread: the 24x7 UTC calendar
+    expect(spreadOptions('ECONOMICS:USM2')).toEqual({ other: undefined });
+    const chart: ChartContext = { symbolInfo: (s) => (s === 'ECONOMICS:USM2' ? NY : undefined) };
+    expect(spreadOptions('ECONOMICS:USM2', chart)).toEqual({ other: NY });
+    expect(spreadOptions('A * B', chart)).toEqual({ other: { timezone: 'Etc/UTC', session: '24x7' } });
   });
 
   it('one bar per trading day of either part from the later first day, last closes of both parts', () => {
@@ -193,8 +218,9 @@ describe('spread symbols', () => {
     // 24x7 chart from Saturday 03/10 to Sunday 11/10/2026: na before the first spread bar, repeated on the weekend
     const chartBars = bars(days(2026, 10, 3, 11));
     const expr = 'ECONOMICS:XXM2 * FX_IDC:XXXUSD';
-    expect(securityOtherValues(chartBars, spreadBars(expr, bySymbol, chart), 'D', (b) => b.map((x) => x.close),
-      spreadOptions(expr), chart)).toEqual([NaN, NaN, 200, 303, 404, 505, 606, 606, 606]);
+    const spreadOf = spreadBars(expr, bySymbol, chart);
+    expect(securityOtherValues(chartBars, spreadOf, 'D', spreadOf.map((x) => x.close), otherSymbolChart(chartBars, chart),
+      spreadOptions(expr, chart))).toEqual([NaN, NaN, 200, 303, 404, 505, 606, 606, 606]);
   });
 });
 
@@ -223,6 +249,8 @@ describe('symbolBarsOf / MissingSymbolDataError', () => {
     } catch (e) {
       error = e;
     }
+    // the library class, as thrown by executeScript
+    expect(MissingSymbolDataError).toBe(ScriptMissingSymbolDataError);
     expect(error).toBeInstanceOf(MissingSymbolDataError);
     expect(error).toBeInstanceOf(Error);
     const missing = error as MissingSymbolDataError;

@@ -17,7 +17,7 @@
  * Other symbols: the bars of every set symbol come from the `bars` accessor of the chart context
  * (`requiredSymbols` lists them); without them `calculate` throws a `MissingSymbolDataError`. The exchange time zone
  * and session of each symbol come from `symbolInfo` of the context. A screening timeframe below the chart timeframe
- * is not supported (an Error is thrown).
+ * shows the last bar of that timeframe that closes by the close of the chart bar, as `request.security`.
  *
  * Chart context (optional third argument of calculate): the chart timeframe (`timeframe`, else read from the bar
  * spacing) gives the text "Timeframe = ..." and the timeframe of the other symbols; with the exchange calendar
@@ -38,7 +38,7 @@ import {
 import type { LabelData } from '../types';
 import { chartTimeframe, hasCalendar, barsAfterLastBar } from '../anchor-period';
 import { symbolBarsOf, type ChartContext, type SymbolRequest } from '../chart-context';
-import { securityOtherValues } from '../other-symbol';
+import { otherSymbolChart, securityOtherValues } from '../other-symbol';
 
 type AssetId =
   | 'asset_01' | 'asset_02' | 'asset_03' | 'asset_04' | 'asset_05' | 'asset_06' | 'asset_07' | 'asset_08'
@@ -106,7 +106,7 @@ export const inputConfig: InputConfig[] = [
   { id: 'checknorm', type: 'bool', title: 'Screen for OB/OS', defval: true },
   { id: 'checkstrong', type: 'bool', title: 'Screen for Strong OB/OS', defval: true },
   { id: 'screenList', type: 'bool', title: '═════════ Asset for Screening ════════', defval: false },
-  ...ASSETS.map((id, i): InputConfig => ({ id, type: 'string', title: `Asset ${String(i + 1).padStart(2, '0')}`, defval: '' })),
+  ...ASSETS.map((id, i): InputConfig => ({ id, type: 'symbol', title: `Asset ${String(i + 1).padStart(2, '0')}`, defval: '' })),
 ];
 
 export const plotConfig: PlotConfig[] = [];
@@ -275,7 +275,7 @@ function assetStatuses(bars: Bar[], cfg: ScreenerMeanReversionChannelInputs, cha
   const bySymbol = new Map<string, number[]>();
   requests.forEach((r, k) => {
     const values = screenMrc(other[k], cfg);
-    bySymbol.set(r.symbol, securityOtherValues(bars, other[k], tf, values, { symbol: r.symbol }, chart));
+    bySymbol.set(r.symbol, securityOtherValues(bars, other[k], tf, values, otherSymbolChart(bars, chart), { other: chart?.symbolInfo?.(r.symbol) }));
   });
   return ASSETS.map((id) => bySymbol.get(cfg[id]) ?? bars.map(() => 0));
 }

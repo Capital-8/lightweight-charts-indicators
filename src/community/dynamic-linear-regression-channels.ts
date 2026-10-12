@@ -17,7 +17,7 @@
 
 import {
   line, linefill, resetDrawings, setDrawingBar, varDrawing, drawingOutputs,
-  type Line, type Linefill, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  type Line, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
@@ -92,13 +92,6 @@ export function calculate(
   const baseLine = varDrawing<Line>();
   const upper = varDrawing<Line>();
   const lower = varDrawing<Line>();
-  // linefill.new(upper, baseLine) and linefill.new(baseLine, lower) run on every bar. A second linefill.new on a pair
-  // that has a live linefill keeps that one (no new object); the library adds one (oakScriptJS #174): the port only
-  // calls linefill.new when the pair has no live linefill (on the first bar, and after the maximum count deleted it).
-  let upperFill: Linefill | null = null;
-  let lowerFill: Linefill | null = null;
-  const alive = (f: Linefill | null) => f !== null && linefill.all().includes(f);
-
   let startIndex = 1; // var start_index = 1
   const at = (a: number[], i: number) => (i >= 0 ? a[i] : NaN);
 
@@ -154,8 +147,8 @@ export function calculate(
       upper.value = line.new(NaN, NaN, NaN, NaN, 'bar_index', undefined, upperLineColor, undefined, 1);
       lower.value = line.new(NaN, NaN, NaN, NaN, 'bar_index', undefined, upperLineColor, undefined, 1);
     }
-    if (!alive(upperFill)) upperFill = linefill.new(upper.value!, baseLine.value!, cfg.colorUpper);
-    if (!alive(lowerFill)) lowerFill = linefill.new(baseLine.value!, lower.value!, cfg.colorLower);
+    linefill.new(upper.value!, baseLine.value!, cfg.colorUpper);
+    linefill.new(baseLine.value!, lower.value!, cfg.colorLower);
 
     const outside = gt(close[i], upperEndPrice[i]) || lt(close[i], lowerEndPrice[i]);
     if (outside && (!isLast || lastConfirmed)) {

@@ -13,10 +13,6 @@
  * Label texts use the chart foreground colour (chart context, `foregroundColorOf`). Drawings need a closed bar: on an
  * open last bar (chart context `lastBarConfirmed` false) none is made there.
  *
- * Library difference (oakScriptJS #174): `line.get_price` is na outside the two points of the line, while Pine
- * extends the line; the level test needs the price at the current bar, after the last point, so the port computes
- * the extended price itself (`priceAt`).
- *
  * Reference: "High Volume Points [BigBeluga]" by BigBeluga
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © BigBeluga
@@ -81,16 +77,6 @@ const X_SCALE = 2.0;
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
-
-/** Pine `line.get_price(id, x)`: the price of the line extended through its two points (na for x1 == x2) */
-function priceAt(l: Line, x: number): number {
-  const x1 = line.get_x1(l);
-  const x2 = line.get_x2(l);
-  const y1 = line.get_y1(l);
-  const y2 = line.get_y2(l);
-  if (x1 === x2) return NaN;
-  return y1 + ((y2 - y1) * (x - x1)) / (x2 - x1);
-}
 
 export function calculate(
   bars: Bar[],
@@ -180,7 +166,7 @@ export function calculate(
     for (let lineNo = 0; lineNo <= qty - 1; lineNo++) {
       if (lineNo < levels.length) {
         const current = levels[lineNo];
-        const level = priceAt(current, i);
+        const level = line.get_price(current, i);
         const s1 = math.sign(prevClose - level);
         const s2 = math.sign(b.close - level);
         // math.sign(na) is na and na != na is false

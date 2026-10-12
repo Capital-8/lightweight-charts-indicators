@@ -21,7 +21,7 @@
 
 import {
   ta, str, color, callsite, Series, line, label, linefill, resetDrawings, setDrawingBar, varDrawing, drawingOutputs,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line, type Label, type Linefill,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line, type Label,
 } from 'oakscriptjs';
 import { foregroundColorOf, type ChartContext } from '../chart-context';
 
@@ -115,17 +115,6 @@ export function calculate(
   // `var color_lines` of the two color_lines() calls
   const lineColor = [cfg.colorUp, cfg.colorDn];
   const upKey = colorKey(cfg.colorUp);
-  // Pine keeps one linefill per pair of lines: linefill.new on a pair that has one changes its colour (same object,
-  // as the object ids of the reference runs show). Library: oakScriptJS #174 (a new linefill per call)
-  const fills = new Map<Line, Map<Line, Linefill>>();
-  const fillPair = (l1: Line | undefined, l2: Line | undefined, col: string) => {
-    if (!l1 || !l2) return; // linefill.new(na, na): no object
-    let inner = fills.get(l1);
-    if (!inner) fills.set(l1, (inner = new Map()));
-    const old = inner.get(l2);
-    if (old) linefill.set_color(old, col);
-    else inner.set(l2, linefill.new(l1, l2, col));
-  };
 
   const yOf = (l: Line | undefined, end: 1 | 2) => (l ? (end === 1 ? line.get_y1(l) : line.get_y2(l)) : NaN);
 
@@ -166,7 +155,8 @@ export function calculate(
       if (lab) label.set_color(lab, String(color.new(fg, 100)));
     }
     if (lab) label.set_size(lab, 'tiny');
-    fillPair(ch.low, ch.top, String(color.new(lineColor[k], 90)));
+    // one linefill per pair: a second call on the pair changes its colour
+    if (ch.low && ch.top) linefill.new(ch.low, ch.top, String(color.new(lineColor[k], 90)));
   };
 
   // trend: var bool = na; na is false in every condition of the script (`not na` is true)

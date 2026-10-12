@@ -11,9 +11,8 @@
  * The report symbol is COT:<code>_F_OI, with the CFTC code of the symbol root (futures), else of its base
  * currency, else of its quote currency, from the "LibraryCOT" library (version 3, the functions used are ported
  * below). The report is requested in both market types: without data on the last closed bar the script stops with
- * an error. The chart context gives the ticker, type and currency; the root (futures: the ticker without its
- * contract suffix) and the base currency (crypto and forex pairs: the ticker without ".P" and without the quote
- * currency) are derived from them, as the context has no such fields.
+ * an error. The chart context gives the ticker, currency, root and base currency (see `rootOf` / `basecurrencyOf`
+ * for a context without the last two).
  *
  * Reference: "Open Interest Stochastic Money Flow Index" by Noldo (uses the "LibraryCOT" library)
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -22,9 +21,9 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, BgColorData } from '../types';
 import {
-  symbolBarsOf, tickerOf, currencyOf, symbolTypeOf, lastBarConfirmedOf, type ChartContext, type SymbolRequest,
+  symbolBarsOf, tickerOf, currencyOf, basecurrencyOf, rootOf, lastBarConfirmedOf, type ChartContext, type SymbolRequest,
 } from '../chart-context';
-import { securityOtherValues } from '../other-symbol';
+import { otherSymbolChart, securityOtherValues } from '../other-symbol';
 
 export interface OpenInterestStochasticMoneyFlowIndexInputs {
   /** Bar colours: 'ON' or 'OFF' */
@@ -174,31 +173,12 @@ const CURRENCY_CODES: Record<string, string> = {
   CAD: '090741', NZD: '112741', GBP: '096742', BRL: '102741', ZAR: '122741', AUD: '232741', ETH: '146021',
 };
 
-/**
- * PineScript `syminfo.root`: the ticker of a futures contract without its contract suffix ("ES1!" -> "ES",
- * "ESH2025" -> "ES"); the ticker for the other symbol types.
- */
-function rootOf(chart?: ChartContext): string {
-  const ticker = tickerOf(chart);
-  if (symbolTypeOf(chart) !== 'futures') return ticker;
-  return ticker.replace(/\d+!$/, '').replace(/[FGHJKMNQUVXZ]\d{4}$/, '');
-}
-
-/** PineScript `syminfo.basecurrency`: the base of a crypto or forex pair ("BTCUSDT.P" quoted in USDT -> "BTC"); else '' */
-function baseCurrencyOf(chart?: ChartContext): string {
-  const type = symbolTypeOf(chart);
-  if (type !== 'crypto' && type !== 'forex') return '';
-  const pair = tickerOf(chart).replace(/\.P$/, '');
-  const quote = currencyOf(chart);
-  return pair.length > quote.length && pair.endsWith(quote) ? pair.slice(0, -quote.length) : '';
-}
-
 /** LibraryCOT version 3 `convertRootToCOTCode("Auto")`, then the overrides of the script (HG, LBR). */
 function cftcCode(chart?: ChartContext): string {
   const ticker = tickerOf(chart);
   const root = rootOf(chart);
   const rootCode = ROOT_CODES.get(root) ?? '';
-  const baseCode = CURRENCY_CODES[baseCurrencyOf(chart)] ?? '';
+  const baseCode = CURRENCY_CODES[basecurrencyOf(chart)] ?? '';
   const mainCode = CURRENCY_CODES[currencyOf(chart)] ?? '';
   const code = root !== ticker && rootCode !== '' ? rootCode : baseCode !== '' ? baseCode : mainCode;
   if (code === '') throw new Error('No root or currency CFTC code found for the current symbol.');
@@ -238,7 +218,7 @@ export function calculate(
   // request.security(tickerId, "1D", close, ignore_invalid_symbol = true): a symbol that does not exist has no bars
   const symbol = cotSymbol(chart);
   const [cotBars] = symbolBarsOf([{ symbol, timeframe: '1D' }], chart);
-  const openInterest = securityOtherValues(bars, cotBars, '1D', (b) => b.map((x) => x.close), { symbol }, chart);
+  const openInterest = securityOtherValues(bars, cotBars, '1D', cotBars.map((x) => x.close), otherSymbolChart(bars, chart), { other: chart?.symbolInfo?.(symbol) });
   // if barstate.islastconfirmedhistory and na(value): runtime.error(...)
   const lastConfirmed = lastBarConfirmedOf(chart) ? n - 1 : n - 2;
   if (lastConfirmed >= 0 && isNaN(openInterest[lastConfirmed])) {

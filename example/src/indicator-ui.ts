@@ -345,6 +345,7 @@ export class IndicatorUI {
           `;
 
         case 'string':
+        case 'symbol': // ticker id of another symbol, e.g. "NASDAQ:MSFT"
         case 'timeframe': // "60", "1D", "" = chart timeframe
         case 'session':
           if (input.options) {

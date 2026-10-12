@@ -12,8 +12,9 @@
  * `request.security`, `session.*`, `time_tradingday`), which have the PineScript rules: trading days from the
  * session and its holidays, sessions that cross midnight, "nD" counted in trading days from the first trading day of
  * the year, weeks from Monday, the start of a D / W / M period at the session start of its first trading day, an
- * intraday bar after an early close outside its day, and a higher-timeframe bar completed by the chart bar whose
- * close reaches the end of the period (`securityPeriods`).
+ * intraday bar after an early close outside its day and its intraday period for `time(tf)` (in the D / W / M bar of
+ * its day for `request.security`), and a higher-timeframe bar completed by the chart bar whose close reaches the end
+ * of the period (`securityPeriods`).
  * `chart.timeframe`, when given, is the chart timeframe; else it is taken from the bar spacing.
  *
  * Without the time zone or the session the port uses the UTC calendar and takes the session start of a trading day
@@ -114,9 +115,9 @@ function calendarPeriodStart(day: number, info: ReturnType<typeof timeframe.info
  * times (seconds as lightweight-charts, or ms). A bar opens a new period (`timeframe.change(tf)`) when its value
  * differs from the previous bar's (see `periodChanges` for the exact PineScript rule). `tf` = "" (the chart
  * timeframe) gives the bar times.
- * With the exchange calendar, `time(tf)` is na on an intraday bar that opens after an early close of its day (D
- * periods): such a bar keeps the period of the bar before it; a bar for which the calendar finds no trading day is
- * its own period.
+ * With the exchange calendar, `time(tf)` is na on an intraday bar that opens after an early close of its day (D and
+ * intraday periods): such a bar keeps the period of the bar before it; a bar for which the calendar finds no trading
+ * day is its own period.
  * @throws RangeError for a string that is not a timeframe, or a tick timeframe
  */
 export function periodStarts(bars: ReadonlyArray<{ time: number }>, tf: string, chart?: ChartContext): number[] {
@@ -182,7 +183,7 @@ export function periodStarts(bars: ReadonlyArray<{ time: number }>, tf: string, 
 /**
  * PineScript `timeframe.change(tf)` of each bar: true on a bar that opens a new `tf` period (false on the first bar).
  * With the exchange calendar it is the rule of the library: a bar whose `time(tf)` is na (an intraday bar after an
- * early close, for D periods) is no change, and neither is the bar after it. Else: `periodStarts` differs from the
+ * early close, for D and intraday periods) is no change, and neither is the bar after it. Else: `periodStarts` differs from the
  * previous bar's.
  * @throws RangeError for a string that is not a timeframe, or a tick timeframe
  */

@@ -367,7 +367,9 @@ export function calculate(
       const topCol = array.binary_search_leftmost(idrow, top);
       const btmCol = array.binary_search_leftmost(idrow, btm);
       forTo(btmCol, topCol, (x) => {
-        mapped.set(i, mapped.get(i)! + (up[x] - dn[x]));
+        // mappedLevel.get(i) + (newRowUp.get(x) - newRowDn.get(x)): PineScript evaluates a + (b - c) left to
+        // right, as (a + b) - c
+        mapped.set(i, (mapped.get(i)! + up[x]) - dn[x]);
       });
     });
     const valArr = [...mapped.values()];

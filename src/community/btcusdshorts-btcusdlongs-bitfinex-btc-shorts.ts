@@ -13,7 +13,7 @@
 import { color, type Bar, type IndicatorResult, type InputConfig, type PlotConfig } from 'oakscriptjs';
 import { symbolBarsOf, type ChartContext, type SymbolRequest } from '../chart-context';
 import { chartTimeframe } from '../anchor-period';
-import { securityOtherValues } from '../other-symbol';
+import { otherSymbolChart, securityOtherValues } from '../other-symbol';
 
 export type BitfinexBtcShortsLongsInputs = Record<string, never>;
 
@@ -54,8 +54,10 @@ export function calculate(
   const [shortBars, longBars] = symbolBarsOf([{ symbol: SHORTS, timeframe: tf }, { symbol: LONGS, timeframe: tf }], chart);
   // shorts = pow(security("BITFINEX:BTCUSDSHORTS", period, close), 1.0)
   const closes = (other: ReadonlyArray<Bar>) => other.map((b) => b.close);
-  const shorts = securityOtherValues(bars, shortBars, '', closes, { symbol: SHORTS }, chart).map((v) => Math.pow(v, 1.0));
-  const longs = securityOtherValues(bars, longBars, '', closes, { symbol: LONGS }, chart).map((v) => Math.pow(v, 1.0));
+  const shorts = securityOtherValues(bars, shortBars, '', closes(shortBars), otherSymbolChart(bars, chart), { other: chart?.symbolInfo?.(SHORTS) })
+    .map((v) => Math.pow(v, 1.0));
+  const longs = securityOtherValues(bars, longBars, '', closes(longBars), otherSymbolChart(bars, chart), { other: chart?.symbolInfo?.(LONGS) })
+    .map((v) => Math.pow(v, 1.0));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },

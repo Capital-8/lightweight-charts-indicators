@@ -183,11 +183,8 @@ export function calculate(
     lookback = math.round((bars[n - 1].time * toMs - visibleRangeOf(bars, chart).leftTime) / barMs);
   }
   if (isNaN(lookback)) return result([]);
-  // ta.highest(lookback_bars) / ta.lowest(lookback_bars) stop the script on the first bar. A length above 15,000 bars
-  // throws in the library; a length of 0 or less gives na there, so the port throws the error of the original itself
-  if (lookback <= 0) {
-    throw new Error(`Error on bar 0: Invalid value of the 'length' argument (${lookback.toFixed(1)}) in the 'highest' function. It must be > 0.`);
-  }
+  // ta.highest(lookback_bars) / ta.lowest(lookback_bars) stop the script on the first bar for a length of 0 or less or
+  // above 15,000 bars (the library throws the error of the original)
 
   // the lines are created on the first bar and placed on the last bar (barstate.islast)
   const last = n - 1;

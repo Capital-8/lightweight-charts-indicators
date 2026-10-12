@@ -31,7 +31,7 @@ import type { MarkerData, LabelData, TableData, TableCellData } from '../types';
 import type { ChartContext, SymbolRequest } from '../chart-context';
 import { backgroundColorOf, lastBarConfirmedOf, symbolBarsOf } from '../chart-context';
 import { chartTimeframe } from '../anchor-period';
-import { securityOther } from '../other-symbol';
+import { otherSymbolChart, securityOther } from '../other-symbol';
 
 export interface HalftrendLongShortSignalEngineInputs {
   amplitude: number;
@@ -95,11 +95,11 @@ export const inputConfig: InputConfig[] = [
     tooltip: 'Multiplier for the Average True Range (ATR) to establish the upper and lower channel bands.' },
   { id: 'baseRiskMult', type: 'float', title: 'Base Risk', defval: 3, step: 0.1, group: RISK,
     tooltip: 'Sets SL distance from HalfTrend line, and TP1 distance from entry. TP2 is 2x, TP3 is 3x.' },
-  { id: 'sym1', type: 'string', title: 'Symbol 1', defval: 'BINANCE:BTCUSD', group: DASH, tooltip: 'First symbol tracked in the multi-asset dashboard.' },
-  { id: 'sym2', type: 'string', title: 'Symbol 2', defval: 'BINANCE:ETHUSD', group: DASH, tooltip: 'Second symbol tracked in the multi-asset dashboard.' },
-  { id: 'sym3', type: 'string', title: 'Symbol 3', defval: 'BINANCE:SOLUSD', group: DASH, tooltip: 'Third symbol tracked in the multi-asset dashboard.' },
-  { id: 'sym4', type: 'string', title: 'Symbol 4', defval: 'OANDA:EURUSD', group: DASH, tooltip: 'Fourth symbol tracked in the multi-asset dashboard.' },
-  { id: 'sym5', type: 'string', title: 'Symbol 5', defval: 'OANDA:XAUUSD', group: DASH, tooltip: 'Fifth symbol tracked in the multi-asset dashboard.' },
+  { id: 'sym1', type: 'symbol', title: 'Symbol 1', defval: 'BINANCE:BTCUSD', group: DASH, tooltip: 'First symbol tracked in the multi-asset dashboard.' },
+  { id: 'sym2', type: 'symbol', title: 'Symbol 2', defval: 'BINANCE:ETHUSD', group: DASH, tooltip: 'Second symbol tracked in the multi-asset dashboard.' },
+  { id: 'sym3', type: 'symbol', title: 'Symbol 3', defval: 'BINANCE:SOLUSD', group: DASH, tooltip: 'Third symbol tracked in the multi-asset dashboard.' },
+  { id: 'sym4', type: 'symbol', title: 'Symbol 4', defval: 'OANDA:EURUSD', group: DASH, tooltip: 'Fourth symbol tracked in the multi-asset dashboard.' },
+  { id: 'sym5', type: 'symbol', title: 'Symbol 5', defval: 'OANDA:XAUUSD', group: DASH, tooltip: 'Fifth symbol tracked in the multi-asset dashboard.' },
   { id: 'channelDeviationUp', type: 'int', title: 'Channel Deviation Transparency', defval: 70, min: 0, max: 100, group: STYLE },
   { id: 'colorBull', type: 'color', title: 'Bullish', defval: '#00E676', inline: 'trend', group: STYLE },
   { id: 'colorBear', type: 'color', title: 'Bearish', defval: '#F23645', inline: 'trend', group: STYLE,
@@ -253,7 +253,7 @@ export function calculate(
   const otherBars = symbolBarsOf(symbols.map((symbol) => ({ symbol, timeframe: tf })), chart);
   const otherTrend = new Map<string, number>();
   symbols.forEach((symbol, k) => {
-    const index = securityOther(bars, otherBars[k], tf, { symbol }, chart);
+    const index = securityOther(bars, otherBars[k], tf, otherSymbolChart(bars, chart), { other: chart?.symbolInfo?.(symbol) });
     const trend = halfTrend(otherBars[k], cfg.amplitude).trend;
     const j = n > 0 ? index[n - 1] : -1;
     otherTrend.set(symbol, j < 0 ? NaN : trend[j]);
