@@ -698,6 +698,18 @@
    "barColors": 401
   }
  },
+ "support-resistance-channels-mtf": {
+  "daily": {
+   "plots": {},
+   "boxes": 6,
+   "tables": 1
+  },
+  "m15": {
+   "plots": {},
+   "boxes": 3,
+   "tables": 1
+  }
+ },
  "ict-silver-bullet": {
   "daily": {
    "plots": {},

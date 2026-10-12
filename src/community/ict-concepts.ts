@@ -37,8 +37,10 @@
  * Original notice: © LuxAlgo
  */
 
-import { ta, Series, color, math, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import { executeScript, indicator as declareIndicator, box, line, label } from 'oakscriptjs/script';
+import {
+  ta, Series, color, math, timeframe, time as pineTime, setDrawingBar, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
+import { executeScript, indicator as declareIndicator, box, line, label, holdDrawing } from 'oakscriptjs/script';
 import type { BgColorData, BoxData, LabelData, LineDrawingData, MarkerData } from '../types';
 import { chartTimeframe } from '../anchor-period';
 import { nowOf, timezoneOf, type ChartContext } from '../chart-context';
@@ -359,6 +361,8 @@ export function calculate(
   // General calculations
   const tf = chartTimeframe(bars, chart);
   const tfMsec = tf === '' ? NaN : timeframe.in_seconds(tf) * 1000;
+  /** Bar size for the clock-change rule of the session tests */
+  const barMs = Number.isNaN(tfMsec) ? undefined : tfMsec;
   const timenow = nowOf(chart);
   // syminfo.timezone: `dayofweek` is read in the exchange time zone
   const exchangeTz = timezoneOf(chart);
@@ -436,9 +440,11 @@ export function calculate(
       x: new Array<number>(maxSize).fill(0),
       y: new Array<number>(maxSize).fill(NaN),
     };
-    // Fibonacci lines (created on the first bar, without coordinates)
+    // Fibonacci lines: `var line` variables created on the first bar, without coordinates. The registry counts them
+    // but never deletes them (the bar loop below gives the registry the current bar)
+    setDrawingBar(0, lastIndex === 0);
     const fibLine = (css: string, transp: number, style: 'solid' | 'dashed' | 'dotted', extend: 'none' | 'right') =>
-      line.new(NaN, NaN, NaN, NaN, xlocFib, extend, String(color.new(css, transp)), style);
+      holdDrawing(line.new(NaN, NaN, NaN, NaN, xlocFib, extend, String(color.new(css, transp)), style));
     const _diag = fibLine(SILVER, 50, 'dashed', 'none');
     const _vert = fibLine(SILVER, 50, 'dotted', 'none');
     const _zero = fibLine(SILVER, 5, 'solid', ext);
@@ -485,6 +491,7 @@ export function calculate(
     let dow1 = NaN;
 
     for (let i = 0; i < n; i++) {
+      setDrawingBar(i, i === lastIndex);
       const open = O[i];
       const high = H[i];
       const low = L[i];
@@ -697,10 +704,10 @@ export function calculate(
       }
 
       // ---- Killzones: time(timeframe.period, session, time zone) and show ----
-      const ny = showNy && pineTime.inSession(time, cfg.nySession, 'America/New_York');
-      const ldn_open = showLdno && pineTime.inSession(time, cfg.ldnoSession, 'Europe/London');
-      const ldn_close = showLdnc && pineTime.inSession(time, cfg.ldncSession, 'Europe/London');
-      const asian = showAsia && pineTime.inSession(time, cfg.asiaSession, 'Asia/Tokyo');
+      const ny = showNy && pineTime.inSession(time, cfg.nySession, 'America/New_York', barMs);
+      const ldn_open = showLdno && pineTime.inSession(time, cfg.ldnoSession, 'Europe/London', barMs);
+      const ldn_close = showLdnc && pineTime.inSession(time, cfg.ldncSession, 'Europe/London', barMs);
+      const asian = showAsia && pineTime.inSession(time, cfg.asiaSession, 'Asia/Tokyo', barMs);
 
       // ---- Candles ----
       const candle = (k: number) => {
@@ -1170,6 +1177,7 @@ export function calculate(
       brBrkConf1 = brBrkConf;
       dow1 = dow;
     }
+    setDrawingBar(null);
   }, bars, {}, { timeUnit: msTimes ? 'ms' : 's' });
 
   return {

@@ -72,6 +72,8 @@ export function calculate(
   // t = time(timeframe.period, sess + ":1234567")
   const session = `${cfg.sess}:1234567`;
   const timezone = timezoneOf(chart);
+  // bar size for the clock-change rule of the session test (intraday bars)
+  const barMs = info !== null && info.isintraday ? timeframe.in_seconds(tf) * 1000 : undefined;
 
   const plot0: Array<{ time: number; value: number; color?: string }> = [];
   const plot1: Array<{ time: number; value: number; color?: string }> = [];
@@ -80,7 +82,7 @@ export function calculate(
   let prevLow = NaN;
   for (let i = 0; i < n; i++) {
     const { time, high, low } = bars[i];
-    const inSession = pineTime.inSession(inMs ? time : time * 1000, session, timezone);
+    const inSession = pineTime.inSession(inMs ? time : time * 1000, session, timezone, barMs);
     const isFirst = inSession && !prevIn;
     let orbHigh = isFirst ? high : prevHigh;
     let orbLow = isFirst ? low : prevLow;

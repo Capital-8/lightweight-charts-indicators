@@ -33,10 +33,12 @@
  * Original notice: © LuxAlgo
  */
 
-import { str, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  str, color, timeframe, box, line, resetDrawings, setDrawingBar, drawingOutputs,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Box,
+} from 'oakscriptjs';
 import type { BoxData, LineDrawingData, TableData, TableCellData } from '../types';
-import { barInterval, barTime } from '../bar-time';
-import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
 
 export interface FairValueGapLuxalgoInputs {
@@ -117,21 +119,6 @@ interface Fvg {
   isbull: boolean;
   t: number;
 }
-interface Area {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-  bg: string;
-  deleted: boolean;
-}
-interface Level {
-  time1: number;
-  time2: number;
-  price: number;
-  color: string;
-  dashed: boolean;
-}
 
 /**
  * request.security(syminfo.tickerid, tf, ...) without lookahead: the bars of timeframe `tf` built from the chart
@@ -145,76 +132,11 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`Fair Value Gap: the timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
   }
-  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
-  // complete them come from the library rule (see anchor-period.ts)
-  const exchange = securityBars(bars, tf, context);
-  if (exchange) {
-    // the time of a bar of the timeframe: its first chart bar
-    const htf = exchange.htf.map((b, k) => ({ ...b, time: bars[exchange.first[k]].time }));
-    return { htf, latest: exchange.latest };
-  }
-  const n = bars.length;
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      // the time of a bar of the timeframe: its first chart bar (a level line starts on that bar)
-      htf.push({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
-
-  // A bar completes its period when its close reaches the end of the period. Symbols that trade every day follow
-  // the UTC calendar: the period of the close time is another period. Other symbols: the last bar of a period.
-  const ms = n > 0 && bars[0].time >= 1e12;
-  const weekend = (t: number) => {
-    const wd = new Date(ms ? t : t * 1000).getUTCDay();
-    return wd === 0 || wd === 6;
-  };
-  const interval = barInterval(bars);
-  const closes = bars.map((b) => ({ time: b.time + interval }));
-  const calendar = bars.some((b) => weekend(b.time)) && closes.some((b) => weekend(b.time));
-  const closeStarts = calendar ? periodStarts(closes, tf) : [];
-  // The last bar of a symbol that does not trade every day: its period is complete when the next possible bar is in
-  // another period. The next bar is on the same day while the bar is earlier in the day than the last bar of the
-  // trading day before; else it is on the next weekday.
-  let lastEnds = true;
-  if (!calendar && n > 1) {
-    const DAY = 86400000;
-    const toMs = (t: number) => (ms ? t : t * 1000);
-    const lastMs = toMs(bars[n - 1].time);
-    const day = Math.floor(lastMs / DAY) * DAY;
-    let next = lastMs + toMs(interval);
-    let sessionOver = true;
-    if (toMs(interval) < DAY) {
-      let j = n - 2;
-      while (j >= 0 && toMs(bars[j].time) >= day) j--;
-      sessionOver = j < 0 || lastMs - day >= toMs(bars[j].time) % DAY;
-    }
-    if (sessionOver) {
-      next = day + DAY;
-      while (weekend(ms ? next : next / 1000)) next += DAY;
-    }
-    const withNext = periodStarts([...bars, { time: ms ? next : next / 1000 }], tf);
-    lastEnds = withNext[n] !== withNext[n - 1];
-  }
-  const latest: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let done = i === 0 ? -1 : latest[i - 1];
-    if (i > 0 && group[i] !== group[i - 1]) done = Math.max(done, group[i] - 1);
-    const ends = i === n - 1 ? lastEnds : starts[i + 1] !== starts[i];
-    const reaches = !calendar || closeStarts[i] !== starts[i];
-    if (ends && reaches) done = Math.max(done, group[i]);
-    latest.push(done);
-  }
-  return { htf, latest };
+  // The periods and the bars that complete them: the exchange calendar of the chart context (time zone and
+  // session), else the UTC calendar rule; grouped and completed by the library (see anchor-period.ts)
+  const { htf, latest, first } = higherTimeframeBars(bars, tf, context);
+  // the time of a bar of the timeframe: its first chart bar
+  return { htf: htf.map((b, k) => ({ ...b, time: bars[first[k]].time })), latest };
 }
 
 export function calculate(
@@ -257,24 +179,13 @@ export function calculate(
     }
   }
 
-  // Live drawings in creation order: when a creation brings the count above max + 5, the oldest are deleted until
-  // max remain
-  const allBoxes: Area[] = [];
-  const newBox = (b: Omit<Area, 'deleted'>): Area => {
-    const o = { ...b, deleted: false };
-    allBoxes.push(o);
-    if (allBoxes.length > MAX_OBJECTS + 5) for (const old of allBoxes.splice(0, allBoxes.length - MAX_OBJECTS)) old.deleted = true;
-    return o;
-  };
-  const deleteBox = (b: Area | undefined) => {
-    if (!b || b.deleted) return;
-    b.deleted = true;
-    allBoxes.splice(allBoxes.indexOf(b), 1);
-  };
-  let allLines: Level[] = [];
-  const newLine = (l: Level) => {
-    allLines.push(l);
-    if (allLines.length > MAX_OBJECTS + 5) allLines = allLines.slice(allLines.length - MAX_OBJECTS);
+  // Boxes and lines in the drawing registry of the library (max_boxes_count / max_lines_count 500)
+  resetDrawings({ box: MAX_OBJECTS, line: MAX_OBJECTS });
+  const ms = n > 0 && bars[0].time >= 1e12;
+  const toMs = (t: number) => (ms ? t : t * 1000);
+  // line.new(get.t, price, time, price, xloc.bar_time, color = css, style = ...)
+  const newLine = (t1: number, t2: number, price: number, css: string, dashed: boolean) => {
+    line.new(toMs(t1), price, toMs(t2), price, 'bar_time', undefined, css, dashed ? 'dashed' : undefined);
   };
 
   let maxBull = NaN;
@@ -287,13 +198,14 @@ export function calculate(
   let bearMitigated = 0;
   let t = 0;
   const records: Fvg[] = [];
-  const areas: Area[] = [];
+  const areas: Box[] = [];
   const plot0: number[] = [];
   const plot1: number[] = [];
   const plot2: number[] = [];
   const plot3: number[] = [];
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === last);
     const close = bars[i].close;
     const time = bars[i].time;
     const k = latest[i];
@@ -307,7 +219,7 @@ export function calculate(
         maxBull = fvg!.max;
         minBull = fvg!.min;
       } else {
-        areas.unshift(newBox({ left: i - 2, top: fvg!.max, right: i + cfg.extend, bottom: fvg!.min, bg: bullCss }));
+        areas.unshift(box.new(i - 2, fvg!.max, i + cfg.extend, fvg!.min, NaN, undefined, undefined, undefined, undefined, bullCss));
       }
       records.unshift(fvg!);
       bullCount += 1;
@@ -321,7 +233,7 @@ export function calculate(
         maxBear = fvg.max;
         minBear = fvg.min;
       } else {
-        areas.unshift(newBox({ left: i - 2, top: fvg.max, right: i + cfg.extend, bottom: fvg.min, bg: bearCss }));
+        areas.unshift(box.new(i - 2, fvg.max, i + cfg.extend, fvg.min, NaN, undefined, undefined, undefined, undefined, bearCss));
       }
       records.unshift(fvg);
       bearCount += 1;
@@ -335,14 +247,14 @@ export function calculate(
       const get = records[j];
       if (get.isbull) {
         if (lt(close, get.min)) {
-          if (cfg.mitigationLevels) newLine({ time1: get.t, time2: time, price: get.min, color: bullCss, dashed: true });
-          if (!dynamic) deleteBox(areas.splice(j, 1)[0]);
+          if (cfg.mitigationLevels) newLine(get.t, time, get.min, bullCss, true);
+          if (!dynamic) box.delete(areas.splice(j, 1)[0]);
           records.splice(j, 1);
           bullMitigated += 1;
         }
       } else if (gt(close, get.max)) {
-        if (cfg.mitigationLevels) newLine({ time1: get.t, time2: time, price: get.max, color: bearCss, dashed: true });
-        if (!dynamic) deleteBox(areas.splice(j, 1)[0]);
+        if (cfg.mitigationLevels) newLine(get.t, time, get.max, bearCss, true);
+        if (!dynamic) box.delete(areas.splice(j, 1)[0]);
         records.splice(j, 1);
         bearMitigated += 1;
       }
@@ -353,7 +265,7 @@ export function calculate(
       for (let j = 0; j <= Math.min(cfg.showLast - 1, records.length - 1); j++) {
         const get = records[j];
         const price = get.isbull ? get.min : get.max;
-        newLine({ time1: get.t, time2: time, price, color: get.isbull ? bullCss : bearCss, dashed: false });
+        newLine(get.t, time, price, get.isbull ? bullCss : bearCss, false);
       }
     }
 
@@ -392,8 +304,8 @@ export function calculate(
     frameWidth: 1,
   };
 
-  const interval = barInterval(bars);
-  const T = (index: number) => barTime(bars, index, interval);
+  setDrawingBar(null);
+  const drawings = drawingOutputs(bars, ms ? 'ms' : 's');
   const P = (values: number[]) => values.map((value, i) => ({ time: bars[i].time, value }));
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -402,13 +314,8 @@ export function calculate(
       { plot1: 'plot0', plot2: 'plot1', colors: bars.map(() => bullCss) },
       { plot1: 'plot2', plot2: 'plot3', colors: bars.map(() => bearCss) },
     ],
-    boxes: allBoxes.map((b) => ({
-      time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom, bgColor: b.bg, borderColor: 'transparent',
-    })),
-    lines: allLines.map((l) => ({
-      time1: l.time1, price1: l.price, time2: l.time2, price2: l.price, color: l.color,
-      ...(l.dashed ? { style: 'dashed' as const } : {}),
-    })),
+    boxes: drawings.boxes ?? [],
+    lines: drawings.lines ?? [],
     tables: n > 0 ? [table] : [],
   };
 }

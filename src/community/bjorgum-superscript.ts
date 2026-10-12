@@ -37,9 +37,9 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, getSourceSeries, color, str, array, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { ta, Series, getSourceSeries, color, str, array, heikinAshi, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, MarkerData, PineSize, PlotBarData, PlotCandleData, TableCellData, TableData, TablePosition } from '../types';
-import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
+import { executeScript, ta as scriptTa } from 'oakscriptjs/script';
 import { barInterval } from '../bar-time';
 import type { ChartContext } from '../chart-context';
 
@@ -501,21 +501,13 @@ export function calculate(
   };
   const t3 = (src: Series, length: number, alpha: number) => gd(gd(gd(src, length, alpha), length, alpha), length, alpha);
 
-  // _haVal(): Heikin-Ashi values
-  const haO: number[] = new Array(n);
-  const haH: number[] = new Array(n);
-  const haL: number[] = new Array(n);
-  const haC: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const b = bars[i];
-    haC[i] = (b.open + b.high + b.low + b.close) / 4;
-    // _o := na(_o[1]) ? (open + close) / 2 : (nz(_o[1]) + nz(_c[1])) / 2
-    const prevO = i > 0 ? haO[i - 1] : NaN;
-    const prevC = i > 0 ? haC[i - 1] : NaN;
-    haO[i] = Number.isNaN(prevO) ? (b.open + b.close) / 2 : (prevO + (Number.isNaN(prevC) ? 0 : prevC)) / 2;
-    haH[i] = Math.max(b.high, Math.max(haO[i], haC[i]));
-    haL[i] = Math.min(b.low, Math.min(haO[i], haC[i]));
-  }
+  // _haVal(): Heikin-Ashi values (_c = ohlc4, _o = average of the previous _o and _c, (open + close) / 2 on the first
+  // bar, _h / _l = extremes of high / low, _o and _c): the Heikin Ashi bars of the library
+  const ha = heikinAshi(bars);
+  const haO = ha.map((b) => b.open);
+  const haH = ha.map((b) => b.high);
+  const haL = ha.map((b) => b.low);
+  const haC = ha.map((b) => b.close);
 
   // _ma(src, type, length)
   const ma = (type: MaType, length: number): number[] => {
@@ -543,7 +535,8 @@ export function calculate(
       case 'SWMA': return A(ta.swma(source));
       case 'VWAP': {
         // ta.vwap(src), anchor timeframe.change("1D"). Intraday bars: a new anchor on each trading day of the
-        // exchange, which the library finds from the time zone and the session of the chart context
+        // exchange: the script API function with its default anchor, run with the time zone and the session of the
+        // chart context (as in Pine, the sums start on the first bar)
         const interval = barInterval(bars);
         if (interval > 0 && interval < DAY_SECONDS) {
           if (chart?.timezone === undefined || chart.session === undefined) {
@@ -552,17 +545,9 @@ export function calculate(
               + 'resets on each trading day, which needs the exchange time zone and session.',
             );
           }
-          let newDay: number[] = [];
-          executeScript(() => { newDay = A(scriptTimeframe.change('1D')); }, bars, {}, chart);
-          // sum(src * volume) / sum(volume) since the first bar of the trading day (from the first bar on the first day)
-          const src = A(source);
-          let sumPv = 0;
-          let sumV = 0;
-          return src.map((v, i) => {
-            if (newDay[i] === 1) { sumPv = 0; sumV = 0; }
-            if (!Number.isNaN(v) && !Number.isNaN(volume[i])) { sumPv += v * volume[i]; sumV += volume[i]; }
-            return sumPv / sumV;
-          });
+          let vwap: number[] = [];
+          executeScript(() => { vwap = A(scriptTa.vwap(source)); }, bars, {}, chart);
+          return vwap;
         }
         // Daily and higher bars: a new anchor on every bar, so sum(src * volume) / sum(volume) over the bar alone
         // (0 / 0 = na without volume)

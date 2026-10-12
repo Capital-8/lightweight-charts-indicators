@@ -17,8 +17,8 @@
  * Original notice: © Pmgjiv
  */
 
-import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import { executeScript, indicator as declareIndicator, box, line, label } from 'oakscriptjs/script';
+import { ta, Series, color, setDrawingBar, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { executeScript, indicator as declareIndicator, box, line, label, varDrawing } from 'oakscriptjs/script';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 
 export interface FluidtradesSmcLiteInputs {
@@ -208,13 +208,14 @@ export function calculate(
     let lastHigh = 0;
     let timeLow = 0;
     let timeHigh = 0;
-    let li: Line | null = null;
+    const li = varDrawing<Line>(); // var line li = na
     const drawLine = () => line.new(timeHigh - sl, lastHigh, timeLow - sl, lastLow, 'bar_index', undefined, zigzagCss, undefined, 2);
     const deleteLine = () => {
-      if (li) line.delete(li);
+      if (li.value) line.delete(li.value);
     };
 
     for (let i = 0; i < n; i++) {
+      setDrawingBar(i, i === n - 1);
       if (!Number.isNaN(swingHigh[i])) {
         addPop(swingHighValues, swingHigh[i]);
         addPop(swingHighBns, i - sl);
@@ -244,13 +245,13 @@ export function calculate(
           lastLow = lowBack;
           timeLow = i;
           deleteLine();
-          li = drawLine();
+          li.value = drawLine();
         }
         if (isMax && gt(highBack, lastLow)) {
           lastHigh = highBack;
           timeHigh = i;
           dirUp = false;
-          li = drawLine();
+          li.value = drawLine();
         }
       }
       if (!dirUp) {
@@ -258,22 +259,23 @@ export function calculate(
           lastHigh = highBack;
           timeHigh = i;
           deleteLine();
-          li = drawLine();
+          li.value = drawLine();
         }
         if (isMin && gt(lastHigh, lowBack)) {
           lastLow = lowBack;
           timeLow = i;
           dirUp = true;
-          li = drawLine();
+          li.value = drawLine();
           if (isMax && gt(highBack, lastLow)) {
             lastHigh = highBack;
             timeHigh = i;
             dirUp = false;
-            li = drawLine();
+            li.value = drawLine();
           }
         }
       }
     }
+    setDrawingBar(null);
   }, bars);
 
   return {

@@ -21,7 +21,7 @@
  * Original notice: © LuxAlgo
  */
 
-import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, setDrawingBar, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { executeScript, indicator as declareIndicator, box, line, label } from 'oakscriptjs/script';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 
@@ -114,127 +114,134 @@ export function calculate(
   const min = bars.map((b) => (cfg.useBody ? Math.min(b.close, b.open) : b.low));
   const ms = (i: number) => bars[i].time * 1000;
 
-  const run = executeScript(() => {
-    declareIndicator(metadata.title, { overlay: true, max_lines_count: 500, max_labels_count: 500, max_boxes_count: 500 });
-    let os = 0;
-    let top: Swing = { y: NaN, x: NaN, crossed: false };
-    let btm: Swing = { y: NaN, x: NaN, crossed: false };
-    const bullishOb: Ob[] = [];
-    const bearishOb: Ob[] = [];
-    let prevBullConf = NaN;
-    let prevBearConf = NaN;
+  let run: ReturnType<typeof executeScript>;
+  try {
+    run = executeScript(() => {
+      declareIndicator(metadata.title, { overlay: true, max_lines_count: 500, max_labels_count: 500, max_boxes_count: 500 });
+      let os = 0;
+      let top: Swing = { y: NaN, x: NaN, crossed: false };
+      let btm: Swing = { y: NaN, x: NaN, crossed: false };
+      const bullishOb: Ob[] = [];
+      const bearishOb: Ob[] = [];
+      let prevBullConf = NaN;
+      let prevBearConf = NaN;
 
-    for (let i = 0; i < n; i++) {
-      const bar = bars[i];
-      // swings(length)
-      const prevOs = i > 0 ? os : NaN; // os[1] (na on the first bar)
-      if (i >= length && gt(bars[i - length].high, upper[i])) os = 0;
-      else if (i >= length && gt(lower[i], bars[i - length].low)) os = 1;
-      // `os[1] != 0` is false when os[1] is na
-      if (os === 0 && !Number.isNaN(prevOs) && prevOs !== 0) top = { y: bars[i - length].high, x: i - length, crossed: false };
-      if (os === 1 && !Number.isNaN(prevOs) && prevOs !== 1) btm = { y: bars[i - length].low, x: i - length, crossed: false };
+      for (let i = 0; i < n; i++) {
+        // the bar of the drawing rules of the registry (count limit on the last bar, bar index more than 10,000 back)
+        setDrawingBar(i, i === n - 1);
+        const bar = bars[i];
+        // swings(length)
+        const prevOs = i > 0 ? os : NaN; // os[1] (na on the first bar)
+        if (i >= length && gt(bars[i - length].high, upper[i])) os = 0;
+        else if (i >= length && gt(lower[i], bars[i - length].low)) os = 1;
+        // `os[1] != 0` is false when os[1] is na
+        if (os === 0 && !Number.isNaN(prevOs) && prevOs !== 0) top = { y: bars[i - length].high, x: i - length, crossed: false };
+        if (os === 1 && !Number.isNaN(prevOs) && prevOs !== 1) btm = { y: bars[i - length].low, x: i - length, crossed: false };
 
-      // Bullish OB
-      let bullBreakConf = 0;
-      if (gt(bar.close, top.y) && !top.crossed) {
-        top.crossed = true;
-        let minima = max[i - 1];
-        let maxima = min[i - 1];
-        let loc = ms(i - 1);
-        // for i = 1 to (n - top.x) - 1 (counts down when the end is below 1)
-        const end = i - top.x - 1;
-        for (let k = 1; end >= 1 ? k <= end : k >= end; k += end >= 1 ? 1 : -1) {
-          minima = Math.min(min[i - k], minima);
-          if (eq(minima, min[i - k])) {
-            maxima = max[i - k];
-            loc = ms(i - k);
+        // Bullish OB
+        let bullBreakConf = 0;
+        if (gt(bar.close, top.y) && !top.crossed) {
+          top.crossed = true;
+          let minima = max[i - 1];
+          let maxima = min[i - 1];
+          let loc = ms(i - 1);
+          // for i = 1 to (n - top.x) - 1 (counts down when the end is below 1)
+          const end = i - top.x - 1;
+          for (let k = 1; end >= 1 ? k <= end : k >= end; k += end >= 1 ? 1 : -1) {
+            minima = Math.min(min[i - k], minima);
+            if (eq(minima, min[i - k])) {
+              maxima = max[i - k];
+              loc = ms(i - k);
+            }
+          }
+          bullishOb.unshift({ top: maxima, btm: minima, loc, breaker: false, breakLoc: NaN });
+        }
+        for (let k = bullishOb.length - 1; k >= 0; k--) {
+          const element = bullishOb[k];
+          if (!element.breaker) {
+            if (gt(element.btm, Math.min(bar.close, bar.open))) {
+              element.breaker = true;
+              element.breakLoc = ms(i);
+            }
+          } else if (gt(bar.close, element.top)) {
+            bullishOb.splice(k, 1);
+          } else if (k < showBull && gt(element.top, top.y) && gt(top.y, element.btm)) {
+            bullBreakConf = 1;
           }
         }
-        bullishOb.unshift({ top: maxima, btm: minima, loc, breaker: false, breakLoc: NaN });
-      }
-      for (let k = bullishOb.length - 1; k >= 0; k--) {
-        const element = bullishOb[k];
-        if (!element.breaker) {
-          if (gt(element.btm, Math.min(bar.close, bar.open))) {
-            element.breaker = true;
-            element.breakLoc = ms(i);
-          }
-        } else if (gt(bar.close, element.top)) {
-          bullishOb.splice(k, 1);
-        } else if (k < showBull && gt(element.top, top.y) && gt(top.y, element.btm)) {
-          bullBreakConf = 1;
+        if (bullBreakConf > prevBullConf && cfg.showLabels) {
+          label.new(top.x, top.y, '▼', undefined, undefined, NA_COLOR, 'label_down', notransp(cfg.bearCss), 'tiny');
         }
-      }
-      if (bullBreakConf > prevBullConf && cfg.showLabels) {
-        label.new(top.x, top.y, '▼', undefined, undefined, NA_COLOR, 'label_down', notransp(cfg.bearCss), 'tiny');
-      }
-      prevBullConf = bullBreakConf;
+        prevBullConf = bullBreakConf;
 
-      // Bearish OB
-      let bearBreakConf = 0;
-      if (gt(btm.y, bar.close) && !btm.crossed) {
-        btm.crossed = true;
-        let minima = min[i - 1];
-        let maxima = max[i - 1];
-        let loc = ms(i - 1);
-        const end = i - btm.x - 1;
-        for (let k = 1; end >= 1 ? k <= end : k >= end; k += end >= 1 ? 1 : -1) {
-          maxima = Math.max(max[i - k], maxima);
-          if (eq(maxima, max[i - k])) {
-            minima = min[i - k];
-            loc = ms(i - k);
+        // Bearish OB
+        let bearBreakConf = 0;
+        if (gt(btm.y, bar.close) && !btm.crossed) {
+          btm.crossed = true;
+          let minima = min[i - 1];
+          let maxima = max[i - 1];
+          let loc = ms(i - 1);
+          const end = i - btm.x - 1;
+          for (let k = 1; end >= 1 ? k <= end : k >= end; k += end >= 1 ? 1 : -1) {
+            maxima = Math.max(max[i - k], maxima);
+            if (eq(maxima, max[i - k])) {
+              minima = min[i - k];
+              loc = ms(i - k);
+            }
+          }
+          bearishOb.unshift({ top: maxima, btm: minima, loc, breaker: false, breakLoc: NaN });
+        }
+        for (let k = bearishOb.length - 1; k >= 0; k--) {
+          const element = bearishOb[k];
+          if (!element.breaker) {
+            if (gt(Math.max(bar.close, bar.open), element.top)) {
+              element.breaker = true;
+              element.breakLoc = ms(i);
+            }
+          } else if (gt(element.btm, bar.close)) {
+            bearishOb.splice(k, 1);
+          } else if (k < showBear && gt(btm.y, element.btm) && gt(element.top, btm.y)) {
+            bearBreakConf = 1;
           }
         }
-        bearishOb.unshift({ top: maxima, btm: minima, loc, breaker: false, breakLoc: NaN });
-      }
-      for (let k = bearishOb.length - 1; k >= 0; k--) {
-        const element = bearishOb[k];
-        if (!element.breaker) {
-          if (gt(Math.max(bar.close, bar.open), element.top)) {
-            element.breaker = true;
-            element.breakLoc = ms(i);
-          }
-        } else if (gt(element.btm, bar.close)) {
-          bearishOb.splice(k, 1);
-        } else if (k < showBear && gt(btm.y, element.btm) && gt(element.top, btm.y)) {
-          bearBreakConf = 1;
+        if (bearBreakConf > prevBearConf && cfg.showLabels) {
+          label.new(btm.x, btm.y, '▲', undefined, undefined, NA_COLOR, 'label_up', notransp(cfg.bullCss), 'tiny');
         }
+        prevBearConf = bearBreakConf;
       }
-      if (bearBreakConf > prevBearConf && cfg.showLabels) {
-        label.new(btm.x, btm.y, '▲', undefined, undefined, NA_COLOR, 'label_up', notransp(cfg.bullCss), 'tiny');
-      }
-      prevBearConf = bearBreakConf;
-    }
 
-    // Set Order Blocks (barstate.islast; boxes and lines of earlier bars are deleted on every bar)
-    if (n === 0) return;
-    const time = ms(n - 1);
-    const timeNext = time; // Pine time + 1 (1 ms later): drawn on the last bar
-    const display = (id: Ob, css: string, breakCss: string) => {
-      if (id.breaker) {
-        box.new(id.loc, id.top, id.breakLoc, id.btm, notransp(css), undefined, undefined, undefined, 'bar_time', css);
-        box.new(id.breakLoc, id.top, timeNext, id.btm, NA_COLOR, undefined, undefined, 'right', 'bar_time', breakCss);
-        line.new(id.loc, id.top, id.breakLoc, id.top, 'bar_time', undefined, notransp(css));
-        line.new(id.loc, id.btm, id.breakLoc, id.btm, 'bar_time', undefined, notransp(css));
-        line.new(id.breakLoc, id.top, timeNext, id.top, 'bar_time', 'right', notransp(breakCss), 'dashed');
-        line.new(id.breakLoc, id.btm, timeNext, id.btm, 'bar_time', 'right', notransp(breakCss), 'dashed');
-      } else {
-        box.new(id.loc, id.top, time, id.btm, NA_COLOR, undefined, undefined, 'right', 'bar_time', css);
-        line.new(id.loc, id.top, time, id.top, 'bar_time', 'right', notransp(css));
-        line.new(id.loc, id.btm, time, id.btm, 'bar_time', 'right', notransp(css));
-      }
-    };
-    const displayAll = (obs: Ob[], show: number, css: string, breakCss: string) => {
-      if (show <= 0) return;
-      // for i = 0 to math.min(show - 1, size): array.get(size) is a Pine runtime error
-      for (let k = 0; k <= Math.min(show - 1, obs.length); k++) {
-        if (k >= obs.length) throw new Error(`In 'array.get()' function. Index ${k} is out of bounds, array size is ${obs.length}.`);
-        display(obs[k], css, breakCss);
-      }
-    };
-    displayAll(bullishOb, showBull, cfg.bullCss, cfg.bullBreakCss);
-    displayAll(bearishOb, showBear, cfg.bearCss, cfg.bearBreakCss);
-  }, bars);
+      // Set Order Blocks (barstate.islast; boxes and lines of earlier bars are deleted on every bar)
+      if (n === 0) return;
+      const time = ms(n - 1);
+      const timeNext = time; // Pine time + 1 (1 ms later): drawn on the last bar
+      const display = (id: Ob, css: string, breakCss: string) => {
+        if (id.breaker) {
+          box.new(id.loc, id.top, id.breakLoc, id.btm, notransp(css), undefined, undefined, undefined, 'bar_time', css);
+          box.new(id.breakLoc, id.top, timeNext, id.btm, NA_COLOR, undefined, undefined, 'right', 'bar_time', breakCss);
+          line.new(id.loc, id.top, id.breakLoc, id.top, 'bar_time', undefined, notransp(css));
+          line.new(id.loc, id.btm, id.breakLoc, id.btm, 'bar_time', undefined, notransp(css));
+          line.new(id.breakLoc, id.top, timeNext, id.top, 'bar_time', 'right', notransp(breakCss), 'dashed');
+          line.new(id.breakLoc, id.btm, timeNext, id.btm, 'bar_time', 'right', notransp(breakCss), 'dashed');
+        } else {
+          box.new(id.loc, id.top, time, id.btm, NA_COLOR, undefined, undefined, 'right', 'bar_time', css);
+          line.new(id.loc, id.top, time, id.top, 'bar_time', 'right', notransp(css));
+          line.new(id.loc, id.btm, time, id.btm, 'bar_time', 'right', notransp(css));
+        }
+      };
+      const displayAll = (obs: Ob[], show: number, css: string, breakCss: string) => {
+        if (show <= 0) return;
+        // for i = 0 to math.min(show - 1, size): array.get(size) is a Pine runtime error
+        for (let k = 0; k <= Math.min(show - 1, obs.length); k++) {
+          if (k >= obs.length) throw new Error(`In 'array.get()' function. Index ${k} is out of bounds, array size is ${obs.length}.`);
+          display(obs[k], css, breakCss);
+        }
+      };
+      displayAll(bullishOb, showBull, cfg.bullCss, cfg.bullBreakCss);
+      displayAll(bearishOb, showBear, cfg.bearCss, cfg.bearBreakCss);
+    }, bars);
+  } finally {
+    setDrawingBar(null);
+  }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },

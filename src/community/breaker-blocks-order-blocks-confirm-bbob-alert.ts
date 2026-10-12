@@ -35,7 +35,10 @@
  * Original notice: © TFlab
  */
 
-import { ta, Series, color, callsite, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, color, callsite, line, linefill, resetDrawings, setDrawingBar, holdDrawing, releaseDrawing,
+  type Line, type Linefill, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { LineDrawingData, LinefillData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 
@@ -258,8 +261,6 @@ export const metadata = {
 
 /** indicator(max_lines_count = 500): also the limit of the fills */
 const MAX_LINES = 500;
-/** indicator(max_bars_back = 5000) */
-const MAX_BARS_BACK = 5000;
 
 /** Pine float comparisons: a > b only when a - b > 1e-10 (a >= b when a - b >= -1e-10); na compares false */
 const EPS = 1e-10;
@@ -354,24 +355,8 @@ function switchingColorMode(css: string, mode: ThemeMode): string {
 
 // ── Drawings ──
 
-interface Ln {
-  x1: number;
-  y: number;
-  x2: number;
-  color: string;
-  style: 'dashed' | 'dotted';
-  deleted: boolean;
-}
-interface Fill {
-  line1: Ln;
-  line2: Ln;
-  color: string;
-  deleted: boolean;
-  /** Bar on which the variable of the library that held this fill got another one (null: still held) */
-  released: number | null;
-}
-/** A zone: two edge lines, the middle line and the fill between the edges */
-interface Zone { distal: Ln | null; proximal: Ln | null; mid: Ln | null; fill: Fill | null }
+/** A zone: two edge lines, the middle line and the fill between the edges (the `var` variables of the library) */
+interface Zone { distal: Line | null; proximal: Line | null; mid: Line | null; fill: Linefill | null }
 
 /** Outputs of one OBRefiner() call: the bar and the distal / proximal prices of the block */
 interface Refined { x: number; distal: number; proximal: number }
@@ -400,58 +385,30 @@ export function calculate(
   const midCss = String(color.rgb(0, 0, 0));
   const themed = (css: string) => switchingColorMode(css, cfg.themeMode);
 
-  // Lines in creation order. When a creation brings the count above max + 5, the oldest are deleted until max
-  // remain. A line held by a `var` variable of the libraries is never deleted by this limit, but it counts.
-  // Fills have the same limit with another rule for the fills that are kept: a fill held by a `var` variable, or
-  // released by it less than max_bars_back bars ago, is skipped; when the count is still above max + 5 after that,
-  // the oldest fills are deleted until max remain, whatever their state. A fill whose line was deleted is not
-  // drawn but still counts.
-  const lines: Ln[] = [];
-  const fills: Fill[] = [];
-  const held = new Set<Ln>();
-  const hold = (before: Ln | null, now: Ln): Ln => {
-    if (before) held.delete(before);
-    held.add(now);
-    return now;
+  // Drawings of the library registry (maximum count 500 for the lines and the fills). The libraries keep the lines
+  // and the fill of a zone in `var` variables: such a line is never deleted by the maximum count, and a fill is
+  // skipped while it is held or less than 5,000 bars after it was released.
+  resetDrawings({ line: MAX_LINES });
+  /** `variable := object`: the variable holds the new object and releases the one before */
+  const assign = <T extends object>(before: T | null, now: T): T => {
+    releaseDrawing(before);
+    return holdDrawing(now);
   };
-  const newLine = (x1: number, y: number, x2: number, css: string, style: 'dashed' | 'dotted'): Ln => {
-    const o: Ln = { x1, y, x2, color: css, style, deleted: false };
-    lines.push(o);
-    if (lines.length > MAX_LINES + 5) {
-      for (let k = 0; k < lines.length && lines.length > MAX_LINES; ) {
-        if (held.has(lines[k])) k++;
-        else lines.splice(k, 1)[0].deleted = true;
-      }
-    }
-    return o;
+  const newLine = (x1: number, y: number, x2: number, css: string, style: 'dashed' | 'dotted'): Line =>
+    line.new(x1, y, x2, y, 'bar_index', 'none', css, style, 1);
+  const deleteLine = (l: Line | null) => {
+    if (l) line.delete(l);
   };
-  const deleteLine = (l: Ln | null) => {
-    if (!l || l.deleted) return;
-    l.deleted = true;
-    lines.splice(lines.indexOf(l), 1);
-  };
-  const setX2 = (l: Ln | null, x: number) => {
-    if (l && !l.deleted) l.x2 = x;
+  const setX2 = (l: Line | null, x: number) => {
+    if (l) line.set_x2(l, x);
   };
   const noZone = (): Zone => ({ distal: null, proximal: null, mid: null, fill: null });
   /** A new zone on bar `x2` (the current bar), in place of the zone `before` of the same variables */
   const newZone = (before: Zone, index: number, distalPrice: number, proximalPrice: number, x2: number, css: string): Zone => {
-    const distal = hold(before.distal, newLine(index, distalPrice, x2, edgeCss, 'dashed'));
-    const proximal = hold(before.proximal, newLine(index, proximalPrice, x2, edgeCss, 'dashed'));
-    const mid = hold(before.mid, newLine(index, (proximalPrice + distalPrice) / 2, x2, midCss, 'dotted'));
-    const fill: Fill = { line1: distal, line2: proximal, color: css, deleted: false, released: null };
-    fills.push(fill);
-    if (fills.length > MAX_LINES + 5) {
-      for (let k = 0; k < fills.length && fills.length > MAX_LINES; ) {
-        const f = fills[k];
-        if (f === fill || f.released === null || x2 - f.released < MAX_BARS_BACK) k++;
-        else fills.splice(k, 1)[0].deleted = true;
-      }
-      if (fills.length > MAX_LINES + 5) {
-        for (const dropped of fills.splice(0, fills.length - MAX_LINES)) dropped.deleted = true;
-      }
-    }
-    if (before.fill) before.fill.released = x2;
+    const distal = assign(before.distal, newLine(index, distalPrice, x2, edgeCss, 'dashed'));
+    const proximal = assign(before.proximal, newLine(index, proximalPrice, x2, edgeCss, 'dashed'));
+    const mid = assign(before.mid, newLine(index, (proximalPrice + distalPrice) / 2, x2, midCss, 'dotted'));
+    const fill = assign(before.fill, linefill.new(distal, proximal, css));
     return { distal, proximal, mid, fill };
   };
   const growZone = (z: Zone, x: number) => {
@@ -463,10 +420,7 @@ export function calculate(
     deleteLine(z.distal);
     deleteLine(z.proximal);
     deleteLine(z.mid);
-    if (z.fill && !z.fill.deleted) {
-      z.fill.deleted = true;
-      fills.splice(fills.indexOf(z.fill), 1);
-    }
+    if (z.fill) linefill.delete(z.fill);
   };
   /** The mitigation level of the libraries: "50 % OB" is the only name of the middle level (another name is na) */
   const level = (kind: string, proximal: number, distal: number) =>
@@ -970,6 +924,7 @@ export function calculate(
   };
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const { low, close } = bars[i];
     const prevLastMLL = lastMLL;
     const prevLastMHH = lastMHH;
@@ -1286,9 +1241,9 @@ export function calculate(
     // before the last one (as in the original, the second value replaces the first one)
     if (advIndex.length > 4) {
       const beyond = (k: number) => gt(L(k), chBuLowest);
-      chBuLowest = lowestMLL(low, i - lastMLL);
+      chBuLowest = lowestMLL(low, i - lastMLL, i);
       correctBuIndex = countBeyond(i, correctBuIndex, i - lastMLL, beyond);
-      chBuLowest = lowestSub(low, i - lastPivotIndex02);
+      chBuLowest = lowestSub(low, i - lastPivotIndex02, i);
       correctBuIndexSub = countBeyond(i, correctBuIndexSub, i - lastPivotIndex02, beyond);
     }
     if (bullMajorChoCh && advIndex.length > 2) {
@@ -1368,9 +1323,9 @@ export function calculate(
 
     // Demand block of a break of structure
     if (advIndex.length > 10) {
-      boSBuLowest = lowestBoS(low, i - lastPivotIndex);
+      boSBuLowest = lowestBoS(low, i - lastPivotIndex, i);
       correctBuBoSIndex = countBeyond(i, correctBuBoSIndex, i - lastPivotIndex, (k) => gt(L(k), boSBuLowest));
-      boSBuLowest02 = lowestBoS02(low, i - lastPivotIndex02);
+      boSBuLowest02 = lowestBoS02(low, i - lastPivotIndex02, i);
       correctBuBoSIndex02 = countBeyond(i, correctBuBoSIndex02, i - lastPivotIndex02, (k) => gt(L(k), boSBuLowest02));
     }
     if (bullMajorBoS && advIndex.length > 2) {
@@ -1400,9 +1355,9 @@ export function calculate(
 
     // Supply blocks of a change of character
     if (advIndex.length > 4) {
-      chBeHighest = highestMHH(bars[i].high, i - lastMHH);
+      chBeHighest = highestMHH(bars[i].high, i - lastMHH, i);
       correctBeIndex = countBeyond(i, correctBeIndex, i - lastMHH, (k) => lt(H(k), chBeHighest));
-      chBeHighestSub = highestSub(bars[i].high, i - lastPivotIndex02);
+      chBeHighestSub = highestSub(bars[i].high, i - lastPivotIndex02, i);
       correctBeIndexSub = countBeyond(i, correctBeIndexSub, i - lastPivotIndex02, (k) => lt(H(k), chBeHighestSub));
     }
     if (bearMajorChoCh && advIndex.length > 2) {
@@ -1525,18 +1480,19 @@ export function calculate(
 
   const interval = barInterval(bars);
   const T = (index: number) => barTime(bars, index, interval);
-  // a line with an na coordinate is not drawn
-  const drawn = (l: Ln) => !isNaN(l.x1) && !isNaN(l.x2) && !isNaN(l.y);
-  const out = (l: Ln): LineDrawingData => ({
-    time1: T(l.x1), price1: l.y, time2: T(l.x2), price2: l.y, color: l.color, width: 1, style: l.style,
+  setDrawingBar(null);
+  // a line with an na coordinate (also a deleted line) is not drawn
+  const drawn = (l: Line) => !isNaN(l.x1) && !isNaN(l.x2) && !isNaN(l.y1);
+  const out = (l: Line): LineDrawingData => ({
+    time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: String(l.color), width: 1, style: l.style as 'dashed' | 'dotted',
   });
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
-    lines: lines.filter(drawn).map(out),
+    lines: line.all().filter(drawn).map(out),
     // a fill whose line was deleted is not drawn
-    linefills: fills.filter((f) => !f.deleted && !f.line1.deleted && !f.line2.deleted && drawn(f.line1) && drawn(f.line2))
-      .map((f) => ({ line1: out(f.line1), line2: out(f.line2), color: f.color })),
+    linefills: linefill.all().filter((f) => drawn(f.line1) && drawn(f.line2))
+      .map((f) => ({ line1: out(f.line1), line2: out(f.line2), color: String(f.color) })),
   };
 }
 

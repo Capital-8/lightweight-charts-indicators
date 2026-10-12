@@ -51,9 +51,12 @@
  * research contributions from xtech5192.
  */
 
-import { ta, Series, color, math, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, box, color, math, str, timeframe, time as pineTime, resample, periodClose, chartSessions, resetDrawings,
+  setDrawingBar, varDrawing, type Box, type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { BarColorData, BoxData, LabelData, LineDrawingData, TableCellData, TableData } from '../types';
-import { chartTimeframe, periodStarts, securityBars } from '../anchor-period';
+import { barsAfterLastBar, chartTimeframe, hasCalendar, periodChanges, periodStarts, securityBars } from '../anchor-period';
 import { barInterval, barTime } from '../bar-time';
 import { currencyOf, mintickOf, symbolTypeOf, timezoneOf, type ChartContext } from '../chart-context';
 
@@ -728,7 +731,7 @@ interface Ln {
 interface Lb { x: number; y: number; text: string; textColor: string; align: 'right' | 'center'; byTime: boolean }
 interface Bx {
   left: number; top: number; right: number; bottom: number;
-  bg: string; border: string; borderWidth: number; extend: 'none' | 'right'; deleted: boolean;
+  bg: string; border: string; borderWidth: number; extend: 'none' | 'right';
 }
 
 /** The 8 market sessions: hours (UTC without daylight saving time) and the region whose daylight saving time they follow */
@@ -778,6 +781,8 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
   const mult = info.multiplier;
   const tfSeconds = timeframe.in_seconds(tf);
   const tfMs = mult * 60 * 1000; // timeframe.multiplier * 60 * 1000, as the original
+  // bar size for the clock-change rule of the session test (intraday bars)
+  const barMs = info.isintraday ? tfSeconds * 1000 : undefined;
   const show = info.isminutes && mult <= 240 && mult >= 1;
   const showDly = info.isminutes;
   const validTimeFrame = info.isintraday;
@@ -807,24 +812,33 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
   const ema800 = A(ta.ema(closeS, 800));
   const cloud = A(ta.stdev(closeS, 100)).map((v) => v / 4);
 
-  // time('D'), time('W'), time('M') and newBar(res): ta.change(time(res)) != 0
+  // time('D'), time('W'), time('M') and newBar(res): ta.change(time(res)) != 0 (timeframe.change(res))
   const startsOf = (res: string) => periodStarts(bars, res, chart);
   const dStarts = startsOf('D');
-  const newBarOf = (starts: number[]) => starts.map((s, i) => i > 0 && s !== starts[i - 1]);
-  const newBarD = newBarOf(dStarts);
+  const newBarOf = (res: string) => periodChanges(bars, res, chart);
+  const newBarD = newBarOf('D');
   /** Index of the last bar that opens a period (-1: none) */
   const lastNewBar = (flags: boolean[]) => flags.lastIndexOf(true);
 
-  // time_close: the bar time plus the chart timeframe, at most the end of the session of the day when the context
-  // gives day session hours (e.g. "0930-1600")
-  const sessionHours = typeof chart?.session === 'string' ? chart.session : chart?.session?.session;
-  const dayHours = sessionHours !== undefined && info.isintraday ? /^(\d\d)(\d\d)-(\d\d)(\d\d)$/.exec(sessionHours.trim()) : null;
+  // Exchange calendar of the context (time zone and session of the symbol), for time_close and the times after the
+  // last bar
+  let calendar: SessionContext | null = null;
+  if (hasCalendar(chart) && n > 0) {
+    calendar = {
+      timeframe: tf, timezone: chart!.timezone, session: chart!.session, regularSession: chart!.regularSession,
+      timeUnit: unit === 1 ? 'ms' : 's',
+    };
+    try {
+      chartSessions(calendar);
+    } catch {
+      calendar = null;
+    }
+  }
+  // time_close: on intraday bars with the exchange calendar, the close of the bar on the calendar (the session end,
+  // an early close); else the bar time plus the chart timeframe
   const closeMs = (i: number) => {
-    const t = tMs(i);
-    const c = t + tfSeconds * 1000;
-    if (dayHours === null) return c;
-    const end = pineTime.timestamp(tz, pineTime.year(t, tz), pineTime.month(t, tz), pineTime.dayofmonth(t, tz), Number(dayHours[3]), Number(dayHours[4]), 0);
-    return end > t && end < c ? end : c;
+    const c = calendar && info.isintraday ? periodClose(bars[i].time, tf, calendar) : NaN;
+    return Number.isNaN(c) ? tMs(i) + tfSeconds * 1000 : c;
   };
 
   // Higher timeframe bars of the chart symbol (the first one is made of the bars loaded, as on a symbol whose
@@ -837,21 +851,7 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
       return { bars: sec.htf, group: sec.group, prev };
     }
     // Without the exchange calendar: the periods of the UTC calendar; a period is complete on its last chart bar
-    const starts = startsOf(res);
-    const out: Bar[] = [];
-    const group: number[] = [];
-    bars.forEach((b, i) => {
-      if (i === 0 || starts[i] !== starts[i - 1]) {
-        out.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-      } else {
-        const h = out[out.length - 1];
-        h.high = Math.max(h.high, b.high);
-        h.low = Math.min(h.low, b.low);
-        h.close = b.close;
-        h.volume = (h.volume ?? NaN) + (b.volume ?? NaN);
-      }
-      group.push(out.length - 1);
-    });
+    const { bars: out, group } = resample(bars, startsOf(res));
     return { bars: out, group, prev: group.map((g, i) => (i === 0 ? -1 : g - 1)) };
   };
   const NO_HTF: Htf = { bars: [], group: new Array(n).fill(-1), prev: new Array(n).fill(-1) };
@@ -912,28 +912,21 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
     pvsra.push(flags.get(c)!);
   }
 
-  // Boxes alive, in creation order. When a creation brings the count above max + 5 the oldest are deleted until max
-  // remain; a box held by a `var` variable (the opening range box of each session call) is not deleted by this
-  // limit, but it counts.
-  const liveBoxes: Bx[] = [];
-  const heldBoxes = new Set<Bx>();
-  const newBox = (b: Omit<Bx, 'deleted'>, held = false): Bx => {
-    const o: Bx = { ...b, deleted: false };
-    if (held) heldBoxes.add(o);
-    liveBoxes.push(o);
-    if (liveBoxes.length > MAX_BOXES + 5) {
-      for (let k = 0; k < liveBoxes.length && liveBoxes.length > MAX_BOXES; ) {
-        if (heldBoxes.has(liveBoxes[k])) k++;
-        else liveBoxes.splice(k, 1)[0].deleted = true;
-      }
-    }
-    return o;
+  // Boxes in the drawing registry of the library: each box of the script has an object of the registry, which keeps
+  // at most max_boxes_count boxes with the rules of the original platform; a box held by a `var` variable (the
+  // opening range box of each session call) is not deleted by this limit, but it counts.
+  resetDrawings({ box: MAX_BOXES });
+  const boxData = new Map<Box, Bx>();
+  const refOf = new WeakMap<Bx, Box>();
+  const newBox = (b: Bx): Bx => {
+    const ref = box.new(b.left, b.top, b.right, b.bottom);
+    boxData.set(ref, b);
+    refOf.set(b, ref);
+    return b;
   };
-  const deleteBox = (b: Bx) => {
-    if (b.deleted) return;
-    b.deleted = true;
-    liveBoxes.splice(liveBoxes.indexOf(b), 1);
-  };
+  /** True for a box deleted by the script or by the limit (its getters return na) */
+  const deleted = (b: Bx) => Number.isNaN(box.get_left(refOf.get(b)!));
+  const deleteBox = (b: Bx) => box.delete(refOf.get(b)!);
 
   // calcSessionStartEnd(): the end of the session that starts on bar i, then its length in bars
   const sessionDuration = (i: number, hours: string, gmt: string) => {
@@ -979,6 +972,7 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
     const style: LineStyle = cfg.rectStyle === 'Solid' ? 'solid' : 'dashed';
     let orPrev = NaN; // session[1] of drawOpenRange
     let orBox: Bx | null = null;
+    const orVar = varDrawing<Box>(); // the `var` variable of the opening range box
     let prev = NaN; // session[1] of drawSessionHiLo
     let hi = 0;
     let lo = 10000000000.0;
@@ -993,16 +987,16 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
       if (!showRectangle) return;
       const b = bars[i];
       // time(timeframe.period, session, gmt): the bar time inside the session, else na
-      const session = pineTime.inSession(tMs(i), sessionString, gmt) ? tMs(i) : NaN;
+      const session = pineTime.inSession(tMs(i), sessionString, gmt, barMs) ? tMs(i) : NaN;
 
       // drawOpenRange()
       if (showOr) {
         if (!isNaN(session) && isNaN(orPrev)) {
           const right = mult === 1 ? i : i + sessionDuration(i, hours, gmt);
-          if (orBox !== null) heldBoxes.delete(orBox);
-          orBox = newBox({ left: i, top: b.high, right, bottom: b.low, bg: boxColor, border: 'transparent', borderWidth: 1, extend: 'none' }, true);
+          orBox = newBox({ left: i, top: b.high, right, bottom: b.low, bg: boxColor, border: 'transparent', borderWidth: 1, extend: 'none' });
+          orVar.value = refOf.get(orBox);
         } else if (mult === 1 && ((isNaN(orPrev) && !isNaN(session)) || orPrev < session)) {
-          if (orBox !== null && !orBox.deleted) orBox.right = i + 1;
+          if (orBox !== null && !deleted(orBox)) orBox.right = i + 1;
         }
         orPrev = session;
       }
@@ -1075,8 +1069,9 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
       const valbox = boxArr[k];
       if (valbox === null) continue;
       // box.get_bottom / box.get_top of a box deleted by the count limit: na
-      const valbottom = valbox.deleted ? NaN : valbox.bottom;
-      const valtop = valbox.deleted ? NaN : valbox.top;
+      const gone = deleted(valbox);
+      const valbottom = gone ? NaN : valbox.bottom;
+      const valtop = gone ? NaN : valbox.top;
       if (direction === 1) {
         if (ge(b.close, valtop) || ge(b.high, valtop)) {
           deleteBox(valbox);
@@ -1120,6 +1115,7 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const t = tMs(i);
+    setDrawingBar(i, i === last);
 
     // calcDst(): daylight saving time of New York, London and Sydney from the calendar date of the bar
     let nyDST = false;
@@ -1161,8 +1157,8 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
 
     // calcPsyLevels()
     if (showPsylevels) {
-      const inPsy = psyType === 'crypto' ? pineTime.inSession(t, '2200-0600:1', sydDST ? 'GMT+1' : 'GMT')
-        : pineTime.inSession(t, '0000-0800:2', 'GMT');
+      const inPsy = psyType === 'crypto' ? pineTime.inSession(t, '2200-0600:1', sydDST ? 'GMT+1' : 'GMT', barMs)
+        : pineTime.inSession(t, '0000-0800:2', 'GMT', barMs);
       if (inPsy) {
         psyHi = inPsyPrev ? Math.max(b.high, psyHi) : b.high;
         psyLo = inPsyPrev ? Math.min(b.low, psyLo) : b.low;
@@ -1185,6 +1181,7 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
       cleanarr(zoneBoxesBelow);
     }
   }
+  setDrawingBar(null);
 
   // Plots
   const P = (f: (i: number) => { value: number; color?: string }) => bars.map((b, i) => ({ time: b.time, ...f(i) }));
@@ -1237,8 +1234,8 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
   const dayStartMs = dStarts[last] * unit;
   const levelStart = info.isseconds || (info.isminutes && mult < 5) ? dayStartMs : dayStartMs - DAY;
   const firstOfDay = lastNewBar(newBarD);
-  const newBarW = validTimeFrame ? newBarOf(startsOf('W')) : [];
-  const newBarM = validTimeFrame ? newBarOf(startsOf('M')) : [];
+  const newBarW = validTimeFrame ? newBarOf('W') : [];
+  const newBarM = validTimeFrame ? newBarOf('M') : [];
   const addLabel = (x: number, y: number, text: string, textColor: string, align: 'right' | 'center') => {
     labels.push({ x, y, text, textColor, align, byTime: true });
   };
@@ -1484,7 +1481,15 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
 
   // Output: an object with an na coordinate is not drawn
   const interval = barInterval(bars);
-  const X = (x: number, byTime: boolean) => (byTime ? x / unit : barTime(bars, x, interval));
+  // A time after the last bar (xloc.bar_time) is drawn on the bar that contains it: with the exchange calendar, the
+  // future bar of the trading calendar (closed hours and days skipped), given as a bar slot of the chart (last bar
+  // time plus k bar intervals); without it, the time itself
+  const atTime = (t: number) => {
+    if (!calendar || !(t > bars[last].time)) return t;
+    const k = barsAfterLastBar(bars, t, chart);
+    return Number.isNaN(k) ? t : bars[last].time + k * interval;
+  };
+  const X = (x: number, byTime: boolean) => (byTime ? atTime(x / unit) : barTime(bars, x, interval));
   result.lines = lines.filter((l) => !isNaN(l.y1) && !isNaN(l.y2)).map((l) => ({
     time1: X(l.x1, l.byTime), price1: l.y1, time2: X(l.x2, l.byTime), price2: l.y2, color: l.color,
     ...(l.style !== 'solid' ? { style: l.style } : {}),
@@ -1495,7 +1500,7 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
     time: X(l.x, l.byTime), price: l.y, text: l.text, textColor: l.textColor, style: 'none' as const,
     ...(l.align === 'right' ? { textAlign: 'right' as const } : {}),
   }));
-  result.boxes = liveBoxes.map((b) => ({
+  result.boxes = box.all().map((ref) => boxData.get(ref)!).map((b) => ({
     time1: barTime(bars, b.left, interval), price1: b.top, time2: barTime(bars, b.right, interval), price2: b.bottom,
     bgColor: b.bg, borderColor: b.border,
     ...(b.borderWidth !== 1 ? { borderWidth: b.borderWidth } : {}),

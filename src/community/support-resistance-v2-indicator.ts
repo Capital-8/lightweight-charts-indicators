@@ -27,7 +27,10 @@
  * Original notice: © BarsStallone. Code update provided by @christofferka
  */
 
-import { ta, math, Series, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, math, Series, timeframe, resample, line, resetDrawings, setDrawingBar, varDrawing, drawingOutputs,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line,
+} from 'oakscriptjs';
 import type { LineDrawingData } from '../types';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
@@ -83,21 +86,8 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   // rule (see anchor-period.ts)
   const exchange = securityBars(bars, tf, context);
   if (exchange) return { htf: exchange.htf, group: exchange.group };
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
+  // Without it: the periods of the UTC calendar rule (see anchor-period.ts), grouped by the library
+  const { bars: htf, group } = resample(bars, periodStarts(bars, tf));
   return { htf, group };
 }
 
@@ -152,14 +142,6 @@ function levels(bars: Bar[]): { xup: number[]; xdown: number[] } {
   return { xup, xdown };
 }
 
-interface Level {
-  x1: number;
-  x2: number;
-  y: number;
-  color?: string;
-  width?: number;
-}
-
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceV2IndicatorInputs> = {},
@@ -171,60 +153,33 @@ export function calculate(
   const { htf, group } = timeframeBars(bars, cfg.srTf, chart);
   const { xup, xdown } = levels(htf);
 
-  // Lines in creation order. When a creation brings the count above max + 5, the oldest are deleted until max
-  // remain; the line that a variable still refers to is kept
-  let lines: Level[] = [];
-  let tf1Line: Level | null = null;
-  let tf2Line: Level | null = null;
-  const newLine = (line: Level): Level => {
-    lines.push(line);
-    return line;
-  };
-  const applyLimit = () => {
-    if (lines.length <= MAX_LINES + 5) return;
-    let excess = lines.length - MAX_LINES;
-    lines = lines.filter((l) => {
-      if (excess > 0 && l !== tf1Line && l !== tf2Line) {
-        excess--;
-        return false;
-      }
-      return true;
-    });
-  };
-
+  // The lines go through the drawing registry of the library (max_lines_count, the lines held by the two `var`
+  // variables are kept)
+  resetDrawings({ line: MAX_LINES });
+  const tf1Line = varDrawing<Line>(); // var tf1_line = line.new(0, 0, 0, 0)
+  const tf2Line = varDrawing<Line>(); // var tf2_line = line.new(0, 0, 0, 0)
   let tf1Prev = NaN;
   let tf2Prev = NaN;
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const tf1 = xup[group[i]];
     const tf2 = xdown[group[i]];
-    if (i === 0) {
-      // var tf1_line = line.new(0, 0, 0, 0), var tf2_line = line.new(0, 0, 0, 0)
-      tf1Line = newLine({ x1: 0, x2: 0, y: 0 });
-      tf2Line = newLine({ x1: 0, x2: 0, y: 0 });
-    }
+    if (i === 0) tf1Line.value = line.new(0, 0, 0, 0);
     // ta.change(tf) used as a condition: a change that is not 0 and not na
-    if (truthy(tf1 - tf1Prev)) {
-      tf1Line = newLine({ x1: i, x2: i, y: tf1, color: GREEN, width: LINE_WIDTH });
-      applyLimit();
-    }
-    tf1Line!.x2 = i;
-    if (truthy(tf2 - tf2Prev)) {
-      tf2Line = newLine({ x1: i, x2: i, y: tf2, color: ORANGE, width: LINE_WIDTH });
-      applyLimit();
-    }
-    tf2Line!.x2 = i;
+    if (truthy(tf1 - tf1Prev)) tf1Line.value = line.new(i, tf1, i, tf1, 'bar_index', undefined, GREEN, undefined, LINE_WIDTH);
+    line.set_x2(tf1Line.value!, i);
+    if (i === 0) tf2Line.value = line.new(0, 0, 0, 0);
+    if (truthy(tf2 - tf2Prev)) tf2Line.value = line.new(i, tf2, i, tf2, 'bar_index', undefined, ORANGE, undefined, LINE_WIDTH);
+    line.set_x2(tf2Line.value!, i);
     tf1Prev = tf1;
     tf2Prev = tf2;
   }
+  setDrawingBar(null);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
-    lines: lines.map((l) => ({
-      time1: bars[l.x1].time, price1: l.y, time2: bars[l.x2].time, price2: l.y,
-      ...(l.color !== undefined ? { color: l.color } : {}),
-      ...(l.width !== undefined ? { width: l.width } : {}),
-    })),
+    lines: drawingOutputs(bars).lines ?? [],
   };
 }
 

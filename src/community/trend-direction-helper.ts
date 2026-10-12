@@ -25,7 +25,8 @@
  * - Risk must be between 5 and 10005: outside it the original stops with a runtime error on the first bar (its
  *   average range reads a negative history index below 5, and more than 10000 bars back above 10005); the port
  *   throws an Error with the same message. Labels need a Risk below 40 (buy) / below 20 (sell).
- * - At most 50 labels stay, as in the original (default label limit).
+ * - At most 50 labels stay, as in the original (default label limit, drawing registry of the library: the labels of
+ *   the two `var` variables are not deleted by the limit).
  * - The plots have `trackprice = true` in the original (a horizontal line at the last value): PlotConfig has no
  *   such field, so that line is not described here.
  * - The input "== TREND DIRECTION ==" is a title in the original: it does nothing.
@@ -34,7 +35,10 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, label, resetDrawings, setDrawingBar, varDrawing, type IndicatorResult, type InputConfig, type PlotConfig,
+  type Bar, type Label,
+} from 'oakscriptjs';
 import type { LabelData, LineDrawingData, MarkerData, PineSize } from '../types';
 
 export interface TrendDirectionHelperInputs {
@@ -147,7 +151,6 @@ interface LabelObj {
   up: boolean;
   /** Placed above the bar (the label of `dn`), else below it */
   above: boolean;
-  deleted: boolean;
 }
 
 export function calculate(
@@ -178,8 +181,8 @@ export function calculate(
   }
 
   // ----- Trend direction: TS(RISK)
-  // value10 = abs(RISK / 180) + 1 is the length of highest() / lowest() in wpr(): an integer number of bars
-  const wprLength = Math.trunc(Math.abs(cfg.risk / 180) + 1);
+  // value10 = abs(RISK / 180) + 1 is the length of highest() / lowest() in wpr() (the library truncates a fraction)
+  const wprLength = Math.abs(cfg.risk / 180) + 1;
   const x1 = 60 + cfg.risk;
   const x2 = 20 - cfg.risk;
   const upper = A(ta.highest(S(high), wprLength));
@@ -187,23 +190,15 @@ export function calculate(
   // value2 = 100 - abs(wpr(value10)), wpr = 100 * (close - upper) / (upper - lower)
   const value2 = bars.map((b, i) => 100 - Math.abs((100 * (b.close - upper[i])) / (upper[i] - lower[i])));
 
-  // Labels in creation order. A creation that brings the count above max + 5 deletes the oldest until max remain; a
-  // label that a `var` variable still refers to (the last buy label, the last sell label) is not deleted, but counts.
-  let liveLabels: LabelObj[] = [];
-  let lastUp: LabelObj | null = null;
-  let lastDn: LabelObj | null = null;
-  const newLabel = (bar: number, up: boolean, above: boolean): LabelObj => {
-    const obj: LabelObj = { bar, up, above, deleted: false };
-    liveLabels.push(obj);
-    if (liveLabels.length > MAX_LABELS + 5) {
-      let excess = liveLabels.length - MAX_LABELS;
-      liveLabels = liveLabels.filter((o) => {
-        if (excess <= 0 || o === lastUp || o === lastDn) return true;
-        excess--;
-        o.deleted = true;
-        return false;
-      });
-    }
+  // Labels: library objects in the drawing registry (a creation that brings the count above max + 5 deletes the
+  // oldest until max remain; the labels of the `var` variables TS_UP_Label / TS_DN_Label are not deleted, but count)
+  resetDrawings({ label: MAX_LABELS });
+  const upLabel = varDrawing<Label>();
+  const dnLabel = varDrawing<Label>();
+  const labelInfo = new Map<object, LabelObj>();
+  const newLabel = (bar: number, up: boolean, above: boolean): Label => {
+    const obj = label.new(bar, NaN, up ? cfg.textUp : cfg.textDn, 'bar_index', above ? 'abovebar' : 'belowbar');
+    labelInfo.set(obj, { bar, up, above });
     return obj;
   };
 
@@ -243,102 +238,107 @@ export function calculate(
   /** zz of the bars where the comparisons of f_y(0), f_y(1), f_y(2) ran: valuewhen() keeps the history of these bars only */
   const compared: number[] = [];
 
-  for (let i = 0; i < n; i++) {
-    const bar = bars[i];
+  try {
+    for (let i = 0; i < n; i++) {
+      const bar = bars[i];
+      setDrawingBar(i, i === n - 1);
 
-    // ----- Trend direction labels
-    // for i1 = 1 to 50: the newest bar before this one with value2 in a zone (ii1 stays 1 without one)
-    let ii1 = 1;
-    for (let k = 1; k <= 50; k++) {
-      const v = at(value2, i - k);
-      if (gt(x2, v) || gt(v, x1)) {
-        ii1 = k;
-        break;
-      }
-    }
-    const ref = at(value2, i - ii1);
-    const dn = gt(x2, value2[i]) && gt(ref, x1) ? ii1 : 0;
-    const up = gt(value2[i], x1) && gt(x2, ref) ? ii1 : 0;
-    // label.new(x = bar_index - barssince(up), ...): barssince is 0 on the bar of the signal. Text, colours and
-    // style of both labels follow `up` (text_label = up ? text_up : text_dn ...); with a Risk below -20 the two
-    // zones overlap and a bar can have both labels.
-    if (up !== 0) lastUp = newLabel(i, true, false);
-    if (dn !== 0) lastDn = newLabel(i, up !== 0, true);
-
-    // ----- HH / LL markers, drawn with offset = -2
-    if (i >= 4) {
-      const top = gt(high[i - 2], high[i - 4]) && ge(high[i - 2], high[i - 3]) && ge(high[i - 2], high[i - 1]) && gt(high[i - 2], high[i]);
-      const bot = gt(low[i - 4], low[i - 2]) && ge(low[i - 3], low[i - 2]) && le(low[i - 2], low[i - 1]) && gt(low[i], low[i - 2]);
-      const time = bars[i - 2].time;
-      if (top) {
-        // valuewhen(filteredtopf, high[2], 0 / 1 / 2)
-        topHighs.push(high[i - 2]);
-        const [v2, v1, v0] = [at(topHighs, topHighs.length - 3), at(topHighs, topHighs.length - 2), high[i - 2]];
-        const higherHigh = gt(v0, v1) && gt(v0, v2);
-        const lowerHigh = gt(v1, v0) && gt(v2, v0);
-        if (cfg.showHHLL && higherHigh) markers.push({ time, position: 'aboveBar', shape: 'square', color: MAROON, text: '[HH]', textColor: PLOT_BLUE });
-        if (cfg.showHHLL && lowerHigh) markers.push({ time, position: 'aboveBar', shape: 'square', color: MAROON, text: '[LH]', textColor: PLOT_BLUE });
-      }
-      if (bot) {
-        botLows.push(low[i - 2]);
-        const [v2, v1, v0] = [at(botLows, botLows.length - 3), at(botLows, botLows.length - 2), low[i - 2]];
-        const higherLow = gt(v0, v1) && gt(v0, v2);
-        const lowerLow = gt(v1, v0) && gt(v2, v0);
-        if (cfg.showHHLL && higherLow) markers.push({ time, position: 'belowBar', shape: 'square', color: GREEN, text: '[HL]', textColor: PLOT_BLUE });
-        if (cfg.showHHLL && lowerLow) markers.push({ time, position: 'belowBar', shape: 'square', color: GREEN, text: '[LL]', textColor: PLOT_BLUE });
-      }
-    }
-
-    // ----- Zig zag: f_zz(percent)
-    const prevPivot = pivot;
-    const prevHtrack = htrack;
-    const prevLtrack = ltrack;
-    if (i >= 1) {
-      const reverseRange = (Number.isNaN(prevPivot) ? 0 : prevPivot) * percent;
-      if (isDirectionUp === null) isDirectionUp = true;
-      if (isDirectionUp) {
-        htrack = Math.max(Math.max(bar.high, high[i - 1]), Number.isNaN(prevHtrack) ? bar.high : prevHtrack);
-        ltrack = NaN;
-        if (gt(prevHtrack - reverseRange, bar.close)) {
-          pivot = htrack;
-          isDirectionUp = false;
+      // ----- Trend direction labels
+      // for i1 = 1 to 50: the newest bar before this one with value2 in a zone (ii1 stays 1 without one)
+      let ii1 = 1;
+      for (let k = 1; k <= 50; k++) {
+        const v = at(value2, i - k);
+        if (gt(x2, v) || gt(v, x1)) {
+          ii1 = k;
+          break;
         }
       }
-      if (!isDirectionUp) {
-        ltrack = Math.min(Math.min(bar.low, low[i - 1]), Number.isNaN(prevLtrack) ? bar.low : prevLtrack);
-        htrack = NaN;
-        if (gt(bar.close, prevLtrack + reverseRange)) {
-          pivot = ltrack;
-          isDirectionUp = true;
+      const ref = at(value2, i - ii1);
+      const dn = gt(x2, value2[i]) && gt(ref, x1) ? ii1 : 0;
+      const up = gt(value2[i], x1) && gt(x2, ref) ? ii1 : 0;
+      // label.new(x = bar_index - barssince(up), ...): barssince is 0 on the bar of the signal. Text, colours and
+      // style of both labels follow `up` (text_label = up ? text_up : text_dn ...); with a Risk below -20 the two
+      // zones overlap and a bar can have both labels.
+      if (up !== 0) upLabel.value = newLabel(i, true, false);
+      if (dn !== 0) dnLabel.value = newLabel(i, up !== 0, true);
+
+      // ----- HH / LL markers, drawn with offset = -2
+      if (i >= 4) {
+        const top = gt(high[i - 2], high[i - 4]) && ge(high[i - 2], high[i - 3]) && ge(high[i - 2], high[i - 1]) && gt(high[i - 2], high[i]);
+        const bot = gt(low[i - 4], low[i - 2]) && ge(low[i - 3], low[i - 2]) && le(low[i - 2], low[i - 1]) && gt(low[i], low[i - 2]);
+        const time = bars[i - 2].time;
+        if (top) {
+          // valuewhen(filteredtopf, high[2], 0 / 1 / 2)
+          topHighs.push(high[i - 2]);
+          const [v2, v1, v0] = [at(topHighs, topHighs.length - 3), at(topHighs, topHighs.length - 2), high[i - 2]];
+          const higherHigh = gt(v0, v1) && gt(v0, v2);
+          const lowerHigh = gt(v1, v0) && gt(v2, v0);
+          if (cfg.showHHLL && higherHigh) markers.push({ time, position: 'aboveBar', shape: 'square', color: MAROON, text: '[HH]', textColor: PLOT_BLUE });
+          if (cfg.showHHLL && lowerHigh) markers.push({ time, position: 'aboveBar', shape: 'square', color: MAROON, text: '[LH]', textColor: PLOT_BLUE });
+        }
+        if (bot) {
+          botLows.push(low[i - 2]);
+          const [v2, v1, v0] = [at(botLows, botLows.length - 3), at(botLows, botLows.length - 2), low[i - 2]];
+          const higherLow = gt(v0, v1) && gt(v0, v2);
+          const lowerLow = gt(v1, v0) && gt(v2, v0);
+          if (cfg.showHHLL && higherLow) markers.push({ time, position: 'belowBar', shape: 'square', color: GREEN, text: '[HL]', textColor: PLOT_BLUE });
+          if (cfg.showHHLL && lowerLow) markers.push({ time, position: 'belowBar', shape: 'square', color: GREEN, text: '[LL]', textColor: PLOT_BLUE });
         }
       }
-    }
-    // zz = change(pivot) != 0 ? pivot : na
-    const zz = truthy(pivot - prevPivot) ? pivot : NaN;
 
-    let mode: 'push' | 'replace' | null = null;
-    if (truthy(zz)) {
-      if (Number.isNaN(ys[1])) {
-        mode = 'push';
-      } else {
-        compared.push(zz);
-        const f1 = at(compared, compared.length - 2);
-        const f2 = at(compared, compared.length - 3);
-        // a pivot above the two before it
-        if (gt(zz, f1) && gt(zz, f2)) mode = gt(ys[1], ys[0]) ? 'push' : 'replace';
-        // a pivot below the two before it
-        if (gt(f1, zz) && gt(f2, zz)) mode = gt(ys[0], ys[1]) ? 'push' : 'replace';
+      // ----- Zig zag: f_zz(percent)
+      const prevPivot = pivot;
+      const prevHtrack = htrack;
+      const prevLtrack = ltrack;
+      if (i >= 1) {
+        const reverseRange = (Number.isNaN(prevPivot) ? 0 : prevPivot) * percent;
+        if (isDirectionUp === null) isDirectionUp = true;
+        if (isDirectionUp) {
+          htrack = Math.max(Math.max(bar.high, high[i - 1]), Number.isNaN(prevHtrack) ? bar.high : prevHtrack);
+          ltrack = NaN;
+          if (gt(prevHtrack - reverseRange, bar.close)) {
+            pivot = htrack;
+            isDirectionUp = false;
+          }
+        }
+        if (!isDirectionUp) {
+          ltrack = Math.min(Math.min(bar.low, low[i - 1]), Number.isNaN(prevLtrack) ? bar.low : prevLtrack);
+          htrack = NaN;
+          if (gt(bar.close, prevLtrack + reverseRange)) {
+            pivot = ltrack;
+            isDirectionUp = true;
+          }
+        }
+      }
+      // zz = change(pivot) != 0 ? pivot : na
+      const zz = truthy(pivot - prevPivot) ? pivot : NaN;
+
+      let mode: 'push' | 'replace' | null = null;
+      if (truthy(zz)) {
+        if (Number.isNaN(ys[1])) {
+          mode = 'push';
+        } else {
+          compared.push(zz);
+          const f1 = at(compared, compared.length - 2);
+          const f2 = at(compared, compared.length - 3);
+          // a pivot above the two before it
+          if (gt(zz, f1) && gt(zz, f2)) mode = gt(ys[1], ys[0]) ? 'push' : 'replace';
+          // a pivot below the two before it
+          if (gt(f1, zz) && gt(f2, zz)) mode = gt(ys[0], ys[1]) ? 'push' : 'replace';
+        }
+      }
+      if (mode === 'push') {
+        xs.unshift(bar.time);
+        ys.unshift(zz);
+        xs.length = ZZ_POINTS;
+        ys.length = ZZ_POINTS;
+      } else if (mode === 'replace') {
+        xs[0] = bar.time;
+        ys[0] = zz;
       }
     }
-    if (mode === 'push') {
-      xs.unshift(bar.time);
-      ys.unshift(zz);
-      xs.length = ZZ_POINTS;
-      ys.length = ZZ_POINTS;
-    } else if (mode === 'replace') {
-      xs[0] = bar.time;
-      ys[0] = zz;
-    }
+  } finally {
+    setDrawingBar(null);
   }
 
   // The 8 lines are made again on every bar: the lines of the last bar stay. A line with an na point is not drawn.
@@ -354,10 +354,11 @@ export function calculate(
   }
 
   const size: PineSize = cfg.size;
-  const labels: LabelData[] = liveLabels.map((l) => ({
+  const labels: LabelData[] = label.all().map((obj) => labelInfo.get(obj)!).map((l) => ({
     time: bars[l.bar].time, price: NaN, yloc: l.above ? 'abovebar' : 'belowbar', text: l.up ? cfg.textUp : cfg.textDn,
     color: l.up ? LABEL_UP : LABEL_DN, textColor: l.up ? TEXT_UP : TEXT_DN, style: l.up ? 'label_up' : 'label_down', size,
   }));
+  resetDrawings();
 
   // plot(showSR ? level : na, style = plot.style_circles, color = close >= level ? green : red, show_last = 1)
   const plots: Record<string, Array<{ time: number; value: number; color?: string }>> = {};

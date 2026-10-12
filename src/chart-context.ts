@@ -2,25 +2,15 @@
  * What the caller knows about the chart and its symbol, for the indicators whose output depends on it: the optional
  * third argument of `calculate(bars, inputs, chart)`.
  *
- * It is the oakscriptjs ChartContext (chart timeframe, exchange time zone, session, symbol tick, ticker id, state of
- * the last bar) with a few more values that scripts read from the chart: the symbol type and currency, the chart
- * colours and the current time. Every value is optional. Without a value the indicator uses the fallback given
- * below, which is what it did before this argument existed.
+ * It is the oakscriptjs ChartContext (chart timeframe, exchange time zone, session, symbol tick, ticker id, symbol
+ * type and currency, chart colours, current time, state of the last bar) with the visible range of the chart. Every
+ * value is optional. Without a value the indicator uses the fallback given below, which is what it did before this
+ * argument existed.
  */
 
 import type { ChartContext as ScriptChartContext } from 'oakscriptjs/script';
 
 export interface ChartContext extends ScriptChartContext {
-  /** Symbol type (PineScript `syminfo.type`): "stock", "crypto", "forex", "futures", "index", "fund"... */
-  symbolType?: string;
-  /** Currency of the symbol (PineScript `syminfo.currency`), e.g. "USD" */
-  currency?: string;
-  /** Chart foreground colour (PineScript `chart.fg_color`); fallback: the dark theme value #DBDBDB */
-  foregroundColor?: string;
-  /** Chart background colour (PineScript `chart.bg_color`); fallback: the dark theme value #0F0F0F */
-  backgroundColor?: string;
-  /** Current time in ms (PineScript `timenow`); fallback: the clock of the computer */
-  now?: number;
   /**
    * Time of the first bar visible on the chart, in ms (PineScript `chart.left_visible_bar_time`); fallback: the
    * first bar given to the indicator
@@ -39,6 +29,14 @@ export function mintickOf(chart?: ChartContext): number {
   if (chart?.mintick !== undefined) return chart.mintick;
   if (chart?.minmove !== undefined && chart.pricescale !== undefined) return chart.minmove / chart.pricescale;
   return 0.01;
+}
+
+/**
+ * Session hours of the symbol (the hours of `chart.session`, a string or the `session` of a session object), e.g.
+ * "0930-1600"; fallback: an empty string
+ */
+export function sessionHoursOf(chart?: ChartContext): string {
+  return (typeof chart?.session === 'string' ? chart.session : chart?.session?.session) ?? '';
 }
 
 /** Exchange time zone (PineScript `syminfo.timezone`); fallback UTC */

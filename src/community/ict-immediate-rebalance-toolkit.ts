@@ -361,7 +361,10 @@ export function calculate(
   const msTimes = n > 0 && bars[0].time >= 1e12;
 
   // timeframe.* of the chart
-  const tf = timeframe.info(chartTimeframe(bars, chart) || '1D');
+  const tfName = chartTimeframe(bars, chart);
+  const tf = timeframe.info(tfName || '1D');
+  // bar duration for the session test of the macro windows (clock-change rule of the library)
+  const barMs = tfName === '' ? undefined : timeframe.in_seconds(tfName) * 1000;
   // chart.fg_color; barstate.isconfirmed of the last bar
   const chartFg = foregroundColorOf(chart);
   const lastConfirmed = lastBarConfirmedOf(chart);
@@ -571,7 +574,7 @@ export function calculate(
 
     // ---- Macros: time(timeframe.period, session, "UTC-5") is not na when the bar opens inside the session
     if (anyMacro) {
-      const inSession = macroSites.map((s) => s.on && time.inSession(msTimes ? t : t * 1000, s.session, MACRO_TZ));
+      const inSession = macroSites.map((s) => s.on && time.inSession(msTimes ? t : t * 1000, s.session, MACRO_TZ, barMs));
       const inMC = inSession.some((x) => x);
       // bgcolor(): one call per macro, the later call is drawn on top
       for (let k = 0; k < macroSites.length; k++) if (inSession[k] && tfM) bgColors.push({ time: t, color: macroSites[k].css });

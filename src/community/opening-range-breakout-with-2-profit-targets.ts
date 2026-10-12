@@ -31,7 +31,7 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { color, time, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { color, time, timeframe, resample, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { periodStarts, securityStarts, chartTimeframe } from '../anchor-period';
 import type { MarkerData, BgColorData } from '../types';
 import { timezoneOf, type ChartContext } from '../chart-context';
@@ -122,7 +122,8 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
 /**
  * security(tickerid, tf, ...) on the chart symbol: the first chart bar, the start time (unit of the bar times) and
- * the high / low of each bar of timeframe `tf`, and for each chart bar the index of its bar of that timeframe.
+ * the high / low of each bar of timeframe `tf`, and for each chart bar the index of its bar of that timeframe. The
+ * chart bars are grouped by the library (`resample`) on the period starts of the period helper.
  */
 function timeframeBars(
   bars: Bar[],
@@ -134,26 +135,9 @@ function timeframeBars(
   if (!same && timeframe.in_seconds(tf) < timeframe.in_seconds(chartTf)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chartTf}": the bars do not carry that data.`);
   }
-  const starts = same ? [] : securityStarts(bars, tf, chart);
-  const first: number[] = [];
-  const start: number[] = [];
-  const high: number[] = [];
-  const low: number[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (same || i === 0 || starts[i] !== starts[i - 1]) {
-      first.push(i);
-      start.push(same ? b.time : starts[i]);
-      high.push(b.high);
-      low.push(b.low);
-    } else {
-      const j = high.length - 1;
-      high[j] = Math.max(high[j], b.high);
-      low[j] = Math.min(low[j], b.low);
-    }
-    group.push(high.length - 1);
-  });
-  return { first, start, high, low, group };
+  const { bars: htf, group } = resample(bars, same ? bars.map((b) => b.time) : securityStarts(bars, tf, chart));
+  const first = group.flatMap((g, i) => (i === 0 || g !== group[i - 1] ? [i] : []));
+  return { first, start: htf.map((b) => b.time), high: htf.map((b) => b.high), low: htf.map((b) => b.low), group };
 }
 
 export function calculate(
@@ -173,8 +157,15 @@ export function calculate(
   // A version 1 session without days runs from Monday to Friday
   const sessToUse = picked.includes(':') ? picked : `${picked}:23456`;
   const allDay = cfg.sessNum === 0;
-  /** time(tf, session) is not na: a bar that opens at `t` (unit of the bar times) is inside the session */
-  const inSess = (t: number) => allDay || time.inSession(ms ? t : t * 1000, sessToUse, tz);
+  /**
+   * time(tf, session) is not na: a bar that opens at `t` (unit of the bar times) is inside the session; `barMs` is the
+   * duration of the bars (the clock-change rule of the library)
+   */
+  const inSess = (t: number, barMs: number) =>
+    allDay || time.inSession(ms ? t : t * 1000, sessToUse, tz, Number.isFinite(barMs) ? barMs : undefined);
+  const chartMs = chartTf === '' ? NaN : timeframe.in_seconds(chartTf) * 1000;
+  // time('D', session) is read on the bars of the range timeframe (inside the security call)
+  const resMs = cfg.res.trim() === '' ? chartMs : timeframe.in_seconds(cfg.res) * 1000;
 
   // time('D', session): the start of the trading day of the session that contains the bar (the latest session
   // start at or before the bar; the first range of a session with several ranges), na outside the session.
@@ -183,7 +174,7 @@ export function calculate(
   const startMin = (Number(picked.slice(0, 2)) * 60 + Number(picked.slice(2, 4))) % 1440;
   const minuteOfDay = (t: number) => time.hour(t, tz) * 60 + time.minute(t, tz);
   const sessionDay = (barTime: number, firstBar: number): number => {
-    if (!inSess(barTime)) return NaN;
+    if (!inSess(barTime, resMs)) return NaN;
     if (allDay) return dayStarts[firstBar];
     const t = Math.floor((ms ? barTime : barTime * 1000) / 60000) * 60000;
     const start = t - (((minuteOfDay(t) - startMin) % 1440 + 1440) % 1440) * 60000;
@@ -228,7 +219,7 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     const { high, low } = bars[i];
     const t = bars[i].time;
-    const active = inSess(t);
+    const active = inSess(t, chartMs);
     const highRes = highRange[group[i]];
     const lowRes = lowRange[group[i]];
     const range = highRes - lowRes;

@@ -26,7 +26,7 @@
  * Original notice: © LudoGH68
  */
 
-import { ta, str, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { str, color, callsite, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 
@@ -252,17 +252,14 @@ export function calculate(
   const breakLow = (i: number) => (i >= 0 ? (body ? bars[i].close : bars[i].low) : NaN);
 
   // bar_index > lookback ? ta.highestbars(high, lookback) : ta.highestbars(high, bar_index + 1)
-  // (on the first 11 bars the window is every bar so far)
-  const extremeBars = (source: number[], fn: typeof ta.highestbars): number[] => {
-    const out = fn(new Series(bars, (_, i) => source[i]), LOOKBACK).toArray().map((v) => v ?? NaN);
-    const head = bars.slice(0, LOOKBACK + 1);
-    for (let i = 0; i < head.length; i++) {
-      out[i] = fn(new Series(head, (_, k) => source[k]), i + 1).toArray()[i] ?? NaN;
-    }
-    return out;
+  // Each branch is its own call site: the first one only runs from bar 11, so its window starts there
+  const extremeBars = (source: number[], site: typeof callsite.highestbars): number[] => {
+    const fixed = site();
+    const growing = site();
+    return source.map((v, i) => (i > LOOKBACK ? fixed(i, v, LOOKBACK) : growing(i, v, i + 1)));
   };
-  const maxBarArr = extremeBars(bars.map((b) => b.high), ta.highestbars);
-  const minBarArr = extremeBars(bars.map((b) => b.low), ta.lowestbars);
+  const maxBarArr = extremeBars(bars.map((b) => b.high), callsite.highestbars);
+  const minBarArr = extremeBars(bars.map((b) => b.low), callsite.lowestbars);
 
   // Live lines and labels in creation order. When a creation brings the count above max + 5, the oldest are deleted
   // until max remain. An object held by a `var` variable of the script (the lines and labels of the current

@@ -19,8 +19,8 @@
  * the chart (`leftVisibleBarTime` / `rightVisibleBarTime` of the chart context, third argument of calculate). It
  * must be calculated again when the user scrolls or zooms. Without these values the range is all the bars. As in
  * the original, the visible price range is used only when the last visible bar is the last bar; otherwise the
- * range is the last bar alone. A visible range of more than 15,000 bars throws the Error of the original (its
- * highest / lowest window limit).
+ * range is the last bar alone. A visible range of more than 15,000 bars throws the Error of the original (the
+ * highest / lowest window limit of the library).
  *
  * Chart values (third argument): the port also reads the symbol tick (levels in the table are rounded to it;
  * without it: 0.01).
@@ -41,7 +41,9 @@
  * Original notice: © LonesomeTheBlue
  */
 
-import { array, color, math, str, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  array, callsite, color, math, str, timeframe, resample, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import { chartTimeframe, periodStarts, securityBars } from '../anchor-period';
 import { barTime } from '../bar-time';
 import type { BoxData, TableCellData, TableData, TablePosition } from '../types';
@@ -134,9 +136,6 @@ export const metadata = {
 /** The indicator reads the visible range of the chart: calculate again when the user scrolls or zooms */
 export const usesVisibleRange = true;
 
-/** Longest window of ta.highest / ta.lowest */
-const MAX_WINDOW = 15000;
-
 /** Pine float comparisons within 1e-10 (na compares false) */
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
@@ -159,18 +158,7 @@ function timeframeHighLow(bars: Bar[], tf: string, chart?: ChartContext): Array<
   }
   const exchange = securityBars(bars, tf, chart);
   if (exchange) return exchange.htf;
-  const starts = periodStarts(bars, tf, chart);
-  const htf: Array<{ high: number; low: number }> = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ high: b.high, low: b.low });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-    }
-  });
-  return htf;
+  return resample(bars, periodStarts(bars, tf, chart)).bars;
 }
 
 export function calculate(
@@ -217,8 +205,9 @@ export function calculate(
   // `for x = 0 to array.size(pivotvals) - 1` runs with x = 0 on an empty array
   if (count === 0) throw new Error('Index 0 is out of bounds, array size is 0');
 
-  // visible price range: ta.highest(visibleBars) / ta.lowest(visibleBars) on the last bar, where visibleBars is
-  // the number of visible bars when the last bar is the last visible bar, else 1
+  // visible price range: chart_highest = ta.highest(visibleBars), chart_lowest = ta.lowest(visibleBars) on every bar,
+  // where visibleBars is the number of visible bars on the last visible bar, else 1 (the value of the last bar is
+  // used; the library throws the runtime error of a window above 15,000 bars)
   const last = n - 1;
   const close = bars[last].close;
   let chartHighest = NaN;
@@ -229,14 +218,12 @@ export function calculate(
     const visible = range.left <= range.right
       && bars[range.left].time * toMs >= range.leftTime && bars[range.right].time * toMs <= range.rightTime;
     const visibleBars = visible && range.right === last ? last - range.left + 1 : 1;
-    if (visibleBars > MAX_WINDOW) {
-      throw new Error(`The 'highest' function references too many historical candles (${visibleBars}), the limit is ${MAX_WINDOW}.`);
-    }
-    chartHighest = bars[last].high;
-    chartLowest = bars[last].low;
-    for (let i = last - visibleBars + 1; i < last; i++) {
-      chartHighest = Math.max(chartHighest, bars[i].high);
-      chartLowest = Math.min(chartLowest, bars[i].low);
+    const highestSite = callsite.highest();
+    const lowestSite = callsite.lowest();
+    for (let i = 0; i < n; i++) {
+      const length = i === last ? visibleBars : 1;
+      chartHighest = highestSite(bars[i].high, length, i);
+      chartLowest = lowestSite(bars[i].low, length, i);
     }
     // use 5% more
     chartHighest += (chartHighest - chartLowest) * 0.05;

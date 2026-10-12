@@ -37,7 +37,7 @@
  */
 
 import {
-  ta, taCore, Series, color, str, math, timeframe, getSourceSeries,
+  ta, taCore, Series, color, str, math, timeframe, getSourceSeries, resample, periodsOf,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PolylineData } from '../types';
@@ -227,21 +227,13 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
     return { htf, latest: exchange.latest };
   }
   const n = bars.length;
+  // Without it: the periods of the UTC calendar rule (anchor-period.ts), grouped by the library (`resample`)
   const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
+  const { bars: grouped, group } = resample(bars, starts);
+  // the time of a bar of the timeframe: its first chart bar
+  const first: number[] = [];
+  group.forEach((g, i) => { if (g === first.length) first.push(i); });
+  const htf = grouped.map((b, k) => ({ ...b, time: bars[first[k]].time }));
 
   // A bar completes its period when its close reaches the end of the period. Symbols that trade every day follow
   // the UTC calendar: the period of the close time is another period. Other symbols: the last bar of a period.
@@ -256,7 +248,8 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   const closeStarts = calendar ? periodStarts(closes, tf) : [];
   // The last bar of a symbol that does not trade every day: its period is complete when the next possible bar is in
   // another period. The next bar is on the same day while the bar is earlier in the day than the last bar of the
-  // trading day before; else it is on the next weekday.
+  // trading day before; else it is on the next weekday. (The library rule `periodsOf` takes the last bar as the end
+  // of its period: without an exchange calendar it cannot know the next bar, so the port keeps this test.)
   let lastEnds = true;
   if (!calendar && n > 1) {
     const DAY = 86400000;
@@ -277,15 +270,10 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
     const withNext = periodStarts([...bars, { time: ms ? next : next / 1000 }], tf);
     lastEnds = withNext[n] !== withNext[n - 1];
   }
-  const latest: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let done = i === 0 ? -1 : latest[i - 1];
-    if (i > 0 && group[i] !== group[i - 1]) done = Math.max(done, group[i] - 1);
-    const ends = i === n - 1 ? lastEnds : starts[i + 1] !== starts[i];
-    const reaches = !calendar || closeStarts[i] !== starts[i];
-    if (ends && reaches) done = Math.max(done, group[i]);
-    latest.push(done);
-  }
+  // completion rule of the library: a bar completes its period when it is the last bar of the period and reaches
+  // its end; a new period completes the ones before
+  const reaches = bars.map((_b, i) => (!calendar || closeStarts[i] !== starts[i]) && (i < n - 1 || lastEnds));
+  const { latest } = periodsOf(starts, starts, reaches);
   return { htf, latest };
 }
 

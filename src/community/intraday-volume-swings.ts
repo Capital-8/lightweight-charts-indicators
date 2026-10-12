@@ -12,11 +12,10 @@
  * Reference: "Intraday Volume Swings" by rumpypumpydumpy
  */
 
-import { ta, Series, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData, LabelData } from '../types';
 import type { ChartContext } from '../chart-context';
-import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
-import { barInterval } from '../bar-time';
+import { periodChanges } from '../anchor-period';
 
 export interface IntradayVolumeSwingsInputs {
   markSwings: boolean;
@@ -56,30 +55,6 @@ export const metadata = {
   overlay: true,
 };
 
-/**
- * First bar of each trading day of the exchange on intraday bars (Pine timeframe.change("1D")), found by the library
- * from the time zone and the session of the chart context. Null when the context does not give both, or when the bars
- * are not intraday.
- */
-function tradingDayStarts(bars: Bar[], chart?: ChartContext): boolean[] | null {
-  const interval = barInterval(bars);
-  if (chart?.timezone === undefined || chart.session === undefined || !(interval > 0 && interval < 86400)) return null;
-  let change: Array<number | null> = [];
-  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(interval) };
-  executeScript(() => { change = scriptTimeframe.change('1D').toArray(); }, bars, {}, context);
-  return change.map((v) => v === 1);
-}
-
-/** Check if bar starts a new day (UTC date) vs previous bar */
-function isNewDay(bar: Bar, prevBar: Bar | null): boolean {
-  if (!prevBar) return false;
-  const d1 = new Date(bar.time * 1000);
-  const d2 = new Date(prevBar.time * 1000);
-  return d1.getUTCFullYear() !== d2.getUTCFullYear() ||
-    d1.getUTCMonth() !== d2.getUTCMonth() ||
-    d1.getUTCDate() !== d2.getUTCDate();
-}
-
 export function calculate(bars: Bar[], inputs: Partial<IntradayVolumeSwingsInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; labels: LabelData[] } {
   const { markSwings, markNewDay, markGreaterSwings, plotCurrent } = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -91,8 +66,8 @@ export function calculate(bars: Bar[], inputs: Partial<IntradayVolumeSwingsInput
   const ll3Arr = ta.lowest(lowSeries, 3).toArray();
 
   // Arrays for per-bar state
-  const newDay: boolean[] = new Array(n).fill(false);
-  const dayStarts = tradingDayStarts(bars, chart);
+  // new_day = change(time("D")) != 0: the trading days of the exchange with the chart context, else UTC days
+  const newDay = periodChanges(bars, '1D', chart);
   const incVol: boolean[] = new Array(n).fill(false);
   const lowerLow: boolean[] = new Array(n).fill(false);
   const higherHigh: boolean[] = new Array(n).fill(false);
@@ -104,7 +79,6 @@ export function calculate(bars: Bar[], inputs: Partial<IntradayVolumeSwingsInput
   const confirmedSwingHigh: boolean[] = new Array(n).fill(false);
 
   for (let i = 0; i < n; i++) {
-    newDay[i] = dayStarts ? i > 0 && dayStarts[i] : isNewDay(bars[i], i > 0 ? bars[i - 1] : null);
     incVol[i] = i > 0 && (bars[i].volume ?? 0) > (bars[i - 1].volume ?? 0);
     lowerLow[i] = i > 0 && bars[i].low < bars[i - 1].low;
     higherHigh[i] = i > 0 && bars[i].high > bars[i - 1].high;

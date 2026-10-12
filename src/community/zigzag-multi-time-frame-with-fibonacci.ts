@@ -22,7 +22,10 @@
  * Original notice: © LonesomeTheBlue
  */
 
-import { ta, str, math, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, taCore, str, math, Series, line, resetDrawings, setDrawingBar, varDrawing,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { periodStarts } from '../anchor-period';
@@ -113,16 +116,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 /** A number used as a condition: na and 0 are false */
 const truthy = (v: number) => !isNaN(v) && v !== 0;
 
-interface Ln {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  color: string;
-  width: number;
-  dotted: boolean;
-  extendRight: boolean;
-}
+type Line = ReturnType<typeof line.new>;
 
 export function calculate(
   bars: Bar[],
@@ -143,42 +137,28 @@ export function calculate(
     .toArray()
     .map((v) => v ?? NaN);
 
-  // highestbars(high, len) == 0 / lowestbars(low, len) == 0 with a length per bar: the bar holds the extreme of the
-  // window (the newest bar wins a tie)
-  const highest = callsite.highest();
-  const lowest = callsite.lowest();
+  // ph = highestbars(high, nz(len, 1)) == 0 ? high : na (a length per bar)
+  const len = bi.map((v, i) => (isNaN(v) ? 1 : i - v + 1));
+  const hb = taCore.highestbars(bars.map((b) => b.high), len);
+  const lb = taCore.lowestbars(bars.map((b) => b.low), len);
 
   let dir = 0;
   // zigzag: value, bar index, value, bar index ... (newest first)
   const zigzag: number[] = [];
-  const lines: Ln[] = [];
-  let zzline: Ln | null = null;
-  const deleteLine = (l: Ln | null) => {
-    const k = l ? lines.indexOf(l) : -1;
-    if (k >= 0) lines.splice(k, 1);
-  };
-  const newLine = (l: Ln): Ln => {
-    lines.push(l);
-    // Line count limit: above max + 5 the oldest are deleted until max remain; the line held by the zigzag line
-    // variable stays
-    if (lines.length > MAX_LINES + 5) {
-      for (let k = 0; k < lines.length && lines.length > MAX_LINES; ) {
-        if (lines[k] === zzline) k++;
-        else lines.splice(k, 1);
-      }
-    }
-    return l;
-  };
+  // Lines live in the library registry: the line count limit (max_lines_count 50) and the line held by the `var`
+  // variable `zzline` follow the PineScript rules there
+  resetDrawings({ line: MAX_LINES });
+  const zzline = varDrawing<Line>();
   const addToZigzag = (value: number, bindex: number) => {
     zigzag.unshift(value, bindex);
     if (zigzag.length > MAX_ARRAY_SIZE) zigzag.length -= 2;
   };
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const b = bars[i];
-    const window = isNaN(bi[i]) ? 1 : i - bi[i] + 1;
-    const ph = highest(b.high, window) === b.high ? b.high : NaN;
-    const pl = lowest(b.low, window) === b.low ? b.low : NaN;
+    const ph = hb[i] === 0 ? b.high : NaN;
+    const pl = lb[i] === 0 ? b.low : NaN;
 
     const prevDir = dir;
     dir = truthy(ph) && isNaN(pl) ? 1 : truthy(pl) && isNaN(ph) ? -1 : dir;
@@ -199,19 +179,17 @@ export function calculate(
 
     if (cfg.showzigzag && zigzag.length >= 4 && oldzigzag.length >= 4) {
       if (!eq(zigzag[0], oldzigzag[0]) || !eq(zigzag[1], oldzigzag[1])) {
-        if (eq(zigzag[2], oldzigzag[2]) && eq(zigzag[3], Math.round(oldzigzag[3]))) deleteLine(zzline);
-        zzline = newLine({
-          x1: Math.round(zigzag[1]), y1: zigzag[0], x2: Math.round(zigzag[3]), y2: zigzag[2],
-          color: dir === 1 ? cfg.upcol : cfg.dncol, width: 2, dotted: false, extendRight: false,
-        });
+        if (zzline.value && eq(zigzag[2], oldzigzag[2]) && eq(zigzag[3], Math.round(oldzigzag[3]))) line.delete(zzline.value);
+        zzline.value = line.new(
+          Math.round(zigzag[1]), zigzag[0], Math.round(zigzag[3]), zigzag[2], 'bar_index', 'none', dir === 1 ? cfg.upcol : cfg.dncol, 'solid', 2,
+        );
       }
     }
     if (!cfg.showzigzag && zigzag.length >= 6) {
-      deleteLine(zzline);
-      zzline = newLine({
-        x1: Math.round(zigzag[3]), y1: zigzag[2], x2: Math.round(zigzag[5]), y2: zigzag[4],
-        color: dir === 1 ? cfg.upcol : cfg.dncol, width: 2, dotted: true, extendRight: false,
-      });
+      if (zzline.value) line.delete(zzline.value);
+      zzline.value = line.new(
+        Math.round(zigzag[3]), zigzag[2], Math.round(zigzag[5]), zigzag[4], 'bar_index', 'none', dir === 1 ? cfg.upcol : cfg.dncol, 'dotted', 2,
+      );
     }
   }
 
@@ -219,7 +197,7 @@ export function calculate(
   const T = (index: number) => barTime(bars, index, interval);
   const outLabels: LabelData[] = [];
 
-  // Fibonacci levels, on the last bar
+  // Fibonacci levels, on the last bar (the drawing bar is still the last bar)
   if (cfg.showfibo && zigzag.length >= 6 && n > 0) {
     const ratios = [0];
     let shownlevels = 1;
@@ -240,7 +218,7 @@ export function calculate(
       if (stopit && x > shownlevels) break;
       const level = zigzag[2] + diff * ratios[x];
       const lineColor = cfg.colorfulfibo ? FIBO_COLORS[Math.trunc((seconds * x) % 10)] : cfg.fibolinecol;
-      newLine({ x1: Math.round(zigzag[5]), y1: level, x2: last, y2: level, color: lineColor, width: 1, dotted: false, extendRight: true });
+      line.new(Math.round(zigzag[5]), level, last, level, 'bar_index', 'right', lineColor, 'solid', 1);
       const left = cfg.labelloc === 'Left';
       outLabels.unshift({
         time: T(left ? Math.round(zigzag[5]) - 1 : last),
@@ -254,10 +232,12 @@ export function calculate(
     }
   }
 
-  const outLines: LineDrawingData[] = lines.map((l) => ({
-    time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: l.color, width: l.width,
-    ...(l.dotted ? { style: 'dotted' as const } : {}),
-    ...(l.extendRight ? { extend: 'right' as const } : {}),
+  setDrawingBar(null);
+
+  const outLines: LineDrawingData[] = line.all().map((l) => ({
+    time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: String(l.color), width: l.width ?? 1,
+    ...(l.style === 'dotted' ? { style: 'dotted' as const } : {}),
+    ...(l.extend === 'right' ? { extend: 'right' as const } : {}),
   }));
 
   return {

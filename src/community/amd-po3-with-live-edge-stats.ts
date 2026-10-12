@@ -31,10 +31,9 @@
  */
 
 import {
-  ta, Series, color, str, math as pineMath, time as pineTime, timeframe, barInterval,
+  ta, Series, color, str, math as pineMath, time as pineTime, timeframe, barInterval, resample, periodClose,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import { executeScript, time_close as scriptTimeClose } from 'oakscriptjs/script';
 import type {
   BgColorData, BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TableMergeData,
   TablePosition,
@@ -462,21 +461,8 @@ function timeframeBars(bars: Bar[], tf: string, chartTf: string, context?: Chart
   // With the exchange calendar of the chart context (time zone and session): the periods come from the library rule
   const exchange = securityBars(bars, tf, context);
   if (exchange) return { htf: exchange.htf, group: exchange.group };
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
+  // else the periods of the UTC calendar
+  const { bars: htf, group } = resample(bars, periodStarts(bars, tf));
   return { htf, group };
 }
 
@@ -490,12 +476,14 @@ function closeTimes(bars: Bar[], chartTf: string, chart?: ChartContext): number[
   const fallback = bars.map((b) => b.time * unit + interval);
   if (!chart || !hasCalendar(chart) || chartTf === '') return fallback;
   try {
-    let out: number[] = [];
-    executeScript(() => { out = Array.from(scriptTimeClose.toArray(), (v) => v ?? NaN); }, bars, {}, {
+    const context = {
       timeframe: chartTf, timezone: chart.timezone, session: chart.session, regularSession: chart.regularSession,
-      sessionType: chart.sessionType, timeUnit: unit === 1 ? 'ms' : 's',
+      timeUnit: unit === 1 ? 'ms' as const : 's' as const,
+    };
+    return bars.map((b) => {
+      const v = periodClose(b.time, chartTf, context);
+      return na(v) ? b.time * unit : v;
     });
-    return out.map((v, i) => (na(v) ? bars[i].time * unit : v));
   } catch {
     return fallback;
   }
@@ -581,10 +569,11 @@ export function calculate(
   const ph = A(ta.pivothigh(S(high), PIVOT_LR, PIVOT_LR));
   const pl = A(ta.pivotlow(S(low), PIVOT_LR, PIVOT_LR));
 
-  // Killzones: time(timeframe.period, session + ":1234567", time zone)
+  // Killzones: time(timeframe.period, session + ":1234567", time zone); the bar size is needed on clock-change days
   const needKz = cfg.useKillzones || cfg.showSessions;
-  const inKZ = bars.map((_b, i) => needKz && (pineTime.inSession(timeMs(i), `${cfg.kzLdn}:1234567`, cfg.kzTz)
-    || pineTime.inSession(timeMs(i), `${cfg.kzNy}:1234567`, cfg.kzTz)));
+  const barMs = chartTf !== '' ? timeframe.in_seconds(chartTf) * 1000 : undefined;
+  const inKZ = bars.map((_b, i) => needKz && (pineTime.inSession(timeMs(i), `${cfg.kzLdn}:1234567`, cfg.kzTz, barMs)
+    || pineTime.inSession(timeMs(i), `${cfg.kzNy}:1234567`, cfg.kzTz, barMs)));
 
   // HTF bias: request.security(tickerid, tf, [close[1], ta.ema(close, 50)[1]], lookahead_on): the bar of the
   // timeframe before the one of the chart bar

@@ -19,7 +19,7 @@
  * Original notice: © LuxAlgo
  */
 
-import { ta, Series, color, math, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, math, setDrawingBar, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { executeScript, indicator as declareIndicator, box, line } from 'oakscriptjs/script';
 import type { BoxData, LineDrawingData } from '../types';
 
@@ -158,6 +158,8 @@ export function calculate(
     let prevBear: boolean | null = null;
 
     for (let i = 0; i < n; i++) {
+      // the bar of the drawing registry: the rules of the last bar and the 10,000-bar limit of a bar index
+      setDrawingBar(i, i === n - 1);
       const b = bars[i];
       const per = cfg.mode === 'Present' ? n - 1 - i <= 500 : true;
       const x2 = i - 1;
@@ -324,6 +326,7 @@ export function calculate(
         }
       }
     }
+    setDrawingBar(null);
   }, bars);
 
   return {

@@ -41,7 +41,10 @@
  * Original notice: © fluxchart
  */
 
-import { ta, str, timeframe, time as pineTime, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, str, timeframe, time as pineTime, line, label, Series, SessionBars, TradingCalendar, chartSessionFlags, resetDrawings,
+  setDrawingBar, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TableMergeData, TablePosition } from '../types';
 import { chartTimeframe, periodStarts, sessionFlags } from '../anchor-period';
 import { lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
@@ -231,45 +234,38 @@ export function calculate(
   // starts when the bar is in the session and the bar before was not, or when a run started after the bar before
   // (t[1] < t). The function is called from bar 1 on: t[1] is na on its first call.
   // The session hours are read in the exchange time zone (chart context; UTC without it).
-  const dayStart = periodStarts(bars, 'D', chart);
+  const chartTf = chartTimeframe(bars, chart);
+  const barMs = timeframe.in_seconds(chartTf) * 1000;
   const tz = timezoneOf(chart);
-  const utc = tz === 'UTC' || tz === 'Etc/UTC';
-  const DAY = 86400000;
-  // Clock of the exchange time zone minus UTC, at time t
-  const zoneOffset = (t: number) => (utc ? 0 : Date.UTC(
-    pineTime.year(t, tz), pineTime.month(t, tz) - 1, pineTime.dayofmonth(t, tz),
-    pineTime.hour(t, tz), pineTime.minute(t, tz), pineTime.second(t, tz),
-  ) - Math.floor(t / 1000) * 1000);
-  /** Bar i is the first bar of a run of the session `sess` (`firstCall`: the bar before has no session state) */
-  const runBegins = (sess: string, firstCall: number) => {
-    const inSession = (i: number) => pineTime.inSession(tMs[i], sess, tz);
-    const runStarts = sess.trim() === '24x7' ? [0]
-      : [...sess.matchAll(/(\d\d)(\d\d)-\d{4}/g)].map((m) => ((Number(m[1]) * 60 + Number(m[2])) % 1440) * 60000);
-    return (i: number): boolean => {
-      if (!inSession(i)) return false;
-      if (i === firstCall || !inSession(i - 1)) return true;
-      const offset = zoneOffset(tMs[i]);
-      const clock = tMs[i] + offset;
-      return runStarts.some((m) => {
-        let s = Math.floor(clock / DAY) * DAY + m;
-        if (s > clock) s -= DAY;
-        return s - offset > tMs[i - 1] && pineTime.inSession(s - offset, sess, tz);
-      });
-    };
+  /** time('1440', sess) of each bar in ms, NaN outside the session (library calendar of the session string) */
+  const sessionRunTime = (sess: string): number[] => {
+    const days = new SessionBars(new TradingCalendar(tz, { session: sess }, 'pine'), chartTf);
+    return tMs.map((t) => (pineTime.inSession(t, sess, tz, barMs) ? days.timeOf(t, '1440') : NaN));
   };
-  const customBegins = runBegins(cfg.customSessionTime, 1);
+  const customRun = cfg.customSessionEnabled ? sessionRunTime(cfg.customSessionTime) : [];
+  const customBegins = (i: number): boolean => !isNaN(customRun[i])
+    && (i === 1 || isNaN(customRun[i - 1]) || customRun[i - 1] < customRun[i]);
   // session.isfirstbar_regular: with the time zone and the session of the chart context, the flag of the exchange
-  // calendar (see anchor-period.ts); with regular session hours that the calendar cannot use, the first bar of a
-  // session run; without them, the first bar of a UTC day
-  const exchangeFirst = cfg.customSessionEnabled ? null : sessionFlags(bars, chart)?.isfirstbar_regular ?? null;
-  const regularSpec = chart?.regularSession ?? chart?.session;
-  const regular = typeof regularSpec === 'string' ? regularSpec : regularSpec?.session;
-  const regularBegins = typeof regular === 'string' && /^(24x7|\d{4}-\d{4}(,\d{4}-\d{4})*(:\d+)?)$/.test(regular.trim())
-    ? runBegins(regular, -1) : null;
+  // calendar (see anchor-period.ts); with session hours but no time zone, the flag of the library calendar in UTC;
+  // without session hours, the first bar of a UTC day
+  const regularFirst = (): boolean[] | null => {
+    const flags = sessionFlags(bars, chart);
+    if (flags) return flags.isfirstbar_regular;
+    const session = chart?.session ?? chart?.regularSession;
+    if (session === undefined || chartTf === '') return null;
+    try {
+      return chartSessionFlags(bars.map((b) => b.time), {
+        timeframe: chartTf, timezone: tz, session, regularSession: chart?.regularSession, timeUnit: ms ? 'ms' : 's',
+      }).isfirstbar_regular;
+    } catch {
+      return null; // a session the library does not read: the UTC day
+    }
+  };
+  const exchangeFirst = cfg.customSessionEnabled ? null : regularFirst();
+  const dayStart = exchangeFirst === null ? periodStarts(bars, 'D', chart) : [];
   const newRange = (i: number): boolean => {
     if (cfg.customSessionEnabled) return customBegins(i);
-    if (exchangeFirst !== null) return exchangeFirst[i];
-    return regularBegins !== null ? regularBegins(i) : dayStart[i] !== dayStart[i - 1];
+    return exchangeFirst !== null ? exchangeFirst[i] : dayStart[i] !== dayStart[i - 1];
   };
 
   const diffPercent = (val1: number, val2: number) => (Math.abs(val1 - val2) / val2) * 100.0;
@@ -427,26 +423,39 @@ export function calculate(
     }
   }
 
-  // Range lines and entry labels, on the last bar (newest range first). The original keeps 500 lines and 500 labels:
-  // a creation that brings the count above 505 deletes the oldest ones until 500 remain.
-  for (const orb of orbList) {
-    if (!(orb.startIndex > last - RENDER_MAX_BARS_BACK)) continue;
-    if (cfg.showORBZones) {
-      const x2 = bars[isNaN(orb.endIndex) ? last : orb.endIndex].time;
-      const x1 = bars[orb.startIndex].time;
-      lines.push({ time1: x1, price1: orb.h, time2: x2, price2: orb.h, color: cfg.highColor, width: 2 });
-      if (lines.length > MAX_LINES + 5) lines = lines.slice(lines.length - MAX_LINES);
-      lines.push({ time1: x1, price1: orb.l, time2: x2, price2: orb.l, color: cfg.lowColor, width: 2 });
-      if (lines.length > MAX_LINES + 5) lines = lines.slice(lines.length - MAX_LINES);
+  // Range lines and entry labels, on the last bar (newest range first), with the drawing registry of the library:
+  // 500 lines and 500 labels (a creation above 505 deletes the oldest ones until 500 remain), and the runtime error of
+  // a bar index more than 10,000 bars back
+  resetDrawings({ line: MAX_LINES, label: MAX_LABELS });
+  setDrawingBar(last, true);
+  const lineData = new Map<object, LineDrawingData>();
+  const labelData = new Map<object, LabelData>();
+  try {
+    for (const orb of orbList) {
+      if (!(orb.startIndex > last - RENDER_MAX_BARS_BACK)) continue;
+      if (cfg.showORBZones) {
+        const end = isNaN(orb.endIndex) ? last : orb.endIndex;
+        const x1 = bars[orb.startIndex].time;
+        const x2 = bars[end].time;
+        lineData.set(line.new(orb.startIndex, orb.h, end, orb.h, 'bar_index', 'none', cfg.highColor, 'solid', 2),
+          { time1: x1, price1: orb.h, time2: x2, price2: orb.h, color: cfg.highColor, width: 2 });
+        lineData.set(line.new(orb.startIndex, orb.l, end, orb.l, 'bar_index', 'none', cfg.lowColor, 'solid', 2),
+          { time1: x1, price1: orb.l, time2: x2, price2: orb.l, color: cfg.lowColor, width: 2 });
+      }
+      if (!isNaN(orb.entryIndex)) {
+        const price = orb.entryPrice + orb.entryATR * 3 * (orb.entryBullish ? -1 : 1);
+        const style = orb.entryBullish ? 'label_up' : 'label_down';
+        const text = orb.entryBullish ? 'Buy' : 'Sell';
+        const col = orb.entryBullish ? GREEN : RED;
+        labelData.set(label.new(orb.entryIndex, price, text, 'bar_index', 'price', col, style, WHITE),
+          { time: bars[orb.entryIndex].time, price, text, color: col, textColor: WHITE, style });
+      }
     }
-    if (!isNaN(orb.entryIndex)) {
-      labels.push({
-        time: bars[orb.entryIndex].time, price: orb.entryPrice + orb.entryATR * 3 * (orb.entryBullish ? -1 : 1),
-        text: orb.entryBullish ? 'Buy' : 'Sell', color: orb.entryBullish ? GREEN : RED, textColor: WHITE,
-        style: orb.entryBullish ? 'label_up' : 'label_down',
-      });
-      if (labels.length > MAX_LABELS + 5) labels = labels.slice(labels.length - MAX_LABELS);
-    }
+    lines = line.all().map((l) => lineData.get(l)!);
+    labels = label.all().map((l) => labelData.get(l)!);
+  } finally {
+    setDrawingBar(null);
+    resetDrawings();
   }
 
   const mintick = mintickOf(chart);

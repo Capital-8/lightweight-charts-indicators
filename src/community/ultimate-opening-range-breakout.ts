@@ -36,11 +36,13 @@
  * Original notice: © LuxAlgo
  */
 
-import { ta, str, color, time, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import { executeScript, time as scriptTime } from 'oakscriptjs/script';
+import {
+  ta, str, color, time, timeframe, callsite, Series, label, resetDrawings, setDrawingBar, SessionBars, TradingCalendar,
+  type Label, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import { chartTimeframe, hasCalendar } from '../anchor-period';
 import { barInterval, barTime } from '../bar-time';
-import { foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
+import { foregroundColorOf, mintickOf, sessionHoursOf, type ChartContext } from '../chart-context';
 import type { BgColorData, BoxData, LabelData, TableCellData, TableData, TableMergeData } from '../types';
 
 export interface UltimateOpeningRangeBreakoutInputs {
@@ -235,22 +237,19 @@ interface Lb { x: number; y: number; text: string; color: string; style: 'label_
 
 /**
  * time("D", "", timezone) of each bar: the day of the bar with the session hours of the symbol read in `timezone`
- * (NaN: the bar opens outside these hours). With the exchange calendar of the chart context the value comes from
- * the library; without it every bar is inside the hours and the value is the day number in `timezone`.
+ * (NaN: the bar opens outside these hours). With the session of the chart context the value comes from the session
+ * calendar of the library (the symbol hours in `timezone`, without corrections and holidays, as the script API
+ * `time("D", "", timezone)`); without it every bar is inside the hours and the value is the day number in `timezone`.
  */
 function dayTimes(bars: Bar[], timezone: string, chart?: ChartContext): number[] {
   const ms = bars.length > 0 && bars[0].time >= 1e12;
   const tf = chartTimeframe(bars, chart);
   if (chart && hasCalendar(chart) && tf !== '') {
-    let out: number[] = [];
-    const flat = bars.map((b): Bar => ({ time: b.time, open: 1, high: 1, low: 1, close: 1, volume: 1 }));
-    executeScript(() => {
-      out = Array.from(scriptTime('D', '', timezone).toArray(), (v) => v ?? NaN);
-    }, flat, {}, {
-      timeframe: tf, timezone: chart.timezone, session: chart.session, regularSession: chart.regularSession,
-      sessionType: chart.sessionType, timeUnit: ms ? 'ms' : 's',
+    const days = new SessionBars(new TradingCalendar(timezone, { session: sessionHoursOf(chart) }, 'symbol'), tf);
+    return bars.map((b) => {
+      const t = ms ? b.time : b.time * 1000;
+      return days.inside(t) ? days.timeOf(t, 'D') : NaN;
     });
-    return out;
   }
   return bars.map((b) => {
     const t = ms ? b.time : b.time * 1000;
@@ -284,7 +283,10 @@ export function calculate(
     : cfg.stopTimeType === 'London Close' ? '1130'
       : cfg.stopTimeType === 'Manual Time' ? cfg.manualEndTime.replace(':', '') : '2359';
   const plottingSession = `${cfg.sessionInput.substring(0, 4)}-${targetEndTime}:${cfg.sessionDays}`;
-  const within = (i: number, session: string) => time.inSession(ms ? bars[i].time : bars[i].time * 1000, session, cfg.timezoneInput);
+  // the bar duration is needed on the days of a clock change
+  const chartTf = chartTimeframe(bars, chart);
+  const barMs = chartTf !== '' ? timeframe.in_seconds(chartTf) * 1000 : undefined;
+  const within = (i: number, session: string) => time.inSession(ms ? bars[i].time : bars[i].time * 1000, session, cfg.timezoneInput, barMs);
   const dayStarts = dayTimes(bars, cfg.timezoneInput, chart);
 
   const f1 = cfg.extType === 'Fibonacci' ? 0.382 : cfg.mult1;
@@ -317,11 +319,11 @@ export function calculate(
   const crossUp = callsite.crossover();
   const crossDn = callsite.crossunder();
 
-  // Labels in creation order: above max + 5 the oldest are deleted until max remain
-  const labels: Lb[] = [];
+  // Labels in the drawing registry of the library, with the label limit of the script (max_labels_count)
+  resetDrawings({ label: MAX_LABELS, line: MAX_LABELS, box: MAX_LABELS });
+  const labelData = new Map<Label, Lb>();
   const newLabel = (l: Lb) => {
-    labels.push(l);
-    if (labels.length > MAX_LABELS + 5) labels.splice(0, labels.length - MAX_LABELS);
+    labelData.set(label.new(l.x, l.y, l.text, 'bar_index'), l);
   };
 
   type Point = { time: number; value: number; color?: string };
@@ -345,6 +347,7 @@ export function calculate(
   let d = [NaN, NaN, NaN];
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === last);
     const b = bars[i];
     const volume = b.volume ?? NaN;
     const inSession = within(i, orSession);
@@ -553,6 +556,9 @@ export function calculate(
       }
     }
   }
+
+  const labels = label.all().map((obj) => labelData.get(obj) as Lb);
+  setDrawingBar(null);
 
   // Dashboard
   const tables: TableData[] = [];

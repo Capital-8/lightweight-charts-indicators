@@ -27,6 +27,8 @@
  *   original): read from the chart context, the clock of the computer without it.
  * - The previous day, week and average daily range come from the daily and weekly bars built from the chart bars
  *   (UTC days, weeks from Monday): they need bars from the start of the previous week (22 days for the average).
+ * - The lines of the last bar that end after it: with the session of the symbol (chart context) they are drawn on the
+ *   bar of their end time on the trading calendar, else on bar slots of the chart timeframe.
  * - The six plots are hidden in the original (white, transparency 100, only the last 5 bars): only the fills between
  *   them are visible. The three session background colours have a transparency of 100.
  *
@@ -41,9 +43,13 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, color, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, color, str, timeframe, time as pineTime, label, resetDrawings, setDrawingBar, resample, barInterval, barsUntil,
+  chartSessions, TradingCalendar, type Label, type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig,
+  type Bar,
+} from 'oakscriptjs';
 import type { BgColorData, LineDrawingData, LabelData, PineSize } from '../types';
-import { chartTimeframe, periodStarts, securityBars } from '../anchor-period';
+import { chartTimeframe, hasCalendar, periodStarts, securityBars } from '../anchor-period';
 import { mintickOf, nowOf, timezoneOf, type ChartContext } from '../chart-context';
 
 type StyleName = 'solid' | 'dashed' | 'dotted';
@@ -295,6 +301,8 @@ const MAX_LABELS = 50;
 const ONE_DAY = 1000 * 60 * 60 * 24;
 
 interface ScriptLabel { time: number; price: number; text: string; style: 'label_up' | 'none'; textColor?: string; size?: PineSize; noColor: boolean }
+/** A label of the script and its object in the drawing registry (count limit, deletes) */
+type RegisteredLabel = ScriptLabel & { ref: Label };
 
 /**
  * An hour input ("00" .. "23") moved to the exchange time zone (`offset` hours added): its number (24 and more are
@@ -320,22 +328,8 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { high:
   // rule (see anchor-period.ts)
   const exchange = securityBars(bars, tf, context);
   if (exchange) return { high: exchange.htf.map((b) => b.high), low: exchange.htf.map((b) => b.low), group: exchange.group };
-  const starts = periodStarts(bars, tf);
-  const high: number[] = [];
-  const low: number[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      high.push(b.high);
-      low.push(b.low);
-    } else {
-      const k = high.length - 1;
-      high[k] = Math.max(high[k], b.high);
-      low[k] = Math.min(low[k], b.low);
-    }
-    group.push(high.length - 1);
-  });
-  return { high, low, group };
+  const { bars: htf, group } = resample(bars, periodStarts(bars, tf));
+  return { high: htf.map((b) => b.high), low: htf.map((b) => b.low), group };
 }
 
 export function calculate(
@@ -397,16 +391,20 @@ export function calculate(
   const endLineMinute = minuteOf(cfg.userEltm);
   const supportHour = 17 + EXCHANGE_OFFSET;
 
-  /** not na(time(timeframe.period, ses)) */
-  const inSession = (tMs: number, ses: string) => pineTime.inSession(tMs, ses + WEEKDAYS, TZ);
-  /** time("D", ses): the start of the session that contains the bar (na outside the session) */
+  /** not na(time(timeframe.period, ses)); the bar size is needed on the days of a clock change */
+  const barMs = info?.isintraday ? timeframe.in_seconds(period) * 1000 : undefined;
+  const inSession = (tMs: number, ses: string) => pineTime.inSession(tMs, ses + WEEKDAYS, TZ, barMs);
+  /** time("D", ses): the start of the session period that contains the bar (na outside the session) */
+  const calendars = new Map<string, TradingCalendar>();
   const sessionStart = (tMs: number, ses: string): number => {
     if (!inSession(tMs, ses)) return NaN;
-    const m = /^(\d{2})(\d{2})-/.exec(ses);
-    if (!m) return NaN;
-    const second = pineTime.hour(tMs, TZ) * 3600 + pineTime.minute(tMs, TZ) * 60 + pineTime.second(tMs, TZ);
-    const since = (second - (Number(m[1]) * 60 + Number(m[2])) * 60 + 86400) % 86400;
-    return tMs - since * 1000;
+    let calendar = calendars.get(ses);
+    if (!calendar) {
+      calendar = new TradingCalendar(TZ, { session: ses + WEEKDAYS }, 'pine');
+      calendars.set(ses, calendar);
+    }
+    const at = calendar.locate(tMs);
+    return at && at.inside ? calendar.periods(at.date)[at.index][0] : NaN;
   };
 
   // Daily and weekly bars of the symbol (security(..., lookahead_on)), on the resolutions that use them
@@ -426,19 +424,20 @@ export function calculate(
   const hb = cfg.showHiLoTime ? ta.highestbars(Series.fromArray(bars, bars.map((b) => b.high)), lookbackLength).toArray() : [];
   const lb = cfg.showHiLoTime ? ta.lowestbars(Series.fromArray(bars, bars.map((b) => b.low)), lookbackLength).toArray() : [];
 
-  // Labels in creation order: a creation that brings the count above max + 5 deletes the oldest until max remain
-  let labels: ScriptLabel[] = [];
-  const addLabel = (l: ScriptLabel): ScriptLabel => {
-    labels.push(l);
-    if (labels.length > MAX_LABELS + 5) labels = labels.slice(labels.length - MAX_LABELS);
-    return l;
+  // Labels in the drawing registry of the library, with the label limit of the script
+  resetDrawings({ label: MAX_LABELS });
+  const labelData = new Map<Label, RegisteredLabel>();
+  const addLabel = (l: ScriptLabel): RegisteredLabel => {
+    const obj = { ...l, ref: label.new(l.time, l.price, l.text, 'bar_time') };
+    labelData.set(obj.ref, obj);
+    return obj;
   };
   // label.delete(x[1]) of a label made inside an `if`: the label of the last bar where that `if` ran
-  const last: Record<string, ScriptLabel | undefined> = {};
+  const last: Record<string, RegisteredLabel | undefined> = {};
   const replaceLabel = (site: string, l: ScriptLabel) => {
     const old = last[site];
     last[site] = addLabel(l);
-    if (old) labels = labels.filter((x) => x !== old);
+    if (old) label.delete(old.ref);
   };
   const timeAt = (i: number) => (i >= 0 ? ms(bars[i].time) : NaN);
   /** get_label_offset(): the time some bars back, by chart timeframe */
@@ -460,7 +459,28 @@ export function calculate(
   const stamp = (tMs: number, dayShift: number, hour: number, minute: number) => pineTime.timestamp(
     TZ, pineTime.year(tMs, TZ), pineTime.month(tMs, TZ), pineTime.dayofmonth(tMs, TZ) + dayShift, hour, minute);
 
+  // A line end after the last bar: with the exchange calendar of the chart context, the bar of that time on the
+  // trading calendar (a future bar slot); else the time itself (drawn on bar slots of the chart timeframe)
+  let calendar: SessionContext | null = null;
+  if (hasCalendar(chart) && period !== '' && n > 0) {
+    calendar = { timeframe: period, timezone: chart!.timezone, session: chart!.session, regularSession: chart!.regularSession, timeUnit: inMs ? 'ms' : 's' };
+    try {
+      chartSessions(calendar);
+    } catch {
+      calendar = null;
+    }
+  }
+  const interval = barInterval(bars);
+  const lineTime = (tMs: number) => {
+    const t = out(tMs);
+    if (!calendar || !(t > bars[n - 1].time)) return t;
+    // the time is read to the second (the script moves some times by 15 ms)
+    const slots = barsUntil(bars[n - 1].time, out(Math.round(tMs / 1000) * 1000), calendar);
+    return Number.isNaN(slots) ? t : bars[n - 1].time + slots * interval;
+  };
+
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const bar = bars[i];
     const tMs = ms(bar.time);
     const hour = pineTime.hour(tMs, TZ);
@@ -505,7 +525,7 @@ export function calculate(
       const boxWidth = Math.trunc(cfg.boxLineWidth);
       const wide = Math.trunc(cfg.sessionLineWidth);
       const line = (x1: number, y1: number, x2: number, y2: number, c: string, st: StyleName, width: number) => {
-        lines.push({ time1: out(x1), price1: y1, time2: out(x2), price2: y2, color: c, style: st, width });
+        lines.push({ time1: lineTime(x1), price1: y1, time2: lineTime(x2), price2: y2, color: c, style: st, width });
       };
       // The Asian box
       line(fromDate, asian.low, toDate, asian.low, lineColor, boxStyle, boxWidth);
@@ -647,6 +667,8 @@ export function calculate(
     }
   }
 
+  setDrawingBar(null);
+
   // fill() between the two plots of each session: blue, teal and silver with `transp = 90`, a style value (alpha 0.1);
   // na on resolutions where the sessions are not drawn
   const fillColor = (c: string) => `rgba(${parseInt(c.slice(1, 3), 16)}, ${parseInt(c.slice(3, 5), 16)}, ${parseInt(c.slice(5, 7), 16)}, 0.1)`;
@@ -661,7 +683,7 @@ export function calculate(
   const ok = (...v: number[]) => v.every((x) => Number.isFinite(x));
   // color.new(color.black, 100)
   const noColor = String(color.new(COLORS.black, 100));
-  const outLabels: LabelData[] = labels.filter((l) => ok(l.time, l.price)).map((l) => ({
+  const outLabels: LabelData[] = label.all().map((ref) => labelData.get(ref)!).filter((l) => ok(l.time, l.price)).map((l) => ({
     time: out(l.time), price: l.price, text: l.text, style: l.style,
     ...(l.noColor ? { color: noColor } : {}),
     ...(l.textColor !== undefined ? { textColor: l.textColor } : {}),

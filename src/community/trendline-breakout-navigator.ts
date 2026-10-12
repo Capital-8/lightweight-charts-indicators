@@ -32,11 +32,13 @@
  * Original notice: © LuxAlgo
  */
 
-import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, color, timeframe, line, label, resetDrawings, setDrawingBar, drawingOutputs,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line,
+} from 'oakscriptjs';
 import type { BarColorData, BgColorData, LabelData, LineDrawingData } from '../types';
-import { barInterval } from '../bar-time';
 import { foregroundColorOf, type ChartContext } from '../chart-context';
-import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 
 export interface TrendlineBreakoutNavigatorInputs {
   /** Timeframe of the swings ('' = chart timeframe) */
@@ -120,51 +122,31 @@ const lt = (a: number, b: number) => b - a > EPS;
 const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 const ne = (a: number, b: number) => Math.abs(a - b) > EPS;
 
-/** A trendline (line.new with bar indices) */
-interface Trendline {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  color: string;
-  style: 'solid' | 'dashed' | 'dotted';
-  width: number;
-  deleted: boolean;
-}
 /** type bin */
 interface Bin {
-  lin: Trendline | null;
+  lin: Line | null;
   slope: number;
   active: boolean;
   cp: { index: number; price: number } | null;
 }
-interface Mark {
-  x: number;
-  y: number;
-  text: string;
-  textColor: string;
-  style?: 'label_up' | 'label_center';
-  size?: 'tiny';
-}
-
-// Line getters: na for no line and for a deleted line
-const x1Of = (l: Trendline | null) => (l && !l.deleted ? l.x1 : NaN);
-const y1Of = (l: Trendline | null) => (l && !l.deleted ? l.y1 : NaN);
-const x2Of = (l: Trendline | null) => (l && !l.deleted ? l.x2 : NaN);
-const y2Of = (l: Trendline | null) => (l && !l.deleted ? l.y2 : NaN);
-/** line.get_price(x): the price of the line, extended on both sides, at bar x */
-const priceAt = (l: Trendline | null, x: number) => (l && !l.deleted ? l.y1 + ((l.y2 - l.y1) / (l.x2 - l.x1)) * (x - l.x1) : NaN);
-const setXY1 = (l: Trendline | null, x: number, y: number) => {
-  if (l && !l.deleted) {
-    l.x1 = x;
-    l.y1 = y;
-  }
+// Line getters (library lines): na for no line and for a deleted line
+const x1Of = (l: Line | null) => (l ? line.get_x1(l) : NaN);
+const y1Of = (l: Line | null) => (l ? line.get_y1(l) : NaN);
+const x2Of = (l: Line | null) => (l ? line.get_x2(l) : NaN);
+const y2Of = (l: Line | null) => (l ? line.get_y2(l) : NaN);
+/**
+ * line.get_price(x): the price of the line at bar x, the line extended on both sides as PineScript reads it. Own
+ * formula: the library `line.get_price` gives na outside the two points of a line without extension.
+ */
+const priceAt = (l: Line | null, x: number) => {
+  const [x1, y1, x2, y2] = [x1Of(l), y1Of(l), x2Of(l), y2Of(l)];
+  return y1 + ((y2 - y1) / (x2 - x1)) * (x - x1);
 };
-const setXY2 = (l: Trendline | null, x: number, y: number) => {
-  if (l && !l.deleted) {
-    l.x2 = x;
-    l.y2 = y;
-  }
+const setXY1 = (l: Line | null, x: number, y: number) => {
+  if (l) line.set_xy1(l, x, y);
+};
+const setXY2 = (l: Line | null, x: number, y: number) => {
+  if (l) line.set_xy2(l, x, y);
 };
 
 /**
@@ -180,71 +162,9 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
   }
-  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
-  // complete them come from the library rule (see anchor-period.ts)
-  const exchange = securityBars(bars, tf, context);
-  if (exchange) return { htf: exchange.htf, latest: exchange.latest };
-  const n = bars.length;
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
-
-  // A bar completes its period when its close reaches the end of the period. Symbols that trade every day follow
-  // the UTC calendar: the period of the close time is another period. Other symbols: the last bar of a period.
-  const ms = n > 0 && bars[0].time >= 1e12;
-  const weekend = (t: number) => {
-    const wd = new Date(ms ? t : t * 1000).getUTCDay();
-    return wd === 0 || wd === 6;
-  };
-  const interval = barInterval(bars);
-  const closes = bars.map((b) => ({ time: b.time + interval }));
-  const calendar = bars.some((b) => weekend(b.time)) && closes.some((b) => weekend(b.time));
-  const closeStarts = calendar ? periodStarts(closes, tf) : [];
-  // The last bar of a symbol that does not trade every day: its period is complete when the next possible bar is in
-  // another period. The next bar is on the same day while the bar is earlier in the day than the last bar of the
-  // trading day before; else it is on the next weekday.
-  let lastEnds = true;
-  if (!calendar && n > 1) {
-    const DAY = 86400000;
-    const toMs = (t: number) => (ms ? t : t * 1000);
-    const lastMs = toMs(bars[n - 1].time);
-    const day = Math.floor(lastMs / DAY) * DAY;
-    let next = lastMs + toMs(interval);
-    let sessionOver = true;
-    if (toMs(interval) < DAY) {
-      let j = n - 2;
-      while (j >= 0 && toMs(bars[j].time) >= day) j--;
-      sessionOver = j < 0 || lastMs - day >= toMs(bars[j].time) % DAY;
-    }
-    if (sessionOver) {
-      next = day + DAY;
-      while (weekend(ms ? next : next / 1000)) next += DAY;
-    }
-    const withNext = periodStarts([...bars, { time: ms ? next : next / 1000 }], tf);
-    lastEnds = withNext[n] !== withNext[n - 1];
-  }
-  const latest: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let done = i === 0 ? -1 : latest[i - 1];
-    if (i > 0 && group[i] !== group[i - 1]) done = Math.max(done, group[i] - 1);
-    const ends = i === n - 1 ? lastEnds : starts[i + 1] !== starts[i];
-    const reaches = !calendar || closeStarts[i] !== starts[i];
-    if (ends && reaches) done = Math.max(done, group[i]);
-    latest.push(done);
-  }
-  return { htf, latest };
+  // The periods and the bars that complete them: the exchange calendar of the chart context (time zone and
+  // session), else the UTC calendar rule; grouped and completed by the library (see anchor-period.ts)
+  return higherTimeframeBars(bars, tf, context);
 }
 
 export function calculate(
@@ -260,28 +180,13 @@ export function calculate(
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const ps = cfg.term === 'Long' ? 1 : cfg.term === 'Medium' ? 2 : 3;
 
-  // Drawings in creation order: when a creation brings the count above max + 5, the oldest are deleted until max
-  // remain
-  let lines: Trendline[] = [];
-  let labels: Mark[] = [];
-  const newLine = (x1: number, y1: number, x2: number, y2: number, css: string, pos: number): Trendline => {
-    const l: Trendline = {
-      x1, y1, x2, y2, color: css, style: pos === 1 ? 'solid' : pos === 2 ? 'dashed' : 'dotted', width: pos === 1 ? 2 : 1, deleted: false,
-    };
-    lines.push(l);
-    if (lines.length > MAX_OBJECTS + 5) {
-      for (const old of lines.splice(0, lines.length - MAX_OBJECTS)) old.deleted = true;
-    }
-    return l;
-  };
-  const deleteLine = (l: Trendline | null) => {
-    if (!l || l.deleted) return;
-    l.deleted = true;
-    lines = lines.filter((o) => o !== l);
-  };
-  const newLabel = (m: Mark) => {
-    labels.push(m);
-    if (labels.length > MAX_OBJECTS + 5) labels = labels.slice(labels.length - MAX_OBJECTS);
+  // The lines and labels go through the drawing registry of the library (max_lines_count, max_labels_count)
+  resetDrawings({ line: MAX_OBJECTS, label: MAX_OBJECTS });
+  const newLine = (x1: number, y1: number, x2: number, y2: number, css: string, pos: number): Line =>
+    line.new(x1, y1, x2, y2, 'bar_index', undefined, css, pos === 1 ? 'solid' : pos === 2 ? 'dashed' : 'dotted', pos === 1 ? 2 : 1);
+  /** label.new(x, y, text, color = color(na), textcolor, size, style) */
+  const newLabel = (x: number, y: number, text: string, textColor: string, size?: 'tiny', style?: 'label_up' | 'label_center') => {
+    label.new(x, y, text, 'bar_index', undefined, NaN, style, textColor, size);
   };
 
   // The swings of the three lengths: [time[2], pivot] of the timeframe on the chart bars, then
@@ -330,7 +235,7 @@ export function calculate(
       if (bullish ? gt(c, priceLin) : lt(c, priceLin)) {
         // where the wick breaks the last line price
         if (ne(bn.slope, 0)) {
-          newLabel({ x: i - idx, y: priceLin, text: '●', textColor: bullish ? cfg.cWickBull : cfg.cWickBear, style: 'label_center' });
+          newLabel(i - idx, priceLin, '●', bullish ? cfg.cWickBull : cfg.cWickBear, undefined, 'label_center');
         }
         setXY2(bn.lin, i, v + slope * idx);
         if (eq(bn.slope, 0)) {
@@ -380,7 +285,7 @@ export function calculate(
       if (bn.active) {
         if (x2Of(bn.lin) - x1Of(bn.lin) > MAX_BACK) {
           bn.active = false;
-          deleteLine(bn.lin);
+          if (bn.lin) line.delete(bn.lin);
         } else {
           setXY2(bn.lin, i, y2Of(bn.lin) + bn.slope);
         }
@@ -402,9 +307,9 @@ export function calculate(
         if (trend < 1) {
           if (gt(v, prevPh.price) && x - prevPh.index > 5 && i - prevPl.index < MAX_BACK) {
             if (pos === ps && cfg.hhll !== 'None') {
-              newLabel({ x, y: v, text: 'HH\n', textColor: CHART_FG, size: 'tiny' });
+              newLabel(x, v, 'HH\n', CHART_FG, 'tiny');
               if (cfg.hhll === 'HH/LL & previous H/L') {
-                newLabel({ x: prevPh.index, y: prevPh.price, text: '●', textColor: CHART_FG, size: 'tiny' });
+                newLabel(prevPh.index, prevPh.price, '●', CHART_FG, 'tiny');
               }
             }
             trend = 1;
@@ -436,9 +341,9 @@ export function calculate(
         if (trend > -1) {
           if (lt(v, prevPl.price) && x - prevPl.index > 5 && i - prevPh.index < MAX_BACK) {
             if (pos === ps && cfg.hhll !== 'None') {
-              newLabel({ x, y: v, text: '\nLL', textColor: CHART_FG, size: 'tiny', style: 'label_up' });
+              newLabel(x, v, '\nLL', CHART_FG, 'tiny', 'label_up');
               if (cfg.hhll === 'HH/LL & previous H/L') {
-                newLabel({ x: prevPl.index, y: prevPl.price, text: '●', textColor: CHART_FG, size: 'tiny', style: 'label_up' });
+                newLabel(prevPl.index, prevPl.price, '●', CHART_FG, 'tiny', 'label_up');
               }
             }
             trend = -1;
@@ -472,6 +377,7 @@ export function calculate(
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const time = bars[i].time;
     const close = bars[i].close;
     const [trend1, value1] = draw1(i);
@@ -494,20 +400,15 @@ export function calculate(
     }
   }
 
+  setDrawingBar(null);
+
   // An object with an na coordinate is not drawn
-  const drawn = (...values: number[]) => values.every((v) => !isNaN(v));
+  const out = drawingOutputs(bars);
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2, plot3 },
-    lines: lines.filter((l) => drawn(l.x1, l.y1, l.x2, l.y2)).map((l) => ({
-      time1: bars[l.x1].time, price1: l.y1, time2: bars[l.x2].time, price2: l.y2, color: l.color, width: l.width,
-      ...(l.style !== 'solid' ? { style: l.style } : {}),
-    })),
-    labels: labels.filter((m) => drawn(m.x, m.y)).map((m) => ({
-      time: bars[m.x].time, price: m.y, text: m.text, color: 'transparent', textColor: m.textColor,
-      ...(m.style !== undefined ? { style: m.style } : {}),
-      ...(m.size !== undefined ? { size: m.size } : {}),
-    })),
+    lines: out.lines ?? [],
+    labels: out.labels ?? [],
     barColors,
     bgColors,
   };

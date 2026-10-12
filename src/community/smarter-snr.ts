@@ -27,8 +27,6 @@
  *   start at the first chart bar. A timeframe below the chart timeframe needs data that the chart bars do not have:
  *   with "Show Table?" on, the port throws an Error for such a timeframe. The default "Timeframe - B" is 45 minutes:
  *   on a chart above 45 minutes choose another timeframe or switch the table off.
- * - Position of an added swing (the highest high between two lows): the library has no `ta.highestbars` /
- *   `ta.lowestbars` with a length that changes on each bar; the port calls them on the window of each bar.
  *
  * Reference: "Smarter SnR" by hanabil
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -36,10 +34,11 @@
  */
 
 import {
-  ta, Series, str, math, color, callsite, timeframe, getSourceSeries, barInterval, barTime,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
+  ta, Series, str, math, color, callsite, timeframe, getSourceSeries, barInterval, barTime, line, label,
+  resetDrawings, setDrawingBar, varDrawing,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType, type Line, type Label,
 } from 'oakscriptjs';
-import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import { mintickOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
 import type { LabelData, LineDrawingData, TableData, TableCellData, TablePosition } from '../types';
 
@@ -271,24 +270,6 @@ const lineStyleOf = (name: LineStyleName) => (name === 'Solid' ? 'solid' : name 
 const positionOf = (place: TablePlace): TablePosition =>
   (place === 'Top' ? 'top_right' : place === 'Bot' ? 'bottom_right' : 'middle_right');
 
-interface Ln {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  /** The x values are times (ms) and not bar indexes */
-  byTime: boolean;
-  /** 0: zigzag, 1: support, 2: resistance, 3: trendline */
-  kind: number;
-  deleted: boolean;
-}
-interface Lb {
-  /** 0 to 5: S1, S2, S3, R1, R2, R3; 6 / 7: upper / lower trendline price; 8 / 9: upper / lower break; 10: dashboard */
-  kind: number;
-  bar: number;
-  y: number;
-  deleted: boolean;
-}
 
 /**
  * request.security(syminfo.ticker, tf, ...) without lookahead: the bars of timeframe `tf` built from the chart
@@ -302,69 +283,9 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`Smarter SnR: the table timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data (choose another timeframe or switch "Show Table?" off)`);
   }
-  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
-  // complete them come from the library rule (see anchor-period.ts)
-  const exchange = securityBars(bars, tf, context);
-  if (exchange) return { htf: exchange.htf, latest: exchange.latest };
-
-  const n = bars.length;
-  const starts = periodStarts(bars, tf, context);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
-  // A bar completes its period when its close reaches the end of the period. Symbols that trade every day follow
-  // the UTC calendar: the period of the close time is another period. Other symbols: the last bar of a period
-  // (the last bar of the data: when the next weekday is in another period).
-  const ms = n > 0 && bars[0].time >= 1e12;
-  const weekend = (t: number) => {
-    const wd = new Date(ms ? t : t * 1000).getUTCDay();
-    return wd === 0 || wd === 6;
-  };
-  const interval = barInterval(bars);
-  const closes = bars.map((b) => ({ time: b.time + interval }));
-  const calendar = bars.some((b) => weekend(b.time)) && closes.some((b) => weekend(b.time));
-  const closeStarts = calendar ? periodStarts(closes, tf, context) : [];
-  let lastEnds = true;
-  if (!calendar && n > 1) {
-    const DAY = 86400000;
-    const toMs = (t: number) => (ms ? t : t * 1000);
-    const lastMs = toMs(bars[n - 1].time);
-    const day = Math.floor(lastMs / DAY) * DAY;
-    let next = lastMs + toMs(interval);
-    let sessionOver = true;
-    if (toMs(interval) < DAY) {
-      let j = n - 2;
-      while (j >= 0 && toMs(bars[j].time) >= day) j--;
-      sessionOver = j < 0 || lastMs - day >= toMs(bars[j].time) % DAY;
-    }
-    if (sessionOver) {
-      next = day + DAY;
-      while (weekend(ms ? next : next / 1000)) next += DAY;
-    }
-    const withNext = periodStarts([...bars, { time: ms ? next : next / 1000 }], tf, context);
-    lastEnds = withNext[n] !== withNext[n - 1];
-  }
-  const latest: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let done = i === 0 ? -1 : latest[i - 1];
-    if (i > 0 && group[i] !== group[i - 1]) done = Math.max(done, group[i] - 1);
-    const ends = i === n - 1 ? lastEnds : starts[i + 1] !== starts[i];
-    const reaches = !calendar || closeStarts[i] !== starts[i];
-    if (ends && reaches) done = Math.max(done, group[i]);
-    latest.push(done);
-  }
-  return { htf, latest };
+  // The periods and the bars that complete them: the exchange calendar of the chart context (time zone and
+  // session), else the UTC calendar rule; grouped and completed by the library (see anchor-period.ts)
+  return higherTimeframeBars(bars, tf, context);
 }
 
 /** The values of every bar that the drawings of the script read */
@@ -412,25 +333,9 @@ function levels(bars: Bar[], cfg: SmarterSnrInputs, chart?: ChartContext) {
   const lowestSite = callsite.lowest();
   const highest1 = highP.map((v, i) => highestSite(v, barPl1[i]));
   const lowest1 = lowP.map((v, i) => lowestSite(v, barPh1[i]));
-  // ta.highestbars(high[Period], bar_pl1) / ta.lowestbars(low[Period], bar_ph1) on the window of the bar
-  const extremeBars = (source: number[], length: number[], fn: typeof ta.highestbars) => {
-    const memo = new Map<number, number>();
-    return (i: number): number => {
-      let v = memo.get(i);
-      if (v === undefined) {
-        const len = length[i];
-        if (len > i + 1) v = NaN;
-        else {
-          const window = bars.slice(i - len + 1, i + 1);
-          v = fn(new Series(window, (_b, k) => source[i - len + 1 + k]), len).toArray()[len - 1] ?? NaN;
-        }
-        memo.set(i, v);
-      }
-      return v;
-    };
-  };
-  const highestbars1 = extremeBars(highP, barPl1, ta.highestbars);
-  const lowestbars1 = extremeBars(lowP, barPh1, ta.lowestbars);
+  // ta.highestbars(high[Period], bar_pl1) / ta.lowestbars(low[Period], bar_ph1): the same lengths per bar
+  const highestbars1 = A(ta.highestbars(S(highP), S(barPl1)));
+  const lowestbars1 = A(ta.lowestbars(S(lowP), S(barPh1)));
 
   const h = ph;
   const hA = pl.map((v, i) => v && eq(P1[i], pl1[i]));
@@ -457,8 +362,8 @@ function levels(bars: Bar[], cfg: SmarterSnrInputs, chart?: ChartContext) {
   const fixPlVal = l0.map((v, i) => (realLow[i] ? v : lA0[i]));
   const sinceFixPh = barsSince(fixPh, 0);
   const sinceFixPl = barsSince(fixPl, 0);
-  const offsetPhAt = (i: number) => -sinceFixPh[i] + (realHigh[i] ? -P : highestbars1(i) - P);
-  const offsetPlAt = (i: number) => -sinceFixPl[i] + (realLow[i] ? -P : lowestbars1(i) - P);
+  const offsetPhAt = (i: number) => -sinceFixPh[i] + (realHigh[i] ? -P : highestbars1[i] - P);
+  const offsetPlAt = (i: number) => -sinceFixPl[i] + (realLow[i] ? -P : lowestbars1[i] - P);
   // The offsets are read on the bars of a fixed pivot (ta.valuewhen) and, for the zigzag, on the bars of a pivot
   const offsetPh = index.map((i) => (fixPh[i] || fixPl[i] ? offsetPhAt(i) : NaN));
   const offsetPl = index.map((i) => (fixPh[i] || fixPl[i] ? offsetPlAt(i) : NaN));
@@ -539,45 +444,41 @@ export function calculate(
     };
   }) : [];
 
-  // Live drawings in creation order. When a creation brings the count above max + 5, the oldest are deleted until
-  // max remain. A label held by a `var` variable of the script (the two trendline price labels and the latest break
-  // label of each side) is never deleted by this limit, but it counts.
-  const held = new Set<object>();
-  const registry = <T extends { deleted: boolean }>() => {
-    const list: T[] = [];
-    const add = (o: T): T => {
-      list.push(o);
-      if (list.length > MAX_OBJECTS + 5) {
-        for (let k = 0; k < list.length && list.length > MAX_OBJECTS; ) {
-          if (held.has(list[k])) k++;
-          else list.splice(k, 1)[0].deleted = true;
-        }
-      }
-      return o;
-    };
-    const remove = (o: T | null) => {
-      if (!o || o.deleted) return;
-      o.deleted = true;
-      list.splice(list.lastIndexOf(o), 1);
-    };
-    return { list, add, remove };
+  // Drawings of the library registry with the limits of indicator(); the `var` labels of the script (the two
+  // trendline price labels and the latest break label of each side) hold their objects
+  resetDrawings({ line: MAX_OBJECTS, label: MAX_OBJECTS });
+  /** 0: zigzag, 1: support, 2: resistance, 3: trendline (x as times in ms) */
+  const lineKind = new Map<Line, number>();
+  /** 0 to 5: S1, S2, S3, R1, R2, R3; 6 / 7: upper / lower trendline price; 8 / 9: upper / lower break; 10: dashboard */
+  const labelOf = new Map<Label, { kind: number; bar: number }>();
+  const newLine = (kind: number, x1: number, y1: number, x2: number, y2: number, byTime = false) => {
+    const l = line.new(x1, y1, x2, y2, byTime ? 'bar_time' : 'bar_index');
+    lineKind.set(l, kind);
+    return l;
   };
-  const lines = registry<Ln>();
-  const labels = registry<Lb>();
-  const newLine = (kind: number, x1: number, y1: number, x2: number, y2: number, byTime = false) =>
-    lines.add({ x1, y1, x2, y2, byTime, kind, deleted: false });
-  const newLabel = (kind: number, bar: number, y: number) => labels.add({ kind, bar, y, deleted: false });
+  const newLabel = (kind: number, bar: number, x: number, y: number) => {
+    const l = label.new(x, y);
+    labelOf.set(l, { kind, bar });
+    return l;
+  };
+  const removeLine = (o: Line | null) => {
+    if (o) line.delete(o);
+  };
+  const removeLabel = (o: Label | null) => {
+    if (o) label.delete(o);
+  };
 
   const lastConfirmed = lastBarConfirmedOf(chart);
-  const snrLine: Array<Ln | null> = [null, null, null, null, null, null];
-  const snrLabel: Array<Lb | null> = [null, null, null, null, null, null];
-  const tlLine: Array<Ln | null> = [null, null];
-  const tlLabel: Array<Lb | null> = [null, null];
-  const breakLabel: Array<Lb | null> = [null, null];
-  let dashLabel: Lb | null = null;
+  const snrLine: Array<Line | null> = [null, null, null, null, null, null];
+  const snrLabel: Array<Label | null> = [null, null, null, null, null, null];
+  const tlLine: Array<Line | null> = [null, null];
+  const tlLabel = [varDrawing<Label>(), varDrawing<Label>()];
+  const breakLabel = [varDrawing<Label>(), varDrawing<Label>()];
+  let dashLabel: Label | null = null;
   const sides = [...v.supports, ...v.resistances];
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     // ---- Zigzag
     if (cfg.showZZ) {
       if (v.hA[i]) {
@@ -598,11 +499,11 @@ export function calculate(
         const y = sides[k].price[i];
         const before = snrLine[k];
         snrLine[k] = newLine(k < 3 ? 1 : 2, i + sides[k].bar[i], y, i + 10, y);
-        lines.remove(before);
+        removeLine(before);
         if (cfg.showPriceSnr) {
           const labelBefore = snrLabel[k];
-          snrLabel[k] = newLabel(k, i, y);
-          labels.remove(labelBefore);
+          snrLabel[k] = newLabel(k, i, i + 10, y);
+          removeLabel(labelBefore);
         }
       }
     }
@@ -612,7 +513,7 @@ export function calculate(
       if (truthy(bars[i].close) && cfg.newestTL) {
         const before = tlLine[side];
         tlLine[side] = newLine(3, t.x1[i], t.y1[i], v.time[i], t.price[i], true);
-        lines.remove(before);
+        removeLine(before);
       }
       if (t.cond[i] && !cfg.newestTL) {
         // newY2 = x2 + (y2_mult * a_bar_time * 25), a_bar_time = time - time[1]
@@ -620,12 +521,9 @@ export function calculate(
         newLine(3, t.x1[i], t.y1[i], t.x2[i] + cfg.y2Mult * barTimeMs * 25, t.price[i], true);
       }
       if (cfg.showPriceTl) {
-        const before = tlLabel[side];
-        const label = newLabel(6 + side, i, t.price[i]);
-        if (before) held.delete(before);
-        held.add(label);
-        tlLabel[side] = label;
-        labels.remove(before);
+        const before = tlLabel[side].value ?? null;
+        tlLabel[side].value = newLabel(6 + side, i, i + 10, t.price[i]);
+        removeLabel(before);
       }
     });
 
@@ -633,22 +531,20 @@ export function calculate(
     if (i < n - 1 || lastConfirmed) {
       [v.breakUpper[i], v.breakLower[i]].forEach((broken, side) => {
         if (!broken) return;
-        const before = breakLabel[side];
-        const label = newLabel(8 + side, i, side === 0 ? bars[i].low : bars[i].high);
-        if (before) held.delete(before);
-        held.add(label);
-        breakLabel[side] = label;
-        if (cfg.newestBreak) labels.remove(before);
+        const before = breakLabel[side].value ?? null;
+        breakLabel[side].value = newLabel(8 + side, i, i, side === 0 ? bars[i].low : bars[i].high);
+        if (cfg.newestBreak) removeLabel(before);
       });
     }
 
     // ---- Dashboard
     if (cfg.dash) {
       const before = dashLabel;
-      dashLabel = newLabel(10, i, bars[i].close);
-      labels.remove(before);
+      dashLabel = newLabel(10, i, i + Math.trunc(cfg.dashDist), bars[i].close);
+      removeLabel(before);
     }
   }
+  setDrawingBar(null);
 
   const interval = barInterval(bars);
   const T = (index: number) => barTime(bars, index, interval);
@@ -657,15 +553,17 @@ export function calculate(
   const snrExtend = cfg.lineExtendI === 'None' ? 'none' : cfg.lineExtendI === 'Left' ? 'left' : cfg.lineExtendI === 'Both' ? 'both' : 'right';
   const tlStyle = lineStyleOf(cfg.lStyleI);
   // a line or a label with an na coordinate is not drawn
-  const outLines: LineDrawingData[] = lines.list
+  const outLines: LineDrawingData[] = line.all()
     .filter((l) => ![l.x1, l.y1, l.x2, l.y2].some((c) => isNaN(c)))
     .map((l) => {
-      const time1 = l.byTime ? fromMs(l.x1) : T(l.x1);
-      const time2 = l.byTime ? fromMs(l.x2) : T(l.x2);
-      if (l.kind === 0) return { time1, price1: l.y1, time2, price2: l.y2, color: cfg.zzCol };
-      if (l.kind === 3) return { time1, price1: l.y1, time2, price2: l.y2, color: cfg.lColor, style: tlStyle, width: cfg.lWidth };
+      const kind = lineKind.get(l) ?? 0;
+      const byTime = l.xloc === 'bar_time';
+      const time1 = byTime ? fromMs(l.x1) : T(l.x1);
+      const time2 = byTime ? fromMs(l.x2) : T(l.x2);
+      if (kind === 0) return { time1, price1: l.y1, time2, price2: l.y2, color: cfg.zzCol };
+      if (kind === 3) return { time1, price1: l.y1, time2, price2: l.y2, color: cfg.lColor, style: tlStyle, width: cfg.lWidth };
       return {
-        time1, price1: l.y1, time2, price2: l.y2, color: l.kind === 1 ? cfg.supLineCol : cfg.resLineCol,
+        time1, price1: l.y1, time2, price2: l.y2, color: kind === 1 ? cfg.supLineCol : cfg.resLineCol,
         style: snrStyle, width: cfg.linWidth, extend: snrExtend,
       };
     });
@@ -682,7 +580,8 @@ export function calculate(
       + `\n🔸 Upper = ${str.tostring(v.upper.price[i])}\n🔸 Lower = ${str.tostring(v.lower.price[i])}` : '';
     return cfg.dashTitle + snrText + trendlineText;
   };
-  const outLabels: LabelData[] = labels.list.filter((l) => !isNaN(l.y)).map((l): LabelData => {
+  const outLabels: LabelData[] = label.all().filter((o) => !isNaN(o.y)).map((o): LabelData => {
+    const l = { ...labelOf.get(o)!, y: o.y };
     if (l.kind < 6) {
       return {
         time: T(l.bar + 10), price: l.y, text: `${NAMES[l.kind]} -> ${str.tostring(l.y)}`,

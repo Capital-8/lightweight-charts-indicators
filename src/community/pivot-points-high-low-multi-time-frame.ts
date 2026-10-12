@@ -28,7 +28,10 @@
  * Original notice: © LonesomeTheBlue
  */
 
-import { ta, Series, str, math, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, str, math, timeframe, resample, line, label, resetDrawings, setDrawingBar, drawingOutputs,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { LabelData, LineDrawingData } from '../types';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import { mintickOf, type ChartContext } from '../chart-context';
@@ -101,21 +104,8 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   // rule (see anchor-period.ts)
   const exchange = securityBars(bars, tf, context);
   if (exchange) return { htf: exchange.htf, group: exchange.group };
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
+  // Without it: the periods of the UTC calendar rule (see anchor-period.ts), grouped by the library
+  const { bars: htf, group } = resample(bars, periodStarts(bars, tf));
   return { htf, group };
 }
 
@@ -139,17 +129,13 @@ export function calculate(
   const highest = A(ta.highest(Series.fromArray(bars, bars.map((b) => b.high)), 300));
   const lowest = A(ta.lowest(Series.fromArray(bars, bars.map((b) => b.low)), 300));
 
-  // Drawings in creation order: when a creation brings the count above max + 5, the oldest are deleted until max
-  // remain
-  let lines: LineDrawingData[] = [];
-  let labels: LabelData[] = [];
+  // The lines and labels go through the drawing registry of the library (max_lines_count, max_labels_count), with
+  // xloc.bar_time (UNIX ms)
+  resetDrawings({ line: MAX_OBJECTS, label: MAX_OBJECTS });
+  const ms = n > 0 && bars[0].time >= 1e12;
+  const toMs = (t: number) => (ms ? t : t * 1000);
   const newLine = (time1: number, price1: number, time2: number, price2: number, color: string) => {
-    lines.push({ time1, price1, time2, price2, color, width: 2 });
-    if (lines.length > MAX_OBJECTS + 5) lines = lines.slice(lines.length - MAX_OBJECTS);
-  };
-  const newLabel = (label: LabelData) => {
-    labels.push(label);
-    if (labels.length > MAX_OBJECTS + 5) labels = labels.slice(labels.length - MAX_OBJECTS);
+    line.new(toMs(time1), price1, toMs(time2), price2, 'bar_time', undefined, color, undefined, 2);
   };
   // syminfo.mintick: the symbol tick of the chart context (0.01 without it)
   const mintick = mintickOf(chart);
@@ -159,6 +145,7 @@ export function calculate(
   let ph1 = NaN;
   let pl1 = NaN;
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const g = group[i];
     const ph = phH[g];
     const pl = plH[g];
@@ -179,7 +166,7 @@ export function calculate(
       newLine(start, ph, end, ph, cfg.phlinecol);
       newLine(start, ph, start, ph + width, cfg.phlinecol);
       newLine(end, ph, end, ph + width, cfg.phlinecol);
-      newLabel({ time: (start + end) / 2, price: ph + width, text: text(ph), color: cfg.phbgcol, textColor: cfg.phtextcol });
+      label.new(toMs((start + end) / 2), ph + width, text(ph), 'bar_time', undefined, cfg.phbgcol, undefined, cfg.phtextcol);
     }
     if (isNaN(pl1) && truthy(pl)) {
       const start = htfTime(g - rightBars);
@@ -187,14 +174,16 @@ export function calculate(
       newLine(start, pl, end, pl, cfg.pllinecol);
       newLine(start, pl, start, pl - width, cfg.pllinecol);
       newLine(end, pl, end, pl - width, cfg.pllinecol);
-      newLabel({ time: (start + end) / 2, price: pl - width, text: text(pl), color: cfg.plbgcol, textColor: cfg.pltextcol, style: 'label_up' });
+      label.new(toMs((start + end) / 2), pl - width, text(pl), 'bar_time', undefined, cfg.plbgcol, 'label_up', cfg.pltextcol);
     }
     ph1 = ph;
     pl1 = pl;
   }
 
-  // An object with an na coordinate is not drawn. A label time between two bars is drawn on the next bar
-  const drawn = (...values: number[]) => values.every((v) => !isNaN(v));
+  setDrawingBar(null);
+
+  // An object with an na coordinate is not drawn (drawingOutputs). A label time between two bars is drawn on the next
+  // bar
   const onBar = (time: number) => {
     let lo = 0;
     let hi = n;
@@ -205,11 +194,12 @@ export function calculate(
     }
     return lo < n ? bars[lo].time : time;
   };
+  const out = drawingOutputs(bars, ms ? 'ms' : 's');
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
-    lines: lines.filter((l) => drawn(l.time1, l.price1, l.time2, l.price2)),
-    labels: labels.filter((l) => drawn(l.time, l.price)).map((l) => ({ ...l, time: onBar(l.time) })),
+    lines: out.lines ?? [],
+    labels: (out.labels ?? []).map((l) => ({ ...l, time: onBar(l.time) })),
   };
 }
 

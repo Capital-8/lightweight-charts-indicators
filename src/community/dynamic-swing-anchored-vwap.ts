@@ -10,14 +10,17 @@
  * (kept between 5 and 300).
  *
  * Each VWAP segment is a polyline. The segment in progress is redrawn on every bar; the segments before stay. At
- * most 100 polylines and 500 labels are kept.
+ * most 100 polylines and 500 labels are kept (library drawing registry).
  *
  * Reference: "Dynamic Swing Anchored VWAP (Zeiierman)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Zeiierman
  */
 
-import { ta, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, color, label, polyline, chartPoint, Series, resetDrawings, setDrawingBar,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type ChartPoint, type Polyline,
+} from 'oakscriptjs';
 import type { LabelData, PolylineData } from '../types';
 
 export interface DynamicSwingAnchoredVwapInputs {
@@ -76,14 +79,6 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
-interface Point {
-  index: number;
-  price: number;
-}
-interface Poly {
-  points: Point[];
-  color: string;
-}
 
 export function calculate(
   bars: Bar[],
@@ -118,18 +113,16 @@ export function calculate(
   let dirPrev = NaN;
   let p = n > 0 ? hlc3(0) * vol(0) : NaN; // var p = hlc3 * volume
   let v = n > 0 ? vol(0) : NaN; // var vol = volume
-  let points: Point[] = [];
-  let live: Poly | null = null; // vwap.poly
-  // Polylines that stay (one per direction change), oldest first; the segment in progress is the newest polyline
-  let kept: Poly[] = [];
-  /** polyline.new: when the creation brings the count above max + 5, the oldest are deleted until max remain */
-  const created = (withLive: boolean) => {
-    const count = kept.length + (withLive ? 1 : 0);
-    if (count > MAX_POLYLINES + 5) kept = kept.slice(count - MAX_POLYLINES);
-  };
-  let labels: Array<{ x: number; y: number; text: string; up: boolean; color: string }> = [];
+  let points: ChartPoint[] = [];
+  // vwap.poly: a field of a user type, not a `var` variable: the maximum count may delete it
+  let live: Polyline | undefined;
+
+  // Labels and polylines live in the library registry: max_labels_count 500, max_polylines_count 100 and the
+  // PineScript rules of the count (one polyline deleted and one created per bar, the last bar)
+  resetDrawings({ label: MAX_LABELS, polyline: MAX_POLYLINES });
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const phPrev = ph;
     const plPrev = pl;
     if (hiBars[i] === 0) {
@@ -148,49 +141,49 @@ export function calculate(
       const x = up ? plL : phL;
       const y = up ? pl : ph;
       const txt = up && lt(pl, prev) ? 'LL' : up && gt(pl, prev) ? 'HL' : !up && lt(ph, prev) ? 'LH' : !up && gt(ph, prev) ? 'HH' : '';
-      labels.push({ x, y, text: txt, up, color: String(color.new(up ? cfg.highS : cfg.lowS, 20)) });
-      if (labels.length > MAX_LABELS + 5) labels = labels.slice(labels.length - MAX_LABELS);
+      label.new(x, y, txt, 'bar_index', 'price', color.new(up ? cfg.highS : cfg.lowS, 20), up ? 'label_up' : 'label_down', '#FFFFFF');
       prev = up ? phPrev : plPrev;
 
       const barsback = i - x;
       p = y * vol(i - barsback);
       v = vol(i - barsback);
 
+      if (live) polyline.delete(live);
       // the points of the segment before stay as a polyline of their own
-      kept.push({ points, color: dir < 0 ? cfg.R : cfg.S });
-      created(false);
+      polyline.new(points, false, false, 'bar_index', dir < 0 ? cfg.R : cfg.S, null, 'solid', cfg.xx);
       points = [];
       for (let k = barsback; k >= 0; k--) {
         const alpha = alphaAt[i - k];
         p = (1.0 - alpha) * p + alpha * (hlc3(i - k) * vol(i - k));
         v = (1.0 - alpha) * v + alpha * vol(i - k);
-        points.push({ index: i - k, price: gt(v, 0) ? p / v : NaN });
+        points.push(chartPoint.from_index(i - k, gt(v, 0) ? p / v : NaN));
       }
-      live = { points, color: dir < 0 ? cfg.R : cfg.S };
-      created(true);
+      live = polyline.new(points, false, false, 'bar_index', dir < 0 ? cfg.R : cfg.S, null, 'solid', cfg.xx);
     } else {
       const alpha = alphaAt[i];
       p = (1.0 - alpha) * p + alpha * (hlc3(i) * vol(i));
       v = (1.0 - alpha) * v + alpha * vol(i);
-      points.push({ index: i, price: gt(v, 0) ? p / v : NaN });
-      live = { points, color: dir > 0 ? cfg.R : cfg.S };
-      created(true);
+      if (live) polyline.delete(live);
+      points.push(chartPoint.from_index(i, gt(v, 0) ? p / v : NaN));
+      live = polyline.new(points, false, false, 'bar_index', dir > 0 ? cfg.R : cfg.S, null, 'solid', cfg.xx);
     }
     dirPrev = dir;
   }
+  setDrawingBar(null);
 
-  const polylines: PolylineData[] = [...kept, ...(live ? [live] : [])].map((poly) => ({
-    points: poly.points.map((pt) => ({ time: bars[pt.index].time, price: pt.price })),
-    lineColor: poly.color,
-    lineWidth: cfg.xx,
+  const T = (index: number | null) => bars[index ?? 0].time;
+  const polylines: PolylineData[] = polyline.all().map((poly) => ({
+    points: poly.points.map((pt) => ({ time: T(pt.index), price: pt.price })),
+    lineColor: String(poly.line_color),
+    lineWidth: poly.line_width,
   }));
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     // a label with an na price (a swing point that does not exist yet) is not drawn
-    labels: labels.filter((l) => !Number.isNaN(l.y)).map((l) => ({
-      time: bars[l.x].time, price: l.y, text: l.text, style: l.up ? ('label_up' as const) : ('label_down' as const),
-      color: l.color, textColor: '#FFFFFF',
+    labels: label.all().filter((l) => !Number.isNaN(l.y)).map((l) => ({
+      time: T(l.x), price: l.y, text: l.text ?? '', style: l.style === 'label_up' ? ('label_up' as const) : ('label_down' as const),
+      color: String(l.color), textColor: '#FFFFFF',
     })),
     polylines,
   };

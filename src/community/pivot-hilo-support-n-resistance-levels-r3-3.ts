@@ -17,8 +17,8 @@
  * bars before the bar where the pivot is known. With "auto strength" the right length changes from bar to bar: the
  * port moves each bar by its own length.
  *
- * MA filter on the pivots: the pivot functions then run only on the bars that pass the filter and see only those
- * bars (the library rule for a call inside a branch).
+ * MA filter on the pivots: the pivot functions then run only on the bars that pass the filter and keep the values
+ * of those bars only (the rule of a call inside a branch).
  *
  * At most 50 level lines are kept (the default of the platform). The 4 alert conditions of the script have no
  * output. The two moving average plots are circles joined by a line in the original; the port gives circles.
@@ -28,7 +28,10 @@
  * Original notice: Copyright 2017,2018 JustUncleL. SuperSmoother filter © 2013 John F. Ehlers
  */
 
-import { ta, taCore, Series, getSourceSeries, color, callsite, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import {
+  ta, Series, getSourceSeries, color, callsite, line, resetDrawings, setDrawingBar, varDrawing,
+  type Line, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
+} from 'oakscriptjs';
 import type { BarColorData, LineDrawingData, MarkerData } from '../types';
 
 type MaType = 'SMA' | 'EMA' | 'WMA' | 'VWMA' | 'Smooth SMA' | 'DEMA' | 'TEMA' | 'Hull MA' | 'ZeroLag EMA' | 'Triangular MA' | 'SuperSmooth MA';
@@ -158,15 +161,6 @@ const nz = (v: number) => (Number.isNaN(v) ? 0 : v);
 /** A number used as a condition: na and 0 are false */
 const truthy = (v: number) => !Number.isNaN(v) && v !== 0;
 
-/** A level line (`dead` = deleted by the count limit) */
-interface LineObj {
-  x1: number;
-  x2: number;
-  y: number;
-  color: string;
-  dead: boolean;
-}
-
 export function calculate(
   bars: Bar[],
   inputs: Partial<PivotHiloSupportNResistanceLevelsR33Inputs> = {},
@@ -259,21 +253,9 @@ export function calculate(
   const hiCalled = bars.map((_b, i) => !(cfg.uMAf && (fastLonger || lt(fastMa[i], slowMa[i]))));
   const loCalled = bars.map((_b, i) => !(cfg.uMAf && (fastLonger || gt(fastMa[i], slowMa[i]))));
 
-  // pivothigh() / pivotlow() for each pair of lengths in use. The call only sees the bars where it runs
-  const pivotCache = new Map<string, number[]>();
-  const pivot = (isHigh: boolean, i: number): number => {
-    const key = `${isHigh ? 'h' : 'l'}${lenL[i]},${lenR[i]}`;
-    let values = pivotCache.get(key);
-    if (!values) {
-      const L = lenL[i];
-      const R = lenR[i];
-      values = isHigh
-        ? callsite.whenCalled(hiCalled, (x) => taCore.pivothigh(x, L, R), high_)
-        : callsite.whenCalled(loCalled, (x) => taCore.pivotlow(x, L, R), low_);
-      pivotCache.set(key, values);
-    }
-    return values[i];
-  };
+  // pivothigh() / pivotlow(): one call site each, called on the bars where the call runs with the lengths of the bar
+  const pivotHighSite = callsite.pivothigh();
+  const pivotLowSite = callsite.pivotlow();
   // ipivothigh() / ipivotlow(): strictly rising to the pivot then strictly falling (the reverse for a low).
   // `src[k]` inside a function that does not run on every bar: the value of its last call at bar i - k or before
   const ideal = (src: number[], isHigh: boolean, called: boolean[], lastCall: number[], i: number): number => {
@@ -298,8 +280,8 @@ export function calculate(
   const pvthiRaw: number[] = [];
   const pvtloRaw: number[] = [];
   for (let i = 0; i < n; i++) {
-    pvthiRaw.push(!hiCalled[i] ? NaN : cfg.sIdeal ? ideal(high_, true, hiCalled, hiLast, i) : pivot(true, i));
-    pvtloRaw.push(!loCalled[i] ? NaN : cfg.sIdeal ? ideal(low_, false, loCalled, loLast, i) : pivot(false, i));
+    pvthiRaw.push(!hiCalled[i] ? NaN : cfg.sIdeal ? ideal(high_, true, hiCalled, hiLast, i) : pivotHighSite(i, high_[i], lenL[i], lenR[i]));
+    pvtloRaw.push(!loCalled[i] ? NaN : cfg.sIdeal ? ideal(low_, false, loCalled, loLast, i) : pivotLowSite(i, low_[i], lenL[i], lenR[i]));
   }
 
   const plotIds = ['plot0', 'plot1', 'plot2', 'plot3', 'plot4', 'plot5', 'plot6', 'plot7', 'plot8', 'plot9'] as const;
@@ -307,28 +289,11 @@ export function calculate(
   const colors: Record<'plot6' | 'plot7', Array<string | undefined>> = { plot6: new Array(n), plot7: new Array(n) };
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
-  const allLines: LineObj[] = [];
-  let pvthiLine: LineObj | null = null;
-  let pvtloLine: LineObj | null = null;
-  const newLine = (x1: number, x2: number, y: number, col: string): LineObj => {
-    const line = { x1, x2, y, color: col, dead: false };
-    allLines.push(line);
-    return line;
-  };
-  // above max + 5 lines the oldest are deleted until max remain (the lines of the two `var` variables are kept)
-  const limitLines = () => {
-    if (allLines.length <= MAX_LINES + 5) return;
-    let extra = allLines.length - MAX_LINES;
-    for (let k = 0; k < allLines.length && extra > 0;) {
-      if (allLines[k] === pvthiLine || allLines[k] === pvtloLine) {
-        k++;
-      } else {
-        allLines[k].dead = true;
-        allLines.splice(k, 1);
-        extra--;
-      }
-    }
-  };
+  // Level lines in the drawing registry of the library (line limit of the script); `var line pvthiLine / pvtloLine`
+  resetDrawings({ line: MAX_LINES });
+  const pvthiLine = varDrawing<Line>();
+  const pvtloLine = varDrawing<Line>();
+  const newLine = (x1: number, x2: number, y: number, col: string): Line => line.new(x1, y, x2, y, 'bar_index', 'none', col, 'solid', 1);
 
   // valuewhen(pvthi, high_[pvtLenR + Shunt], k): the values kept on the bars with a pivot
   const highsAt: number[] = [];
@@ -342,6 +307,7 @@ export function calculate(
   const lhColor = MAROON;
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const bar = bars[i];
     const pvthi = at(pvthiRaw, i - Shunt);
     const pvtlo = at(pvtloRaw, i - Shunt);
@@ -395,16 +361,10 @@ export function calculate(
 
     // Level lines
     if (!cfg.ShowChannel && cfg.ShowSRLevels) {
-      if (!Number.isNaN(pvthis) && ne(nz(pvthisPrev), pvthis)) {
-        pvthiLine = newLine(i - off, i, pvthis, MAROON);
-        limitLines();
-      }
-      if (pvthiLine && !pvthiLine.dead && !Number.isNaN(pvthis)) pvthiLine.x2 = i;
-      if (!Number.isNaN(pvtlos) && ne(nz(pvtlosPrev), pvtlos)) {
-        pvtloLine = newLine(i - off, i, pvtlos, GREEN);
-        limitLines();
-      }
-      if (pvtloLine && !pvtloLine.dead && !Number.isNaN(pvtlos)) pvtloLine.x2 = i;
+      if (!Number.isNaN(pvthis) && ne(nz(pvthisPrev), pvthis)) pvthiLine.value = newLine(i - off, i, pvthis, MAROON);
+      if (pvthiLine.value && !Number.isNaN(pvthis)) line.set_x2(pvthiLine.value, i);
+      if (!Number.isNaN(pvtlos) && ne(nz(pvtlosPrev), pvtlos)) pvtloLine.value = newLine(i - off, i, pvtlos, GREEN);
+      if (pvtloLine.value && !Number.isNaN(pvtlos)) line.set_x2(pvtloLine.value, i);
     }
 
     if (target >= 0 && cfg.ShowSRLevels && !cfg.ShowChannel) {
@@ -439,6 +399,8 @@ export function calculate(
     }
   }
 
+  setDrawingBar(null);
+
   const plots: IndicatorResult['plots'] = {};
   for (const id of plotIds) {
     const cols = id === 'plot6' || id === 'plot7' ? colors[id] : undefined;
@@ -452,8 +414,8 @@ export function calculate(
     plots,
     markers,
     barColors,
-    lines: allLines.map((l) => ({
-      time1: bars[l.x1].time, price1: l.y, time2: bars[l.x2].time, price2: l.y, color: l.color, width: 1, style: 'solid' as const,
+    lines: line.all().map((l) => ({
+      time1: bars[l.x1].time, price1: l.y1, time2: bars[l.x2].time, price2: l.y2, color: String(l.color), width: 1, style: 'solid' as const,
     })),
   };
 }

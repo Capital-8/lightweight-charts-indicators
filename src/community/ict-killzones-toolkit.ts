@@ -20,8 +20,8 @@
  * not in the result.
  *
  * Limits of the port:
- * - New days / weeks / months come from the UTC calendar and the bars (see anchor-period): equal on UTC symbols
- *   and on symbols whose trading day is inside one UTC day.
+ * - Without the chart context, new days / weeks / months come from the UTC calendar and the bars (see
+ *   anchor-period): equal on UTC symbols and on symbols whose trading day is inside one UTC day.
  * - Chart values read: the symbol price tick (the price texts of the open price labels are formatted with it).
  *   Without a chart context the tick is 0.01.
  * - The chart timeframe is the one of the chart context, else it is read from the bars (the most frequent gap
@@ -41,7 +41,7 @@
  */
 
 import { ta, Series, color, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import { chartTimeframe, periodStarts } from '../anchor-period';
+import { chartTimeframe, periodChanges } from '../anchor-period';
 import type { BgColorData, BoxData, LabelData, LineDrawingData } from '../types';
 import { mintickOf, type ChartContext } from '../chart-context';
 
@@ -313,6 +313,8 @@ export function calculate(
   const isIntraday = tfInfo?.isintraday ?? false;
   const tfM = tfInfo?.multiplier ?? 1;
   const shown = tfM <= cfg.kzSH;
+  // bar duration for the session test (clock-change rule of the library)
+  const barMs = tfName === '' ? undefined : timeframe.in_seconds(tfName) * 1000;
 
   const lines = new Live<Ln>();
   const boxes = new Live<Bx>();
@@ -336,7 +338,7 @@ export function calculate(
   const ppH = A(ta.pivothigh(highS, cfg.mssLN, cfg.mssLN));
   const ppL = A(ta.pivotlow(lowS, cfg.mssLN, cfg.mssLN));
   const dwmTf = cfg.dwmO === 'the Day' ? 'D' : cfg.dwmO === 'the Week' ? 'W' : cfg.dwmO === 'the Month' ? 'M' : null;
-  const dwmStarts = dwmTf ? periodStarts(bars, dwmTf, chart) : null;
+  const dwmChanges = dwmTf ? periodChanges(bars, dwmTf, chart) : null;
   const xTxt = dwmTf ? `${dwmTf}O` : '';
   const kzO = cfg.dwmO === 'Killzones';
   const obbMP = cfg.obbMT === 'Closing Price';
@@ -399,7 +401,7 @@ export function calculate(
     const bar = bars[i];
     const { open, high, low } = bar;
     const t = tMs[i];
-    const active = zones.map((z) => pineTime.inSession(t, z.sess, TZ) && z.on && shown);
+    const active = zones.map((z) => pineTime.inSession(t, z.sess, TZ, barMs) && z.on && shown);
     const inKZ = active.some(Boolean);
 
     // Killzones
@@ -483,7 +485,7 @@ export function calculate(
     });
 
     // Open price of the day / week / month
-    const xChg = dwmStarts !== null && i > 0 && dwmStarts[i] !== dwmStarts[i - 1];
+    const xChg = dwmChanges !== null && dwmChanges[i];
     if (!kzO && isIntraday && shown) {
       if (xChg) {
         labels.del(dwm.lb);

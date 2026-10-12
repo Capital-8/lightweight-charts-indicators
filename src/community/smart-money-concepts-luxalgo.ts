@@ -43,8 +43,9 @@
  */
 
 import {
-  ta, Series, array, color, compare, math, str, callsite, timeframe, barTime,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  ta, Series, array, color, compare, math, str, callsite, timeframe, barTime, line, label, box,
+  resample, resetDrawings, setDrawingBar, varDrawing, holdDrawing,
+  type Box, type Label, type Line, type DrawingVariable, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, PlotCandleData } from '../types';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
@@ -301,61 +302,14 @@ const TRANSPARENT = 'transparent';
 
 type LineStyle = 'solid' | 'dashed' | 'dotted';
 
-/** A drawing of the script. `held`: a `var` variable of the script still refers to it */
-interface Drawing { alive: boolean; held: boolean }
-/** Line with xloc.bar_time (NaN = na: the line exists but is not drawn) */
-interface RawLine extends Drawing { x1: number; y1: number; x2: number; y2: number; color: string; style: LineStyle }
-/** Label: `x` is a time, or a bar index when `byIndex` */
-interface RawLabel extends Drawing {
-  x: number; y: number; byIndex: boolean; text: string; textColor?: string; style: LabelStyle; size: PineSize;
-}
-/** Box with xloc.bar_time */
-interface RawBox extends Drawing {
-  left: number; top: number; right: number; bottom: number; bg?: string; border?: string; extend?: 'right';
-}
-
-/**
- * Drawings of one kind in creation order, with the maximum count of the script: when a creation brings the count
- * above the maximum + 5, the oldest are deleted until the maximum remain. A drawing that a `var` variable still
- * holds counts but is not deleted.
- */
-class Pool<X extends Drawing> {
-  readonly items: X[] = [];
-  private count = 0;
-
-  constructor(private readonly max: number) {}
-
-  add(obj: X): X {
-    this.items.push(obj);
-    this.count++;
-    if (this.count > this.max + 5) {
-      // the new drawing (the last item) is never deleted
-      for (let k = 0; k < this.items.length - 1 && this.count > this.max; k++) {
-        const o = this.items[k];
-        if (o.alive && !o.held) {
-          o.alive = false;
-          this.count--;
-        }
-      }
-    }
-    return obj;
-  }
-
-  /** line.delete() / label.delete() / box.delete(): nothing on na or on a deleted drawing */
-  delete(obj: X | null): void {
-    if (obj && obj.alive) {
-      obj.alive = false;
-      this.count--;
-    }
-  }
-}
-
 interface Pivot { currentLevel: number; lastLevel: number; crossed: boolean; barTime: number; barIndex: number }
 interface Trend { bias: number }
 interface OrderBlock { barHigh: number; barLow: number; barTime: number; bias: number }
-interface FairValueGap { top: number; bottom: number; bias: number; topBox: RawBox; bottomBox: RawBox }
-/** `var line` and `var label` of one drawStructure() call */
-interface StructureSite { line: RawLine | null; label: RawLabel | null }
+interface FairValueGap { top: number; bottom: number; bias: number; topBox: Box; bottomBox: Box }
+/** `var line` and `var label` of one drawStructure() call (made on its first call) */
+interface StructureSite { line: DrawingVariable<Line> | null; label: DrawingVariable<Label> | null }
+/** Line and label of an equal high (low): fields of a `var` object */
+interface EqualDisplay { line: Line | null; label: Label | null }
 /** State of one displayStructure() call */
 interface StructureState {
   bullishBar: boolean; bearishBar: boolean;
@@ -363,7 +317,9 @@ interface StructureState {
   bull: StructureSite; bear: StructureSite;
 }
 /** State of one getCurrentStructure() call: the `var leg` of leg() and the `var label` of its two drawLabel() calls */
-interface LegState { leg: number; highest: number[]; lowest: number[]; lowLabel: RawLabel | null; highLabel: RawLabel | null }
+interface LegState {
+  leg: number; highest: number[]; lowest: number[]; lowLabel: DrawingVariable<Label>; highLabel: DrawingVariable<Label>;
+}
 
 function getStyle(style: string): LineStyle {
   return style === DASHED ? 'dashed' : style === DOTTED ? 'dotted' : 'solid';
@@ -377,21 +333,7 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   const lower = tf.trim() !== '' && chartTf !== '' && timeframe.in_seconds(tf) < timeframe.in_seconds(chartTf);
   const exchange = lower ? null : securityBars(bars, tf, context);
   if (exchange) return { htf: exchange.htf, group: exchange.group };
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  for (let i = 0; i < bars.length; i++) {
-    const b = bars[i];
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume });
-    } else {
-      const cur = htf[htf.length - 1];
-      cur.high = Math.max(cur.high, b.high);
-      cur.low = Math.min(cur.low, b.low);
-      cur.close = b.close;
-    }
-    group.push(htf.length - 1);
-  }
+  const { bars: htf, group } = resample(bars, periodStarts(bars, tf));
   return { htf, group };
 }
 
@@ -429,18 +371,18 @@ export function calculate(
   const premiumZoneColor = mono ? MONO_BEARISH : cfg.premiumZoneColor;
   const discountZoneColor = mono ? MONO_BULLISH : cfg.discountZoneColor;
 
-  const lines = new Pool<RawLine>(MAX_LINES);
-  const labels = new Pool<RawLabel>(MAX_LABELS);
-  const boxes = new Pool<RawBox>(MAX_BOXES);
-  const newLine = (x1: number, y1: number, x2: number, y2: number, lineColor: string, style: LineStyle = 'solid'): RawLine =>
-    lines.add({ alive: true, held: false, x1, y1, x2, y2, color: lineColor, style });
-  const newLabel = (o: Omit<RawLabel, 'alive' | 'held'>): RawLabel => labels.add({ alive: true, held: false, ...o });
-  const newBox = (o: Omit<RawBox, 'alive' | 'held'>): RawBox => boxes.add({ alive: true, held: false, ...o });
-  /** A drawing kept by a `var` variable for the whole run */
-  const hold = <X extends Drawing>(obj: X): X => {
-    obj.held = true;
-    return obj;
-  };
+  // Drawings of the library registry with the maximum counts of indicator(); the `var` variables of the script hold
+  // their objects (varDrawing / holdDrawing). Lines, boxes and labels use xloc.bar_time unless said otherwise.
+  resetDrawings({ line: MAX_LINES, label: MAX_LABELS, box: MAX_BOXES });
+  const newLine = (x1: number, y1: number, x2: number, y2: number, lineColor: string, style: LineStyle = 'solid'): Line =>
+    line.new(x1, y1, x2, y2, 'bar_time', undefined, lineColor, style);
+  /** label.new(): `x` is a time, or a bar index when `byIndex` */
+  const newLabel = (o: { x: number; y: number; byIndex: boolean; text: string; textColor?: string; style: LabelStyle; size: PineSize }): Label =>
+    label.new(o.x, o.y, o.text, o.byIndex ? 'bar_index' : 'bar_time', 'price', TRANSPARENT, o.style, o.textColor, o.size);
+  const newBox = (o: { left: number; top: number; right: number; bottom: number; bg?: string; border?: string; extend?: 'right' }): Box =>
+    box.new(o.left, o.top, o.right, o.bottom, o.border, undefined, undefined, o.extend, 'bar_time', o.bg);
+  /** chart.point.new(time, na, price) */
+  const point = (t: number, price: number) => ({ time: t, index: NaN, price });
 
   const newPivot = (): Pivot => ({ currentLevel: NaN, lastLevel: NaN, crossed: false, barTime: n > 0 ? T[0] : NaN, barIndex: 0 });
   const swingHigh = newPivot();
@@ -451,8 +393,8 @@ export function calculate(
   const equalLow = newPivot();
   const swingTrend: Trend = { bias: 0 };
   const internalTrend: Trend = { bias: 0 };
-  const equalHighDisplay: StructureSite = { line: null, label: null };
-  const equalLowDisplay: StructureSite = { line: null, label: null };
+  const equalHighDisplay: EqualDisplay = { line: null, label: null };
+  const equalLowDisplay: EqualDisplay = { line: null, label: null };
   const fairValueGaps: FairValueGap[] = [];
   const parsedHighs: number[] = [];
   const parsedLows: number[] = [];
@@ -462,8 +404,8 @@ export function calculate(
   const trailing = { top: NaN, bottom: NaN, barTime: NaN, barIndex: NaN, lastTopTime: NaN, lastBottomTime: NaN };
   const swingOrderBlocks: OrderBlock[] = [];
   const internalOrderBlocks: OrderBlock[] = [];
-  const swingOrderBlocksBoxes: RawBox[] = [];
-  const internalOrderBlocksBoxes: RawBox[] = [];
+  const swingOrderBlocksBoxes: Box[] = [];
+  const internalOrderBlocksBoxes: Box[] = [];
   const initialTime = n > 0 ? T[0] : NaN;
 
   // atrMeasure = ta.atr(200); volatilityMeasure = ATR ? atrMeasure : ta.cum(ta.tr) / bar_index
@@ -473,7 +415,8 @@ export function calculate(
   const highSeries = Series.fromArray(bars, H);
   const lowSeries = Series.fromArray(bars, L);
   const legState = (size: number): LegState => ({
-    leg: 0, highest: A(ta.highest(highSeries, size)), lowest: A(ta.lowest(lowSeries, size)), lowLabel: null, highLabel: null,
+    leg: 0, highest: A(ta.highest(highSeries, size)), lowest: A(ta.lowest(lowSeries, size)),
+    lowLabel: varDrawing<Label>(), highLabel: varDrawing<Label>(),
   });
   const swingLeg = legState(cfg.swingsLength);
   const internalLeg = legState(5);
@@ -498,9 +441,9 @@ export function calculate(
   let fvgCum = 0; // ta.cum(math.abs(newTimeframe ? barDeltaPercent : 0))
 
   // drawHighLowSwings(): var lines and labels (made on the first call)
-  let swingsDisplay: { topLine: RawLine; bottomLine: RawLine; topLabel: RawLabel; bottomLabel: RawLabel } | null = null;
+  let swingsDisplay: { topLine: Line; bottomLine: Line; topLabel: Label; bottomLabel: Label } | null = null;
   // drawZone(): var label and var box of the three calls
-  const zones: Array<{ label: RawLabel; box: RawBox }> = [];
+  const zones: Array<{ label: Label; box: Box }> = [];
   const candles: PlotCandleData[] = [];
 
   /** drawStructure(): line and text of a break */
@@ -510,21 +453,18 @@ export function calculate(
   ) => {
     if (site.line === null || site.label === null) {
       // var line l_ine = line.new(na, na, na, na, xloc = xloc.bar_time); var label l_abel = label.new(na, na)
-      site.line = hold(newLine(NaN, NaN, NaN, NaN, '#2962FF'));
-      site.label = hold(newLabel({ x: NaN, y: NaN, byIndex: true, text: '', style: 'label_down', size: 'normal' }));
+      site.line = varDrawing(line.new(NaN, NaN, NaN, NaN, 'bar_time'));
+      site.label = varDrawing(label.new(NaN, NaN));
     }
     if (present) {
-      lines.delete(site.line);
-      labels.delete(site.label);
+      line.delete(site.line.value!);
+      label.delete(site.label.value!);
     }
-    // l_ine := line.new(...): the previous line of the variable is no longer held when the new one is counted
-    site.line.held = false;
-    site.label.held = false;
-    site.line = hold(newLine(p.barTime, p.currentLevel, T[i], p.currentLevel, structureColor, lineStyle));
-    site.label = hold(newLabel({
+    site.line.value = newLine(p.barTime, p.currentLevel, T[i], p.currentLevel, structureColor, lineStyle);
+    site.label.value = newLabel({
       x: math.round(0.5 * (p.barIndex + i)), y: p.currentLevel, byIndex: true, text: tag, textColor: structureColor,
       style: labelStyle, size: labelSize,
-    }));
+    });
   };
 
   /** drawEqualHighLow(): line and text of an equal high (low) */
@@ -534,8 +474,8 @@ export function calculate(
     const equalColor = isHigh ? swingBearishColor : swingBullishColor;
     const labelStyle: LabelStyle = isHigh ? 'label_down' : 'label_up';
     if (present) {
-      lines.delete(display.line);
-      labels.delete(display.label);
+      if (display.line) line.delete(display.line);
+      if (display.label) label.delete(display.label);
     }
     display.line = newLine(p.barTime, p.currentLevel, at(T, i - size), level, equalColor, 'dotted');
     const labelPosition = math.round(0.5 * (p.barIndex + i - size));
@@ -545,10 +485,11 @@ export function calculate(
   };
 
   /** drawLabel() of a swing point: one `var label` per call */
-  const drawSwingLabel = (prev: RawLabel | null, labelTime: number, labelPrice: number, tag: string, labelColor: string, labelStyle: LabelStyle) => {
-    if (present) labels.delete(prev);
-    if (prev) prev.held = false;
-    return hold(newLabel({ x: labelTime, y: labelPrice, byIndex: false, text: tag, textColor: labelColor, style: labelStyle, size: 'small' }));
+  const drawSwingLabel = (
+    l_abel: DrawingVariable<Label>, labelTime: number, labelPrice: number, tag: string, labelColor: string, labelStyle: LabelStyle,
+  ) => {
+    if (present && l_abel.value) label.delete(l_abel.value);
+    l_abel.value = newLabel({ x: labelTime, y: labelPrice, byIndex: false, text: tag, textColor: labelColor, style: labelStyle, size: 'small' });
   };
 
   /** getCurrentStructure(): new pivots of one size, equal highs / lows, trailing extremes, swing point labels */
@@ -585,7 +526,7 @@ export function calculate(
         trailing.lastBottomTime = p.barTime;
       }
       if (cfg.showSwings && swing) {
-        st.lowLabel = drawSwingLabel(st.lowLabel, p.barTime, p.currentLevel, lt(p.currentLevel, p.lastLevel) ? 'LL' : 'HL', swingBullishColor, 'label_up');
+        drawSwingLabel(st.lowLabel, p.barTime, p.currentLevel, lt(p.currentLevel, p.lastLevel) ? 'LL' : 'HL', swingBullishColor, 'label_up');
       }
     } else {
       const p = equalHighLow ? equalHigh : internal ? internalHigh : swingHigh;
@@ -606,7 +547,7 @@ export function calculate(
         trailing.lastTopTime = p.barTime;
       }
       if (cfg.showSwings && swing) {
-        st.highLabel = drawSwingLabel(st.highLabel, p.barTime, p.currentLevel, gt(p.currentLevel, p.lastLevel) ? 'HH' : 'LH', swingBearishColor, 'label_down');
+        drawSwingLabel(st.highLabel, p.barTime, p.currentLevel, gt(p.currentLevel, p.lastLevel) ? 'HH' : 'LH', swingBearishColor, 'label_down');
       }
     }
   };
@@ -709,12 +650,10 @@ export function calculate(
           ? (bearish ? cfg.internalBearishOrderBlockColor : cfg.internalBullishOrderBlockColor)
           : (bearish ? cfg.swingBearishOrderBlockColor : cfg.swingBullishOrderBlockColor);
       const b = array.get(blockBoxes, index);
-      b.left = block.barTime;
-      b.top = block.barHigh;
-      b.right = lastBarTime;
-      b.bottom = block.barLow;
-      b.border = internal ? TRANSPARENT : blockColor;
-      b.bg = blockColor;
+      box.set_top_left_point(b, point(block.barTime, block.barHigh));
+      box.set_bottom_right_point(b, point(lastBarTime, block.barLow));
+      box.set_border_color(b, internal ? TRANSPARENT : blockColor);
+      box.set_bgcolor(b, blockColor);
     }
   };
 
@@ -742,16 +681,17 @@ export function calculate(
     const rightTime = lastBarTime + 20 * (T[i] - at(T, i - 1));
     const lineStyle = getStyle(style);
     // var lines and labels: made here, the function runs on one bar
-    hold(newLine(parsedTopTime, parsedTop, rightTime, parsedTop, levelColor, lineStyle));
-    hold(newLine(parsedBottomTime, parsedBottom, rightTime, parsedBottom, levelColor, lineStyle));
-    hold(newLabel({ x: rightTime, y: parsedTop, byIndex: false, text: str.format('P{0}H', tf), textColor: levelColor, style: 'label_left', size: 'small' }));
-    hold(newLabel({ x: rightTime, y: parsedBottom, byIndex: false, text: str.format('P{0}L', tf), textColor: levelColor, style: 'label_left', size: 'small' }));
+    holdDrawing(newLine(parsedTopTime, parsedTop, rightTime, parsedTop, levelColor, lineStyle));
+    holdDrawing(newLine(parsedBottomTime, parsedBottom, rightTime, parsedBottom, levelColor, lineStyle));
+    holdDrawing(newLabel({ x: rightTime, y: parsedTop, byIndex: false, text: str.format('P{0}H', tf), textColor: levelColor, style: 'label_left', size: 'small' }));
+    holdDrawing(newLabel({ x: rightTime, y: parsedBottom, byIndex: false, text: str.format('P{0}L', tf), textColor: levelColor, style: 'label_left', size: 'small' }));
   };
 
   /** higherTimeframe(tf): the chart timeframe is above `tf` */
   const higherTimeframe = (tf: string) => chartSeconds > timeframe.in_seconds(tf);
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === last);
     const barDuration = T[i] - at(T, i - 1); // time - time[1]
 
     // barstate.isfirst: the boxes of the order blocks
@@ -793,18 +733,22 @@ export function calculate(
         // drawHighLowSwings()
         if (swingsDisplay === null) {
           swingsDisplay = {
-            topLine: hold(newLine(NaN, NaN, NaN, NaN, swingBearishColor)),
-            bottomLine: hold(newLine(NaN, NaN, NaN, NaN, swingBullishColor)),
-            topLabel: hold(newLabel({ x: NaN, y: NaN, byIndex: false, text: '', textColor: swingBearishColor, style: 'label_down', size: 'tiny' })),
-            bottomLabel: hold(newLabel({ x: NaN, y: NaN, byIndex: false, text: '', textColor: swingBullishColor, style: 'label_up', size: 'tiny' })),
+            topLine: holdDrawing(newLine(NaN, NaN, NaN, NaN, swingBearishColor)),
+            bottomLine: holdDrawing(newLine(NaN, NaN, NaN, NaN, swingBullishColor)),
+            topLabel: holdDrawing(newLabel({ x: NaN, y: NaN, byIndex: false, text: '', textColor: swingBearishColor, style: 'label_down', size: 'tiny' })),
+            bottomLabel: holdDrawing(newLabel({ x: NaN, y: NaN, byIndex: false, text: '', textColor: swingBullishColor, style: 'label_up', size: 'tiny' })),
           };
         }
         const rightTimeBar = lastBarTime + 20 * barDuration;
         const d = swingsDisplay;
-        Object.assign(d.topLine, { x1: trailing.lastTopTime, y1: trailing.top, x2: rightTimeBar, y2: trailing.top });
-        Object.assign(d.topLabel, { x: rightTimeBar, y: trailing.top, text: swingTrend.bias === BEARISH ? 'Strong High' : 'Weak High' });
-        Object.assign(d.bottomLine, { x1: trailing.lastBottomTime, y1: trailing.bottom, x2: rightTimeBar, y2: trailing.bottom });
-        Object.assign(d.bottomLabel, { x: rightTimeBar, y: trailing.bottom, text: swingTrend.bias === BULLISH ? 'Strong Low' : 'Weak Low' });
+        line.set_first_point(d.topLine, point(trailing.lastTopTime, trailing.top));
+        line.set_second_point(d.topLine, point(rightTimeBar, trailing.top));
+        label.set_point(d.topLabel, point(rightTimeBar, trailing.top));
+        label.set_text(d.topLabel, swingTrend.bias === BEARISH ? 'Strong High' : 'Weak High');
+        line.set_first_point(d.bottomLine, point(trailing.lastBottomTime, trailing.bottom));
+        line.set_second_point(d.bottomLine, point(rightTimeBar, trailing.bottom));
+        label.set_point(d.bottomLabel, point(rightTimeBar, trailing.bottom));
+        label.set_text(d.bottomLabel, swingTrend.bias === BULLISH ? 'Strong Low' : 'Weak Low');
       }
 
       if (cfg.showPremiumDiscountZones) {
@@ -820,13 +764,14 @@ export function calculate(
         zoneData.forEach(([labelLevel, labelIndex, zoneTop, zoneBottom, tag, zoneColor, style], k) => {
           if (zones.length <= k) {
             zones.push({
-              label: hold(newLabel({ x: NaN, y: NaN, byIndex: true, text: tag, textColor: zoneColor, style, size: 'small' })),
-              box: hold(newBox({ left: NaN, top: NaN, right: NaN, bottom: NaN, bg: String(color.new(zoneColor, 80)), border: TRANSPARENT })),
+              label: holdDrawing(newLabel({ x: NaN, y: NaN, byIndex: true, text: tag, textColor: zoneColor, style, size: 'small' })),
+              box: holdDrawing(newBox({ left: NaN, top: NaN, right: NaN, bottom: NaN, bg: String(color.new(zoneColor, 80)), border: TRANSPARENT })),
             });
           }
           const zone = zones[k];
-          Object.assign(zone.box, { left: trailing.barTime, top: zoneTop, right: lastBarTime, bottom: zoneBottom });
-          Object.assign(zone.label, { x: labelIndex, y: labelLevel });
+          box.set_top_left_point(zone.box, point(trailing.barTime, zoneTop));
+          box.set_bottom_right_point(zone.box, point(lastBarTime, zoneBottom));
+          label.set_point(zone.label, { time: NaN, index: labelIndex, price: labelLevel });
         });
       }
     }
@@ -836,8 +781,8 @@ export function calculate(
       for (let index = 0; index < fairValueGaps.length; index++) {
         const gap = fairValueGaps[index];
         if ((lt(L[i], gap.bottom) && gap.bias === BULLISH) || (gt(H[i], gap.top) && gap.bias === BEARISH)) {
-          boxes.delete(gap.topBox);
-          boxes.delete(gap.bottomBox);
+          box.delete(gap.topBox);
+          box.delete(gap.bottomBox);
           fairValueGaps.splice(index, 1);
         }
       }
@@ -928,30 +873,31 @@ export function calculate(
   };
   const indexTime = (index: number): number => barTime(bars, index);
   const outLines: LineDrawingData[] = [];
-  for (const o of lines.items) {
-    if (!o.alive || [o.x1, o.y1, o.x2, o.y2].some(Number.isNaN)) continue;
-    const line: LineDrawingData = { time1: onBar(o.x1), price1: o.y1, time2: onBar(o.x2), price2: o.y2, color: o.color };
-    if (o.style !== 'solid') line.style = o.style;
-    outLines.push(line);
+  for (const o of line.all()) {
+    if ([o.x1, o.y1, o.x2, o.y2].some(Number.isNaN)) continue;
+    const out: LineDrawingData = { time1: onBar(o.x1), price1: o.y1, time2: onBar(o.x2), price2: o.y2, color: String(o.color) };
+    if (o.style !== 'solid') out.style = o.style as LineStyle;
+    outLines.push(out);
   }
   const outLabels: LabelData[] = [];
-  for (const o of labels.items) {
-    if (!o.alive || Number.isNaN(o.x) || Number.isNaN(o.y)) continue;
-    const time = o.byIndex ? indexTime(o.x) : onBar(o.x);
+  for (const o of label.all()) {
+    if (Number.isNaN(o.x) || Number.isNaN(o.y)) continue;
+    const time = o.xloc === 'bar_index' ? indexTime(o.x) : onBar(o.x);
     if (Number.isNaN(time)) continue;
-    const label: LabelData = { time, price: o.y, text: o.text, color: TRANSPARENT, style: o.style, size: o.size };
-    if (o.textColor !== undefined) label.textColor = o.textColor;
-    outLabels.push(label);
+    const out: LabelData = { time, price: o.y, text: o.text ?? '', color: TRANSPARENT, style: o.style as LabelStyle, size: o.size as PineSize };
+    if (o.textcolor !== undefined) out.textColor = String(o.textcolor);
+    outLabels.push(out);
   }
   const outBoxes: BoxData[] = [];
-  for (const o of boxes.items) {
-    if (!o.alive || [o.left, o.top, o.right, o.bottom].some(Number.isNaN)) continue;
-    const box: BoxData = { time1: onBar(o.left), price1: o.top, time2: onBar(o.right), price2: o.bottom };
-    if (o.bg !== undefined) box.bgColor = o.bg;
-    if (o.border !== undefined) box.borderColor = o.border;
-    if (o.extend) box.extend = o.extend;
-    outBoxes.push(box);
+  for (const o of box.all()) {
+    if ([o.left, o.top, o.right, o.bottom].some(Number.isNaN)) continue;
+    const out: BoxData = { time1: onBar(o.left), price1: o.top, time2: onBar(o.right), price2: o.bottom };
+    if (o.bgcolor !== undefined) out.bgColor = String(o.bgcolor);
+    if (o.border_color !== undefined) out.borderColor = String(o.border_color);
+    if (o.extend === 'right') out.extend = 'right';
+    outBoxes.push(out);
   }
+  setDrawingBar(null);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },

@@ -24,7 +24,10 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, color, timeframe, resample, mapToChart,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
@@ -149,26 +152,12 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the bars do not carry that data.`);
   }
-  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
-  // complete them come from the library rule (see anchor-period.ts)
+  // With the exchange calendar of the chart context (time zone and session): the periods come from the library rule
+  // (see anchor-period.ts); without it, the periods of the UTC calendar and the bars, grouped by the library
   const exchange = securityBars(bars, tf, context);
-  if (exchange) return { htf: exchange.htf, toChart: (values) => exchange.group.map((g) => values[g]) };
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
-  return { htf, toChart: (values) => group.map((g) => values[g]) };
+  const { bars: htf, group } = exchange ? { bars: exchange.htf, group: exchange.group } : resample(bars, periodStarts(bars, tf));
+  // lookahead: every chart bar of a period shows the value of the period
+  return { htf, toChart: (values) => mapToChart(values, group, [], true, false) };
 }
 
 /** k = sma(stoch(close, high, low, len), smoothK), d = sma(k, smoothD) on timeframe `tf`, on the chart bars */

@@ -33,7 +33,7 @@
  *   the UTC calendar and the bars (see anchor-period.ts).
  *
  * Limits of the port:
- * - The pivots with the adaptive length are those of the library function for the length of each bar.
+ * - The pivots with the adaptive length: the library function with a left length per bar.
  * - A "Higher Timeframe" below the chart timeframe (the default "240" on a daily chart) needs data that the chart
  *   bars do not have: the port throws an Error when "Enable HTF Confluence" is on.
  * - The alerts give no output.
@@ -43,8 +43,10 @@
  */
 
 import {
-  ta, math, str, color, array, timeframe, Series, barInterval, barTime,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  ta, math, str, color, array, timeframe, Series, barInterval, barTime, line, label, box, resample,
+  resetDrawings, setDrawingBar, varDrawing,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line, type Label, type Box,
+  type DrawingVariable,
 } from 'oakscriptjs';
 import type {
   BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TablePosition,
@@ -275,49 +277,6 @@ function formatVolume(v: number): string {
 const strengthToTransparency = (strength: number) => Math.trunc(88.0 - Math.max(0.0, Math.min(100.0, strength)) * 0.33);
 
 type DrawStyle = 'solid' | 'dashed' | 'dotted';
-/** Drawings as the script handles them: x is a bar time (`byTime`, xloc.bar_time) or a bar index */
-interface Bx { left: number; top: number; right: number; bottom: number; border: string; bg: string; deleted: boolean }
-interface Ln { x1: number; y1: number; x2: number; y2: number; color: string; style: DrawStyle; byTime: boolean; deleted: boolean }
-interface Lb {
-  x: number; y: number; text: string; color: string; textColor: string; style: LabelStyle; size: PineSize;
-  yloc?: 'abovebar' | 'belowbar'; byTime: boolean; deleted: boolean;
-}
-
-/**
- * Live drawings of one kind in creation order. At most max objects are kept: a creation that brings the count above
- * max + 5 deletes the oldest until max remain. An object that a `var` variable of the script still refers to (the
- * lines and labels of the trade levels) is not deleted by this rule, but it counts. A deleted object ignores later
- * changes.
- */
-class Live<T extends { deleted: boolean }> {
-  items: T[] = [];
-  private held = new Set<T>();
-  add(o: T): T {
-    this.items.push(o);
-    if (this.items.length > MAX_OBJECTS + 5) {
-      let excess = this.items.length - MAX_OBJECTS;
-      this.items = this.items.filter((x) => {
-        if (this.held.has(x) || excess <= 0) return true;
-        excess -= 1;
-        x.deleted = true;
-        return false;
-      });
-    }
-    return o;
-  }
-  /** `variable := object`: the variable holds the new object */
-  hold(o: T): T {
-    this.held.add(o);
-    return o;
-  }
-  delete(o: T | null): void {
-    if (!o || o.deleted) return;
-    o.deleted = true;
-    this.held.delete(o);
-    const k = this.items.lastIndexOf(o);
-    if (k >= 0) this.items.splice(k, 1);
-  }
-}
 
 interface Pool {
   level: number;
@@ -332,9 +291,9 @@ interface Pool {
   sweptAtIdx: number;
   sweptAtTime: number;
   htfBonus: number;
-  zoneBox: Bx;
-  poolLabel: Lb;
-  midLine: Ln;
+  zoneBox: Box;
+  poolLabel: Label;
+  midLine: Line;
 }
 
 /**
@@ -349,27 +308,16 @@ function htfPivots(bars: Bar[], tf: string, context?: ChartContext): { high: num
     if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
       throw new Error(`The higher timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data (switch "Enable HTF Confluence" off or choose a higher timeframe)`);
     }
-    // With the exchange calendar of the chart context the periods come from the library rule (see anchor-period.ts)
+    // With the exchange calendar of the chart context the periods come from the library rule (see anchor-period.ts);
+    // else the bars of the UTC calendar periods, grouped by the library
     const exchange = securityBars(bars, tf, context);
     if (exchange) {
       htf = exchange.htf;
       group = exchange.group;
     } else {
-      const starts = periodStarts(bars, tf);
-      htf = [];
-      group = [];
-      bars.forEach((b, i) => {
-        if (i === 0 || starts[i] !== starts[i - 1]) {
-          htf.push({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-        } else {
-          const last = htf[htf.length - 1];
-          last.high = Math.max(last.high, b.high);
-          last.low = Math.min(last.low, b.low);
-          last.close = b.close;
-          last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-        }
-        group.push(htf.length - 1);
-      });
+      const grouped = resample(bars, periodStarts(bars, tf));
+      htf = grouped.bars;
+      group = grouped.group;
     }
   }
   const ph = ta.pivothigh(new Series(htf, (b) => b.high), HTF_PIVOT_LEN, HTF_PIVOT_LEN).toArray().map((v) => v ?? NaN);
@@ -464,27 +412,20 @@ export function calculate(
   const rightLen = cfg.rightConfirm;
   const WARMUP_BARS = Math.max(50, cfg.atrLenRisk + 10);
 
-  // ta.pivothigh(leftLen, rightLen) / ta.pivotlow(leftLen, rightLen) with a left length per bar: the value of the
-  // library function for the length of the bar
-  const highS = new Series(bars, (b) => b.high);
-  const lowS = new Series(bars, (b) => b.low);
-  const pivotsByLen = new Map<number, { high: number[]; low: number[] }>();
-  const pivotsOf = (len: number) => {
-    let p = pivotsByLen.get(len);
-    if (!p) {
-      p = { high: A(ta.pivothigh(highS, len, rightLen)), low: A(ta.pivotlow(lowS, len, rightLen)) };
-      pivotsByLen.set(len, p);
-    }
-    return p;
-  };
+  // ta.pivothigh(leftLen, rightLen) / ta.pivotlow(leftLen, rightLen) with a left length per bar
+  const leftLenS = Series.fromArray(bars, leftLenArr);
+  const pivotHighs = A(ta.pivothigh(new Series(bars, (b) => b.high), leftLenS, rightLen));
+  const pivotLows = A(ta.pivotlow(new Series(bars, (b) => b.low), leftLenS, rightLen));
 
   // HTF pivot levels: only the strength bonus reads them, and only when "Enable HTF Confluence" is on
   const htf = cfg.useHtfConfluence ? htfPivots(bars, cfg.htfTimeframe, chart) : null;
 
   // ── Drawings ──
-  const boxes = new Live<Bx>();
-  const lines = new Live<Ln>();
-  const labels = new Live<Lb>();
+  // The library registry keeps at most 500 objects of each kind; the trade lines and labels are held by `var`
+  // variables. Pools use xloc.bar_time: x is the Pine time (ms) of a bar
+  resetDrawings({ line: MAX_OBJECTS, label: MAX_OBJECTS, box: MAX_OBJECTS });
+  const inMs = bars[0].time >= 1e12;
+  const pineTime = (t: number) => (inMs ? t : t * 1000);
 
   // ── Pools ──
   let pools: Pool[] = [];
@@ -532,14 +473,10 @@ export function calculate(
 
   const createPool = (price: number, idx: number, t: number, vol: number, isHigh: boolean, htfBonus: number): void => {
     const borderClr = isHigh ? BEAR_ZONE_BORDER : BULL_ZONE_BORDER;
-    const zoneBox = boxes.add({
-      left: t, top: price + tolerance / 2.0, right: t, bottom: price - tolerance / 2.0, border: borderClr, bg: C(borderClr, 88), deleted: false,
-    });
-    const midLine = lines.add({ x1: t, y1: price, x2: t, y2: price, color: C(borderClr, 50), style: 'dotted', byTime: true, deleted: false });
-    const poolLabel = labels.add({
-      x: t, y: price, text: '', color: CLEAR, textColor: isHigh ? BEAR_TEXT : BULL_TEXT, style: 'label_left', size: 'small',
-      byTime: true, deleted: false,
-    });
+    const x = pineTime(t);
+    const zoneBox = box.new(x, price + tolerance / 2.0, x, price - tolerance / 2.0, borderClr, 1, undefined, undefined, 'bar_time', C(borderClr, 88));
+    const midLine = line.new(x, price, x, price, 'bar_time', 'none', C(borderClr, 50), 'dotted', 1);
+    const poolLabel = label.new(x, price, '', 'bar_time', 'price', CLEAR, 'label_left', isHigh ? BEAR_TEXT : BULL_TEXT, 'small');
     pools.push({
       level: price, levelTop: price + tolerance / 2.0, levelBot: price - tolerance / 2.0, lastTouchIdx: idx, firstBarTime: t,
       touchCount: 1, cumulativeVol: vol, isHigh, state: STATE_ACTIVE, sweptAtIdx: 0, sweptAtTime: 0, htfBonus,
@@ -549,9 +486,9 @@ export function calculate(
 
   const removePool = (k: number): void => {
     const victim = pools[k];
-    boxes.delete(victim.zoneBox);
-    lines.delete(victim.midLine);
-    labels.delete(victim.poolLabel);
+    box.delete(victim.zoneBox);
+    line.delete(victim.midLine);
+    label.delete(victim.poolLabel);
     pools.splice(k, 1);
   };
 
@@ -587,34 +524,35 @@ export function calculate(
   let tp3Reached = false;
   let beActive = false;
 
-  let slLine: Ln | null = null;
-  let tp1Line: Ln | null = null;
-  let tp2Line: Ln | null = null;
-  let tp3Line: Ln | null = null;
-  let entryLine: Ln | null = null;
-  let slLabel: Lb | null = null;
-  let tp1Label: Lb | null = null;
-  let tp2Label: Lb | null = null;
-  let tp3Label: Lb | null = null;
-  let entryLabel: Lb | null = null;
+  // var line slLine = na ... var label entryLabel = na
+  const slLine = varDrawing<Line>();
+  const tp1Line = varDrawing<Line>();
+  const tp2Line = varDrawing<Line>();
+  const tp3Line = varDrawing<Line>();
+  const entryLine = varDrawing<Line>();
+  const slLabel = varDrawing<Label>();
+  const tp1Label = varDrawing<Label>();
+  const tp2Label = varDrawing<Label>();
+  const tp3Label = varDrawing<Label>();
+  const entryLabel = varDrawing<Label>();
+  const riskLines = [slLine, tp1Line, tp2Line, tp3Line, entryLine];
+  const riskLabels = [slLabel, tp1Label, tp2Label, tp3Label, entryLabel];
   let riskLinesActive = false;
   const deleteRiskDrawings = (): void => {
-    for (const l of [slLine, tp1Line, tp2Line, tp3Line, entryLine]) lines.delete(l);
-    for (const l of [slLabel, tp1Label, tp2Label, tp3Label, entryLabel]) labels.delete(l);
+    for (const l of riskLines) if (l.value) line.delete(l.value);
+    for (const l of riskLabels) if (l.value) label.delete(l.value);
   };
-  const alive = <T extends { deleted: boolean }>(o: T | null): o is T => o !== null && !o.deleted;
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const { high, low, close } = b;
     barIndex = i;
     const isLast = i === n - 1;
+    setDrawingBar(i, isLast);
     const isConfirmed = !isLast || lastConfirmed;
     const isWarmedUp = i >= WARMUP_BARS;
-    const leftLen = leftLenArr[i];
-    const pivots = pivotsOf(leftLen);
-    const ph = pivots.high[i];
-    const pl = pivots.low[i];
+    const ph = pivotHighs[i];
+    const pl = pivotLows[i];
     tolerance = atrFast[i] * cfg.atrTolerance;
 
     // ── New pivots ──
@@ -707,9 +645,10 @@ export function calculate(
       for (const p of pools) {
         const s = computeStrength(p);
         const visible = cfg.showZones && (p.state === STATE_ACTIVE ? ge(s, cfg.minStrengthShow) : cfg.showSwept);
-        const box = p.zoneBox;
-        const line = p.midLine;
-        const label = p.poolLabel;
+        const zoneBox = p.zoneBox;
+        const midLine = p.midLine;
+        const poolLabel = p.poolLabel;
+        // the setters do nothing on a deleted object
         if (visible) {
           const rightT = p.state === STATE_ACTIVE ? b.time : p.sweptAtTime;
           const baseClr = p.isHigh ? BEAR_ZONE_BORDER : BULL_ZONE_BORDER;
@@ -723,63 +662,47 @@ export function calculate(
             borderClr = MITIGATED_BORDER;
             bgClr = MITIGATED_BG;
           }
-          if (!box.deleted) {
-            box.left = p.firstBarTime;
-            box.right = rightT;
-            box.top = p.levelTop;
-            box.bottom = p.levelBot;
-            box.border = borderClr;
-            box.bg = bgClr;
-          }
-          if (!line.deleted) {
-            line.x1 = p.firstBarTime;
-            line.x2 = rightT;
-            line.y1 = p.level;
-            line.y2 = p.level;
-            line.color = C(borderClr, 40);
-          }
-          if (!label.deleted) {
-            if (cfg.showLabels) {
-              const typeStr = p.isHigh ? 'SSL' : 'BSL';
-              const countStr = p.touchCount > 1 ? str.format(' ×{0}', p.touchCount) : '';
-              const strStr = str.format(' [{0}]', math.round(s) as number);
-              const volStr = cfg.showVolume ? ' ' + formatVolume(p.cumulativeVol) : '';
-              const stateStr = p.state === STATE_SWEPT ? 'Swept ' : p.state === STATE_MITIGATED ? 'Mit. ' : '';
-              label.x = rightT;
-              label.y = p.level;
-              label.text = stateStr + typeStr + countStr + strStr + volStr;
-              label.textColor = p.state === STATE_ACTIVE ? (p.isHigh ? BEAR_TEXT : BULL_TEXT) : C(TEXT_MUTED, 20);
-            } else {
-              label.text = '';
-            }
+          box.set_left(zoneBox, pineTime(p.firstBarTime));
+          box.set_right(zoneBox, pineTime(rightT));
+          box.set_top(zoneBox, p.levelTop);
+          box.set_bottom(zoneBox, p.levelBot);
+          line.set_x1(midLine, pineTime(p.firstBarTime));
+          line.set_x2(midLine, pineTime(rightT));
+          line.set_y1(midLine, p.level);
+          line.set_y2(midLine, p.level);
+          box.set_border_color(zoneBox, borderClr);
+          box.set_bgcolor(zoneBox, bgClr);
+          line.set_color(midLine, C(borderClr, 40));
+          if (cfg.showLabels) {
+            const typeStr = p.isHigh ? 'SSL' : 'BSL';
+            const countStr = p.touchCount > 1 ? str.format(' ×{0}', p.touchCount) : '';
+            const strStr = str.format(' [{0}]', math.round(s) as number);
+            const volStr = cfg.showVolume ? ' ' + formatVolume(p.cumulativeVol) : '';
+            const stateStr = p.state === STATE_SWEPT ? 'Swept ' : p.state === STATE_MITIGATED ? 'Mit. ' : '';
+            label.set_x(poolLabel, pineTime(rightT));
+            label.set_y(poolLabel, p.level);
+            label.set_text(poolLabel, stateStr + typeStr + countStr + strStr + volStr);
+            label.set_textcolor(poolLabel, p.state === STATE_ACTIVE ? (p.isHigh ? BEAR_TEXT : BULL_TEXT) : C(TEXT_MUTED, 20));
+          } else {
+            label.set_text(poolLabel, '');
           }
         } else {
           // hidden: the box and the line are collapsed on the current bar
-          if (!box.deleted) {
-            box.left = b.time;
-            box.right = b.time;
-          }
-          if (!line.deleted) {
-            line.x1 = b.time;
-            line.x2 = b.time;
-          }
-          if (!label.deleted) label.text = '';
+          box.set_left(zoneBox, pineTime(b.time));
+          box.set_right(zoneBox, pineTime(b.time));
+          line.set_x1(midLine, pineTime(b.time));
+          line.set_x2(midLine, pineTime(b.time));
+          label.set_text(poolLabel, '');
         }
       }
     }
 
     // ── Signal markers ──
     if (cfg.showSignals && sweepBuySignal) {
-      labels.add({
-        x: i, y: low, text: 'Long', color: cfg.bullColor, textColor: BULL_LABEL_TEXT, style: 'label_up', size: signalMarkerSize,
-        yloc: 'belowbar', byTime: false, deleted: false,
-      });
+      label.new(i, low, 'Long', 'bar_index', 'belowbar', cfg.bullColor, 'label_up', BULL_LABEL_TEXT, signalMarkerSize);
     }
     if (cfg.showSignals && sweepSellSignal) {
-      labels.add({
-        x: i, y: high, text: 'Short', color: cfg.bearColor, textColor: BEAR_LABEL_TEXT, style: 'label_down', size: signalMarkerSize,
-        yloc: 'abovebar', byTime: false, deleted: false,
-      });
+      label.new(i, high, 'Short', 'bar_index', 'abovebar', cfg.bearColor, 'label_down', BEAR_LABEL_TEXT, signalMarkerSize);
     }
 
     // ── Trade model ──
@@ -848,49 +771,49 @@ export function calculate(
     // ── SL / TP lines and labels ──
     if ((confirmedBuy || confirmedSell) && cfg.showSlTp) {
       deleteRiskDrawings();
-      const level = (y: number, lineColor: string, style: DrawStyle): Ln =>
-        lines.hold(lines.add({ x1: i, y1: y, x2: i + LINE_LOOKAHEAD, y2: y, color: lineColor, style, byTime: false, deleted: false }));
-      entryLine = level(activeEntry, ENTRY_COLOR, 'dotted');
-      slLine = level(activeSL, SL_COLOR, 'solid');
-      tp1Line = level(activeTP1, TP1_COLOR, 'dashed');
-      tp2Line = level(activeTP2, TP2_COLOR, 'dashed');
-      tp3Line = level(activeTP3, TP3_COLOR, 'dashed');
+      const level = (y: number, lineColor: string, style: DrawStyle): Line =>
+        line.new(i, y, i + LINE_LOOKAHEAD, y, 'bar_index', 'none', lineColor, style, 1);
+      entryLine.value = level(activeEntry, ENTRY_COLOR, 'dotted');
+      slLine.value = level(activeSL, SL_COLOR, 'solid');
+      tp1Line.value = level(activeTP1, TP1_COLOR, 'dashed');
+      tp2Line.value = level(activeTP2, TP2_COLOR, 'dashed');
+      tp3Line.value = level(activeTP3, TP3_COLOR, 'dashed');
       if (cfg.showSlTpLabels) {
-        const tag = (y: number, text: string, bg: string): Lb => labels.hold(labels.add({
-          x: i + LABEL_OFFSET, y, text, color: bg, textColor: LABEL_TEXT, style: 'label_left', size: labelSize, byTime: false, deleted: false,
-        }));
-        entryLabel = tag(activeEntry, 'ENTRY ' + tickText(activeEntry), ENTRY_COLOR);
-        slLabel = tag(activeSL, 'SL ' + tickText(activeSL) + formatPctFromEntry(activeSL, activeEntry), SL_COLOR);
-        tp1Label = tag(activeTP1, 'TP1 ' + tickText(activeTP1) + formatPctFromEntry(activeTP1, activeEntry), TP1_COLOR);
-        tp2Label = tag(activeTP2, 'TP2 ' + tickText(activeTP2) + formatPctFromEntry(activeTP2, activeEntry), TP2_COLOR);
-        tp3Label = tag(activeTP3, 'TP3 ' + tickText(activeTP3) + formatPctFromEntry(activeTP3, activeEntry), TP3_COLOR);
+        const tag = (y: number, text: string, bg: string): Label =>
+          label.new(i + LABEL_OFFSET, y, text, 'bar_index', 'price', bg, 'label_left', LABEL_TEXT, labelSize);
+        entryLabel.value = tag(activeEntry, 'ENTRY ' + tickText(activeEntry), ENTRY_COLOR);
+        slLabel.value = tag(activeSL, 'SL ' + tickText(activeSL) + formatPctFromEntry(activeSL, activeEntry), SL_COLOR);
+        tp1Label.value = tag(activeTP1, 'TP1 ' + tickText(activeTP1) + formatPctFromEntry(activeTP1, activeEntry), TP1_COLOR);
+        tp2Label.value = tag(activeTP2, 'TP2 ' + tickText(activeTP2) + formatPctFromEntry(activeTP2, activeEntry), TP2_COLOR);
+        tp3Label.value = tag(activeTP3, 'TP3 ' + tickText(activeTP3) + formatPctFromEntry(activeTP3, activeEntry), TP3_COLOR);
       }
       riskLinesActive = true;
     }
 
     // a target that was reached: solid line in the hit colour, label with a check mark
-    const markHit = (line: Ln | null, label: Lb | null, name: string, level: number): void => {
-      if (alive(line)) {
-        line.color = TP_HIT_COLOR;
-        line.style = 'solid';
-      }
-      if (cfg.showSlTpLabels && alive(label)) {
-        label.text = name + ' ✓ ' + tickText(level) + formatPctFromEntry(level, activeEntry);
-        label.color = TP_HIT_COLOR;
+    // `not na(tp1Line)`: the variable got a line once (a deleted line is not na); the setters do nothing on a deleted
+    // object
+    const markHit = (lineVar: DrawingVariable<Line>, labelVar: DrawingVariable<Label>, name: string, level: number): void => {
+      const l = lineVar.value as Line;
+      line.set_color(l, TP_HIT_COLOR);
+      line.set_style(l, 'solid');
+      if (cfg.showSlTpLabels && labelVar.value) {
+        label.set_text(labelVar.value, name + ' ✓ ' + tickText(level) + formatPctFromEntry(level, activeEntry));
+        label.set_color(labelVar.value, TP_HIT_COLOR);
       }
     };
-    if (cfg.showSlTp && tp1Line !== null && tp1Reached) markHit(tp1Line, tp1Label, 'TP1', activeTP1);
-    if (cfg.showSlTp && tp2Line !== null && tp2Reached) markHit(tp2Line, tp2Label, 'TP2', activeTP2);
-    if (cfg.showSlTp && tp3Line !== null && tp3Reached) markHit(tp3Line, tp3Label, 'TP3', activeTP3);
+    if (cfg.showSlTp && tp1Line.value && tp1Reached) markHit(tp1Line, tp1Label, 'TP1', activeTP1);
+    if (cfg.showSlTp && tp2Line.value && tp2Reached) markHit(tp2Line, tp2Label, 'TP2', activeTP2);
+    if (cfg.showSlTp && tp3Line.value && tp3Reached) markHit(tp3Line, tp3Label, 'TP3', activeTP3);
 
     // break-even: the first stop line is dimmed and the entry label says where the stop is
     if (cfg.showSlTp && beActive && activeDir !== 0) {
-      if (alive(slLine)) slLine.color = SL_DIM;
+      if (slLine.value) line.set_color(slLine.value, SL_DIM);
       if (cfg.showSlTpLabels) {
-        if (alive(slLabel)) slLabel.color = SL_DIM;
-        if (alive(entryLabel)) {
-          entryLabel.text = 'ENTRY ' + tickText(activeEntry) + '  → SL (BE)';
-          entryLabel.color = BE_COLOR;
+        if (slLabel.value) label.set_color(slLabel.value, SL_DIM);
+        if (entryLabel.value) {
+          label.set_text(entryLabel.value, 'ENTRY ' + tickText(activeEntry) + '  → SL (BE)');
+          label.set_color(entryLabel.value, BE_COLOR);
         }
       }
     }
@@ -904,19 +827,16 @@ export function calculate(
     // the position is open: the lines end 5 bars after the current bar
     if (activeDir !== 0 && riskLinesActive && cfg.showSlTp) {
       const newEnd = i + LINE_EXTEND;
-      if (slLine !== null) {
-        for (const l of [slLine, tp1Line, tp2Line, tp3Line, entryLine]) {
-          if (alive(l)) l.x2 = newEnd;
-        }
+      if (slLine.value) {
+        for (const l of riskLines) if (l.value) line.set_x2(l.value, newEnd);
       }
-      if (cfg.showSlTpLabels && slLabel !== null) {
-        for (const l of [slLabel, tp1Label, tp2Label, tp3Label, entryLabel]) {
-          if (alive(l)) l.x = newEnd + 1;
-        }
+      if (cfg.showSlTpLabels && slLabel.value) {
+        for (const l of riskLabels) if (l.value) label.set_x(l.value, newEnd + 1);
       }
     }
     // end of the bar
   }
+  setDrawingBar(null);
 
   // ── Tables of the last bar ──
   const last = bars[n - 1];
@@ -1035,19 +955,23 @@ export function calculate(
   }
 
   // ── Output ──
+  // Live objects of the registry: a bar_time x (Pine ms) back to the unit of the bars, a bar index to its bar time
   const interval = barInterval(bars);
-  const X = (x: number, byTime: boolean) => (byTime ? x : barTime(bars, x, interval));
+  const X = (x: number, xloc: 'bar_index' | 'bar_time') => (xloc === 'bar_time' ? (inMs ? x : x / 1000) : barTime(bars, x, interval));
   return {
     ...base,
-    boxes: boxes.items.map((o) => ({
-      time1: o.left, price1: o.top, time2: o.right, price2: o.bottom, bgColor: o.bg, borderColor: o.border, borderWidth: 1,
+    boxes: box.all().map((o) => ({
+      time1: X(o.left, o.xloc), price1: o.top, time2: X(o.right, o.xloc), price2: o.bottom, bgColor: String(o.bgcolor),
+      borderColor: String(o.border_color), borderWidth: o.border_width ?? 1,
     })),
-    lines: lines.items.map((l) => ({
-      time1: X(l.x1, l.byTime), price1: l.y1, time2: X(l.x2, l.byTime), price2: l.y2, color: l.color, width: 1, style: l.style,
+    lines: line.all().map((l) => ({
+      time1: X(l.x1, l.xloc), price1: l.y1, time2: X(l.x2, l.xloc), price2: l.y2, color: String(l.color), width: l.width ?? 1,
+      style: (l.style ?? 'solid') as DrawStyle,
     })),
-    labels: labels.items.map((l) => ({
-      time: X(l.x, l.byTime), price: l.y, text: l.text, color: l.color, textColor: l.textColor, style: l.style, size: l.size,
-      ...(l.yloc !== undefined ? { yloc: l.yloc } : {}),
+    labels: label.all().map((l) => ({
+      time: X(l.x, l.xloc), price: l.y, text: l.text ?? '', color: String(l.color), textColor: String(l.textcolor),
+      style: l.style as LabelStyle, size: l.size as PineSize,
+      ...(l.yloc !== 'price' ? { yloc: l.yloc as 'abovebar' | 'belowbar' } : {}),
     })),
     tables,
   };

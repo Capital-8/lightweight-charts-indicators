@@ -115,10 +115,8 @@ export function calculate(bars: Bar[], inputs: Partial<AutoFiboIndicatorsInputs>
   const hbArr = ta.highestbars(high, cfg.fiboLen).toArray();
   const lbArr = ta.lowestbars(low, cfg.fiboLen).toArray();
 
-  const warmup = Math.max(cfg.fiboLen, cfg.indLen);
-
-  const makePlot = (arr: number[]) =>
-    arr.map((v, i) => ({ time: bars[i].time, value: i < warmup ? NaN : v }));
+  // na before bar fiboLen - 1 and while the indicator has no value: the library rule of ta.highest / ta.lowest
+  const makePlot = (arr: number[]) => arr.map((v, i) => ({ time: bars[i].time, value: v }));
 
   const lowPlot: number[] = new Array(n);
   const highPlot: number[] = new Array(n);
@@ -172,19 +170,19 @@ export function calculate(bars: Bar[], inputs: Partial<AutoFiboIndicatorsInputs>
   // Build conditional plots for extended fib levels
   const f1272Plot = f1272Arr.map((v, i) => ({
     time: bars[i].time,
-    value: i < warmup ? NaN : (cfg.showAdjFibo ? v : NaN),
+    value: cfg.showAdjFibo ? v : NaN,
   }));
   const f1618Plot = f1618Arr.map((v, i) => ({
     time: bars[i].time,
-    value: i < warmup ? NaN : (cfg.showFibo1618 ? v : NaN),
+    value: cfg.showFibo1618 ? v : NaN,
   }));
   const f2618Plot = f2618Arr.map((v, i) => ({
     time: bars[i].time,
-    value: i < warmup ? NaN : (cfg.showFibo2618 ? v : NaN),
+    value: cfg.showFibo2618 ? v : NaN,
   }));
   const f3618Plot = f3618Arr.map((v, i) => ({
     time: bars[i].time,
-    value: i < warmup ? NaN : (cfg.showFibo3618 ? v : NaN),
+    value: cfg.showFibo3618 ? v : NaN,
   }));
 
   const result: Omit<IndicatorResult, 'markers'> & { hlines?: any[]; fills?: any[] } = {

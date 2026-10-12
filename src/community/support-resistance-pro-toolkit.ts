@@ -24,7 +24,10 @@
  * Original notice: © LuxAlgo
  */
 
-import { ta, str, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, str, color, Series, line, box, label, resetDrawings, setDrawingBar,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, PineSize, TableCellData, TableData, TablePosition } from '../types';
 import { barInterval, barTime } from '../bar-time';
 
@@ -141,34 +144,9 @@ const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
-/** x of a drawing: a bar time (xloc.bar_time) or a bar index (xloc.bar_index) */
-interface Ln {
-  x1: number;
-  x2: number;
-  y: number;
-  byTime: boolean;
-  color: string;
-  deleted: boolean;
-}
-interface Bx {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-  byTime: boolean;
-  bg: string;
-  deleted: boolean;
-}
-interface Lb {
-  x: number;
-  y: number;
-  byTime: boolean;
-  text: string;
-  textColor: string;
-  style: 'label_center' | 'label_left';
-  size: PineSize;
-  deleted: boolean;
-}
+type Ln = ReturnType<typeof line.new>;
+type Bx = ReturnType<typeof box.new>;
+type Lb = ReturnType<typeof label.new>;
 interface Level {
   top: number;
   btm: number;
@@ -227,40 +205,24 @@ export function calculate(
   const pivotHigh = method === 'Pivots' ? A(ta.pivothigh(high, sensInt, sensInt)) : [];
   const pivotLow = method === 'Pivots' ? A(ta.pivotlow(low, sensInt, sensInt)) : [];
 
-  // Live drawings in creation order: when a creation brings the count above max + 5, the oldest are deleted until
-  // max remain. A deleted object ignores later changes.
-  // On the last bar the original applies this limit one step later: not right after the creation that passes it,
-  // but before the next creation of the same kind (measured on this script: the counts of every bar before the
-  // last one follow the first rule, those of the last bar the second). So up to max + 6 objects of a kind can be
-  // alive after the last bar.
-  const lines: Ln[] = [];
-  const boxes: Bx[] = [];
-  const labels: Lb[] = [];
-  let onLastBar = false;
-  const cut = <T extends { deleted: boolean }>(list: T[]) => {
-    if (list.length > MAX_OBJECTS + 5) {
-      for (const old of list.splice(0, list.length - MAX_OBJECTS)) old.deleted = true;
-    }
-  };
-  const add = <T extends { deleted: boolean }>(list: T[], o: T): T => {
-    if (onLastBar) cut(list);
-    list.push(o);
-    if (!onLastBar) cut(list);
-    return o;
-  };
-  const newLine = (x1: number, x2: number, y: number, byTime: boolean, c: string): Ln => add(lines, {
-    x1, x2, y, byTime, color: c, deleted: false,
-  });
-  const newBox = (left: number, top: number, right: number, bottom: number, byTime: boolean, c: string): Bx => add(boxes, {
-    left, right, top, bottom, byTime, bg: String(color.new(c, 85)), deleted: false,
-  });
+  // Drawings live in the library registry (max_lines_count, max_boxes_count, max_labels_count = 500), which applies
+  // the count limit with its rules (also those of the last bar). An x is a bar time (xloc.bar_time, in the unit of
+  // the bar times) or a bar index (xloc.bar_index).
+  resetDrawings({ line: MAX_OBJECTS, box: MAX_OBJECTS, label: MAX_OBJECTS });
+  const xlocOf = (byTime: boolean) => (byTime ? 'bar_time' : 'bar_index');
+  const newLine = (x1: number, x2: number, y: number, byTime: boolean, c: string): Ln =>
+    line.new(x1, y, x2, y, xlocOf(byTime), 'none', c);
+  const newBox = (left: number, top: number, right: number, bottom: number, byTime: boolean, c: string): Bx =>
+    box.new(left, top, right, bottom, NONE_COLOR, undefined, undefined, undefined, xlocOf(byTime), String(color.new(c, 85)));
   const newLabel = (
-    x: number, y: number, byTime: boolean, text: string, textColor: string, style: Lb['style'], size: PineSize,
-  ): Lb => add(labels, { x, y, byTime, text, textColor, style, size, deleted: false });
-  const drop = <T extends { deleted: boolean }>(list: T[], o: T | null): null => {
-    if (o && !o.deleted) {
-      o.deleted = true;
-      list.splice(list.indexOf(o), 1);
+    x: number, y: number, byTime: boolean, text: string, textColor: string, style: 'label_center' | 'label_left', size: PineSize,
+  ): Lb => label.new(x, y, text, xlocOf(byTime), 'price', NONE_COLOR, style, textColor, size);
+  /** x.delete(); the field becomes na */
+  const drop = (o: Ln | Bx | Lb | null): null => {
+    if (o) {
+      if ('x1' in o) line.delete(o);
+      else if ('left' in o) box.delete(o);
+      else label.delete(o);
     }
     return null;
   };
@@ -327,7 +289,7 @@ export function calculate(
   };
 
   for (let i = 0; i < n; i++) {
-    onLastBar = i === n - 1;
+    setDrawingBar(i, i === n - 1);
     const b = bars[i];
     const volume = b.volume ?? NaN;
     // get_atr(): the ATR, or the average bar range while the ATR is na
@@ -502,22 +464,19 @@ export function calculate(
         // Primary line / box, by bar time
         if (!l.lineId) {
           l.lineId = newLine(l.startTime, endT, l.basePrice, true, c);
-        } else if (!l.lineId.deleted) {
-          l.lineId.x1 = l.startTime;
-          l.lineId.x2 = endT;
-          l.lineId.y = l.basePrice;
+        } else {
+          line.set_xy1(l.lineId, l.startTime, l.basePrice);
+          line.set_xy2(l.lineId, endT, l.basePrice);
         }
         if (zones) {
           if (!l.boxId) {
             l.boxId = newBox(l.startTime, l.top, endT, l.btm, true, c);
-          } else if (!l.boxId.deleted) {
-            l.boxId.left = l.startTime;
-            l.boxId.top = l.top;
-            l.boxId.right = endT;
-            l.boxId.bottom = l.btm;
+          } else {
+            box.set_lefttop(l.boxId, l.startTime, l.top);
+            box.set_rightbottom(l.boxId, endT, l.btm);
           }
         } else if (l.boxId) {
-          l.boxId = drop(boxes, l.boxId);
+          l.boxId = drop(l.boxId);
         }
 
         // Extension objects, by bar index
@@ -525,47 +484,44 @@ export function calculate(
           const endExt = i + 25;
           if (!l.extLineId) {
             l.extLineId = newLine(i, endExt, l.basePrice, false, c);
-          } else if (!l.extLineId.deleted) {
-            l.extLineId.x1 = i;
-            l.extLineId.x2 = endExt;
-            l.extLineId.y = l.basePrice;
+          } else {
+            line.set_xy1(l.extLineId, i, l.basePrice);
+            line.set_xy2(l.extLineId, endExt, l.basePrice);
           }
           if (zones) {
             if (!l.extBoxId) {
               l.extBoxId = newBox(i, l.top, endExt, l.btm, false, c);
-            } else if (!l.extBoxId.deleted) {
-              l.extBoxId.left = i;
-              l.extBoxId.top = l.top;
-              l.extBoxId.right = endExt;
-              l.extBoxId.bottom = l.btm;
+            } else {
+              box.set_lefttop(l.extBoxId, i, l.top);
+              box.set_rightbottom(l.extBoxId, endExt, l.btm);
             }
           } else if (l.extBoxId) {
-            l.extBoxId = drop(boxes, l.extBoxId);
+            l.extBoxId = drop(l.extBoxId);
           }
 
           // Stats label
           const txt = str.format('E:{0} | S:{1} | SW:{2} | V:{3} | D:{4}', l.entries, l.strength, l.sweeps, formatVal(l.tradedVolume), curD);
           if (!l.statsLabel) {
             l.statsLabel = newLabel(endExt, avgY, false, txt, c, 'label_left', 'tiny');
-          } else if (!l.statsLabel.deleted) {
-            l.statsLabel.x = endExt;
-            l.statsLabel.y = avgY;
-            l.statsLabel.text = txt;
+          } else {
+            label.set_xy(l.statsLabel, endExt, avgY);
+            label.set_text(l.statsLabel, txt);
           }
         } else {
-          l.extLineId = drop(lines, l.extLineId);
-          l.extBoxId = drop(boxes, l.extBoxId);
-          l.statsLabel = drop(labels, l.statsLabel);
+          l.extLineId = drop(l.extLineId);
+          l.extBoxId = drop(l.extBoxId);
+          l.statsLabel = drop(l.statsLabel);
         }
       } else {
-        l.lineId = drop(lines, l.lineId);
-        l.boxId = drop(boxes, l.boxId);
-        l.extLineId = drop(lines, l.extLineId);
-        l.extBoxId = drop(boxes, l.extBoxId);
-        l.statsLabel = drop(labels, l.statsLabel);
+        l.lineId = drop(l.lineId);
+        l.boxId = drop(l.boxId);
+        l.extLineId = drop(l.extLineId);
+        l.extBoxId = drop(l.extBoxId);
+        l.statsLabel = drop(l.statsLabel);
       }
     }
   }
+  setDrawingBar(null);
 
   // Dashboard (last bar)
   const tables: TableData[] = [];
@@ -617,20 +573,21 @@ export function calculate(
   }
 
   const interval = barInterval(bars);
-  const T = (x: number, byTime: boolean) => (byTime ? x : barTime(bars, x, interval));
+  const T = (x: number, xloc: 'bar_index' | 'bar_time') => (xloc === 'bar_time' ? x : barTime(bars, x, interval));
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     // an object with an na coordinate is not drawn
-    lines: lines.filter((l) => !isNaN(l.y) && !isNaN(l.x1) && !isNaN(l.x2)).map((l) => ({
-      time1: T(l.x1, l.byTime), price1: l.y, time2: T(l.x2, l.byTime), price2: l.y, color: l.color,
+    lines: line.all().filter((l) => !isNaN(l.y1) && !isNaN(l.x1) && !isNaN(l.x2)).map((l) => ({
+      time1: T(l.x1, l.xloc), price1: l.y1, time2: T(l.x2, l.xloc), price2: l.y2, color: String(l.color),
     })),
-    boxes: boxes.filter((b) => !isNaN(b.top) && !isNaN(b.bottom) && !isNaN(b.left) && !isNaN(b.right)).map((b) => ({
-      time1: T(b.left, b.byTime), price1: b.top, time2: T(b.right, b.byTime), price2: b.bottom, bgColor: b.bg,
+    boxes: box.all().filter((b) => !isNaN(b.top) && !isNaN(b.bottom) && !isNaN(b.left) && !isNaN(b.right)).map((b) => ({
+      time1: T(b.left, b.xloc), price1: b.top, time2: T(b.right, b.xloc), price2: b.bottom, bgColor: String(b.bgcolor),
       borderColor: NONE_COLOR,
     })),
-    labels: labels.filter((l) => !isNaN(l.y) && !isNaN(l.x)).map((l) => ({
-      time: T(l.x, l.byTime), price: l.y, text: l.text, color: NONE_COLOR, textColor: l.textColor, style: l.style, size: l.size,
+    labels: label.all().filter((l) => !isNaN(l.y) && !isNaN(l.x)).map((l) => ({
+      time: T(l.x, l.xloc), price: l.y, text: l.text ?? '', color: NONE_COLOR, textColor: String(l.textcolor),
+      style: l.style as 'label_center' | 'label_left', size: l.size as PineSize,
     })),
     tables,
   };

@@ -18,7 +18,10 @@
  * Original notice: © dgtrd
  */
 
-import { ta, str, array, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, str, array, callsite, Series, line, box, label, linefill, resetDrawings, setDrawingBar, holdDrawing,
+  type Box, type Line, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { BarColorData, BoxData, LabelData, LineDrawingData, LinefillData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { mintickOf, type ChartContext } from '../chart-context';
@@ -200,29 +203,8 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 const pmin = (a: number, b: number) => (isNaN(a) || isNaN(b) ? NaN : Math.min(a, b));
 const pmax = (a: number, b: number) => (isNaN(a) || isNaN(b) ? NaN : Math.max(a, b));
 
-interface Drawn<T> {
-  data: T;
-  deleted: boolean;
-}
-
-/** Live drawings in creation order: above max + 5 objects the oldest are deleted until max remain */
-class Registry<T> {
-  live: Array<Drawn<T>> = [];
-
-  constructor(private max: number) {}
-
-  create(data: T): Drawn<T> {
-    const obj = { data, deleted: false };
-    this.live.push(obj);
-    if (this.live.length > this.max + 5) {
-      for (const old of this.live.splice(0, this.live.length - this.max)) old.deleted = true;
-    }
-    return obj;
-  }
-}
-
-/** A box with bar indexes (left / right) */
-interface BoxObj {
+/** box.new() of the script (bar indexes): border and background of the same colour */
+interface BoxArgs {
   left: number;
   top: number;
   right: number;
@@ -230,14 +212,15 @@ interface BoxObj {
   color: string;
   borderStyle?: 'dotted';
 }
-/** A line with bar indexes */
-interface LineObj {
+/** line.new() of the script (bar indexes, width 2) */
+interface LineArgs {
   x1: number;
   x2: number;
   y: number;
   color: string;
 }
-interface LabelObj {
+/** label.new() of the script (bar index, size of the input, centred text) */
+interface LabelArgs {
   x: number;
   y: number;
   text: string;
@@ -272,10 +255,13 @@ export function calculate(
   const pvtHigh = A(ta.pivothigh(new Series(bars, (b) => b.high), pvtLength, pvtLength));
   const pvtLow = A(ta.pivotlow(new Series(bars, (b) => b.low), pvtLength, pvtLength));
 
-  const boxes = new Registry<BoxObj>(MAX_BOXES);
-  const lines = new Registry<LineObj>(MAX_LINES);
-  const linefills = new Registry<{ line1: LineObj; line2: LineObj; color: string }>(MAX_LINES);
-  const labels = new Registry<LabelObj>(MAX_LABELS);
+  // Drawings of the library registry with the maximum counts of indicator() (linefills have the line maximum)
+  resetDrawings({ box: MAX_BOXES, line: MAX_LINES, label: MAX_LABELS });
+  const newBox = (o: BoxArgs): Box =>
+    box.new(o.left, o.top, o.right, o.bottom, o.color, 1, o.borderStyle ?? 'solid', undefined, 'bar_index', o.color);
+  const newLine = (o: LineArgs): Line => line.new(o.x1, o.y, o.x2, o.y, 'bar_index', 'none', o.color, 'solid', 2);
+  const newLabel = (o: LabelArgs) =>
+    label.new(o.x, o.y, o.text, 'bar_index', 'price', o.color, o.style, o.textColor, labelSize, 'center', o.tooltip);
   /** syminfo.mintick, the tick size of format.mintick (0.01 without a chart context) */
   const MINTICK = mintickOf(chart);
   const fmtTick = (v: number) => str.tostring(v, 'mintick', MINTICK);
@@ -348,7 +334,7 @@ export function calculate(
     Math.trunc((storage[level] / array.max(storage)) * length * profileWidth);
 
   // State (var)
-  const aPoc: Array<Drawn<BoxObj>> = [];
+  const aPoc: Box[] = [];
   let x1 = 0;
   let x2 = 0;
   let levelAbovePoc = 0;
@@ -366,6 +352,7 @@ export function calculate(
   const breakLine = cfg.showPrice || cfg.showChange ? '\n' : '';
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === last);
     const bar = bars[i];
     const nzVolume = nzV(i);
     const volumeStorageT: number[] = new Array(profileLevels + 1).fill(0);
@@ -403,7 +390,7 @@ export function calculate(
           const width = rowWidth(volumeStorageT, level, profileLength);
           const startBoxIndex = cfg.profilePlacement === 'Right' ? i - width : i - profileLength;
           const endBoxIndex = cfg.profilePlacement === 'Right' ? i : startBoxIndex + width;
-          boxes.create({
+          newBox({
             left: startBoxIndex - pvtLength, top: priceLowest + (level + 0.1) * priceStep,
             right: endBoxIndex - pvtLength, bottom: priceLowest + (level + 0.9) * priceStep,
             color: rowColor(level, levelBelowPoc, levelAbovePoc),
@@ -411,17 +398,17 @@ export function calculate(
         }
       }
       if (cfg.backgroundFill) {
-        boxes.create({ left: pivotBar - profileLength, top: priceHighest, right: pivotBar, bottom: priceLowest, color: cfg.backgroundColor, borderStyle: 'dotted' });
+        newBox({ left: pivotBar - profileLength, top: priceHighest, right: pivotBar, bottom: priceLowest, color: cfg.backgroundColor, borderStyle: 'dotted' });
       }
       if (cfg.pointOfControl) {
-        aPoc.push(boxes.create({
+        aPoc.push(newBox({
           left: pivotBar - profileLength, top: priceLowest + (pocLevel + 0.4) * priceStep,
           right: pivotBar, bottom: priceLowest + (pocLevel + 0.6) * priceStep, color: cfg.pocColor,
         }));
       }
-      const vah = lines.create({ x1: pivotBar - profileLength, x2: pivotBar, y: vahPrice, color: cfg.valueAreaHigh ? cfg.vahColor : NO_COLOR });
-      const val = lines.create({ x1: pivotBar - profileLength, x2: pivotBar, y: valPrice, color: cfg.valueAreaLow ? cfg.valColor : NO_COLOR });
-      if (cfg.vaBackground) linefills.create({ line1: vah.data, line2: val.data, color: cfg.vaBackgroundColor });
+      const vah = newLine({ x1: pivotBar - profileLength, x2: pivotBar, y: vahPrice, color: cfg.valueAreaHigh ? cfg.vahColor : NO_COLOR });
+      const val = newLine({ x1: pivotBar - profileLength, x2: pivotBar, y: valPrice, color: cfg.valueAreaLow ? cfg.valColor : NO_COLOR });
+      if (cfg.vaBackground) linefill.new(vah, val, cfg.vaBackgroundColor);
 
       const range = priceHighest - priceLowest;
       const statTip = '\n -Traded Volume : ' + fmtVolume(tradedVolume) + ' (' + str.tostring(profileLength - 1) + ' bars)'
@@ -444,19 +431,19 @@ export function calculate(
           + (isHigh ? (cfg.showChange ? (cfg.showPrice ? ' ↑ %' : '↑ %') + fmtPct(upChange) : '') + volumeText : '');
         const lowerText = (cfg.showPrice ? fmtTick(lowerPriceLevel) : '')
           + (isLow ? (cfg.showChange ? (cfg.showPrice ? ' ↓ %' : '↓ %') + fmtPct(downChange) : '') + volumeText : '');
-        labels.create({
+        newLabel({
           x: pivotBar - profileLength / 2, y: upperPriceLevel, text: upperText, color: upperText !== '' ? cfg.highLabelColor : NO_COLOR,
           style: 'label_down', textColor: cfg.labelTextColor,
           tooltip: 'Profile High : ' + fmtTick(priceHighest) + '\n %' + fmtPct((range / priceLowest) * 100) + ' higher than the Profile Low' + statTip,
         });
-        labels.create({
+        newLabel({
           x: pivotBar - profileLength / 2, y: lowerPriceLevel, text: lowerText, color: lowerText !== '' ? cfg.lowLabelColor : NO_COLOR,
           style: 'label_up', textColor: cfg.labelTextColor,
           tooltip: 'Profile Low : ' + fmtTick(priceLowest) + '\n %' + fmtPct((range / priceHighest) * 100) + ' lower than the Profile High' + statTip,
         });
       } else {
         if (isHigh) {
-          labels.create({
+          newLabel({
             x: pivotBar, y: pvtHigh[i],
             text: (noContent ? '▼' : '') + (cfg.showPrice ? fmtTick(pvtHigh[i]) : '')
               + (cfg.showChange ? (cfg.showPrice ? ' ↑ %' : '↑ %') + fmtPct(upChange) : '') + volumeText,
@@ -466,7 +453,7 @@ export function calculate(
           });
         }
         if (isLow) {
-          labels.create({
+          newLabel({
             x: pivotBar, y: pvtLow[i],
             text: (noContent ? '▲' : '') + (cfg.showPrice ? fmtTick(pvtLow[i]) : '')
               + (cfg.showChange ? (cfg.showPrice ? ' ↓ %' : '↓ %') + fmtPct(downChange) : '') + volumeText,
@@ -485,14 +472,14 @@ export function calculate(
         if (boxNo >= aPoc.length) continue;
         const current = aPoc[boxNo];
         // a box deleted by the maximum count reads na
-        const mid = current.deleted ? NaN : (current.data.bottom + current.data.top) / 2;
+        const mid = (box.get_bottom(current) + box.get_top(current)) / 2;
         const prevSide = Math.sign((i > 0 ? bars[i - 1].close : NaN) - mid);
         const differs = (a: number, b: number) => !isNaN(a) && !isNaN(b) && a !== b; // na != x is false
         const crossed = differs(prevSide, Math.sign(bar.close - mid));
         const touched = differs(prevSide, Math.sign(bar.low - mid)) || differs(prevSide, Math.sign(bar.high - mid));
         if (crossed && cfg.pocExtend === 'Until Bar Cross') aPoc.splice(boxNo, 1);
         else if (touched && cfg.pocExtend === 'Until Bar Touch') aPoc.splice(boxNo, 1);
-        else if (!current.deleted) current.data.right = i;
+        else box.set_right(current, i);
       }
     }
 
@@ -516,22 +503,23 @@ export function calculate(
           const width = rowWidth(volumeStorageT, level, profileLength);
           const startBoxIndex = cfg.profilePlacement === 'Right' ? i - width : i - profileLength;
           const endBoxIndex = cfg.profilePlacement === 'Right' ? i : startBoxIndex + width;
-          boxes.create({
+          newBox({
             left: startBoxIndex, top: priceLowest + (level + 0.1) * priceStep, right: endBoxIndex,
             bottom: priceLowest + (level + 0.9) * priceStep, color: rowColor(level, levelBelowPoc, levelAbovePoc),
           });
         }
       }
-      if (cfg.backgroundFill) boxes.create({ left: i - profileLength, top: priceHighest, right: i, bottom: priceLowest, color: cfg.backgroundColor });
+      if (cfg.backgroundFill) newBox({ left: i - profileLength, top: priceHighest, right: i, bottom: priceLowest, color: cfg.backgroundColor });
       if (cfg.pointOfControl) {
-        boxes.create({
+        newBox({
           left: i - profileLength, top: priceLowest + (pocLevel + 0.4) * priceStep, right: i,
           bottom: priceLowest + (pocLevel + 0.6) * priceStep, color: cfg.pocColor,
         });
       }
-      const vah = lines.create({ x1: i - profileLength, x2: i, y: vahPrice, color: cfg.valueAreaHigh ? cfg.vahColor : NO_COLOR });
-      const val = lines.create({ x1: i - profileLength, x2: i, y: valPrice, color: cfg.valueAreaLow ? cfg.valColor : NO_COLOR });
-      if (cfg.vaBackground) linefills.create({ line1: vah.data, line2: val.data, color: cfg.vaBackgroundColor });
+      // f_drawLineX / f_drawLabelX: `var id = line.new(...)` (label.new), made on the last bar
+      const vah = holdDrawing(newLine({ x1: i - profileLength, x2: i, y: vahPrice, color: cfg.valueAreaHigh ? cfg.vahColor : NO_COLOR }));
+      const val = holdDrawing(newLine({ x1: i - profileLength, x2: i, y: valPrice, color: cfg.valueAreaLow ? cfg.valColor : NO_COLOR }));
+      if (cfg.vaBackground) linefill.new(vah, val, cfg.vaBackgroundColor);
 
       if (cfg.levels !== 'Pivot Points') {
         const range = priceHighest - priceLowest;
@@ -552,16 +540,16 @@ export function calculate(
           + (pvtLast === 'L' ? (cfg.showChange ? (cfg.showPrice ? ' ↑ %' : '↑ %') + fmtPct(((bar.close - pvtLow1) * 100) / pvtLow1) + '*' : '') + volumeText : '');
         const lowerText = (cfg.showPrice ? fmtTick(lowerPriceLevel) : '')
           + (pvtLast === 'H' ? (cfg.showChange ? (cfg.showPrice ? ' ↓ %' : '↓ %') + fmtPct(((pvtHigh1 - bar.close) * 100) / pvtHigh1) + '*' : '') + volumeText : '');
-        labels.create({
+        holdDrawing(newLabel({
           x: i - profileLength / 2, y: upperPriceLevel, text: upperText, color: upperText !== '' ? cfg.highLabelColor : NO_COLOR,
           style: 'label_down', textColor: cfg.labelTextColor,
           tooltip: 'Profile High : ' + fmtTick(priceHighest) + '\n %' + fmtPct((range / priceLowest) * 100) + ' higher than the Profile Low' + statTip,
-        });
-        labels.create({
+        }));
+        holdDrawing(newLabel({
           x: i - profileLength / 2, y: lowerPriceLevel, text: lowerText, color: lowerText !== '' ? cfg.lowLabelColor : NO_COLOR,
           style: 'label_up', textColor: cfg.labelTextColor,
           tooltip: 'Profile Low : ' + fmtTick(priceLowest) + '\n %' + fmtPct((range / priceHighest) * 100) + ' lower than the Profile High' + statTip,
-        });
+        }));
       }
     }
 
@@ -575,27 +563,30 @@ export function calculate(
     }
   }
 
+  setDrawingBar(null);
+
   // Outputs: bar indexes to bar times (a drawing with an na coordinate or before the first bar is not drawn)
   const interval = barInterval(bars);
   const time = (x: number) => barTime(bars, Math.trunc(x), interval);
   const drawn = (...v: number[]) => v.every((x) => !isNaN(x));
-  const toLine = (l: LineObj): LineDrawingData => ({ time1: time(l.x1), price1: l.y, time2: time(l.x2), price2: l.y, color: l.color, width: 2 });
-  const lineOk = (l: LineObj) => drawn(l.y) && l.x1 >= 0 && l.x2 >= 0;
+  const toLine = (l: Line): LineDrawingData => ({ time1: time(l.x1), price1: l.y1, time2: time(l.x2), price2: l.y2, color: String(l.color), width: 2 });
+  const lineOk = (l: Line) => drawn(l.y1) && l.x1 >= 0 && l.x2 >= 0;
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     barColors,
-    boxes: boxes.live.map((b) => b.data).filter((b) => drawn(b.top, b.bottom) && b.left >= 0 && b.right >= 0).map((b) => ({
-      time1: time(b.left), price1: b.top, time2: time(b.right), price2: b.bottom, bgColor: b.color, borderColor: b.color,
-      ...(b.borderStyle ? { borderStyle: b.borderStyle } : {}),
+    boxes: box.all().filter((b) => drawn(b.top, b.bottom) && b.left >= 0 && b.right >= 0).map((b) => ({
+      time1: time(b.left), price1: b.top, time2: time(b.right), price2: b.bottom, bgColor: String(b.bgcolor), borderColor: String(b.border_color),
+      ...(b.border_style === 'dotted' ? { borderStyle: 'dotted' as const } : {}),
     })),
-    lines: lines.live.map((l) => l.data).filter(lineOk).map(toLine),
-    linefills: linefills.live.map((f) => f.data).filter((f) => lineOk(f.line1) && lineOk(f.line2))
-      .map((f) => ({ line1: toLine(f.line1), line2: toLine(f.line2), color: f.color })),
-    labels: labels.live.map((l) => l.data).filter((l) => drawn(l.y) && l.x >= 0).map((l) => ({
-      time: time(l.x), price: l.y, text: l.text, color: l.color, textColor: l.textColor, style: l.style, size: labelSize,
-      tooltip: l.tooltip,
+    lines: line.all().filter(lineOk).map(toLine),
+    // a linefill whose lines were deleted is not drawn
+    linefills: linefill.all().filter((f) => lineOk(f.line1) && lineOk(f.line2))
+      .map((f) => ({ line1: toLine(f.line1), line2: toLine(f.line2), color: String(f.color) })),
+    labels: label.all().filter((l) => drawn(l.y) && l.x >= 0).map((l) => ({
+      time: time(l.x), price: l.y, text: l.text ?? '', color: String(l.color), textColor: String(l.textcolor),
+      style: l.style as 'label_down' | 'label_up', size: labelSize, tooltip: l.tooltip ?? '',
     })),
     // var table logo = table.new(position.bottom_right, 1, 1), filled on the last bar
     tables: n > 0 ? [{

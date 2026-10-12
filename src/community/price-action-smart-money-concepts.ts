@@ -27,7 +27,10 @@
  * https://mozilla.org/MPL/2.0/ (c) BigBeluga
  */
 
-import { ta, Series, color, compare, math, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, color, compare, math, str, line, box, label, resetDrawings, setDrawingBar,
+  type Line, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { BarColorData, BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, PolylineData } from '../types';
 import { foregroundColorOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
@@ -233,7 +236,7 @@ interface Fvg {
   top: number; btm: number; loc: number; isbb: boolean; bbloc: number; israid: boolean; raidy: number;
   raidloc: number; raidx2: number; active: boolean; raidcs: string;
 }
-/** Drawing with times in milliseconds, as the script (NaN = na: the object exists but is not drawn) */
+/** Arguments of line.new / box.new / label.new, times in milliseconds as the script (NaN = na: not drawn) */
 interface RawLine { x1: number; x2: number; y1: number; y2: number; color: string; style?: LStyle; extend?: 'right' }
 interface RawBox {
   left: number; right: number; top: number; bottom: number; border: string; bg: string; width?: number; extend?: 'right';
@@ -292,23 +295,28 @@ export function calculate(
   const atr200 = ta.atr(bars, 200).toArray().map((v) => v ?? NaN);
   const atr = atr200.map((v) => v / (5 / len));
 
-  // Live drawings, in creation order (all of them are created on the last bar), with the maximum counts of the
-  // script: when a creation brings the count above the maximum + 5, the oldest are deleted until the maximum remain
-  const rawLines: RawLine[] = [];
-  const rawBoxes: RawBox[] = [];
-  const rawLabels: RawLabel[] = [];
-  const add = <X,>(list: X[], obj: X, max: number): X => {
-    list.push(obj);
-    if (list.length > max + 5) list.splice(0, list.length - max);
-    return obj;
+  // Drawings of the library registry with the maximum counts of the script (xloc.bar_time unless said otherwise).
+  // All of them are created on the last bar, where the library applies the rules of the last bar.
+  resetDrawings({ line: MAX_LINES, label: MAX_LABELS, box: MAX_BOXES });
+  /** lines created with an explicit style (the output keeps it, also 'solid') */
+  const styled = new WeakSet<Line>();
+  const newLine = (o: RawLine) => {
+    const l = line.new(o.x1, o.y1, o.x2, o.y2, 'bar_time', o.extend, o.color, o.style);
+    if (o.style) styled.add(l);
+    return l;
   };
-  const newLine = (o: RawLine) => add(rawLines, o, MAX_LINES);
-  const newBox = (o: RawBox) => add(rawBoxes, o, MAX_BOXES);
-  const newLabel = (o: RawLabel) => add(rawLabels, o, MAX_LABELS);
+  const newBox = (o: RawBox) => box.new(o.left, o.top, o.right, o.bottom, o.border, o.width, undefined, o.extend, 'bar_time', o.bg);
+  const newLabel = (o: RawLabel) =>
+    label.new(o.x, o.y, o.text, o.index ? 'bar_index' : 'bar_time', 'price', o.color, o.style, o.textColor, o.size);
   const polylines: PolylineData[] = [];
 
-  // var phl = Zphl.new(...) makes two labels without coordinates on the first bar. They are never drawn, and the
-  // labels of earlier bars do not count for the maximum on the bar that creates the others: they are left out.
+  // var phl = Zphl.new(...): two labels without coordinates (fields of a `var` object) made on the first bar. They
+  // are never drawn, but they count for the maximum.
+  if (n > 0) {
+    setDrawingBar(0, last === 0);
+    newLabel({ x: NaN, y: NaN, color: INVCOL, textColor: cfg.swingcssdn, style: 'label_down', size: 'tiny', text: '' });
+    newLabel({ x: NaN, y: NaN, color: INVCOL, textColor: cfg.swingcssup, style: 'label_up', size: 'tiny', text: '' });
+  }
 
   // ---- market structure and order blocks: structure(swingcssup, swingcssdn, showSwing, false, swingLimit) ----
   // With the window on, the function runs from the bar after last_bar_index - mswindow: its pivots see only those bars
@@ -468,6 +476,7 @@ export function calculate(
   const barColors: BarColorData[] = [];
 
   for (let i = first; i < n; i++) {
+    setDrawingBar(i, i === last);
     const high = H[i];
     const low = L[i];
     const close = C[i];
@@ -1006,17 +1015,18 @@ export function calculate(
     }
     return bars[lo].time as number;
   };
-  const lines: LineDrawingData[] = rawLines.filter((l) => ok(l.x1, l.x2, l.y1, l.y2)).map((l) => ({
-    time1: tOut(l.x1), price1: l.y1, time2: tOut(l.x2), price2: l.y2, color: l.color,
-    ...(l.style ? { style: l.style } : {}), ...(l.extend ? { extend: l.extend } : {}),
+  setDrawingBar(null);
+  const lines: LineDrawingData[] = line.all().filter((l) => ok(l.x1, l.x2, l.y1, l.y2)).map((l) => ({
+    time1: tOut(l.x1), price1: l.y1, time2: tOut(l.x2), price2: l.y2, color: String(l.color),
+    ...(styled.has(l) ? { style: l.style as LStyle } : {}), ...(l.extend === 'right' ? { extend: 'right' as const } : {}),
   }));
-  const boxes: BoxData[] = rawBoxes.filter((b) => ok(b.left, b.right, b.top, b.bottom)).map((b) => ({
-    time1: tOut(b.left), price1: b.top, time2: tOut(b.right), price2: b.bottom, bgColor: b.bg, borderColor: b.border,
-    ...(b.width !== undefined ? { borderWidth: b.width } : {}), ...(b.extend ? { extend: b.extend } : {}),
+  const boxes: BoxData[] = box.all().filter((b) => ok(b.left, b.right, b.top, b.bottom)).map((b) => ({
+    time1: tOut(b.left), price1: b.top, time2: tOut(b.right), price2: b.bottom, bgColor: String(b.bgcolor), borderColor: String(b.border_color),
+    ...(b.border_width !== 1 ? { borderWidth: b.border_width } : {}), ...(b.extend === 'right' ? { extend: 'right' as const } : {}),
   }));
-  const labels: LabelData[] = rawLabels.filter((l) => ok(l.x, l.y) && (!l.index || l.x >= 0)).map((l) => ({
-    time: l.index ? (bars[l.x].time as number) : tOut(l.x), price: l.y, text: l.text, color: l.color,
-    ...(l.textColor !== undefined ? { textColor: l.textColor } : {}), style: l.style, size: l.size,
+  const labels: LabelData[] = label.all().filter((l) => ok(l.x, l.y) && (l.xloc !== 'bar_index' || l.x >= 0)).map((l) => ({
+    time: l.xloc === 'bar_index' ? (bars[l.x].time as number) : tOut(l.x), price: l.y, text: l.text ?? '', color: String(l.color),
+    ...(l.textcolor !== undefined ? { textColor: String(l.textcolor) } : {}), style: l.style as LabelStyle, size: l.size as PineSize,
   }));
 
   return {

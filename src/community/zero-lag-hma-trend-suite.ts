@@ -15,11 +15,10 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, getSourceSeries, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
 import type { ChartContext } from '../chart-context';
-import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
-import { barInterval } from '../bar-time';
+import { periodChanges } from '../anchor-period';
 
 export interface ZeroLagHMATrendSuiteInputs {
   /** HMA length */
@@ -83,26 +82,11 @@ export const metadata = {
 const gt = (a: number, b: number) => a - b > 1e-10;
 
 /**
- * First bar of each trading day of the exchange on intraday bars (Pine timeframe.change("1D")), found by the library
- * from the time zone and the session of the chart context. Null when the context does not give both, or when the bars
- * are not intraday.
- */
-function tradingDayStarts(bars: Bar[], chart?: ChartContext): boolean[] | null {
-  const interval = barInterval(bars);
-  if (chart?.timezone === undefined || chart.session === undefined || !(interval > 0 && interval < 86400)) return null;
-  let change: Array<number | null> = [];
-  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(interval) };
-  executeScript(() => { change = scriptTimeframe.change('1D').toArray(); }, bars, {}, context);
-  return change.map((v) => v === 1);
-}
-
-/**
- * Start of a new day (Pine ta.vwap anchor: timeframe.change("1D")); true on the first bar. On intraday bars with the
- * time zone and the session of the chart context: the trading days of the exchange. Else: UTC days.
+ * Start of a new day (Pine ta.vwap anchor: timeframe.change("1D")); true on the first bar, where the sums start as in
+ * Pine. With the time zone and the session of the chart context: the trading days of the exchange. Else: UTC days.
  */
 function newDay(bars: Bar[], chart?: ChartContext): boolean[] {
-  const starts = tradingDayStarts(bars, chart);
-  return bars.map((b, i) => i === 0 || (starts ? starts[i] : Math.floor(b.time / 86400) !== Math.floor(bars[i - 1].time / 86400)));
+  return periodChanges(bars, '1D', chart).map((change, i) => i === 0 || change);
 }
 
 export function calculate(

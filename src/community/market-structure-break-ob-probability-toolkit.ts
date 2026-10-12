@@ -28,10 +28,12 @@
  */
 
 import {
-  ta, math, str, color, time as pineTime, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  ta, math, str, color, time as pineTime, timeframe, Series, box, line, label, resetDrawings, setDrawingBar, varDrawing,
+  type DrawingVariable, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, TableData, TableCellData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { chartTimeframe } from '../anchor-period';
 import { timezoneOf, type ChartContext } from '../chart-context';
 
 export interface MarketStructureBreakObProbabilityToolkitInputs {
@@ -177,6 +179,44 @@ interface Lb {
   size: 'small' | 'tiny';
   align: 'center' | 'left';
 }
+/**
+ * Live drawings of one kind, in creation order, kept by the drawing registry of the library: each object of the
+ * script has an object of the registry, which applies the limit of the script (max_*_count) with the rules of the
+ * original platform. An object that a `var` variable of the script refers to (the latest box and label of each
+ * session) is not deleted by the limit, but it counts.
+ */
+class Live<T extends object, R extends object> {
+  private readonly data = new Map<R, T>();
+  private readonly refs = new WeakMap<T, R>();
+  private readonly vars = new Map<string, DrawingVariable<R>>();
+  constructor(private readonly make: (o: T) => R, private readonly live: () => R[], private readonly del: (ref: R) => void) {}
+  add(o: T): T {
+    const ref = this.make(o);
+    this.data.set(ref, o);
+    this.refs.set(o, ref);
+    return o;
+  }
+  /** `x.delete()` of the script (no effect on an object already deleted) */
+  remove(o: T): void {
+    const ref = this.refs.get(o);
+    if (ref) this.del(ref);
+  }
+  /** The `var` variable `name` now refers to `o` (the object it referred to before can be deleted) */
+  hold(name: string, o: T): T {
+    let v = this.vars.get(name);
+    if (!v) {
+      v = varDrawing<R>();
+      this.vars.set(name, v);
+    }
+    v.value = this.refs.get(o);
+    return o;
+  }
+  /** The objects alive, in creation order */
+  get items(): T[] {
+    return this.live().map((ref) => this.data.get(ref)!);
+  }
+}
+
 interface OrderBlock {
   box: Bx;
   label: Lb;
@@ -215,35 +255,18 @@ export function calculate(
   const phArr = ta.pivothigh(new Series(bars, (b) => b.high), pivotLen, pivotLen).toArray();
   const plArr = ta.pivotlow(new Series(bars, (b) => b.low), pivotLen, pivotLen).toArray();
 
-  // Live drawings in creation order. Limit: when a creation brings the count above max + 5, the oldest are deleted
-  // until max remain; an object held by a `var` variable (the latest box and label of each session) is never
-  // deleted by the limit, but it counts.
-  const held = new Set<object>();
-  const boxes: Bx[] = [];
-  const lines: Ln[] = [];
-  const labels: Lb[] = [];
-  const add = <T extends object>(list: T[], o: T): T => {
-    list.push(o);
-    if (list.length > MAX_OBJECTS + 5) {
-      for (let k = 0; k < list.length && list.length > MAX_OBJECTS; ) {
-        if (held.has(list[k])) k++;
-        else list.splice(k, 1);
-      }
-    }
-    return o;
-  };
-  const remove = <T extends object>(list: T[], o: T) => {
-    const k = list.indexOf(o);
-    if (k >= 0) list.splice(k, 1);
-  };
-  const hold = <T extends object>(before: T | null, now: T): T => {
-    if (before) held.delete(before);
-    held.add(now);
-    return now;
-  };
+  // Live drawings in the registry of the library (max_boxes_count / max_lines_count / max_labels_count), placed by
+  // bar index
+  resetDrawings({ box: MAX_OBJECTS, line: MAX_OBJECTS, label: MAX_OBJECTS });
+  const boxes = new Live((b: Bx) => box.new(b.left, b.top, b.right, b.bottom), box.all, box.delete);
+  const lines = new Live((l: Ln) => line.new(l.x1, l.y, l.x2, l.y), line.all, line.delete);
+  const labels = new Live((l: Lb) => label.new(l.x, l.y, l.text), label.all, label.delete);
 
   // drawSession(): one state per call. time(timeframe.period, sessStr) reads the hours in the exchange time zone
   const timezone = timezoneOf(chart);
+  // bar size for the clock-change rule of the session test (intraday bars)
+  const chartTf = chartTimeframe(bars, chart);
+  const barMs = chartTf !== '' && timeframe.info(chartTf).isintraday ? timeframe.in_seconds(chartTf) * 1000 : undefined;
   const session = (show: boolean, sessStr: string, col: string, name: string) => {
     let sBox: Bx | null = null;
     let sLabel: Lb | null = null;
@@ -252,7 +275,7 @@ export function calculate(
     let inSession1 = false;
     const tms = (i: number) => (bars[i].time < 1e11 ? bars[i].time * 1000 : bars[i].time);
     return (i: number) => {
-      const inSession = pineTime.inSession(tms(i), sessStr, timezone);
+      const inSession = pineTime.inSession(tms(i), sessStr, timezone, barMs);
       const isStart = inSession && !inSession1;
       inSession1 = inSession;
       if (!(show && inSession)) return;
@@ -260,10 +283,10 @@ export function calculate(
       if (isStart) {
         sHigh = bar.high;
         sLow = bar.low;
-        sBox = hold(sBox, add<Bx>(boxes, {
+        sBox = boxes.hold(`box ${name}`, boxes.add({
           left: i, top: sHigh, right: i, bottom: sLow, border: col, bg: String(color.new(col, 92)), style: 'dotted',
         }));
-        sLabel = hold(sLabel, add<Lb>(labels, {
+        sLabel = labels.hold(`label ${name}`, labels.add({
           x: i, y: sHigh, text: name, color: '', textColor: col, style: 'none', size: 'small', align: 'center',
         }));
       } else {
@@ -298,6 +321,7 @@ export function calculate(
   let totalObs = 0;
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const bar = bars[i];
     const close1 = i > 0 ? bars[i - 1].close : NaN;
     const momentumZ = ((priceChange[i] ?? NaN) - (avgChange[i] ?? NaN)) / (stdChange[i] ?? NaN);
@@ -320,15 +344,15 @@ export function calculate(
     const isMSBBear = lt(bar.close, lastPl) && ge(close1, lastPl) && lt(momentumZ, -cfg.msbZScoreInput);
 
     if (isMSBBull) {
-      add<Ln>(lines, { x1: lastPhIdx, x2: i, y: lastPh, color: BULL_COLOR, dashed: false });
-      add<Lb>(labels, {
+      lines.add({ x1: lastPhIdx, x2: i, y: lastPh, color: BULL_COLOR, dashed: false });
+      labels.add({
         x: math.round((lastPhIdx + i) / 2), y: lastPh, text: 'MSB', color: String(color.new(BULL_COLOR, 100)),
         textColor: BULL_COLOR, style: 'label_down', size: 'small', align: 'center',
       });
     }
     if (isMSBBear) {
-      add<Ln>(lines, { x1: lastPlIdx, x2: i, y: lastPl, color: BEAR_COLOR, dashed: false });
-      add<Lb>(labels, {
+      lines.add({ x1: lastPlIdx, x2: i, y: lastPl, color: BEAR_COLOR, dashed: false });
+      labels.add({
         x: math.round((lastPlIdx + i) / 2), y: lastPl, text: 'MSB', color: String(color.new(BEAR_COLOR, 100)),
         textColor: BEAR_COLOR, style: 'label_up', size: 'small', align: 'center',
       });
@@ -366,16 +390,16 @@ export function calculate(
 
       if (!overlapping) {
         const c = isHPZ ? hpzColor : baseColor;
-        const box = add<Bx>(boxes, {
+        const obBox = boxes.add({
           left: i - obIdx, top: obTop, right: i + 15, bottom: obBottom, border: String(color.new(c, isHPZ ? 40 : 60)),
           bg: String(color.new(c, isHPZ ? 80 : 85)), style: 'dashed',
         });
-        const poc = add<Ln>(lines, { x1: i - obIdx, x2: i + 15, y: obPOC, color: String(color.new(c, isHPZ ? 40 : 70)), dashed: true });
-        const label = add<Lb>(labels, {
+        const poc = lines.add({ x1: i - obIdx, x2: i + 15, y: obPOC, color: String(color.new(c, isHPZ ? 40 : 70)), dashed: true });
+        const obLabel = labels.add({
           x: i + 18, y: obPOC, text: str.tostring(score, '#') + '%', color: String(color.new(baseColor, 100)),
           textColor: isHPZ ? hpzColor : baseColor, style: 'none', size: 'tiny', align: 'left',
         });
-        obArray.push({ box, label, poc, top: obTop, bottom: obBottom, isBull: isMSBBull, isHPZ, mitigated: false, mitigationBar: 0 });
+        obArray.push({ box: obBox, label: obLabel, poc, top: obTop, bottom: obBottom, isBull: isMSBBull, isHPZ, mitigated: false, mitigationBar: 0 });
       }
 
       if (isMSBBull) lastPh = NaN;
@@ -386,9 +410,9 @@ export function calculate(
     // Dynamic management. A deleted object ignores later changes.
     if (obArray.length > 0) {
       const drop = (ob: OrderBlock) => {
-        remove(boxes, ob.box);
-        remove(labels, ob.label);
-        remove(lines, ob.poc);
+        boxes.remove(ob.box);
+        labels.remove(ob.label);
+        lines.remove(ob.poc);
       };
       const setEnd = (ob: OrderBlock, right: number, labelX: number) => {
         ob.box.right = right;
@@ -427,6 +451,7 @@ export function calculate(
       if (obArray.length > obCount) drop(obArray.shift()!);
     }
   }
+  setDrawingBar(null);
 
   // Analytics dashboard: the table always exists; its cells are written on the last bar
   const size = ({ Tiny: 'tiny', Small: 'small', Normal: 'normal', Large: 'large', Huge: 'huge' } as const)[cfg.dashboardSizeInput];
@@ -465,14 +490,14 @@ export function calculate(
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
-    boxes: boxes.map((b) => ({
+    boxes: boxes.items.map((b) => ({
       time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom, bgColor: b.bg, borderColor: b.border,
       borderWidth: 1, borderStyle: b.style,
     })),
-    lines: lines.map((l) => ({
+    lines: lines.items.map((l) => ({
       time1: T(l.x1), price1: l.y, time2: T(l.x2), price2: l.y, color: l.color, width: 1, ...(l.dashed ? { style: 'dashed' as const } : {}),
     })),
-    labels: labels.map((l) => ({
+    labels: labels.items.map((l) => ({
       time: T(l.x), price: l.y, text: l.text, ...(l.color ? { color: l.color } : {}), textColor: l.textColor, style: l.style,
       size: l.size, textAlign: l.align,
     })),

@@ -40,7 +40,7 @@ import {
   ta, math, str, color, Series, getSourceSeries, barInterval, barTime,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
-import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
+import { hasCalendar, periodChanges } from '../anchor-period';
 import type {
   BoxData, LabelData, LineDrawingData, MarkerData, PineSize, PolylineData, TableCellData, TableData, TablePosition,
 } from '../types';
@@ -558,35 +558,19 @@ export function calculate(bars: Bar[], inputs: Partial<MulticatorTableInputs> = 
   const wpr = A(ta.wpr(bars, cfg.wprLenIn));
   const obv = A(ta.obv(bars));
 
-  // vwapVal = ta.vwap(hlc3), anchor timeframe.change("1D")
+  // vwapVal = ta.vwap(hlc3): anchor timeframe.change("1D"), the sums also start on the first bar (a day in progress)
   const interval = barInterval(bars);
-  let vwapVal: number[];
-  if (interval > 0 && interval < DAY_SECONDS) {
-    if (chart?.timezone === undefined || chart.session === undefined) {
-      // Intraday bars: the trading day of the exchange is not known without its time zone and session
-      if (cfg.vwapShow) {
-        throw new Error(
-          'Multicator Table: on intraday bars "Show VWAP" needs the exchange time zone and session of the chart context '
-          + '(ta.vwap restarts on each trading day).',
-        );
-      }
-      vwapVal = new Array(n).fill(NaN);
-    } else {
-      let newDay: number[] = [];
-      executeScript(() => { newDay = A(scriptTimeframe.change('1D')); }, bars, {}, chart);
-      // sum(src * volume) / sum(volume) since the first bar of the trading day (from the first bar on the first day)
-      let sumPv = 0;
-      let sumV = 0;
-      vwapVal = hlc3.map((v, i) => {
-        if (newDay[i] === 1) { sumPv = 0; sumV = 0; }
-        if (!Number.isNaN(v) && !Number.isNaN(volume[i])) { sumPv += v * volume[i]; sumV += volume[i]; }
-        return sumPv / sumV;
-      });
-    }
-  } else {
-    // Daily and higher bars: a new anchor on every bar (0 / 0 = na without volume)
-    vwapVal = hlc3.map((v, i) => (v * volume[i]) / volume[i]);
+  const intraday = interval > 0 && interval < DAY_SECONDS;
+  // Intraday bars: the trading day of the exchange is not known without its time zone and session
+  if (intraday && !hasCalendar(chart) && cfg.vwapShow) {
+    throw new Error(
+      'Multicator Table: on intraday bars "Show VWAP" needs the exchange time zone and session of the chart context '
+      + '(ta.vwap restarts on each trading day).',
+    );
   }
+  // Daily and higher bars: each bar is its own day
+  const newDay = intraday ? periodChanges(bars, '1D', chart).map((change, i) => (i === 0 || change ? 1 : 0)) : bars.map(() => 1);
+  const vwapVal = intraday && !hasCalendar(chart) ? new Array<number>(n).fill(NaN) : A(ta.vwap(hlc3S, volumeS, S(newDay)));
 
   const [stLineS, stDirS] = ta.supertrend(bars, stFactorK, stAtrK);
   const stLine = A(stLineS);

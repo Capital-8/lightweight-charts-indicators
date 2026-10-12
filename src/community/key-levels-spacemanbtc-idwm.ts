@@ -20,7 +20,9 @@
  *
  * Chart values read from the optional third argument:
  * - the current time (`now`): the right end of the lines is the current time plus "Distance" times the gap between
- *   the last two bars. Without it the port reads the clock of the computer.
+ *   the last two bars. Without it the port reads the clock of the computer. With the exchange calendar (`timezone`
+ *   and `session`) that time is drawn on the future bar that contains it on the trading calendar (closed days
+ *   skipped), else at the time itself.
  * - the exchange time zone (`timezone`): the hours of the FX sessions are read in it. Without it the port throws an
  *   Error when one of the three FX session ranges is switched on.
  *
@@ -34,9 +36,11 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { array, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  array, timeframe, time as pineTime, barInterval, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { LineDrawingData, LabelData, PineSize } from '../types';
-import { securityStarts, chartTimeframe } from '../anchor-period';
+import { securityStarts, chartTimeframe, hasCalendar, barsAfterLastBar } from '../anchor-period';
 import { nowOf, type ChartContext } from '../chart-context';
 
 export interface KeyLevelsSpacemanbtcIdwmInputs {
@@ -307,6 +311,8 @@ export function calculate(
   if (n === 0) return result();
 
   const chartTf = chartTimeframe(bars, chart);
+  // bar size for the clock-change rule of the session test (intraday bars)
+  const barMs = chartTf !== '' && timeframe.info(chartTf).isintraday ? timeframe.in_seconds(chartTf) * 1000 : undefined;
   const cache = new Map<string, Period>();
   const period = (tf: string): Period => {
     let p = cache.get(tf);
@@ -354,7 +360,17 @@ export function calculate(
   const nowMs = nowOf(chart);
   const timenow = ms ? nowMs : Math.floor(nowMs / 1000);
   const gap = n > 1 ? bars[n - 1].time - bars[n - 2].time : NaN;
-  const limitRight = (count: number) => timenow + gap * count;
+  // A time after the last bar is drawn on the bar that contains it: with the exchange calendar of the context, the
+  // future bar of the trading calendar (closed days skipped), given as a bar slot of the chart (last bar time plus k
+  // bar intervals); without it, the time itself
+  const calendar = hasCalendar(chart);
+  const interval = barInterval(bars);
+  const onFutureBar = (t: number): number => {
+    if (!calendar || !(t > bars[n - 1].time)) return t;
+    const k = barsAfterLastBar(bars, t, chart);
+    return Number.isNaN(k) ? t : bars[n - 1].time + k * interval;
+  };
+  const limitRight = (count: number) => onFutureBar(timenow + gap * count);
   const right = limitRight(cfg.distanceRight);
   const anchor = limitRight(cfg.anchorDistance);
 
@@ -395,7 +411,7 @@ export function calculate(
     let finalOpen = 0.0;
     let wasOut = false;
     for (const bar of bars) {
-      if (pineTime.inSession(ms ? bar.time : bar.time * 1000, session, exchangeZone)) {
+      if (pineTime.inSession(ms ? bar.time : bar.time * 1000, session, exchangeZone, barMs)) {
         if (bar.high > currentHigh) currentHigh = bar.high;
         if (bar.low < currentLow) currentLow = bar.low;
         if (wasOut) {

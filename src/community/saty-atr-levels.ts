@@ -28,7 +28,7 @@
  * Original notice: Copyright (C) 2022 Saty Mahajan
  */
 
-import { ta, Series, str, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, str, color, timeframe, resample, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { TableData, TableCellData } from '../types';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
@@ -197,21 +197,8 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   // rule (see anchor-period.ts)
   const exchange = securityBars(bars, tf, context);
   if (exchange) return { htf: exchange.htf, group: exchange.group };
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
+  // Without it: the periods of the UTC calendar rule (see anchor-period.ts), grouped by the library
+  const { bars: htf, group } = resample(bars, periodStarts(bars, tf));
   return { htf, group };
 }
 

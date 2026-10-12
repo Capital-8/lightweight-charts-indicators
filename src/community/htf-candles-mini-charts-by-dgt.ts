@@ -32,12 +32,12 @@
  */
 
 import {
-  ta, str, color, array, time, timeframe, Series, getSourceSeries,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
+  ta, str, color, array, time, timeframe, Series, getSourceSeries, box, heikinAshi, resetDrawings,
+  setDrawingBar, varDrawing, type Box, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { BarColorData, BoxData, LabelData, LineDrawingData, PolylineData, TableCellData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
-import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import { periodStarts, chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import { backgroundColorOf, foregroundColorOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
 
 type TimeframeOption = 'Chart' | '1 Minute' | '3 Minutes' | '5 Minutes' | '15 Minutes' | '30 Minutes' | '1 Hour' | '2 Hours'
@@ -357,97 +357,15 @@ const nz = (v: number | undefined | null) => (v === undefined || v === null || N
 
 const arr = (s: { toArray(): ArrayLike<number | null | undefined> }): number[] => Array.from(s.toArray(), (v) => v ?? NaN);
 
-/** ticker.heikinashi: Heikin Ashi bars of the bars (the volume is kept) */
-function heikinAshi(bars: Bar[]): Bar[] {
-  const out: Bar[] = [];
-  for (let i = 0; i < bars.length; i++) {
-    const b = bars[i];
-    const close = (b.open + b.high + b.low + b.close) / 4;
-    const open = i === 0 ? (b.open + b.close) / 2 : (out[i - 1].open + out[i - 1].close) / 2;
-    out.push({ time: b.time, open, high: Math.max(b.high, open, close), low: Math.min(b.low, open, close), close, volume: b.volume });
-  }
-  return out;
-}
-
 /**
  * request.security(syminfo.tickerid, tf, ...) without lookahead: the bars of timeframe `tf` built from the chart
  * bars, and for each chart bar the index of the latest completed bar of that timeframe (-1: none yet).
  */
 function timeframeBars(bars: Bar[], tf: string, sameAsChart: boolean, context?: ChartContext): { htf: Bar[]; latest: number[] } {
   if (sameAsChart) return { htf: bars, latest: bars.map((_b, i) => i) };
-  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
-  // complete them come from the library rule (see anchor-period.ts)
-  const exchange = securityBars(bars, tf, context);
-  if (exchange) return { htf: exchange.htf, latest: exchange.latest };
-  const n = bars.length;
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
-  // A bar completes its period when its close reaches the end of the period. Symbols that trade every day follow
-  // the UTC calendar: the period of the close time is another period. Other symbols: the last bar of a period.
-  const ms = n > 0 && bars[0].time >= 1e12;
-  const weekend = (t: number) => {
-    const wd = new Date(ms ? t : t * 1000).getUTCDay();
-    return wd === 0 || wd === 6;
-  };
-  const interval = barInterval(bars);
-  const closes = bars.map((b) => ({ time: b.time + interval }));
-  const calendar = bars.some((b) => weekend(b.time)) && closes.some((b) => weekend(b.time));
-  const closeStarts = calendar ? periodStarts(closes, tf) : [];
-  // The last bar of a symbol that does not trade every day: its period is complete when the next possible bar is in
-  // another period (the next weekday, or the same day while the bar is earlier than the last bar of the day before)
-  let lastEnds = true;
-  if (!calendar && n > 1) {
-    const DAY = 86400000;
-    const toMs = (t: number) => (ms ? t : t * 1000);
-    const lastMs = toMs(bars[n - 1].time);
-    const day = Math.floor(lastMs / DAY) * DAY;
-    let next = lastMs + toMs(interval);
-    let sessionOver = true;
-    if (toMs(interval) < DAY) {
-      let j = n - 2;
-      while (j >= 0 && toMs(bars[j].time) >= day) j--;
-      sessionOver = j < 0 || lastMs - day >= toMs(bars[j].time) % DAY;
-    }
-    if (sessionOver) {
-      next = day + DAY;
-      while (weekend(ms ? next : next / 1000)) next += DAY;
-    }
-    const withNext = periodStarts([...bars, { time: ms ? next : next / 1000 }], tf);
-    lastEnds = withNext[n] !== withNext[n - 1];
-  }
-  const latest: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let done = i === 0 ? -1 : latest[i - 1];
-    if (i > 0 && group[i] !== group[i - 1]) done = Math.max(done, group[i] - 1);
-    const ends = i === n - 1 ? lastEnds : starts[i + 1] !== starts[i];
-    const reaches = !calendar || closeStarts[i] !== starts[i];
-    if (ends && reaches) done = Math.max(done, group[i]);
-    latest.push(done);
-  }
-  return { htf, latest };
-}
-
-interface Bx {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-  bg: string;
-  border: string;
-  deleted: boolean;
+  // The periods and the bars that complete them: the exchange calendar of the chart context (time zone and
+  // session), else the UTC calendar rule; grouped and completed by the library (see anchor-period.ts)
+  return higherTimeframeBars(bars, tf, context);
 }
 
 export function calculate(
@@ -677,24 +595,9 @@ export function calculate(
   };
 
   // ---- drawings -----------------------------------------------------------------------------------------------------
-  // Boxes in creation order: when a creation brings the count above max + 5, the oldest are deleted until max remain.
-  // A box held by a `var` variable of the script (the two boxes of the current period of each timeframe) is never
-  // deleted by this limit, but it counts.
-  const boxes: Bx[] = [];
-  const held = new Set<Bx>();
-  const newBox = (b: Omit<Bx, 'deleted'>, before: Bx | null): Bx => {
-    const o = { ...b, deleted: false };
-    if (before) held.delete(before);
-    held.add(o);
-    boxes.push(o);
-    if (boxes.length > MAX_BOXES + 5) {
-      for (let k = 0; k < boxes.length && boxes.length > MAX_BOXES;) {
-        if (held.has(boxes[k])) k++;
-        else boxes.splice(k, 1)[0].deleted = true;
-      }
-    }
-    return o;
-  };
+  // Boxes of the library registry with the limit of indicator(); the two boxes of the current period of each
+  // timeframe are held by `var` variables of the script
+  resetDrawings({ box: MAX_BOXES });
   const lines: LineDrawingData[] = [];
   const labels: LabelData[] = [];
   const polylines: PolylineData[] = [];
@@ -840,9 +743,10 @@ export function calculate(
 
   // processHTF(): the candles of the timeframe on the chart
   const candles = sides.map((s, k) => ({
-    s, r: requests[k], changed: s.show ? changes(tfs[k]) : [], hl: null as Bx | null, oc: null as Bx | null, ran: false,
+    s, r: requests[k], changed: s.show ? changes(tfs[k]) : [], hl: varDrawing<Box>(), oc: varDrawing<Box>(), ran: false,
   })).filter((c) => c.s.show);
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     for (const c of candles) {
       const { s, r } = c;
       const w = r.at(off + i);
@@ -857,28 +761,31 @@ export function calculate(
       const fill = String(color.new(bxColor, s.transp));
       // timeframe.change() is false on the first bar where this block runs
       if (c.ran && c.changed[i]) {
-        c.hl = newBox({ left: i, top: b.high, right: i, bottom: b.low, bg: fill, border }, c.hl);
+        c.hl.value = box.new(i, b.high, i, b.low, border, undefined, undefined, undefined, undefined, fill);
         // the original tests the chart type of the first timeframe here
-        if (side1.type !== 'High-Low') c.oc = newBox({ left: i, top: b.open, right: i, bottom: b.close, bg: fill, border }, c.oc);
+        if (side1.type !== 'High-Low') c.oc.value = box.new(i, b.open, i, b.close, border, undefined, undefined, undefined, undefined, fill);
       } else {
-        if (c.hl && !c.hl.deleted) {
-          c.hl.top = b.high;
-          c.hl.right = i;
-          c.hl.bottom = b.low;
-          c.hl.bg = fill;
-          c.hl.border = border;
+        const hl = c.hl.value;
+        if (hl) {
+          box.set_top(hl, b.high);
+          box.set_right(hl, i);
+          box.set_bottom(hl, b.low);
+          box.set_bgcolor(hl, fill);
+          box.set_border_color(hl, border);
         }
-        if (s.type !== 'High-Low' && c.oc && !c.oc.deleted) {
-          c.oc.top = b.open;
-          c.oc.right = i;
-          c.oc.bottom = b.close;
-          c.oc.bg = fill;
-          c.oc.border = border;
+        const oc = c.oc.value;
+        if (s.type !== 'High-Low' && oc) {
+          box.set_top(oc, b.open);
+          box.set_right(oc, i);
+          box.set_bottom(oc, b.close);
+          box.set_bgcolor(oc, fill);
+          box.set_border_color(oc, border);
         }
       }
       c.ran = true;
     }
   }
+  setDrawingBar(null);
 
   // ---- plots: the chart overlay -------------------------------------------------------------------------------------
   const nAll = allBars.length;
@@ -1083,7 +990,9 @@ export function calculate(
       { plot1: 'plot2', plot2: 'plot1', options: { title: 'ST Downtrend Fill', fillgaps: false }, colors: fillColors(String(color.new(RED, 90))) },
     ],
     barColors,
-    boxes: boxes.map((b) => ({ time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom, bgColor: b.bg, borderColor: b.border })),
+    boxes: box.all().map((b) => ({
+      time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom, bgColor: String(b.bgcolor), borderColor: String(b.border_color),
+    })),
     lines,
     labels,
     polylines,

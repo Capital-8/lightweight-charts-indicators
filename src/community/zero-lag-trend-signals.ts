@@ -32,8 +32,7 @@
 
 import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, TableData, TableCellData } from '../types';
-import { barInterval } from '../bar-time';
-import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
 
 export interface ZeroLagTrendSignalsInputs {
@@ -101,75 +100,9 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`The timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
   }
-  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
-  // complete them come from the library rule (see anchor-period.ts)
-  const exchange = securityBars(bars, tf, context);
-  if (exchange) {
-    // the time of a bar of the timeframe: its first chart bar
-    const htf = exchange.htf.map((b, k) => ({ ...b, time: bars[exchange.first[k]].time }));
-    return { htf, latest: exchange.latest };
-  }
-  const n = bars.length;
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
-
-  // A bar completes its period when its close reaches the end of the period. Symbols that trade every day follow
-  // the UTC calendar: the period of the close time is another period. Other symbols: the last bar of a period.
-  const ms = n > 0 && bars[0].time >= 1e12;
-  const weekend = (t: number) => {
-    const wd = new Date(ms ? t : t * 1000).getUTCDay();
-    return wd === 0 || wd === 6;
-  };
-  const interval = barInterval(bars);
-  const closes = bars.map((b) => ({ time: b.time + interval }));
-  const calendar = bars.some((b) => weekend(b.time)) && closes.some((b) => weekend(b.time));
-  const closeStarts = calendar ? periodStarts(closes, tf) : [];
-  // The last bar of a symbol that does not trade every day: its period is complete when the next possible bar is in
-  // another period. The next bar is on the same day while the bar is earlier in the day than the last bar of the
-  // trading day before; else it is on the next weekday.
-  let lastEnds = true;
-  if (!calendar && n > 1) {
-    const DAY = 86400000;
-    const toMs = (t: number) => (ms ? t : t * 1000);
-    const lastMs = toMs(bars[n - 1].time);
-    const day = Math.floor(lastMs / DAY) * DAY;
-    let next = lastMs + toMs(interval);
-    let sessionOver = true;
-    if (toMs(interval) < DAY) {
-      let j = n - 2;
-      while (j >= 0 && toMs(bars[j].time) >= day) j--;
-      sessionOver = j < 0 || lastMs - day >= toMs(bars[j].time) % DAY;
-    }
-    if (sessionOver) {
-      next = day + DAY;
-      while (weekend(ms ? next : next / 1000)) next += DAY;
-    }
-    const withNext = periodStarts([...bars, { time: ms ? next : next / 1000 }], tf);
-    lastEnds = withNext[n] !== withNext[n - 1];
-  }
-  const latest: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let done = i === 0 ? -1 : latest[i - 1];
-    if (i > 0 && group[i] !== group[i - 1]) done = Math.max(done, group[i] - 1);
-    const ends = i === n - 1 ? lastEnds : starts[i + 1] !== starts[i];
-    const reaches = !calendar || closeStarts[i] !== starts[i];
-    if (ends && reaches) done = Math.max(done, group[i]);
-    latest.push(done);
-  }
-  return { htf, latest };
+  // The periods and the bars that complete them: the exchange calendar of the chart context (time zone and
+  // session), else the UTC calendar rule; grouped and completed by the library (see anchor-period.ts)
+  return higherTimeframeBars(bars, tf, context);
 }
 
 /** The basis, the band width and the trend on the bars of one timeframe */

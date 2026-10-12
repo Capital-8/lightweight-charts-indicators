@@ -20,8 +20,6 @@
  *   first bar of the bars is a session start only when it is not later in the day than the first bar of the next day.
  * - Tooltips of the labels are prices printed with the price tick of the symbol: the port reads the tick from the
  *   chart context (third argument of calculate) and uses 0.01 without it.
- * - The moving average type WMA needs a weighted average with a length that changes on each bar, which the
- *   library does not have: the port throws an Error for it.
  * - The Pine script stops with an error on daily and higher bars; the port throws the same error.
  *
  * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
@@ -36,8 +34,9 @@
  */
 
 import {
-  ta, Series, color, str, callsite, timeframe, time as pineTime,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  ta, Series, color, str, callsite, timeframe, time as pineTime, line, label, box, linefill,
+  resetDrawings, setDrawingBar, varDrawing,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line, type Label, type Box,
 } from 'oakscriptjs';
 import type { LineDrawingData, BoxData, LabelData, LinefillData, PineSize } from '../types';
 import { barInterval, barTime } from '../bar-time';
@@ -176,43 +175,10 @@ const lt = (a: number, b: number) => b - a > EPS;
 const le = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !(a - b > EPS);
 const ge = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !(b - a > EPS);
 
-/**
- * Live drawings of one kind, in creation order. Pine keeps at most max objects: a creation that brings the count
- * above max + 5 deletes the oldest until max remain. An object that a `var` variable of the script still refers to
- * (here the box of the range and the middle line) is not deleted; objects kept in arrays or in fields of other
- * objects are (measured on the original platform).
- */
-class Live<T extends object> {
-  items: T[] = [];
-  private held = new Map<string, T | null>();
-  add(o: T): T {
-    this.items.push(o);
-    if (this.items.length > MAX_OBJECTS + 5) {
-      const kept = new Set(this.held.values());
-      let excess = this.items.length - MAX_OBJECTS;
-      this.items = this.items.filter((x) => kept.has(x) || excess-- <= 0);
-    }
-    return o;
-  }
-  /** The `var` variable `name` now refers to `o` */
-  hold(name: string, o: T): T {
-    this.held.set(name, o);
-    return o;
-  }
-  delete(o: T | null): void {
-    if (!o) return;
-    const k = this.items.lastIndexOf(o);
-    if (k >= 0) this.items.splice(k, 1);
-  }
-  has(o: T): boolean {
-    return this.items.includes(o);
-  }
-}
-
 /** type target: a line and its label */
 interface Target {
-  ln: LineDrawingData | null;
-  lab: LabelData | null;
+  ln: Line | null;
+  lab: Label | null;
 }
 
 type Point = { time: number; value: number; color?: string };
@@ -228,10 +194,6 @@ export function calculate(
   const chartTf = chartTimeframe(bars, chart);
   if (chartTf !== '' && timeframe.in_seconds(chartTf) >= timeframe.in_seconds('D')) {
     throw new Error('Timeframe is too High! Please Reduce Timeframe to be Less-Than 1 Day.');
-  }
-  if (cfg.maType === 'WMA') {
-    throw new Error('Opening Range with Breakouts & Targets: the moving average type WMA needs ta.wma with a length '
-      + 'that changes on each bar, which oakscriptjs does not have.');
   }
   const useBias = cfg.useBias !== 'No Bias';
   const sigSize = cfg.sigSize.toLowerCase() as PineSize;
@@ -251,9 +213,10 @@ export function calculate(
   // Opening range session: or_sesh
   const orSesh: boolean[] = new Array(n).fill(false);
   if (cfg.crTog) {
-    // or_sesh := not na(time(timeframe.period, crSesh, tz))
+    // or_sesh := not na(time(timeframe.period, crSesh, tz)); the bar duration is needed on clock changes
+    const barMs = chartTf !== '' ? timeframe.in_seconds(chartTf) * 1000 : undefined;
     for (let i = 0; i < n; i++) {
-      orSesh[i] = pineTime.inSession(inMs ? bars[i].time : bars[i].time * 1000, cfg.crSesh, cfg.tz);
+      orSesh[i] = pineTime.inSession(inMs ? bars[i].time : bars[i].time * 1000, cfg.crSesh, cfg.tz, barMs);
     }
   } else {
     // session.isfirstbar: the first bar of the trading day; timeframe.change(orTF): a new period of the timeframe
@@ -291,6 +254,8 @@ export function calculate(
   let maSeries: number[] | null = null;
   if (cfg.maType === 'SMA') {
     maSeries = toArray(ta.sma(Series.fromArray(bars, closes), vLenSeries));
+  } else if (cfg.maType === 'WMA') {
+    maSeries = toArray(ta.wma(Series.fromArray(bars, closes), vLenSeries));
   } else if (cfg.maType === 'VWMA') {
     // ta.vwma(s, len) = ta.sma(s * volume, len) / ta.sma(volume, len)
     const pv = toArray(ta.sma(Series.fromArray(bars, bars.map((b) => b.close * (b.volume ?? NaN))), vLenSeries));
@@ -298,23 +263,22 @@ export function calculate(
     maSeries = pv.map((x, i) => x / v[i]);
   }
 
-  const lines = new Live<LineDrawingData>();
-  const boxes = new Live<BoxData>();
-  const labels = new Live<LabelData>();
-  const fills: Array<{ line1: LineDrawingData; line2: LineDrawingData; color: string }> = [];
+  // Drawings live in the library registry: the maximum counts, the objects held by the `var` variables or_bx and
+  // m_ln, and the linefills follow the Pine rules there
+  resetDrawings({ line: MAX_OBJECTS, label: MAX_OBJECTS, box: MAX_OBJECTS });
 
   let upTargs: Target[] = [];
   let downTargs: Target[] = [];
-  const signals: LabelData[] = [];
+  const signals: Label[] = [];
   let orToken = false;
   let orh = NaN, orl = NaN, hst = NaN, lst = NaN, prevOrm = NaN;
   let upCount = NaN, downCount = NaN;
-  let orBx: BoxData | null = null;
+  const orBx = varDrawing<Box>();
   let dayDir = 0;
   let downCheck = false, upCheck = false;
   let hLn: Target = { ln: null, lab: null };
   let lLn: Target = { ln: null, lab: null };
-  let mLn: LineDrawingData | null = null;
+  const mLn = varDrawing<Line>();
   let prevOrmSeries = NaN; // orm[1]
   let ma = NaN;
 
@@ -327,12 +291,14 @@ export function calculate(
 
   // get_1up(_val) => (_val - math.floor(_val)) > 0 ? int(math.floor(_val) + 1) : int(_val)
   const get1up = (v: number) => (gt(v - Math.floor(v), 0) ? Math.trunc(Math.floor(v) + 1) : Math.trunc(v));
-  const targetLabel = (i: number, y: number, text: string, textColor: string): LabelData => labels.add({
-    time: bars[i].time, price: y, text, tooltip: tick(y), style: 'label_left', color: INVIS, textColor, size: txtSize,
-  });
+  const targetLabel = (i: number, y: number, text: string, textColor: string): Label =>
+    label.new(i, y, text, 'bar_index', 'price', INVIS, 'label_left', textColor, txtSize, undefined, tick(y));
+  const deleteLine = (o: Line | null | undefined) => { if (o) line.delete(o); };
+  const deleteLabel = (o: Label | null | undefined) => { if (o) label.delete(o); };
 
   const plot0: Point[] = [];
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const bar = bars[i];
     const t = bar.time;
     const { close, high, low } = bar;
@@ -349,22 +315,22 @@ export function calculate(
     // On Start of OR Session
     if (orStart[i]) {
       for (const targ of upTargs) {
-        if (!cfg.showHist) lines.delete(targ.ln);
-        labels.delete(targ.lab);
+        if (!cfg.showHist) deleteLine(targ.ln);
+        deleteLabel(targ.lab);
       }
       for (const targ of downTargs) {
-        if (!cfg.showHist) lines.delete(targ.ln);
-        labels.delete(targ.lab);
+        if (!cfg.showHist) deleteLine(targ.ln);
+        deleteLabel(targ.lab);
       }
       if (!cfg.showHist) {
-        for (const lab of signals) labels.delete(lab);
-        boxes.delete(orBx);
-        lines.delete(hLn.ln);
-        lines.delete(lLn.ln);
-        lines.delete(mLn);
+        for (const lab of signals) deleteLabel(lab);
+        if (orBx.value) box.delete(orBx.value);
+        deleteLine(hLn.ln);
+        deleteLine(lLn.ln);
+        deleteLine(mLn.value);
       }
-      labels.delete(hLn.lab);
-      labels.delete(lLn.lab);
+      deleteLabel(hLn.lab);
+      deleteLabel(lLn.lab);
       upTargs = [];
       downTargs = [];
 
@@ -375,7 +341,7 @@ export function calculate(
       downCount = 0;
       upCheck = true;
       downCheck = true;
-      orBx = boxes.hold('or_bx', boxes.add({ time1: t, price1: high, time2: t, price2: low, bgColor: cfg.orFillColor, borderWidth: 0 }));
+      orBx.value = box.new(i, high, i, low, undefined, 0, undefined, undefined, 'bar_index', cfg.orFillColor);
       orToken = false;
     }
 
@@ -383,41 +349,34 @@ export function calculate(
     if (sesh) {
       if (gt(high, orh)) orh = high;
       if (lt(low, orl)) orl = low;
-      if (orBx) {
-        orBx.price1 = orh;
-        orBx.price2 = orl;
-        orBx.time2 = t;
+      if (orBx.value) {
+        box.set_top(orBx.value, orh);
+        box.set_bottom(orBx.value, orl);
+        box.set_right(orBx.value, i);
       }
       if (Math.abs(orh - orl) > EPS) orToken = true;
     }
 
     // On End of OR Session
     if (orEnd && orToken) {
-      hLn = {
-        ln: lines.add({ time1: t, price1: orh, time2: t, price2: orh, color: cfg.orColor }),
-        lab: targetLabel(i, orh, 'ORH', orText),
-      };
-      lLn = {
-        ln: lines.add({ time1: t, price1: orl, time2: t, price2: orl, color: cfg.orColor }),
-        lab: targetLabel(i, orl, 'ORL', orText),
-      };
-      mLn = lines.hold('m_ln', lines.add({ time1: t, price1: orm, time2: t, price2: orm, style: 'dashed', color: cfg.orColor }));
+      const hLine = line.new(i, orh, i, orh, 'bar_index', 'none', cfg.orColor);
+      hLn = { ln: hLine, lab: targetLabel(i, orh, 'ORH', orText) };
+      const lLine = line.new(i, orl, i, orl, 'bar_index', 'none', cfg.orColor);
+      lLn = { ln: lLine, lab: targetLabel(i, orl, 'ORL', orText) };
+      mLn.value = line.new(i, orm, i, orm, 'bar_index', 'none', cfg.orColor, 'dashed');
       hst = orh + orw * tPer;
       lst = orl - orw * tPer;
       dayDir = gt(orm, prevOrm) ? 1 : lt(orm, prevOrm) ? -1 : 0;
-      fills.push({
-        line1: hLn.ln as LineDrawingData, line2: lLn.ln as LineDrawingData,
-        color: dayDir === 1 ? cfg.greenFill : dayDir === -1 ? cfg.redFill : INVIS,
-      });
+      linefill.new(hLine, lLine, dayDir === 1 ? cfg.greenFill : dayDir === -1 ? cfg.redFill : INVIS);
     }
 
     // Running outside of OR Session
     if (!sesh && orToken) {
-      if (hLn.ln) hLn.ln.time2 = t;
-      if (lLn.ln) lLn.ln.time2 = t;
-      if (hLn.lab) hLn.lab.time = t;
-      if (lLn.lab) lLn.lab.time = t;
-      if (mLn) mLn.time2 = t;
+      if (hLn.ln) line.set_x2(hLn.ln, i);
+      if (lLn.ln) line.set_x2(lLn.ln, i);
+      if (hLn.lab) label.set_x(hLn.lab, i);
+      if (lLn.lab) label.set_x(lLn.lab, i);
+      if (mLn.value) line.set_x2(mLn.value, i);
     }
 
     // Target Calculations
@@ -452,13 +411,12 @@ export function calculate(
 
     // Targets
     if (!sesh && orToken) {
-      const tPrev = i > 0 ? bars[i - 1].time : t - interval;
       if (upCount < upMax && cfg.tTog) {
         if (!Number.isFinite(upMax)) throw new Error('Opening Range with Breakouts & Targets: the target count is not finite.');
         for (let k = upCount + 1; k <= upMax; k++) {
           const y = orh + orw * tPer * k;
           upTargs.push({
-            ln: lines.add({ time1: tPrev, price1: y, time2: t, price2: y, color: cfg.green, style: targetStyle }),
+            ln: line.new(i - 1, y, i, y, 'bar_index', 'none', cfg.green, targetStyle),
             lab: targetLabel(i, y, str.tostring(k), greenText),
           });
           if (k === upMax) upCount = upMax;
@@ -469,7 +427,7 @@ export function calculate(
         for (let k = downCount + 1; k <= downMax; k++) {
           const y = orl - orw * tPer * k;
           downTargs.push({
-            ln: lines.add({ time1: tPrev, price1: y, time2: t, price2: y, color: cfg.red, style: targetStyle }),
+            ln: line.new(i - 1, y, i, y, 'bar_index', 'none', cfg.red, targetStyle),
             lab: targetLabel(i, y, str.tostring(k), redText),
           });
           if (k === downMax) downCount = downMax;
@@ -480,24 +438,24 @@ export function calculate(
     // Extending to Current Bar
     if (cfg.tDispType === 'Extended' && cfg.tTog) {
       for (const targ of [...upTargs, ...downTargs]) {
-        if (targ.ln) targ.ln.time2 = t;
-        if (targ.lab) targ.lab.time = t;
+        if (targ.ln) line.set_x2(targ.ln, i);
+        if (targ.lab) label.set_x(targ.lab, i);
       }
     }
     if (cfg.tDispType === 'Adaptive' && cfg.tTog) {
-      const next = barTime(bars, i + 1, interval);
+      // targ.ln.get_y1() of a deleted line is na: the condition is false
       for (const targ of upTargs) {
-        const y1 = (targ.ln as LineDrawingData).price1;
+        const y1 = line.get_y1(targ.ln as Line);
         if (le(y1, orh + orw * tPer * upCur) && ge(y1, orh + orw * tPer * (upCur - 2))) {
-          (targ.ln as LineDrawingData).time2 = next;
-          (targ.lab as LabelData).time = next;
+          line.set_x2(targ.ln as Line, i + 1);
+          label.set_x(targ.lab as Label, i + 1);
         }
       }
       for (const targ of downTargs) {
-        const y1 = (targ.ln as LineDrawingData).price1;
+        const y1 = line.get_y1(targ.ln as Line);
         if (le(y1, orl - orw * tPer * (downCur - 2)) && ge(y1, orl - orw * tPer * downCur)) {
-          (targ.ln as LineDrawingData).time2 = next;
-          (targ.lab as LabelData).time = next;
+          line.set_x2(targ.ln as Line, i + 1);
+          label.set_x(targ.lab as Label, i + 1);
         }
       }
     }
@@ -516,29 +474,47 @@ export function calculate(
 
     // Signals
     if (upSignal && cfg.sigTog) {
-      signals.push(labels.add({
-        time: t, price: orl, style: 'label_center', text: '\n▲', color: INVIS, textColor: cfg.upSigColor, size: sigSize,
-      }));
+      signals.push(label.new(i, orl, '\n▲', 'bar_index', 'price', INVIS, 'label_center', cfg.upSigColor, sigSize));
     }
     if (downSignal && cfg.sigTog) {
-      signals.push(labels.add({
-        time: t, price: orh, style: 'label_center', text: '▼\n', color: INVIS, textColor: cfg.downSigColor, size: sigSize,
-      }));
+      signals.push(label.new(i, orh, '▼\n', 'bar_index', 'price', INVIS, 'label_center', cfg.downSigColor, sigSize));
     }
     prevOrmSeries = orm;
   }
 
-  // A linefill lives as long as its two lines
-  const linefills: LinefillData[] = fills
-    .filter((f) => lines.has(f.line1) && lines.has(f.line2))
-    .map((f) => ({ line1: f.line1, line2: f.line2, color: f.color }));
+  setDrawingBar(null);
+
+  // Live objects of the registry; x (a bar index) becomes a bar time, a future time after the last bar
+  const T = (x: number) => barTime(bars, x, interval);
+  const outLines = new Map<Line, LineDrawingData>();
+  for (const l of line.all()) {
+    outLines.set(l, {
+      time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: String(l.color),
+      ...(l.style !== undefined && l.style !== 'solid' ? { style: l.style as LineDrawingData['style'] } : {}),
+    });
+  }
+  const boxes: BoxData[] = box.all().map((b) => ({
+    time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom, bgColor: String(b.bgcolor),
+    borderWidth: b.border_width ?? 1,
+  }));
+  const labels: LabelData[] = label.all().map((l) => ({
+    time: T(l.x), price: l.y, text: l.text ?? '', ...(l.tooltip !== undefined ? { tooltip: l.tooltip } : {}),
+    style: l.style as LabelData['style'], color: String(l.color), textColor: String(l.textcolor), size: l.size as PineSize,
+  }));
+  // A linefill is drawn while its two lines live
+  const linefills: LinefillData[] = [];
+  for (const f of linefill.all()) {
+    const line1 = outLines.get(f.line1);
+    const line2 = outLines.get(f.line2);
+    if (line1 && line2) linefills.push({ line1, line2, color: String(f.color) });
+  }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
-    lines: lines.items,
-    boxes: boxes.items,
-    labels: labels.items,
+    lines: [...outLines.values()],
+    boxes,
+    labels,
     linefills,
   };
 }

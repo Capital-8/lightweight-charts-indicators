@@ -28,18 +28,19 @@
  *   #0F0F0F, foreground #DBDBDB).
  * - Quote currency of the symbol: the position estimate compares it with the account currency once the linear
  *   contract is confirmed. Without it the port throws an Error for that combination of inputs.
- * - Session hours and exchange time zone: on daily bars of a symbol with a day session (e.g. "0930-1600") the close
- *   time of a bar is the end of the session of that day, as in the original (for a bar of the higher timeframe: of
- *   its last day). A day that closes early is not known.
+ * - Session of the symbol and exchange time zone (with its corrections and holidays when given): the close time of a
+ *   bar (`time_close`) and of a bar of the higher timeframe come from the exchange calendar (the end of the session
+ *   of the day on daily bars, of the last trading day of the period on weekly and monthly bars), and the level lines
+ *   that end after the last bar are placed on the trading calendar (closed days skipped).
  *
  * Limits:
- * - Without the session hours, and on weekly and longer bars, the close time of a bar is its time plus the chart
- *   timeframe (taken from the bar times): exact on symbols that trade around the clock and on intraday bars; else
- *   the entry / exit dates in texts can differ. The level lines end some days after the last bar: that time is not
- *   placed on a trading calendar. A time between two bars is given as the time of the next bar, where it is drawn.
+ * - Without the session and the time zone, the close time of a bar is its time plus the chart timeframe (taken from
+ *   the bar times): exact on symbols that trade around the clock and on intraday bars; else the entry / exit dates
+ *   in texts can differ. The close time of a higher-timeframe bar is then its start plus the timeframe length, and a
+ *   time after the last bar is placed on bar slots of the chart timeframe.
+ * - A time between two bars is given as the time of the next bar, where it is drawn.
  * - Days (previous day high / low, session VWAP anchor) and the bars of the higher timeframe are built from the chart
- *   bars with the calendar rule of src/anchor-period.ts. The close time of a higher-timeframe bar is its start
- *   plus the timeframe length (exact on symbols that trade around the clock).
+ *   bars with the calendar rule of src/anchor-period.ts.
  * - The alert inputs are kept but alerts (alert() calls and 16 alert conditions) have no output.
  *
  * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
@@ -52,11 +53,14 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, color, math, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BgColorData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TableMergeData, TablePosition } from '../types';
-import { periodStarts, securityStarts, chartTimeframe } from '../anchor-period';
 import {
-  backgroundColorOf, currencyOf, foregroundColorOf, lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext,
+  ta, Series, color, math, str, timeframe, time as pineTime, label, resetDrawings, setDrawingBar, resample, periodClose, barsUntil,
+  chartSessions, type Label, type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
+import type { BgColorData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TableMergeData, TablePosition } from '../types';
+import { periodStarts, securityStarts, chartTimeframe, hasCalendar } from '../anchor-period';
+import {
+  backgroundColorOf, currencyOf, foregroundColorOf, lastBarConfirmedOf, mintickOf, type ChartContext,
 } from '../chart-context';
 
 type Corner = 'Top Right' | 'Top Left' | 'Middle Right' | 'Middle Left' | 'Bottom Right' | 'Bottom Left';
@@ -543,9 +547,10 @@ interface Plan {
   origin: string;
 }
 
-/** A label of the script, in creation order (`dead` = deleted); times in ms */
+/** A label of the script (times in ms) */
 interface LabelObj {
-  dead: boolean;
+  /** The object of the drawing registry (count limit, deletes) */
+  ref: Label;
   time: number;
   price: number;
   text: string;
@@ -694,17 +699,22 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
     }
   }
 
-  // time_close: the bar time plus the chart timeframe. On daily bars of a symbol with a day session (chart context:
-  // session hours such as "0930-1600" and the exchange time zone) it is the end of the session of that day.
-  const sessionHours = typeof chart?.session === 'string' ? chart.session : chart?.session?.session;
-  const daySession = sessionHours !== undefined && tfSeconds === 86400 ? /^(\d\d)(\d\d)-(\d\d)(\d\d)$/.exec(sessionHours.trim()) : null;
-  const sessionEnd = daySession !== null && Number(daySession[3]) * 60 + Number(daySession[4]) > Number(daySession[1]) * 60 + Number(daySession[2])
-    ? { hour: Number(daySession[3]), minute: Number(daySession[4]), tz: timezoneOf(chart) } : null;
+  // The exchange calendar of the chart context (session and time zone), null without it or when the library cannot
+  // read them
+  let calendar: SessionContext | null = null;
+  if (hasCalendar(chart) && chartTf !== '' && n > 0) {
+    calendar = { timeframe: chartTf, timezone: chart!.timezone, session: chart!.session, regularSession: chart!.regularSession, timeUnit: ms ? 'ms' : 's' };
+    try {
+      chartSessions(calendar);
+    } catch {
+      calendar = null;
+    }
+  }
+  // time_close: from the exchange calendar; without it (or without a period for the bar) the bar time plus the chart
+  // timeframe
   const closeMs = (i: number) => {
-    const t = tMs(i);
-    if (sessionEnd === null) return t + tfSeconds * 1000;
-    const { hour, minute, tz } = sessionEnd;
-    return pineTime.timestamp(tz, pineTime.year(t, tz), pineTime.month(t, tz), pineTime.dayofmonth(t, tz), hour, minute);
+    const t = calendar ? periodClose(bars[i].time, chartTf, calendar) : NaN;
+    return Number.isNaN(t) ? tMs(i) + tfSeconds * 1000 : t;
   };
 
   // Higher timeframe: EMAs, close time and warm-up of its last closed bar (ema[1], time_close[1], bar_index[1])
@@ -714,21 +724,11 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   const htfReady: boolean[] = new Array(n).fill(false);
   if (htfEnabled && n > 0) {
     const starts = securityStarts(bars, cfg.htfInput, chart);
-    const htf: Bar[] = [];
-    const group: number[] = [];
+    const { bars: htf, group } = resample(bars, starts);
     /** Last chart bar of each bar of the higher timeframe */
     const lastOf: number[] = [];
-    bars.forEach((b, i) => {
-      if (i === 0 || starts[i] !== starts[i - 1]) {
-        htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-      } else {
-        const last = htf[htf.length - 1];
-        last.high = Math.max(last.high, b.high);
-        last.low = Math.min(last.low, b.low);
-        last.close = b.close;
-      }
-      group.push(htf.length - 1);
-      lastOf[htf.length - 1] = i;
+    group.forEach((g, i) => {
+      lastOf[g] = i;
     });
     const htfSource = Series.fromArray(htf, htf.map(sourceOf));
     const fast = A(ta.ema(htfSource, fastLen));
@@ -738,8 +738,9 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
       if (g < 0) continue;
       htfFast[i] = fast[g];
       htfSlow[i] = slow[g];
-      // On daily bars with a day session (chart context): the session end of the last day of the period
-      htfClosedAt[i] = sessionEnd !== null ? closeMs(lastOf[g]) : periodEnd(ms ? htf[g].time : htf[g].time * 1000, cfg.htfInput);
+      // time_close of the period: from the exchange calendar, else its start plus the timeframe
+      const closed = calendar ? periodClose(bars[lastOf[g]].time, cfg.htfInput, calendar) : NaN;
+      htfClosedAt[i] = Number.isNaN(closed) ? periodEnd(ms ? htf[g].time : htf[g].time * 1000, cfg.htfInput) : closed;
       htfReady[i] = g >= slowLen * cfg.warmupMult;
     }
   }
@@ -820,22 +821,16 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
     t.mae = Math.max(t.mae, Math.max(0, (-t.dir * (adverse - t.entry)) / t.risk));
   };
 
-  // Drawings. Labels in creation order, with the count limit of Pine: when a creation brings the count above
-  // max + 5, the oldest are deleted until max remain.
-  const allLabels: LabelObj[] = [];
-  const newLabel = (label: Omit<LabelObj, 'dead'>): LabelObj => {
-    const obj = { dead: false, ...label };
-    allLabels.push(obj);
-    if (allLabels.length > MAX_LABELS + 5) {
-      for (const old of allLabels.splice(0, allLabels.length - MAX_LABELS)) old.dead = true;
-    }
+  // Drawings. Labels in the drawing registry of the library, with the label limit of indicator(); the properties of
+  // each label are kept here (texts and times are set on the last bar)
+  resetDrawings({ label: MAX_LABELS });
+  const labelData = new Map<Label, LabelObj>();
+  const newLabel = (data: Omit<LabelObj, 'ref'>): LabelObj => {
+    const obj = { ...data, ref: label.new(data.time, data.price, data.text, 'bar_time') };
+    labelData.set(obj.ref, obj);
     return obj;
   };
-  const deleteLabel = (label: LabelObj) => {
-    label.dead = true;
-    const at = allLabels.indexOf(label);
-    if (at >= 0) allLabels.splice(at, 1);
-  };
+  const deleteLabel = (obj: LabelObj) => label.delete(obj.ref);
   let levelLines: LineObj[] = [];
   let levelLabels: LabelObj[] = [];
   const tables: TableData[] = [];
@@ -855,6 +850,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   const fillBear = String(color.new(bearColor, 88));
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const bar = bars[i];
     const { open, high, low, close } = bar;
     const time = tMs(i);
@@ -913,7 +909,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
     };
 
     // time() with a session spec gives the bar time inside the session, na outside
-    const inSession = pineTime.inSession(time, sessionSpec, sessionTZ);
+    const inSession = pineTime.inSession(time, sessionSpec, sessionTZ, isIntraday ? tfSeconds * 1000 : undefined);
     const sessionAllowed = cfg.sessionMode !== 'Filter entries' || inSession;
     const dateAllowed = time >= cfg.startInput && timeClose < cfg.endInput;
     // A session with a gap starts when the gap ends; a whole-day session rolls on the calendar day of its time zone
@@ -1448,11 +1444,18 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
     }
   }
 
-  // A time between two bars is drawn on the next bar; a time after the last bar is on the future bar slots
+  setDrawingBar(null);
+
+  // A time between two bars is drawn on the next bar; a time after the last bar is on the future bar slots: the bar of
+  // that time on the trading calendar of the exchange, else slots of the chart timeframe
   const interval = tfSeconds * 1000;
   const drawnTime = (tm: number): number => {
     const lastTime = tMs(n - 1);
-    if (tm > lastTime) return fromMs(interval > 0 ? lastTime + Math.ceil((tm - lastTime) / interval) * interval : tm);
+    if (tm > lastTime) {
+      const slots = calendar ? barsUntil(bars[n - 1].time, fromMs(tm), calendar) : NaN;
+      if (!Number.isNaN(slots) && interval > 0) return fromMs(lastTime + slots * interval);
+      return fromMs(interval > 0 ? lastTime + Math.ceil((tm - lastTime) / interval) * interval : tm);
+    }
     let lo = 0;
     let hi = n - 1;
     while (lo < hi) {
@@ -1465,7 +1468,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   const lines: LineDrawingData[] = levelLines.map((ln) => ({
     time1: drawnTime(ln.x1), price1: ln.y1, time2: drawnTime(ln.x2), price2: ln.y2, color: ln.color, style: ln.style,
   }));
-  const labels: LabelData[] = allLabels.map((lb) => ({
+  const labels: LabelData[] = label.all().map((ref) => labelData.get(ref)!).map((lb) => ({
     time: drawnTime(lb.time), price: lb.price, text: lb.text, color: lb.color, textColor: lb.textColor, style: lb.style, size: lb.size,
     ...(lb.tooltip !== undefined ? { tooltip: lb.tooltip } : {}),
   }));

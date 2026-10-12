@@ -17,7 +17,8 @@
  *   event name is written at the middle of the line, `Text Distance (Ticks)` ticks below a low level and above a
  *   high level (the other way round with `Flip Text Position`). Otherwise the line and its label move one bar on.
  *
- * Drawings are kept up to 500 lines and 500 labels (the oldest are removed).
+ * Drawings are kept up to 500 lines and 500 labels (the oldest are removed, by the rules of the library drawing
+ * registry; the newest price label of each side is held by a `var` variable).
  *
  * Chart values (third argument): the port reads the symbol tick (text distance and price label format; without
  * it: 0.01).
@@ -27,7 +28,8 @@
  */
 
 import {
-  ta, str, Series, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  ta, str, Series, time as pineTime, line, label, resetDrawings, setDrawingBar, varDrawing,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, PineSize } from '../types';
 import { barInterval, barTime } from '../bar-time';
@@ -199,27 +201,8 @@ const le = (a: number, b: number) => a - b <= EPS;
 const ge = (a: number, b: number) => b - a <= EPS;
 
 type Style = 'solid' | 'dashed' | 'dotted';
-interface Ln { x1: number; y: number; x2: number; color: string; style: Style; dead: boolean }
-interface Lb {
-  x: number; y: number; text: string; style: 'label_left' | 'none'; color: string; textColor: string; size: PineSize;
-  dead: boolean;
-}
-
-/** Live drawings of one kind: above max + 5 objects the oldest are deleted until max remain */
-class Live<T extends { dead: boolean }> {
-  list: T[] = [];
-  add(o: T): T {
-    this.list.push(o);
-    if (this.list.length > MAX_COUNT + 5) for (const old of this.list.splice(0, this.list.length - MAX_COUNT)) old.dead = true;
-    return o;
-  }
-  /** line.delete / label.delete */
-  remove(o: T | null): void {
-    if (o === null || o.dead) return;
-    o.dead = true;
-    this.list.splice(this.list.indexOf(o), 1);
-  }
-}
+type Ln = ReturnType<typeof line.new>;
+type Lb = ReturnType<typeof label.new>;
 
 /** get_style() */
 function styleOf(s: string): Style {
@@ -262,27 +245,31 @@ export function calculate(
   const phArr = ta.pivothigh(new Series(bars, (b) => b.high), prd, prd).toArray();
   const plArr = ta.pivotlow(new Series(bars, (b) => b.low), prd, prd).toArray();
 
-  const lines = new Live<Ln>();
-  const labels = new Live<Lb>();
+  // Lines and labels live in the library registry (max_lines_count = max_labels_count = 500)
+  resetDrawings({ line: MAX_COUNT, label: MAX_COUNT });
   const C = (i: number) => (i >= 0 ? bars[i].close : NaN);
 
   // is_in_session(): not na(time(timeframe.period, sess + ":1234567", tz_manual))
+  const interval = barInterval(bars);
+  const barMs = inMs ? interval : interval * 1000;
   const sessionsOf = (i: number): Sessions => {
     const t = inMs ? bars[i].time : bars[i].time * 1000;
-    return sessionInputs.map((s) => pineTime.inSession(t, `${s}:1234567`, cfg.tzManual)) as Sessions;
+    return sessionInputs.map((s) => pineTime.inSession(t, `${s}:1234567`, cfg.tzManual, barMs)) as Sessions;
   };
 
   const sides = [
     // Buy lines (pivot lows)
-    { buy: true, pivots: plArr, active: [] as Level[], newLabel: null as Lb | null, kept: null as Sessions | null },
+    // (var label newlabel = na: one variable per side)
+    { buy: true, pivots: plArr, active: [] as Level[], newLabel: varDrawing<Lb>(), kept: null as Sessions | null },
     // Sell lines (pivot highs)
-    { buy: false, pivots: phArr, active: [] as Level[], newLabel: null as Lb | null, kept: null as Sessions | null },
+    { buy: false, pivots: phArr, active: [] as Level[], newLabel: varDrawing<Lb>(), kept: null as Sessions | null },
   ];
   const offsetVal = cfg.lblOffset * mintick;
   const multHigh = cfg.flipText ? -1 : 1;
   const multLow = cfg.flipText ? 1 : -1;
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const { high, low, close } = bars[i];
 
     // Create the lines
@@ -306,18 +293,17 @@ export function calculate(
         const k = was.indexOf(true);
         if (k >= 0) lineCol = sessionColors[k];
       }
-      const newLine = lines.add({ x1: i - prd, y: pv, x2: i + LINE_EXTENSION, color: lineCol, style: 'solid', dead: false });
+      const newLine = line.new(i - prd, pv, i + LINE_EXTENSION, pv, 'bar_index', 'none', lineCol, 'solid', cfg.activeWidth);
       if (cfg.showPrice) {
-        side.newLabel = labels.add({
-          x: i + LINE_EXTENSION, y: pv, text: str.tostring(pv, 'mintick', mintick), style: 'label_left',
-          color: lineCol, textColor: '#FFFFFF', size: 'small', dead: false,
-        });
+        side.newLabel.value = label.new(
+          i + LINE_EXTENSION, pv, str.tostring(pv, 'mintick', mintick), 'bar_index', 'price', lineCol, 'label_left', '#FFFFFF', 'small',
+        );
       }
-      side.active.push({ line: newLine, label: side.newLabel, price: pv });
+      side.active.push({ line: newLine, label: side.newLabel.value ?? null, price: pv });
       if (side.active.length > cfg.maxActiveLines) {
         const old = side.active.shift() as Level;
-        lines.remove(old.line);
-        labels.remove(old.label);
+        line.delete(old.line);
+        if (old.label) label.delete(old.label);
       }
     }
 
@@ -341,38 +327,35 @@ export function calculate(
           event = { text: 'X', show: cfg.showX, lineCol: cfg.colLineX, txtCol: cfg.colTxtX, style: styleX };
         }
         if (event) {
-          if (!l.dead) {
-            l.x2 = i;
-            l.color = event.lineCol;
-            l.style = event.style;
-          }
-          labels.remove(lb);
+          line.set_x2(l, i);
+          line.set_color(l, event.lineCol);
+          line.set_style(l, event.style);
+          if (lb) label.delete(lb);
           if (event.show) {
             // line.get_x1 of a deleted line is na: the label has no bar and is not drawn (it still counts)
-            const midX = l.dead ? NaN : Math.round((l.x1 + i) / 2);
-            labels.add({
-              x: midX, y: lvl + offsetVal * mult, text: event.text, style: 'none', color: 'rgba(255, 255, 255, 0)',
-              textColor: event.txtCol, size: finalSize, dead: false,
-            });
+            const midX = Math.round((line.get_x1(l) + i) / 2);
+            label.new(midX, lvl + offsetVal * mult, event.text, 'bar_index', 'price', 'rgba(255, 255, 255, 0)', 'none', event.txtCol, finalSize);
           }
           side.active.splice(k, 1);
         } else {
           // Waiting
-          if (!l.dead) l.x2 = i + LINE_EXTENSION;
-          if (lb !== null && !lb.dead) lb.x = i + LINE_EXTENSION;
+          line.set_x2(l, i + LINE_EXTENSION);
+          if (lb) label.set_x(lb, i + LINE_EXTENSION);
         }
       }
     }
   }
 
-  const interval = barInterval(bars);
+  setDrawingBar(null);
+
   const timeOf = (x: number) => barTime(bars, x, interval);
-  const outLines: LineDrawingData[] = lines.list.map((l) => ({
-    time1: timeOf(l.x1), price1: l.y, time2: timeOf(l.x2), price2: l.y, color: l.color, width: cfg.activeWidth,
-    ...(l.style !== 'solid' ? { style: l.style } : {}),
+  const outLines: LineDrawingData[] = line.all().map((l) => ({
+    time1: timeOf(l.x1), price1: l.y1, time2: timeOf(l.x2), price2: l.y2, color: String(l.color), width: cfg.activeWidth,
+    ...(l.style !== 'solid' ? { style: l.style as Style } : {}),
   }));
-  const outLabels: LabelData[] = labels.list.filter((l) => !Number.isNaN(l.x)).map((l) => ({
-    time: timeOf(l.x), price: l.y, text: l.text, color: l.color, textColor: l.textColor, style: l.style, size: l.size,
+  const outLabels: LabelData[] = label.all().filter((l) => !Number.isNaN(l.x)).map((l) => ({
+    time: timeOf(l.x), price: l.y, text: l.text ?? '', color: String(l.color), textColor: String(l.textcolor),
+    style: l.style as 'label_left' | 'none', size: l.size as PineSize,
   }));
 
   return {

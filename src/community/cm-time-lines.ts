@@ -12,15 +12,19 @@
  *   5. Session 5 (default 1500-1600)  maroon
  *   6. Session 6 (default 1700-1800)  lime
  *
- * The session windows are wall times of the exchange time zone, as in the original. The port reads the time zone
- * from the optional third argument (see src/chart-context.ts); without it the windows are UTC times.
+ * The session windows are read in the exchange time zone, as in the original (`time(period, session)`, the session
+ * test of oakscriptjs; a malformed session string is an error, as in the original). An empty session string is the
+ * session of the symbol, as in the original: the session hours of the optional third argument; without them that
+ * window colours no bar. The port reads the time zone, the session and the chart timeframe from the optional third
+ * argument (see src/chart-context.ts); without it the windows are UTC times and the timeframe is read from the bars.
  *
  * Reference: "CM_Time Based Vertical Lines" by ChrisMoody
  */
 
-import { time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
-import type { ChartContext } from '../chart-context';
+import { sessionHoursOf, timezoneOf, type ChartContext } from '../chart-context';
+import { chartTimeframe } from '../anchor-period';
 
 export interface CMTimeLinesInputs {
   show1: boolean;
@@ -75,29 +79,6 @@ export const metadata = {
   overlay: true,
 };
 
-/** Parse "HHMM-HHMM" session string into start/end minutes since midnight */
-function parseSession(sess: string): { startMin: number; endMin: number } | null {
-  const m = sess.match(/^(\d{2})(\d{2})-(\d{2})(\d{2})$/);
-  if (!m) return null;
-  return {
-    startMin: parseInt(m[1], 10) * 60 + parseInt(m[2], 10),
-    endMin: parseInt(m[3], 10) * 60 + parseInt(m[4], 10),
-  };
-}
-
-/** Check if a bar's time falls within a session window (wall time of the exchange time zone; UTC without one) */
-function inSession(barTime: number, startMin: number, endMin: number, timezone: string | undefined): boolean {
-  const d = new Date(barTime * 1000);
-  const minuteOfDay = timezone === undefined
-    ? d.getUTCHours() * 60 + d.getUTCMinutes()
-    : pineTime.hour(barTime * 1000, timezone) * 60 + pineTime.minute(barTime * 1000, timezone);
-  if (startMin <= endMin) {
-    return minuteOfDay >= startMin && minuteOfDay < endMin;
-  }
-  // Wraps past midnight
-  return minuteOfDay >= startMin || minuteOfDay < endMin;
-}
-
 export function calculate(bars: Bar[], inputs: Partial<CMTimeLinesInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { bgColors: BgColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
 
@@ -112,19 +93,23 @@ export function calculate(bars: Bar[], inputs: Partial<CMTimeLinesInputs> = {}, 
     { show: cfg.show6, session: cfg.session6, color: 'rgba(0,255,0,0.60)' },      // lime
   ];
 
-  const parsed = sessions.map(s => ({
-    ...s,
-    range: parseSession(s.session),
-  }));
+  // time(period, session): the session test in the exchange time zone, with the bar duration for the days around a
+  // clock change
+  const timezone = timezoneOf(chart);
+  const tf = chartTimeframe(bars, chart);
+  const barMs = tf === '' ? undefined : timeframe.in_seconds(tf) * 1000;
+  // an empty session string: the session of the symbol (none without the context)
+  const symbolSession = sessionHoursOf(chart);
+  const windows = sessions.map((s) => ({ ...s, session: s.session.trim() === '' ? symbolSession : s.session }));
 
   const bgColors: BgColorData[] = [];
   for (let i = 0; i < bars.length; i++) {
     const t = bars[i].time;
     // Evaluate all 6 sessions independently; last matching session wins (Pine layering order)
     let matchColor: string | null = null;
-    for (const s of parsed) {
-      if (!s.show || !s.range) continue;
-      if (inSession(t, s.range.startMin, s.range.endMin, chart?.timezone)) {
+    for (const s of windows) {
+      if (!s.show || s.session === '') continue;
+      if (pineTime.inSession(t * 1000, s.session, timezone, barMs)) {
         matchColor = s.color;
       }
     }

@@ -348,9 +348,12 @@ export function calculate(
   const tfInfo = timeframe.info(chartTimeframe(bars, chart) || '1D');
   const unit = n > 0 && bars[0].time >= 1e12 ? 1 : 1000; // bar time unit in ms
   const tMs = (i: number) => (bars[i].time as number) * unit;
-  // time("1440", session, tz): the time of the day of the bar when the bar is inside the session, else na
+  // bar size for the clock-change rule of the session test (intraday bars)
+  const barMs = tfInfo.isintraday ? timeframe.in_seconds(tfInfo.period) * 1000 : undefined;
+  // time("1440", session, tz): the time of the day of the bar when the bar is inside the session, else na (only
+  // compared with the value of the bar before: a new value is a new session)
   const dayStarts = periodStarts(bars, 'D', chart);
-  const sessTime = (i: number, session: string) => (pineTime.inSession(tMs(i), session, tz) ? dayStarts[i] : NaN);
+  const sessTime = (i: number, session: string) => (pineTime.inSession(tMs(i), session, tz, barMs) ? dayStarts[i] : NaN);
   const sess24hr = `0000-0000:${cfg.sessDays}`;
   const sessions = [
     { session: `${cfg.sess1Time}:${cfg.sessDays}`, show: cfg.showSess1, name: cfg.sess1Name },

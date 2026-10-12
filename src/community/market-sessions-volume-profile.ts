@@ -24,7 +24,9 @@
  * - The original stops with a runtime error when a session is longer than 5,000 bars (history reference limit,
  *   e.g. "Yearly" on 60-minute bars). The port has no such limit and draws the session.
  * - The original stops with a runtime error when a session never starts for 15,000 bars (e.g. the London session
- *   on a symbol without bars before 07:00 UTC): the port throws the same error.
+ *   on a symbol without bars before 07:00 UTC): the port throws the same error (window limit of the library).
+ * - Drawing counts (500 boxes, 50 lines, 50 labels) and the runtime error of a bar index more than 10,000 bars back
+ *   follow the drawing registry of the library.
  *
  * Chart timeframe: `timeframe` of the chart context (optional third argument of calculate) when given; without it
  * the chart timeframe is read from the bar spacing (the most frequent gap between two bars).
@@ -35,8 +37,8 @@
  */
 
 import {
-  ta, Series, array, callsite, timeframe, time as pineTime,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  ta, Series, array, callsite, time as pineTime, box, line, label, SessionBars, TradingCalendar,
+  resetDrawings, setDrawingBar, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { LineDrawingData, BoxData, LabelData } from '../types';
 import { barInterval } from '../bar-time';
@@ -149,8 +151,6 @@ export const metadata = {
 const MAX_BOXES = 500;
 const MAX_LINES = 50;
 const MAX_LABELS = 50;
-/** Longest window of ta.highest / ta.lowest in Pine */
-const MAX_WINDOW = 15000;
 /** color.rgb(0, 0, 0, 100) and color.rgb(54, 58, 69, 100) */
 const NO_COLOR = 'rgba(0, 0, 0, 0)';
 const VA_BOX_BORDER = 'rgba(54, 58, 69, 0)';
@@ -160,17 +160,6 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !(b - a > EPS);
-
-/** Live drawings in creation order: a creation that brings the count above max + 5 deletes the oldest until max remain */
-class Live<T> {
-  items: T[] = [];
-  constructor(private readonly max: number) {}
-  add(o: T): T {
-    this.items.push(o);
-    if (this.items.length > this.max + 5) this.items.splice(0, this.items.length - this.max);
-    return o;
-  }
-}
 
 /** get_vol(): the part of `vol` (spread over `height`) inside the overlap of the ranges y11..y12 and y21..y22; nz() */
 function getVol(y11: number, y12: number, y21: number, y22: number, height: number, vol: number): number {
@@ -198,15 +187,10 @@ export function calculate(
   const interval = barInterval(bars);
   // time(timeframe.period, '0000-2400', 'GMT'): the start of the chart timeframe period that contains the bar, with
   // periods counted from 00:00 GMT (measured: 13:30 gives 13:00 on 60-minute bars, 12:00 on 240-minute bars, and
-  // 00:00 of the day on daily and higher bars)
+  // 00:00 of the day on daily and higher bars), from the library calendar of the session string
   const chartTf = chartTimeframe(bars, chart);
-  const periodMs = chartTf === '' ? 0 : timeframe.in_seconds(chartTf) * 1000;
-  const DAY = 86400000;
-  const sessionTime = (tMs: number) => {
-    if (periodMs <= 0) return tMs;
-    const day = Math.floor(tMs / DAY) * DAY;
-    return periodMs >= DAY ? day : day + Math.floor((tMs - day) / periodMs) * periodMs;
-  };
+  const gmtDays = chartTf === '' ? null : new SessionBars(new TradingCalendar('GMT', { session: '0000-2400' }, 'pine'), chartTf);
+  const sessionTime = (tMs: number) => (gmtDays === null ? tMs : gmtDays.timeOf(tMs, chartTf));
   /** Time of a bar index (a bar before the first bar: by the bar interval) */
   const timeOf = (index: number) => (index >= 0 ? bars[Math.min(index, n - 1)].time : bars[0].time + index * interval);
 
@@ -216,9 +200,16 @@ export function calculate(
     ? ta.ema(Series.fromArray(bars, rawVolume), 5).toArray().map((v) => v ?? NaN)
     : rawVolume;
 
-  const lines = new Live<LineDrawingData>(MAX_LINES);
-  const boxes = new Live<BoxData>(MAX_BOXES);
-  const labels = new Live<LabelData>(MAX_LABELS);
+  // Drawings: library objects (bar index x) in the drawing registry, for the counts (a creation above max + 5
+  // deletes the oldest until max remain, with the rules of the last bar) and the runtime error of a bar index more
+  // than 10,000 bars back; the output data of each object in a map
+  resetDrawings({ box: MAX_BOXES, line: MAX_LINES, label: MAX_LABELS });
+  const lineData = new Map<object, LineDrawingData>();
+  const boxData = new Map<object, BoxData>();
+  const labelData = new Map<object, LabelData>();
+  const lines = { add: (x1: number, x2: number, d: LineDrawingData) => lineData.set(line.new(x1, d.price1, x2, d.price2), d) };
+  const boxes = { add: (x1: number, x2: number, d: BoxData) => boxData.set(box.new(x1, d.price1, x2, d.price2), d) };
+  const labels = { add: (x: number, d: LabelData) => labelData.set(label.new(x, d.price), d) };
 
   let zoneStart = 0, tokyoStart = 0, londonStart = 0, nyStart = 0;
   let activeZone = false;
@@ -228,17 +219,10 @@ export function calculate(
   // bars of the session so far (the lower timeframe arrays of the original: one chart bar each)
   let ltf: number[] = [];
 
+  // ta.highest / ta.lowest call sites (the library throws the runtime error of a window above 15,000 bars)
   const highestSite = callsite.highest();
   const lowestSite = callsite.lowest();
-  const fxSites = cfg.showFx
-    ? [callsite.highest(), callsite.highest(), callsite.highest(), callsite.lowest(), callsite.lowest(), callsite.lowest()]
-    : null;
-  const window = (fn: string, length: number) => {
-    if (length > MAX_WINDOW) {
-      throw new Error(`The '${fn}' function references too many historical candles (${length}), the limit is ${MAX_WINDOW}.`);
-    }
-    return length;
-  };
+  const fxSites = [callsite.highest(), callsite.highest(), callsite.highest(), callsite.lowest(), callsite.lowest(), callsite.lowest()];
   let prevHigh = NaN, prevLow = NaN; // ta.highest(high, lookback + 1)[1], ta.lowest(low, lookback + 1)[1]
   let prev = { dow: NaN, week: NaN, dom: NaN, year: NaN, month: NaN, hour: NaN };
 
@@ -317,10 +301,8 @@ export function calculate(
     const tLeft = timeOf(leftMax);
     const tEnd = timeOf(i - 1);
     if (cfg.showLabels) {
-      labels.add({
-        time: timeOf(Math.trunc((i - 1 + leftMax) / 2)), price: profHigh, text: cfg.sessionType, color: NO_COLOR,
-        textColor: CHART_FG_COLOR,
-      });
+      const x = Math.trunc((i - 1 + leftMax) / 2);
+      labels.add(x, { time: timeOf(x), price: profHigh, text: cfg.sessionType, color: NO_COLOR, textColor: CHART_FG_COLOR });
     }
     if (cfg.showProf) {
       for (let k = 0; k < resolution; k++) {
@@ -328,153 +310,162 @@ export function calculate(
         const redEnd = Math.trunc(greenEnd + (rightMax - leftMax) * (vpRed[k] / rightMaxVol));
         const top = zoneBounds[k] - buffer;
         const bottom = zoneBounds[k] - gap + buffer;
-        boxes.add({ time1: tLeft, price1: top, time2: timeOf(greenEnd), price2: bottom, bgColor: cfg.bullCol, borderWidth: 0 });
+        boxes.add(leftMax, greenEnd,
+          { time1: tLeft, price1: top, time2: timeOf(greenEnd), price2: bottom, bgColor: cfg.bullCol, borderWidth: 0 });
         if (cfg.dispMode === 'Mode 2') {
-          boxes.add({ time1: timeOf(greenEnd), price1: top, time2: timeOf(redEnd), price2: bottom, bgColor: cfg.bearCol, borderWidth: 0 });
+          boxes.add(greenEnd, redEnd,
+            { time1: timeOf(greenEnd), price1: top, time2: timeOf(redEnd), price2: bottom, bgColor: cfg.bearCol, borderWidth: 0 });
         } else if (cfg.dispMode !== 'Mode 1') {
-          boxes.add({
+          boxes.add(leftMax - redEnd + greenEnd, leftMax, {
             time1: timeOf(leftMax - redEnd + greenEnd), price1: top, time2: tLeft, price2: bottom, bgColor: cfg.bearCol,
             borderWidth: 0,
           });
         }
       }
     }
-    boxes.add({
+    boxes.add(leftMax, i - 1, {
       time1: tLeft, price1: profHigh, time2: tEnd, price2: profLow, borderColor: CHART_FG_COLOR,
       borderWidth: Math.trunc(cfg.boxWid), borderStyle: 'dashed', bgColor: cfg.boxBg,
     });
     const poc = pocLevel();
     const [val, vah] = valueLevels(poc, profHigh, profLow);
     if (cfg.showPoc) {
-      lines.add({ time1: tLeft, price1: poc, time2: tEnd, price2: poc, color: cfg.pocCol, width: Math.trunc(cfg.pocWid) });
+      lines.add(leftMax, i - 1, { time1: tLeft, price1: poc, time2: tEnd, price2: poc, color: cfg.pocCol, width: Math.trunc(cfg.pocWid) });
     }
     if (cfg.showVA) {
-      lines.add({ time1: tLeft, price1: vah, time2: tEnd, price2: vah, color: cfg.vahCol, width: Math.trunc(cfg.vahWid) });
-      lines.add({ time1: tLeft, price1: val, time2: tEnd, price2: val, color: cfg.valCol, width: Math.trunc(cfg.valWid) });
+      lines.add(leftMax, i - 1, { time1: tLeft, price1: vah, time2: tEnd, price2: vah, color: cfg.vahCol, width: Math.trunc(cfg.vahWid) });
+      lines.add(leftMax, i - 1, { time1: tLeft, price1: val, time2: tEnd, price2: val, color: cfg.valCol, width: Math.trunc(cfg.valWid) });
     }
     if (cfg.showVAb) {
-      boxes.add({ time1: tLeft, price1: vah, time2: tEnd, price2: val, borderColor: VA_BOX_BORDER, bgColor: cfg.VAbCol });
+      boxes.add(leftMax, i - 1, { time1: tLeft, price1: vah, time2: tEnd, price2: val, borderColor: VA_BOX_BORDER, bgColor: cfg.VAbCol });
     }
   };
 
   /** drawForexBox() */
   const drawForexBox = (i: number, startBar: number, title: string, top: number, bottom: number) => {
-    boxes.add({
+    boxes.add(startBar, i - 1, {
       time1: timeOf(startBar), price1: top, time2: timeOf(i - 1), price2: bottom, borderColor: CHART_FG_COLOR,
       borderWidth: Math.trunc(cfg.boxWid), borderStyle: 'dashed', bgColor: cfg.boxBg,
     });
     if (cfg.showLabels) {
-      labels.add({
-        time: timeOf(Math.trunc((i - 1 + startBar) / 2)), price: top, text: title, color: NO_COLOR,
-        textColor: CHART_FG_COLOR,
-      });
+      const x = Math.trunc((i - 1 + startBar) / 2);
+      labels.add(x, { time: timeOf(x), price: top, text: title, color: NO_COLOR, textColor: CHART_FG_COLOR });
     }
   };
 
-  for (let i = 0; i < n; i++) {
-    const bar = bars[i];
-    const tMs = inMs ? bar.time : bar.time * 1000;
-    const last = i === n - 1;
-    const lookback = i - zoneStart;
-    // profHigh = ta.highest(high, lookback + 1)[1], profLow = ta.lowest(low, lookback + 1)[1]
-    const profHigh = prevHigh;
-    const profLow = prevLow;
-    prevHigh = highestSite(bar.high, window('highest', lookback + 1));
-    prevLow = lowestSite(bar.low, lookback + 1);
+  try {
+    for (let i = 0; i < n; i++) {
+      const bar = bars[i];
+      const tMs = inMs ? bar.time : bar.time * 1000;
+      const last = i === n - 1;
+      setDrawingBar(i, last);
+      const lookback = i - zoneStart;
+      // profHigh = ta.highest(high, lookback + 1)[1], profLow = ta.lowest(low, lookback + 1)[1]
+      const profHigh = prevHigh;
+      const profLow = prevLow;
+      prevHigh = highestSite(bar.high, lookback + 1, i);
+      prevLow = lowestSite(bar.low, lookback + 1, i);
 
-    // Session starts: calendar fields in the exchange time zone
-    const cur = {
-      dow: pineTime.dayofweek(tMs, tz), week: pineTime.weekofyear(tMs, tz), dom: pineTime.dayofmonth(tMs, tz),
-      year: pineTime.year(tMs, tz), month: pineTime.month(tMs, tz),
-      // utcHour = hour(time(timeframe.period, '0000-2400', 'GMT'), 'GMT')
-      hour: pineTime.hour(sessionTime(tMs), 'GMT'),
-    };
-    const has = i > 0;
-    const newDaily = has && cur.dow !== prev.dow;
-    const newWeekly = has && cur.week !== prev.week;
-    const newMonthly = has && cur.dom !== prev.dom + 1 && cur.dom !== prev.dom;
-    const newYearly = has && cur.year !== prev.year;
-    const newQuarterly = has && cur.month !== prev.month && (cur.month - 1) % 3 === 0;
-    const newTokyo = has && cur.hour !== prev.hour + 1 && cur.hour !== prev.hour;
-    const endTokyo = has && cur.hour >= 9 && prev.hour < 9;
-    const newLondon = has && cur.hour >= 7 && prev.hour < 7;
-    const endLondon = has && cur.hour >= 16 && prev.hour < 16;
-    const newNewYork = has && cur.hour >= 13 && prev.hour < 13;
-    const endNewYork = has && cur.hour >= 22 && prev.hour < 22;
-    prev = cur;
+      // Session starts: calendar fields in the exchange time zone
+      const cur = {
+        dow: pineTime.dayofweek(tMs, tz), week: pineTime.weekofyear(tMs, tz), dom: pineTime.dayofmonth(tMs, tz),
+        year: pineTime.year(tMs, tz), month: pineTime.month(tMs, tz),
+        // utcHour = hour(time(timeframe.period, '0000-2400', 'GMT'), 'GMT')
+        hour: pineTime.hour(sessionTime(tMs), 'GMT'),
+      };
+      const has = i > 0;
+      const newDaily = has && cur.dow !== prev.dow;
+      const newWeekly = has && cur.week !== prev.week;
+      const newMonthly = has && cur.dom !== prev.dom + 1 && cur.dom !== prev.dom;
+      const newYearly = has && cur.year !== prev.year;
+      const newQuarterly = has && cur.month !== prev.month && (cur.month - 1) % 3 === 0;
+      const newTokyo = has && cur.hour !== prev.hour + 1 && cur.hour !== prev.hour;
+      const endTokyo = has && cur.hour >= 9 && prev.hour < 9;
+      const newLondon = has && cur.hour >= 7 && prev.hour < 7;
+      const endLondon = has && cur.hour >= 16 && prev.hour < 16;
+      const newNewYork = has && cur.hour >= 13 && prev.hour < 13;
+      const endNewYork = has && cur.hour >= 22 && prev.hour < 22;
+      prev = cur;
 
-    let newSession: boolean;
-    let zoneEnd: boolean;
-    switch (cfg.sessionType) {
-      case 'Tokyo': newSession = newTokyo; zoneEnd = endTokyo; break;
-      case 'London': newSession = newLondon; zoneEnd = endLondon; break;
-      case 'New York': newSession = newNewYork; zoneEnd = endNewYork; break;
-      case 'Weekly': newSession = zoneEnd = newWeekly; break;
-      case 'Monthly': newSession = zoneEnd = newMonthly; break;
-      case 'Yearly': newSession = zoneEnd = newYearly; break;
-      case 'Quarterly': newSession = zoneEnd = newQuarterly; break;
-      default: newSession = zoneEnd = newDaily;
-    }
+      let newSession: boolean;
+      let zoneEnd: boolean;
+      switch (cfg.sessionType) {
+        case 'Tokyo': newSession = newTokyo; zoneEnd = endTokyo; break;
+        case 'London': newSession = newLondon; zoneEnd = endLondon; break;
+        case 'New York': newSession = newNewYork; zoneEnd = endNewYork; break;
+        case 'Weekly': newSession = zoneEnd = newWeekly; break;
+        case 'Monthly': newSession = zoneEnd = newMonthly; break;
+        case 'Yearly': newSession = zoneEnd = newYearly; break;
+        case 'Quarterly': newSession = zoneEnd = newQuarterly; break;
+        default: newSession = zoneEnd = newDaily;
+      }
 
-    // calcSession(zoneEnd or (barstate.islast and showCur)): bar_index > lookback is zoneStart > 0
-    const update = zoneEnd || (last && cfg.showCur);
-    vpGreen.fill(0);
-    vpRed.fill(0);
-    if (zoneStart > 0 && update) {
-      const gap = (profHigh - profLow) / resolution;
-      for (let k = 0; k < resolution; k++) zoneBounds[k] = profHigh - gap * k;
-      for (const j of ltf) profileAdd(bars[j].open, bars[j].high, bars[j].low, bars[j].close, vol[j], gap);
-    }
-    const hasVolume = () => gt((array.sum(vpGreen) as number) + (array.sum(vpRed) as number), 0);
-    // drawNewZone(zoneEnd)
-    if (zoneStart > 0 && zoneEnd && hasVolume()) drawZone(i, lookback, profHigh, profLow);
-    // drawCurZone(barstate.islast and not zoneEnd and showCur and activeZone, zoneEnd): the session in progress. Its
-    // delete branch only removes drawings of an earlier call, and there is none in one pass over the bars
-    if (last && !zoneEnd && cfg.showCur && activeZone && zoneStart > 0 && hasVolume()) drawZone(i, lookback, profHigh, profLow);
-
-    // resetProfile(newSession), updateIntra()
-    if (newSession) {
+      // calcSession(zoneEnd or (barstate.islast and showCur)): bar_index > lookback is zoneStart > 0
+      const update = zoneEnd || (last && cfg.showCur);
       vpGreen.fill(0);
       vpRed.fill(0);
-      ltf = [];
-    }
-    ltf.push(i);
+      if (zoneStart > 0 && update) {
+        const gap = (profHigh - profLow) / resolution;
+        for (let k = 0; k < resolution; k++) zoneBounds[k] = profHigh - gap * k;
+        for (const j of ltf) profileAdd(bars[j].open, bars[j].high, bars[j].low, bars[j].close, vol[j], gap);
+      }
+      const hasVolume = () => gt((array.sum(vpGreen) as number) + (array.sum(vpRed) as number), 0);
+      // drawNewZone(zoneEnd)
+      if (zoneStart > 0 && zoneEnd && hasVolume()) drawZone(i, lookback, profHigh, profLow);
+      // drawCurZone(barstate.islast and not zoneEnd and showCur and activeZone, zoneEnd): the session in progress. Its
+      // delete branch only removes drawings of an earlier call, and there is none in one pass over the bars
+      if (last && !zoneEnd && cfg.showCur && activeZone && zoneStart > 0 && hasVolume()) drawZone(i, lookback, profHigh, profLow);
 
-    if (zoneEnd) activeZone = false;
-    if (newSession) {
-      zoneStart = i;
-      activeZone = true;
-    }
-    if (newLondon) londonStart = i;
-    if (newTokyo) tokyoStart = i;
-    if (newNewYork) nyStart = i;
+      // resetProfile(newSession), updateIntra()
+      if (newSession) {
+        vpGreen.fill(0);
+        vpRed.fill(0);
+        ltf = [];
+      }
+      ltf.push(i);
 
-    // londonHigh = ta.highest(high, bar_index - londonStart + 1) ... (the lengths are checked as in the original)
-    const lenLondon = window('highest', i - londonStart + 1);
-    const lenTokyo = window('highest', i - tokyoStart + 1);
-    const lenNy = window('highest', i - nyStart + 1);
-    if (fxSites) {
-      const londonHigh = fxSites[0](bar.high, lenLondon);
-      const tokyoHigh = fxSites[1](bar.high, lenTokyo);
-      const nyHigh = fxSites[2](bar.high, lenNy);
-      const londonLow = fxSites[3](bar.low, lenLondon);
-      const tokyoLow = fxSites[4](bar.low, lenTokyo);
-      const nyLow = fxSites[5](bar.low, lenNy);
-      if (endLondon) drawForexBox(i, londonStart, 'London', londonHigh, londonLow);
-      if (endNewYork) drawForexBox(i, nyStart, 'New York', nyHigh, nyLow);
-      if (endTokyo) drawForexBox(i, tokyoStart, 'Tokyo', tokyoHigh, tokyoLow);
+      if (zoneEnd) activeZone = false;
+      if (newSession) {
+        zoneStart = i;
+        activeZone = true;
+      }
+      if (newLondon) londonStart = i;
+      if (newTokyo) tokyoStart = i;
+      if (newNewYork) nyStart = i;
+
+      // londonHigh = ta.highest(high, bar_index - londonStart + 1) ...: computed on every bar, as in the original (the
+      // library throws when a session does not start for 15,000 bars)
+      const lenLondon = i - londonStart + 1;
+      const lenTokyo = i - tokyoStart + 1;
+      const lenNy = i - nyStart + 1;
+      const londonHigh = fxSites[0](bar.high, lenLondon, i);
+      const tokyoHigh = fxSites[1](bar.high, lenTokyo, i);
+      const nyHigh = fxSites[2](bar.high, lenNy, i);
+      const londonLow = fxSites[3](bar.low, lenLondon, i);
+      const tokyoLow = fxSites[4](bar.low, lenTokyo, i);
+      const nyLow = fxSites[5](bar.low, lenNy, i);
+      if (cfg.showFx) {
+        if (endLondon) drawForexBox(i, londonStart, 'London', londonHigh, londonLow);
+        if (endNewYork) drawForexBox(i, nyStart, 'New York', nyHigh, nyLow);
+        if (endTokyo) drawForexBox(i, tokyoStart, 'Tokyo', tokyoHigh, tokyoLow);
+      }
     }
+  } finally {
+    setDrawingBar(null);
   }
 
-  // A line with an na price (no point of control) is an object of the script but is not drawn
-  const drawn = lines.items.filter((l) => Number.isFinite(l.price1) && Number.isFinite(l.price2));
+  // The live objects; a line with an na price (no point of control) is an object of the script but is not drawn
+  const drawn = line.all().map((l) => lineData.get(l)!).filter((l) => Number.isFinite(l.price1) && Number.isFinite(l.price2));
+  const liveBoxes = box.all().map((b) => boxData.get(b)!);
+  const liveLabels = label.all().map((l) => labelData.get(l)!);
+  resetDrawings();
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     lines: drawn,
-    boxes: boxes.items,
-    labels: labels.items,
+    boxes: liveBoxes,
+    labels: liveLabels,
   };
 }
 

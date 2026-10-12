@@ -31,7 +31,10 @@
  * Original notice: © fadizeidan. Displacement logic credit: Visualizing Displacement [TFO]
  */
 
-import { ta, color, array, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, color, array, Series, line, label, box as pineBox, linefill, resetDrawings, setDrawingBar, varDrawing,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { BarColorData, BoxData, LabelData, LineDrawingData, LinefillData, PineSize } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
@@ -442,45 +445,9 @@ function lineStyle(style: string | undefined): LineStyle {
   return style === '----' ? 'dashed' : style === '····' ? 'dotted' : 'solid';
 }
 
-/** A drawing object: deleted objects stay in the list of their kind */
-interface Drawn<T> {
-  data: T;
-  deleted: boolean;
-  /** Held by a `var` variable of the drawing type: the count limit never deletes it */
-  keep: boolean;
-}
-
-/** Objects of one kind in creation order, with the count limit of Pine: above max + 5 the oldest are deleted until max remain */
-function drawingStore<T>(max: number) {
-  const all: Array<Drawn<T>> = [];
-  let alive = 0;
-  return {
-    all,
-    add(data: T, keep = false): Drawn<T> {
-      const obj = { data, deleted: false, keep };
-      all.push(obj);
-      alive += 1;
-      if (alive > max + 5) {
-        for (const old of all) {
-          if (alive <= max) break;
-          if (!old.deleted && !old.keep) {
-            old.deleted = true;
-            alive -= 1;
-          }
-        }
-      }
-      return obj;
-    },
-    remove(obj: Drawn<T> | undefined): void {
-      if (obj && !obj.deleted) {
-        obj.deleted = true;
-        alive -= 1;
-      }
-    },
-  };
-}
-
-type Line = Drawn<LineDrawingData>;
+type Line = ReturnType<typeof line.new>;
+type Box = ReturnType<typeof pineBox.new>;
+type Fill = ReturnType<typeof linefill.new>;
 
 interface Pivot {
   index: number;
@@ -514,7 +481,7 @@ interface EqualLevels {
   isClaimed: boolean;
   lineEq?: Line;
   lineLink?: Line;
-  boxLink?: Drawn<BoxData>;
+  boxLink?: Box;
 }
 
 interface ImbalanceBox {
@@ -522,7 +489,7 @@ interface ImbalanceBox {
   close: Line;
   ce?: Line;
   link?: Line;
-  fill?: Drawn<LinefillData>;
+  fill?: Fill;
 }
 
 interface Imbalance {
@@ -614,21 +581,21 @@ export function calculate(
     }
   }
 
-  const lineStore = drawingStore<LineDrawingData>(MAX_OBJECTS);
-  const labelStore = drawingStore<LabelData>(MAX_OBJECTS);
-  const boxStore = drawingStore<BoxData>(MAX_OBJECTS);
-  const fills: Array<Drawn<LinefillData> & { line1: Line; line2: Line }> = [];
-
+  // Drawings live in the library registry (max_lines_count, max_labels_count, max_boxes_count = 500; linefills follow
+  // max_lines_count). x: bar times (xloc.bar_time), except the tester line (bar indexes)
+  resetDrawings({ line: MAX_OBJECTS, label: MAX_OBJECTS, box: MAX_OBJECTS });
   const newLine = (
     time1: number, price1: number, time2: number, price2: number, style: LineStyle, lineColor: string, width: number,
-  ): Line => lineStore.add({ time1, price1, time2, price2, style, color: lineColor, width });
+  ): Line => line.new(time1, price1, time2, price2, 'bar_time', 'none', lineColor, style, width);
+  const deleteLine = (l: Line | undefined) => {
+    if (l) line.delete(l);
+  };
+  const deleteBox = (b: Box | undefined) => {
+    if (b) pineBox.delete(b);
+  };
 
   // var line tester = line.new(na, na, na, na, color = color_transparent): moved by every testEQ() call (bar indexes)
-  const tester = lineStore.add({ time1: NaN, price1: NaN, time2: NaN, price2: NaN, color: TRANSPARENT }, true);
-  let testerX1 = NaN;
-  let testerY1 = NaN;
-  let testerX2 = NaN;
-  let testerY2 = NaN;
+  const tester = varDrawing(line.new(NaN, NaN, NaN, NaN, 'bar_index', 'none', TRANSPARENT));
 
   // Imbalance settings
   const fvgSettings: ImbalanceSettings = {
@@ -693,11 +660,11 @@ export function calculate(
   /** Imbalance.clear() */
   const clear = (imb: Imbalance): void => {
     if (!imb.box) return;
-    lineStore.remove(imb.box.open);
-    lineStore.remove(imb.box.close);
-    lineStore.remove(imb.box.ce);
-    lineStore.remove(imb.box.link);
-    if (imb.box.fill) imb.box.fill.deleted = true;
+    deleteLine(imb.box.open);
+    deleteLine(imb.box.close);
+    deleteLine(imb.box.ce);
+    deleteLine(imb.box.link);
+    if (imb.box.fill) linefill.delete(imb.box.fill);
     imb.box = undefined;
   };
 
@@ -717,6 +684,7 @@ export function calculate(
 
   const first = Math.max(0, n - WINDOW);
   for (let i = first; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const bar = bars[i];
     const { open, high, low, close, time } = bar;
     const isLast = i === n - 1;
@@ -855,14 +823,7 @@ export function calculate(
           };
           imb.box = box;
           if (s.linkShow) box.link = newLine(buffer, imb.open, buffer, imb.close, lineStyle(s.linkStyle), c, s.linkSize);
-          if (s.fill) {
-            const fill = {
-              data: { line1: box.open.data, line2: box.close.data, color: String(color.new(c, s.fillPercent)) },
-              deleted: false, keep: false, line1: box.open, line2: box.close,
-            };
-            fills.push(fill);
-            box.fill = fill;
-          }
+          if (s.fill) box.fill = linefill.new(box.open, box.close, String(color.new(c, s.fillPercent)));
           if (s.ceShow) box.ce = newLine(imb.openTime, imb.middle, buffer, imb.middle, lineStyle(s.ceStyle), cce, s.ceSize);
           if (imb.mitigated && !s.mitigatedShow) clear(imb);
         }
@@ -879,17 +840,15 @@ export function calculate(
       /** testEQ(): no bar between the two pivots goes through the straight line between them */
       const testEQ = (a: Pivot, b: Pivot): boolean => {
         let valid = true;
-        testerX1 = a.index;
-        testerY1 = a.price;
-        testerX2 = b.index;
-        testerY2 = b.price;
+        const t = tester.value as Line;
+        line.set_xy1(t, a.index, a.price);
+        line.set_xy2(t, b.index, b.price);
         const from = a.index + 1;
         const to = b.index - 1;
         const step = from <= to ? 1 : -1;
         for (let x = from; step > 0 ? x <= to : x >= to; x += step) {
           // tester.get_price(x)
-          const slope = (testerY2 - testerY1) / (testerX2 - testerX1);
-          const p = testerY1 + slope * (x - testerX1);
+          const p = line.get_price(t, x);
           const j = i - x;
           if (a.isHigh ? gt(highAt(j), p) : lt(lowAt(j), p)) valid = false;
         }
@@ -913,18 +872,16 @@ export function calculate(
             cfg.eqLinkColor, cfg.eqLinkSize);
         }
         if (cfg.eqShade) {
-          level.boxLink = boxStore.add({
-            time1: level.startTime, price1: level.start, time2: level.endTime, price2: level.end, borderColor: TRANSPARENT,
-            bgColor: level.isHigh ? cfg.eqShadeBull : cfg.eqShadeBear,
-          });
+          level.boxLink = pineBox.new(level.startTime, level.start, level.endTime, level.end, TRANSPARENT, undefined, undefined, undefined,
+            'bar_time', level.isHigh ? cfg.eqShadeBull : cfg.eqShadeBear);
         }
         eqs.unshift(level);
         if (eqs.length > cfg.eqMax + cfg.eqMaxClaimed) {
           const old = eqs.pop();
           if (old) {
-            lineStore.remove(old.lineEq);
-            lineStore.remove(old.lineLink);
-            boxStore.remove(old.boxLink);
+            deleteLine(old.lineEq);
+            deleteLine(old.lineLink);
+            deleteBox(old.boxLink);
           }
         }
       };
@@ -939,14 +896,8 @@ export function calculate(
                 level.end = b.price;
                 level.endTime = b.time;
                 level.endIndex = b.index;
-                if (level.lineLink) {
-                  level.lineLink.data.time2 = level.endTime;
-                  level.lineLink.data.price2 = level.end;
-                }
-                if (level.boxLink) {
-                  level.boxLink.data.time2 = level.endTime;
-                  level.boxLink.data.price2 = level.end;
-                }
+                if (level.lineLink) line.set_xy2(level.lineLink, level.endTime, level.end);
+                if (level.boxLink) pineBox.set_rightbottom(level.boxLink, level.endTime, level.end);
               }
             }
             matched = true;
@@ -1054,18 +1005,18 @@ export function calculate(
           if (eqClaimed.length > cfg.eqMaxClaimed) {
             const old = eqClaimed.pop();
             if (old) {
-              lineStore.remove(old.lineEq);
-              lineStore.remove(old.lineLink);
-              boxStore.remove(old.boxLink);
+              deleteLine(old.lineEq);
+              deleteLine(old.lineLink);
+              deleteBox(old.boxLink);
             }
           }
         }
         if (level.lineEq) {
           if (!level.isClaimed) {
-            level.lineEq.data.time2 = extended;
+            line.set_x2(level.lineEq, extended);
           } else {
-            level.lineEq.data.time2 = time;
-            level.lineEq.data.style = lineStyle(cfg.eqClaimedStyle);
+            line.set_x2(level.lineEq, time);
+            line.set_style(level.lineEq, lineStyle(cfg.eqClaimedStyle));
           }
         }
       }
@@ -1115,10 +1066,8 @@ export function calculate(
             textSize = cfg.ltTextSize;
             textColor = pivot.isHigh ? cfg.ltColorBull : cfg.ltColorBear;
           }
-          labelStore.add({
-            time: pivot.time, price: pivot.price, text: labelText(pivot, cfg), color: labelColor, textColor,
-            style: pivot.isHigh ? 'label_down' : 'label_up', size: textSize as PineSize,
-          });
+          label.new(pivot.time, pivot.price, labelText(pivot, cfg), 'bar_time', 'price', labelColor,
+            pivot.isHigh ? 'label_down' : 'label_up', textColor, textSize);
           add += 1;
         }
         if (add === cfg.maxLabels) break;
@@ -1126,19 +1075,28 @@ export function calculate(
     }
   }
 
-  // The tester line of testEQ(): its last position (bar indexes)
-  if (!Number.isNaN(testerX1) && !Number.isNaN(testerX2)) {
-    Object.assign(tester.data, { time1: bars[testerX1].time, price1: testerY1, time2: bars[testerX2].time, price2: testerY2 });
-  }
+  setDrawingBar(null);
 
   // Objects alive after the last bar; an object with an na coordinate is not drawn
+  const T = (x: number, xloc: 'bar_index' | 'bar_time') => (xloc === 'bar_time' ? x : bars[x]?.time ?? NaN);
+  const lineData = (l: Line): LineDrawingData => {
+    const out: LineDrawingData = { time1: T(l.x1, l.xloc), price1: l.y1, time2: T(l.x2, l.xloc), price2: l.y2 };
+    // the tester line: no style and no width set by the script
+    if (l === tester.value) return { ...out, color: String(l.color) };
+    return { ...out, style: l.style as LineStyle, color: String(l.color), width: l.width };
+  };
   const drawn = (l: LineDrawingData) => ![l.time1, l.price1, l.time2, l.price2].some((v) => Number.isNaN(v));
-  const lines = lineStore.all.filter((l) => !l.deleted && drawn(l.data)).map((l) => l.data);
-  const boxes = boxStore.all.filter((b) => !b.deleted).map((b) => b.data);
-  const labels = labelStore.all.filter((l) => !l.deleted).map((l) => l.data);
-  const linefills = fills
-    .filter((f) => !f.deleted && !f.line1.deleted && !f.line2.deleted && drawn(f.line1.data) && drawn(f.line2.data))
-    .map((f) => f.data);
+  const lines = line.all().map(lineData).filter(drawn);
+  const boxes: BoxData[] = pineBox.all().map((b) => ({
+    time1: b.left, price1: b.top, time2: b.right, price2: b.bottom, borderColor: String(b.border_color), bgColor: String(b.bgcolor),
+  }));
+  const labels: LabelData[] = label.all().map((l) => ({
+    time: l.x, price: l.y, text: l.text ?? '', color: String(l.color), textColor: String(l.textcolor),
+    style: l.style as 'label_down' | 'label_up', size: l.size as PineSize,
+  }));
+  const linefills: LinefillData[] = linefill.all()
+    .map((f) => ({ line1: lineData(f.line1), line2: lineData(f.line2), color: String(f.color) }))
+    .filter((f) => drawn(f.line1) && drawn(f.line2));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },

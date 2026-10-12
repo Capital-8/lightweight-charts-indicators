@@ -30,7 +30,10 @@
  * inspired by @boitoki
  */
 
-import { color, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  box, label, line, color, str, timeframe, time as pineTime, resetDrawings, setDrawingBar, varDrawing,
+  type DrawingVariable, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData, LineDrawingData, BoxData, LabelData, PineSize } from '../types';
 import { barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
@@ -187,26 +190,35 @@ interface Line { x1: number; y1: number; x2: number; y2: number; k: number; styl
 interface Label { x: number; y: number; text: string; k: number }
 
 /**
- * Live drawings of one kind, in creation order. Pine keeps at most max objects: a creation that brings the count
- * above max + 5 deletes the oldest until max remain. An object that a `var` variable of the script still refers to is
- * not deleted: the box, the label and the lines of the current session of each session stay.
+ * Live drawings of one kind, in creation order, kept by the drawing registry of the library: each object of the
+ * script has an object of the registry, which applies the limit of the script (max_*_count) with the rules of the
+ * original platform. An object that a `var` variable of the script still refers to is not deleted by the limit: the
+ * box, the label and the lines of the current session of each session stay.
  */
-class Live<T extends object> {
-  items: T[] = [];
-  private held = new Map<string, T | null>();
+class Live<T extends object, R extends object> {
+  private readonly data = new Map<R, T>();
+  private readonly refs = new WeakMap<T, R>();
+  private readonly vars = new Map<string, DrawingVariable<R>>();
+  constructor(private readonly make: (o: T) => R, private readonly live: () => R[]) {}
   add(o: T): T {
-    this.items.push(o);
-    if (this.items.length > MAX_OBJECTS + 5) {
-      const kept = new Set<T | null>(this.held.values());
-      let excess = this.items.length - MAX_OBJECTS;
-      this.items = this.items.filter((x) => kept.has(x) || excess-- <= 0);
-    }
+    const ref = this.make(o);
+    this.data.set(ref, o);
+    this.refs.set(o, ref);
     return o;
   }
   /** The `var` variable `name` now refers to `o` (the object it referred to before can be deleted) */
   hold(name: string, o: T | null): T | null {
-    this.held.set(name, o);
+    let v = this.vars.get(name);
+    if (!v) {
+      v = varDrawing<R>();
+      this.vars.set(name, v);
+    }
+    v.value = o ? this.refs.get(o) : undefined;
     return o;
+  }
+  /** The objects alive, in creation order */
+  get items(): T[] {
+    return this.live().map((ref) => this.data.get(ref)!);
   }
 }
 
@@ -257,8 +269,11 @@ export function calculate(
   // time(timeframe.period, session) counts the periods of the chart timeframe from the start of the session, so it
   // is the bar time only when the bar opens a whole number of periods after the session start (session 0030-0900 on
   // 60-minute bars: 00:30, 01:30, ... never a bar time; on daily and higher bars: only a bar that opens at the
-  // session start). The hours are read in the exchange time zone
+  // session start). The hours are read in the exchange time zone. (The session periods of the library calendar,
+  // TradingCalendar, place a session that ends at 0000 on the next day, unlike the session test: own parsing.)
   const periodSeconds = isIntraday ? timeframe.in_seconds(chartTf) : 0;
+  // bar size for the clock-change rule of the session test (intraday bars)
+  const barMs = isIntraday ? periodSeconds * 1000 : undefined;
   const onSessionGrid = (tMs: number, hours: string): boolean => {
     const second = pineTime.hour(tMs, exchangeZone) * 3600 + pineTime.minute(tMs, exchangeZone) * 60 + pineTime.second(tMs, exchangeZone);
     for (const part of hours.split(',')) {
@@ -274,9 +289,11 @@ export function calculate(
     return false;
   };
 
-  const boxes = new Live<Box>();
-  const lines = new Live<Line>();
-  const labels = new Live<Label>();
+  // max_boxes_count / max_lines_count / max_labels_count; objects of the registry placed by bar index
+  resetDrawings({ box: MAX_OBJECTS, line: MAX_OBJECTS, label: MAX_OBJECTS });
+  const boxes = new Live((b: Box) => box.new(b.left, b.top, b.right, b.bottom), box.all);
+  const lines = new Live((l: Line) => line.new(l.x1, l.y1, l.x2, l.y2), line.all);
+  const labels = new Live((l: Label) => label.new(l.x, l.y, l.text), label.all);
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
@@ -288,10 +305,11 @@ export function calculate(
     const { open, high, low, close } = bar;
     // daysLeft = math.abs(math.floor((lastBarDate - thisBarDate) / MSPD)); inRange = daysLeft < daysBack
     const inRange = Math.abs(Math.floor((now - tMs) / MSPD)) < cfg.daysBack;
+    setDrawingBar(i, i === n - 1);
 
     for (const s of sessions) {
       // not na(time(timeframe.period, session, SessionZone)) and timeframe.isintraday
-      s.active = isIntraday && pineTime.inSession(tMs, s.session, cfg.sessionZone);
+      s.active = isIntraday && pineTime.inSession(tMs, s.session, cfg.sessionZone, barMs);
       s.start = s.active && !s.prev;
     }
     const [tokyo, london, newYork, sydney] = sessions;
@@ -410,7 +428,7 @@ export function calculate(
       sessions.forEach((s, k) => {
         const next = sessions[(k + 1) % 4];
         if (!s.show || (cfg.merge && next.active)) return;
-        if (pineTime.inSession(tMs, s.session, exchangeZone) && onSessionGrid(tMs, s.hours)) bgColors.push({ time: t, color: s.col });
+        if (pineTime.inSession(tMs, s.session, exchangeZone, barMs) && onSessionGrid(tMs, s.hours)) bgColors.push({ time: t, color: s.col });
       });
     }
 
@@ -425,6 +443,7 @@ export function calculate(
 
     for (const s of sessions) s.prev = s.active;
   }
+  setDrawingBar(null);
 
   // A drawing with an na coordinate is an object of the script but is not drawn
   const ok = (...v: number[]) => v.every((x) => !Number.isNaN(x));

@@ -23,10 +23,10 @@
  * Original notice: © LuxAlgo
  */
 
-import { str, math, color, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { str, math, color, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, LinefillData, MarkerData } from '../types';
 import { lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
-import { periodStarts, sessionFlags } from '../anchor-period';
+import { chartTimeframe, periodStarts, sessionFlags } from '../anchor-period';
 
 type StyleName = 'Dotted' | 'Dashed' | 'Solid';
 type ForecastMode = 'IB Against Previous Open' | 'Filter By Current Day Of Week';
@@ -288,7 +288,10 @@ export function calculate(
   const exchangeFirst = sessionFlags(bars, chart)?.isfirstbar_regular ?? null;
   const dayStart = exchangeFirst === null ? periodStarts(bars, 'D', chart) : [];
   const firstBarRegular = (i: number) => (exchangeFirst !== null ? exchangeFirst[i] : i === 0 ? dayStart[0] === bars[0].time : dayStart[i] !== dayStart[i - 1]);
-  const inSession = (i: number, session: string) => pineTime.inSession(tMs[i], session, tz);
+  // time(timeframe.period, session): the bar duration is needed for the session test on the days around a clock change
+  const chartTf = chartTimeframe(bars, chart);
+  const barMs = chartTf === '' ? undefined : timeframe.in_seconds(chartTf) * 1000;
+  const inSession = (i: number, session: string) => pineTime.inSession(tMs[i], session, tz, barMs);
 
   const lineRegistry = registry<Ln>();
   const boxRegistry = registry<Bx>();

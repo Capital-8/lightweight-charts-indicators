@@ -21,7 +21,7 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, heikinAshi, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
 
 export interface ScalpingPullbackToolInputs {
@@ -125,28 +125,13 @@ const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !(b - a > EPS);
 const le = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !(a - b > EPS);
 
-/**
- * Heikin Ashi candles of the bars (heikinashi(tickerid) on the chart timeframe): close = ohlc4, open = the average of
- * the previous Heikin Ashi open and close ((open + close) / 2 on the first bar), high / low = the extremes of the bar
- * high / low and the Heikin Ashi open and close.
- */
-function heikinAshi(bars: Bar[]): Array<{ open: number; high: number; low: number; close: number }> {
-  const out: Array<{ open: number; high: number; low: number; close: number }> = [];
-  bars.forEach((b, i) => {
-    const close = (b.open + b.high + b.low + b.close) / 4;
-    const prev = out[i - 1];
-    const open = prev ? (prev.open + prev.close) / 2 : (b.open + b.close) / 2;
-    out.push({ open, high: Math.max(b.high, open, close), low: Math.min(b.low, open, close), close });
-  });
-  return out;
-}
-
 export function calculate(bars: Bar[], inputs: Partial<ScalpingPullbackToolInputs> = {}): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const delay = cfg.delayArrow ? 1 : 0;
 
+  // heikinashi(tickerid) on the chart timeframe: the Heikin Ashi candles of the bars
   const candles = cfg.useHAcandles ? heikinAshi(bars) : bars;
   const haOpen = candles.map((b) => b.open);
   const haClose = candles.map((b) => b.close);

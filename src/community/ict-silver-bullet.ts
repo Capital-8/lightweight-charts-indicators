@@ -166,6 +166,8 @@ export function calculate(
   const tMs = bars.map((b) => (ms ? b.time : b.time * 1000));
   const tfName = chartTimeframe(bars, chart);
   const tfSeconds = tfName === '' ? NaN : timeframe.in_seconds(tfName);
+  // bar duration for the session test on the days around a clock change
+  const barMs = Number.isNaN(tfSeconds) ? undefined : tfSeconds * 1000;
 
   const superstrict = cfg.choice === 'Super-Strict';
   const iTrend = cfg.choice !== 'All FVG';
@@ -237,9 +239,9 @@ export function calculate(
     const hasPl = !Number.isNaN(pl) && pl !== 0;
 
     // Silver Bullet periods (on bar 0 the previous value is na: a session can start, not end)
-    const inLN = pineTime.inSession(t, '0300-0400', TZ);
-    const inAM = pineTime.inSession(t, '1000-1100', TZ);
-    const inPM = pineTime.inSession(t, '1400-1500', TZ);
+    const inLN = pineTime.inSession(t, '0300-0400', TZ, barMs);
+    const inAM = pineTime.inSession(t, '1000-1100', TZ, barMs);
+    const inPM = pineTime.inSession(t, '1400-1500', TZ, barMs);
     const isInSB = inLN || inAM || inPM;
     const strSB = isInSB && !prevIn;
     const strLN = inLN && !prevLN;

@@ -17,7 +17,10 @@
  * Original notice: © TFlab
  */
 
-import { color, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  box, label, color, time as pineTime, timeframe, resetDrawings, setDrawingBar, varDrawing, type Box, type Label,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import { chartTimeframe } from '../anchor-period';
 import type { BoxData, LabelData } from '../types';
 import type { ChartContext } from '../chart-context';
@@ -74,9 +77,6 @@ const BLUE = String(color.rgb(34, 101, 155));
 /** color.rgb(255, 255, 255, 100): label background */
 const NO_BACKGROUND = String(color.rgb(255, 255, 255, 100));
 
-interface Bx { left: number; top: number; right: number; bottom: number; bg: string; deleted: boolean }
-interface Lb { x: number; y: number; text: string; deleted: boolean }
-
 export function calculate(
   bars: Bar[],
   inputs: Partial<PowerOf3Ict01AmdIctSmcAccumulationsInputs> = {},
@@ -88,24 +88,12 @@ export function calculate(
   const period = chartTimeframe(bars, chart);
   const drawn = /^\d+$/.test(period) && Number(period) <= 60;
   const unit = n > 0 && bars[0].time >= 1e12 ? 1 : 1000;
+  // bar size for the clock-change rule of the session test (intraday bars)
+  const barMs = period !== '' && timeframe.info(period).isintraday ? timeframe.in_seconds(period) * 1000 : undefined;
 
-  // Live drawings in creation order: when a creation brings the count above max + 5, the oldest are deleted until
-  // max remain. An object held by a `var` variable of the script is never deleted by this limit, but it counts.
-  const held = new Set<object>();
-  const limit = <T extends { deleted: boolean }>(list: T[]) => {
-    if (list.length <= MAX_OBJECTS + 5) return;
-    for (let k = 0; k < list.length && list.length > MAX_OBJECTS; ) {
-      if (held.has(list[k])) k++;
-      else list.splice(k, 1)[0].deleted = true;
-    }
-  };
-  const hold = <T extends object>(before: T | null, now: T): T => {
-    if (before) held.delete(before);
-    held.add(now);
-    return now;
-  };
-  const boxes: Bx[] = [];
-  const labels: Lb[] = [];
+  // Drawings in the registry of the library: limits of the script, the latest box and label of each session held by
+  // their `var` variables
+  resetDrawings({ box: MAX_OBJECTS, label: MAX_OBJECTS });
 
   /** LowHighDetector(On, Color, Text) */
   const detector = (session: string, css: string, text: string) => {
@@ -113,13 +101,13 @@ export function calculate(
     let bar = 0;
     let high = 0;
     let low = 0;
-    let box: Bx | null = null;
-    let label: Lb | null = null;
+    const sessionBox = varDrawing<Box>();
+    const sessionLabel = varDrawing<Label>();
     let prevOn = NaN; // On[1] is na on the first bar
 
     return (i: number) => {
       // math.sign(nz(time(timeframe.period, session, "America/New_York")))
-      const on = pineTime.inSession(bars[i].time * unit, session, TIMEZONE) ? 1 : 0;
+      const on = pineTime.inSession(bars[i].time * unit, session, TIMEZONE, barMs) ? 1 : 0;
       const b = bars[i];
       if (prevOn === 0 && on === 1) {
         bar = i;
@@ -131,26 +119,21 @@ export function calculate(
       }
 
       if (on > prevOn && drawn) {
-        const bx: Bx = { left: i, top: high, right: i, bottom: low, bg, deleted: false };
-        boxes.push(bx);
-        box = hold(box, bx);
-        limit(boxes);
+        sessionBox.value = box.new(i, high, i, low, BLUE, undefined, 'dotted', undefined, 'bar_index', bg);
         // int(math.avg(Bar, bar_index))
-        const lb: Lb = { x: Math.trunc((bar + i) / 2), y: high, text, deleted: false };
-        labels.push(lb);
-        label = hold(label, lb);
-        limit(labels);
+        sessionLabel.value = label.new(Math.trunc((bar + i) / 2), high, text, 'bar_index');
       }
       if (prevOn === 1 || on === 1) {
-        if (box && !box.deleted) {
-          box.top = high;
-          box.bottom = low;
-          box.right = i;
+        // the setters do nothing on a deleted object
+        if (sessionBox.value) {
+          box.set_top(sessionBox.value, high);
+          box.set_bottom(sessionBox.value, low);
+          box.set_right(sessionBox.value, i);
         }
-        if (label && !label.deleted) {
+        if (sessionLabel.value) {
           // math.round(math.avg(Bar, bar_index)): a half rounds up
-          label.x = Math.floor((bar + i) / 2 + 0.5);
-          label.y = high;
+          label.set_x(sessionLabel.value, Math.floor((bar + i) / 2 + 0.5));
+          label.set_y(sessionLabel.value, high);
         }
       }
       prevOn = on;
@@ -161,17 +144,21 @@ export function calculate(
   if (cfg.showAccumulation) steps.push(detector(cfg.accumulationSes, cfg.accumulationColor, 'Accumulation'));
   if (cfg.showManipulation) steps.push(detector(cfg.manipulationSes, cfg.manipulationColor, 'Manipulation'));
   if (cfg.showDistribution) steps.push(detector(cfg.distributionSes, cfg.distributionColor, 'Distribution'));
-  for (let i = 0; i < n; i++) for (const step of steps) step(i);
+  for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
+    for (const step of steps) step(i);
+  }
+  setDrawingBar(null);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
-    boxes: boxes.map((b) => ({
-      time1: bars[b.left].time, price1: b.top, time2: bars[b.right].time, price2: b.bottom, bgColor: b.bg,
+    boxes: box.all().map((b) => ({
+      time1: bars[b.left].time, price1: b.top, time2: bars[b.right].time, price2: b.bottom, bgColor: String(b.bgcolor),
       borderColor: BLUE, borderStyle: 'dotted' as const,
     })),
-    labels: labels.map((l) => ({
-      time: bars[l.x].time, price: l.y, text: l.text, color: NO_BACKGROUND, textColor: BLUE, style: 'label_down' as const,
+    labels: label.all().map((l) => ({
+      time: bars[l.x].time, price: l.y, text: l.text ?? '', color: NO_BACKGROUND, textColor: BLUE, style: 'label_down' as const,
       size: 'normal' as const,
     })),
   };

@@ -10,7 +10,7 @@
  *   or without end when the value is 0). The lines are placed by time; a bar is the time between the confirmation
  *   bar and the bar before it. A line of the highs is drawn when the highs fall, a line of the lows when the highs
  *   do not fall (the original tests the slope of the highs for both); the other ones only when the first display
- *   option is off. At most 50 lines are kept.
+ *   option is off. At most 50 lines are kept (drawing registry of the library).
  * - Breaks: the close is compared with the last lines (the "number of past trendlines to check" + 1 latest pivots
  *   of each side, each with its own slope). A close that crosses over a line of the highs gives a triangle below
  *   the bar and a lime bar; a close that crosses over a line of the lows gives a triangle above the bar and a
@@ -26,7 +26,10 @@
  * Original notice: © Copyright 2019 to present, Joris Duyck (JD)
  */
 
-import { ta, math, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, math, line, Series, resetDrawings, setDrawingBar, varDrawing, type IndicatorResult, type InputConfig, type PlotConfig,
+  type Bar, type Line,
+} from 'oakscriptjs';
 import type { BarColorData, LineDrawingData, MarkerData } from '../types';
 
 export interface TrendlinesJdInputs {
@@ -99,15 +102,6 @@ const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
 interface Row { x: number; y: number; slope: number }
-interface Ln {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  color: string;
-  dotted: boolean;
-  deleted: boolean;
-}
 /** `_check_value[1]` of one line_cross() call: the close of the latest earlier bar on which the call ran */
 interface Site { bar: number; value: number; previous: number }
 
@@ -146,33 +140,22 @@ export function calculate(
     (log ? ((math.log(y2) as number) - (math.log(y1) as number)) / (x2 - x1) : (y2 - y1) / (x2 - x1));
   const project = (y: number, dt: number, slope: number) => (log ? y * (math.exp(dt * slope) as number) : y + dt * slope);
 
-  // Live lines in creation order: a creation that brings the count above max + 5 deletes the oldest until max
-  // remain. The four lines that the `var` variables of the script refer to are never deleted by this rule, but they
-  // count. A deleted line ignores later changes.
-  const lines: Ln[] = [];
-  let lookbackLineHigh: Ln | null = null;
-  let trendlineHigh: Ln | null = null;
-  let lookbackLineLow: Ln | null = null;
-  let trendlineLow: Ln | null = null;
-  const newLine = (x1: number, y1: number, x2: number, y2: number, css: string, dotted: boolean): Ln => {
-    const o: Ln = { x1, y1, x2, y2, color: css, dotted, deleted: false };
-    lines.push(o);
-    if (lines.length > MAX_LINES + 5) {
-      for (let k = 0; k < lines.length && lines.length > MAX_LINES; ) {
-        const l = lines[k];
-        if (l === lookbackLineHigh || l === trendlineHigh || l === lookbackLineLow || l === trendlineLow) k++;
-        else lines.splice(k, 1)[0].deleted = true;
-      }
-    }
-    return o;
-  };
-  const deleteLine = (l: Ln | null) => {
-    if (!l || l.deleted) return;
-    l.deleted = true;
-    lines.splice(lines.indexOf(l), 1);
+  // Lines: library objects (xloc.bar_time) in the drawing registry: a creation that brings the count above max + 5
+  // deletes the oldest until max remain; the lines of the four `var` variables of the script are not deleted by this
+  // rule, but they count; the script deletes count on the last bar. A deleted line ignores later changes.
+  resetDrawings({ line: MAX_LINES });
+  const lookbackLineHigh = varDrawing<Line>();
+  const trendlineHigh = varDrawing<Line>();
+  const lookbackLineLow = varDrawing<Line>();
+  const trendlineLow = varDrawing<Line>();
+  const newLine = (x1: number, y1: number, x2: number, y2: number, css: string, dotted: boolean): Line => line.new(
+    x1, y1, x2, y2, 'bar_time', xtend && dotted ? 'right' : 'none', css, dotted ? 'dotted' : 'solid', 1,
+  );
+  const deleteLine = (l: Line | undefined) => {
+    if (l) line.delete(l);
   };
   // trendline_low at the end of each bar, for trendline_low[k]
-  const trendlineLowHistory: Array<Ln | null> = new Array(n).fill(null);
+  const trendlineLowHistory: Array<Line | undefined> = new Array(n).fill(undefined);
   /** line.delete(trendline_low[(time - pivot time) / bar_time]) */
   const deleteOlder = (i: number, pivotTime: number, barTime: number) => {
     const offset = (timeOf(i) - pivotTime) / barTime;
@@ -184,7 +167,7 @@ export function calculate(
         + `The history-referencing length for the expression must be a value between 0 and ${MAX_BARS_BACK}.`,
       );
     }
-    deleteLine(k === 0 ? trendlineLow : i - k >= 0 ? trendlineLowHistory[i - k] : null);
+    deleteLine(k === 0 ? trendlineLow.value : i - k >= 0 ? trendlineLowHistory[i - k] : undefined);
   };
 
   // line_cross(close, start time, start price, slope): 1 for a cross over the line, -1 for a cross under, else 0
@@ -208,83 +191,88 @@ export function calculate(
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
 
-  for (let i = 0; i < n; i++) {
-    const time = timeOf(i);
-    const barTime = i > 0 ? time - timeOf(i - 1) : NaN;
-    const hp = highPivot[i];
-    const lp = lowPivot[i];
+  try {
+    for (let i = 0; i < n; i++) {
+      setDrawingBar(i, i === n - 1);
+      const time = timeOf(i);
+      const barTime = i > 0 ? time - timeOf(i - 1) : NaN;
+      const hp = highPivot[i];
+      const lp = lowPivot[i];
 
-    // Track and store the pivots
-    if (!Number.isNaN(hp)) addRecord(0, timeOf(i - half), hp);
-    const phx1 = Math.trunc(row(0, 1).x);
-    const phy1 = row(0, 1).y;
-    const phx2 = Math.trunc(row(0, 0).x);
-    const phy2 = row(0, 0).y;
-    const slopeHigh = slopeOf(phx1, phy1, phx2, phy2);
-    row(0, 0).slope = slopeHigh;
+      // Track and store the pivots
+      if (!Number.isNaN(hp)) addRecord(0, timeOf(i - half), hp);
+      const phx1 = Math.trunc(row(0, 1).x);
+      const phy1 = row(0, 1).y;
+      const phx2 = Math.trunc(row(0, 0).x);
+      const phy2 = row(0, 0).y;
+      const slopeHigh = slopeOf(phx1, phy1, phx2, phy2);
+      row(0, 0).slope = slopeHigh;
 
-    if (!Number.isNaN(lp)) addRecord(1, timeOf(i - half), lp);
-    const plx1 = Math.trunc(row(1, 1).x);
-    const ply1 = row(1, 1).y;
-    const plx2 = Math.trunc(row(1, 0).x);
-    const ply2 = row(1, 0).y;
-    const slopeLow = slopeOf(plx1, ply1, plx2, ply2);
-    row(1, 0).slope = slopeLow;
+      if (!Number.isNaN(lp)) addRecord(1, timeOf(i - half), lp);
+      const plx1 = Math.trunc(row(1, 1).x);
+      const ply1 = row(1, 1).y;
+      const plx2 = Math.trunc(row(1, 0).x);
+      const ply2 = row(1, 0).y;
+      const slopeLow = slopeOf(plx1, ply1, plx2, ply2);
+      row(1, 0).slope = slopeLow;
 
-    // Line ends: the bar where the pivot is detected, and the limited extension
-    const lookbackTime = barTime * (len / 2);
-    const phx2Lb = phx2 + lookbackTime;
-    const phy2Lb = project(phy2, lookbackTime, slopeHigh);
-    const plx2Lb = plx2 + lookbackTime;
-    const ply2Lb = project(ply2, lookbackTime, slopeLow);
-    const extensionTime = cfg.limitExtension * barTime * 100;
-    const phx2Adj = xtend ? phx2 : phx2 + extensionTime;
-    const phy2Adj = xtend ? phy2 : project(phy2, extensionTime, slopeHigh);
-    const plx2Adj = xtend ? plx2 : plx2 + extensionTime;
-    const ply2Adj = xtend ? ply2 : project(ply2, extensionTime, slopeLow);
+      // Line ends: the bar where the pivot is detected, and the limited extension
+      const lookbackTime = barTime * (len / 2);
+      const phx2Lb = phx2 + lookbackTime;
+      const phy2Lb = project(phy2, lookbackTime, slopeHigh);
+      const plx2Lb = plx2 + lookbackTime;
+      const ply2Lb = project(ply2, lookbackTime, slopeLow);
+      const extensionTime = cfg.limitExtension * barTime * 100;
+      const phx2Adj = xtend ? phx2 : phx2 + extensionTime;
+      const phy2Adj = xtend ? phy2 : project(phy2, extensionTime, slopeHigh);
+      const plx2Adj = xtend ? plx2 : plx2 + extensionTime;
+      const ply2Adj = xtend ? ply2 : project(ply2, extensionTime, slopeLow);
 
-    const highsFall = lt(slopeHigh * time, 0);
-    if (!Number.isNaN(hp)) {
-      const css = highsFall ? colorRising : cfg.dispSelect ? null : colorFalling;
-      if (css !== null) {
-        lookbackLineHigh = newLine(phx1, phy1, phx2Lb, phy2Lb, css, false);
-        trendlineHigh = newLine(phx1, phy1, phx2Adj, phy2Adj, css, true);
+      const highsFall = lt(slopeHigh * time, 0);
+      if (!Number.isNaN(hp)) {
+        const css = highsFall ? colorRising : cfg.dispSelect ? null : colorFalling;
+        if (css !== null) {
+          lookbackLineHigh.value = newLine(phx1, phy1, phx2Lb, phy2Lb, css, false);
+          trendlineHigh.value = newLine(phx1, phy1, phx2Adj, phy2Adj, css, true);
+        }
+      }
+      if (cfg.limitTrendlineNr) deleteOlder(i, row(0, trendlineNr).x, barTime);
+
+      if (!Number.isNaN(lp)) {
+        const css = highsFall ? (cfg.dispSelect ? null : colorRising) : colorFalling;
+        if (css !== null) {
+          lookbackLineLow.value = newLine(plx1, ply1, plx2Lb, ply2Lb, css, false);
+          trendlineLow.value = newLine(plx1, ply1, plx2Adj, ply2Adj, css, true);
+        }
+      }
+      if (cfg.limitTrendlineNr) deleteOlder(i, row(1, trendlineNr).x, barTime);
+      trendlineLowHistory[i] = trendlineLow.value;
+
+      // Crosses of the last lines
+      let longBreak = false;
+      let shortBreak = false;
+      for (let k = 0; k <= checkNr; k++) {
+        const h = row(0, k);
+        const crossHigh = cfg.dispSelect && gt(h.slope * time, 0) ? 0 : lineCross(i, highSite, barTime, Math.trunc(h.x), h.y, h.slope);
+        if (crossHigh === 1) longBreak = true;
+        const l = row(1, k);
+        const crossLow = cfg.dispSelect && gt(l.slope * time, 0) ? 0 : lineCross(i, lowSite, barTime, Math.trunc(l.x), l.y, l.slope);
+        if (crossLow === 1) shortBreak = true;
+      }
+
+      colorHigh[i] = highsFall ? colorRising : cfg.dispSelect ? null : colorFalling;
+      colorLow[i] = gt(slopeLow * time, 0) ? colorFalling : cfg.dispSelect ? null : colorRising;
+
+      if (cfg.doAlerts) {
+        const t = bars[i].time as number;
+        const shown = !Number.isNaN(bars[i].close) && bars[i].close !== 0;
+        if (longBreak && shown) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: LIME, size: 'small' });
+        if (shortBreak && shown) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: FUCHSIA, size: 'small' });
+        if (longBreak || shortBreak) barColors.push({ time: t, color: longBreak ? LIME : FUCHSIA });
       }
     }
-    if (cfg.limitTrendlineNr) deleteOlder(i, row(0, trendlineNr).x, barTime);
-
-    if (!Number.isNaN(lp)) {
-      const css = highsFall ? (cfg.dispSelect ? null : colorRising) : colorFalling;
-      if (css !== null) {
-        lookbackLineLow = newLine(plx1, ply1, plx2Lb, ply2Lb, css, false);
-        trendlineLow = newLine(plx1, ply1, plx2Adj, ply2Adj, css, true);
-      }
-    }
-    if (cfg.limitTrendlineNr) deleteOlder(i, row(1, trendlineNr).x, barTime);
-    trendlineLowHistory[i] = trendlineLow;
-
-    // Crosses of the last lines
-    let longBreak = false;
-    let shortBreak = false;
-    for (let k = 0; k <= checkNr; k++) {
-      const h = row(0, k);
-      const crossHigh = cfg.dispSelect && gt(h.slope * time, 0) ? 0 : lineCross(i, highSite, barTime, Math.trunc(h.x), h.y, h.slope);
-      if (crossHigh === 1) longBreak = true;
-      const l = row(1, k);
-      const crossLow = cfg.dispSelect && gt(l.slope * time, 0) ? 0 : lineCross(i, lowSite, barTime, Math.trunc(l.x), l.y, l.slope);
-      if (crossLow === 1) shortBreak = true;
-    }
-
-    colorHigh[i] = highsFall ? colorRising : cfg.dispSelect ? null : colorFalling;
-    colorLow[i] = gt(slopeLow * time, 0) ? colorFalling : cfg.dispSelect ? null : colorRising;
-
-    if (cfg.doAlerts) {
-      const t = bars[i].time as number;
-      const shown = !Number.isNaN(bars[i].close) && bars[i].close !== 0;
-      if (longBreak && shown) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: LIME, size: 'small' });
-      if (shortBreak && shown) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: FUCHSIA, size: 'small' });
-      if (longBreak || shortBreak) barColors.push({ time: t, color: longBreak ? LIME : FUCHSIA });
-    }
+  } finally {
+    setDrawingBar(null);
   }
 
   // plot(high_pivot, color = color_high, offset = -len / 2): the value of bar i + half on bar i
@@ -295,18 +283,20 @@ export function calculate(
     return { time: b.time as number, value: Number.isFinite(value) ? value : NaN, color: css ?? 'transparent' };
   });
 
-  const finite = (l: Ln) => [l.x1, l.y1, l.x2, l.y2].every((v) => !Number.isNaN(v));
+  // xloc.bar_time: the ends are times; a line with an na coordinate is not drawn
+  const finite = (l: Line) => [l.x1, l.y1, l.x2, l.y2].every((v) => !Number.isNaN(v));
+  const lines: LineDrawingData[] = line.all().filter(finite).map((l) => ({
+    time1: l.x1 / unit, price1: l.y1, time2: l.x2 / unit, price2: l.y2, color: String(l.color),
+    ...(l.style === 'dotted' ? { style: 'dotted' as const } : {}),
+    ...(l.extend === 'right' ? { extend: 'right' as const } : {}),
+  }));
+  resetDrawings();
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0: shifted(highPivot, colorHigh), plot1: shifted(lowPivot, colorLow) },
     markers,
     barColors,
-    // xloc.bar_time: the ends are times; a line with an na coordinate is not drawn
-    lines: lines.filter(finite).map((l) => ({
-      time1: l.x1 / unit, price1: l.y1, time2: l.x2 / unit, price2: l.y2, color: l.color,
-      ...(l.dotted ? { style: 'dotted' as const } : {}),
-      ...(xtend && l.dotted ? { extend: 'right' as const } : {}),
-    })),
+    lines,
   };
 }
 

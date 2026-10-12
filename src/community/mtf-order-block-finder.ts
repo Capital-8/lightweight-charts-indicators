@@ -31,8 +31,10 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { color, math, timeframe, barTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import { executeScript, time_close as scriptTimeClose } from 'oakscriptjs/script';
+import {
+  color, math, timeframe, barTime, line, box, label, resetDrawings, setDrawingBar, resample, periodsOf, periodClose,
+  type Line, type Box, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { chartTimeframe, hasCalendar, periodStarts, securityBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
@@ -204,55 +206,6 @@ function periodEnd(start: number, tf: string): number {
   return start + timeframe.in_seconds(tf) * 1000;
 }
 
-/** A drawing of the script: bar indexes, or times in ms when `byTime` */
-interface LineObj {
-  dead: boolean;
-  byTime: boolean;
-  x1: number;
-  x2: number;
-  y: number;
-  color: string;
-  width: number;
-  style?: 'dashed';
-  extend?: 'right';
-}
-interface BoxObj {
-  dead: boolean;
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-  bg: string;
-}
-interface LabelObj {
-  dead: boolean;
-  byTime: boolean;
-  x: number;
-  y: number;
-  yloc: 'price' | 'abovebar' | 'belowbar';
-  text: string;
-  color: string;
-}
-
-/**
- * The drawing count limit of Pine: when a creation brings the count of one kind above max + 5, the oldest objects
- * are deleted until max remain.
- */
-function register<T extends { dead: boolean }>(list: T[], obj: T, max: number): T {
-  list.push(obj);
-  if (list.length > max + 5) {
-    for (const old of list.splice(0, list.length - max)) old.dead = true;
-  }
-  return obj;
-}
-
-/** line.delete / box.delete */
-function remove<T extends { dead: boolean }>(list: T[], obj: T): void {
-  if (obj.dead) return;
-  obj.dead = true;
-  list.splice(list.indexOf(obj), 1);
-}
-
 export function calculate(
   bars: Bar[],
   inputs: Partial<MtfOrderBlockFinderInputs> = {},
@@ -292,25 +245,12 @@ export function calculate(
       latest = sb.latest;
       candleMs = sb.htf.map((b) => (isMs ? b.time : b.time * 1000));
     } else {
+      // the periods of the UTC calendar; the completion rule of the library, with the last chart bar of a period as
+      // its end (the last bar: when its close reaches the period end)
       const starts = periodStarts(bars, res, chart);
-      candles = [];
-      latest = [];
-      bars.forEach((b, i) => {
-        if (i === 0 || starts[i] !== starts[i - 1]) {
-          candles.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-        } else {
-          const c = candles[candles.length - 1];
-          c.high = Math.max(c.high, b.high);
-          c.low = Math.min(c.low, b.low);
-          c.close = b.close;
-          c.volume = (c.volume ?? NaN) + (b.volume ?? NaN);
-        }
-        const g = candles.length - 1;
-        // the candle is closed by the last chart bar of its period (the last bar: when its close reaches the period end)
-        const startMs = isMs ? starts[i] : starts[i] * 1000;
-        const closes = i < n - 1 ? starts[i + 1] !== starts[i] : tMs(i) + timeframe.in_seconds(chartTf) * 1000 >= periodEnd(startMs, res);
-        latest.push(closes ? g : g - 1);
-      });
+      candles = resample(bars, starts).bars;
+      const lastReaches = tMs(n - 1) + timeframe.in_seconds(chartTf) * 1000 >= periodEnd(isMs ? starts[n - 1] : starts[n - 1] * 1000, res);
+      latest = periodsOf(starts, starts, bars.map((_, i) => i < n - 1 || lastReaches)).latest;
       candleMs = candles.map((b) => (isMs ? b.time : b.time * 1000));
     }
   }
@@ -330,12 +270,11 @@ export function calculate(
   let closeMs: number[] = [];
   if (chart && hasCalendar(chart)) {
     try {
-      executeScript(() => {
-        closeMs = Array.from((res === '' ? scriptTimeClose : scriptTimeClose(res)).toArray(), (v) => v ?? NaN);
-      }, bars.map((b) => ({ time: b.time, open: 1, high: 1, low: 1, close: 1, volume: 1 })), {}, {
+      const context = {
         timeframe: chartTf, timezone: chart.timezone, session: chart.session, regularSession: chart.regularSession,
-        sessionType: chart.sessionType, timeUnit: isMs ? 'ms' : 's',
-      });
+        timeUnit: isMs ? 'ms' as const : 's' as const,
+      };
+      closeMs = bars.map((b) => periodClose(b.time, res === '' ? chartTf : res, context));
     } catch {
       closeMs = [];
     }
@@ -351,12 +290,12 @@ export function calculate(
 
   const bull = cfg.bullColor;
   const bear = cfg.bearColor;
-  const allLines: LineObj[] = [];
-  const allBoxes: BoxObj[] = [];
-  const allLabels: LabelObj[] = [];
+  // Drawings of the library registry with the limits of study(); the zones are only held by var arrays (the script
+  // has no var variable of a drawing type)
+  resetDrawings({ line: MAX_LINES, label: MAX_LABELS, box: MAX_BOXES });
   // var arrays of the zones: [average, high, low] lines and the boxes, oldest first
-  const zoneLines: Record<'bull' | 'bear', LineObj[][]> = { bull: [], bear: [] };
-  const zoneBoxes: Record<'bull' | 'bear', BoxObj[]> = { bull: [], bear: [] };
+  const zoneLines: Record<'bull' | 'bear', Line[][]> = { bull: [], bear: [] };
+  const zoneBoxes: Record<'bull' | 'bear', Box[]> = { bull: [], bear: [] };
   let selectorShift = obShift;
   const syncMult = Math.trunc(resSec / chartSec);
   const withLines = style === 'LINE' || style === 'BOTH';
@@ -364,6 +303,7 @@ export function calculate(
 
   let pointer = -1;
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     while (pointer + 1 < closings.length && closings[pointer + 1].bar <= i) pointer++;
 
     // Despawn distant objects
@@ -377,8 +317,8 @@ export function calculate(
           for (let k = list.length - 1; k >= 0; k--) {
             const [, h, l] = list[k];
             // a line deleted by the count limit has no price
-            if (far(h.dead ? NaN : h.y, l.dead ? NaN : l.y)) {
-              for (const ln of list[k]) remove(allLines, ln);
+            if (far(line.get_y1(h), line.get_y1(l))) {
+              for (const ln of list[k]) line.delete(ln);
               list.splice(k, 1);
             }
           }
@@ -386,8 +326,8 @@ export function calculate(
         if (withBoxes) {
           const list = zoneBoxes[side];
           for (let k = list.length - 1; k >= 0; k--) {
-            if (far(list[k].dead ? NaN : list[k].top, list[k].dead ? NaN : list[k].bottom)) {
-              remove(allBoxes, list[k]);
+            if (far(box.get_top(list[k]), box.get_bottom(list[k]))) {
+              box.delete(list[k]);
               list.splice(k, 1);
             }
           }
@@ -486,11 +426,10 @@ export function calculate(
       for (const [side, found, avg, high, low, col, count] of zones) {
         if (!found || count <= 0) continue;
         const list = zoneLines[side];
-        if (list.length === count) for (const ln of list.shift() ?? []) remove(allLines, ln);
-        const zoneLine = (y: number, width: number, dashed: boolean) => register<LineObj>(allLines, {
-          dead: false, byTime: true, x1: sync, x2: sync + 12, y, color: width > 0 ? col : 'transparent', width, extend: 'right',
-          ...(dashed ? { style: 'dashed' as const } : {}),
-        }, MAX_LINES);
+        if (list.length === count) for (const ln of list.shift() ?? []) line.delete(ln);
+        // color = width > 0 ? colour : na
+        const zoneLine = (y: number, width: number, dashed: boolean) =>
+          line.new(sync, y, sync + 12, y, 'bar_time', 'right', width > 0 ? col : 'transparent', dashed ? 'dashed' : 'solid', width);
         list.push([zoneLine(avg, cfg.linewidthAvg, true), zoneLine(high, cfg.linewidthHl, false), zoneLine(low, cfg.linewidthHl, false)]);
       }
     }
@@ -500,9 +439,9 @@ export function calculate(
         const list = zoneBoxes[side];
         if (list.length === count) {
           const old = list.shift();
-          if (old) remove(allBoxes, old);
+          if (old) box.delete(old);
         }
-        list.push(register<BoxObj>(allBoxes, { dead: false, left: sync, right: sync + 12, top: high, bottom: low, bg: col }, MAX_BOXES));
+        list.push(box.new(sync, high, sync + 12, low, BOX_BORDER, 0, undefined, 'right', 'bar_time', col));
       }
     }
 
@@ -517,35 +456,35 @@ export function calculate(
       const isBull = side === 'bull';
       const text = isBull ? 'Bull OB' : 'Bear OB';
       if (res === '') {
-        register<LabelObj>(allLabels, { dead: false, byTime: false, x: i + os, y: 0, yloc: isBull ? 'belowbar' : 'abovebar', text, color: solid }, MAX_LABELS);
+        label.new(i + os, 0, text, 'bar_index', isBull ? 'belowbar' : 'abovebar', solid, 'none', solid, 'small');
         // Horizontal_Line(price, colour, width, os, os - sync_mult)
         for (const [y, width] of [[high, 2], [low, 2], [avg, 1]]) {
-          register<LineObj>(allLines, { dead: false, byTime: false, x1: i + os + 1, x2: i + os - syncMult - 1, y, color: solid, width }, MAX_LINES);
+          line.new(i + os + 1, y, i + os - syncMult - 1, y, 'bar_index', undefined, solid, undefined, width);
         }
       } else {
-        register<LabelObj>(allLabels, { dead: false, byTime: true, x: avgTime, y: isBull ? low : high, yloc: 'price', text, color: solid }, MAX_LABELS);
+        label.new(avgTime, isBull ? low : high, text, 'bar_time', 'price', solid, 'none', solid, 'small');
         const marks: Array<[number, number, number]> = [[high, startTime - 1, 2], [low, startTime, 2], [avg, startTime, 1]];
-        for (const [y, x1, width] of marks) {
-          register<LineObj>(allLines, { dead: false, byTime: true, x1, x2: endTime, y, color: solid, width }, MAX_LINES);
-        }
+        for (const [y, x1, width] of marks) line.new(x1, y, endTime, y, 'bar_time', undefined, solid, undefined, width);
       }
     }
   }
+  setDrawingBar(null);
 
   /** A bar index or a time in ms as a time of the bars */
-  const timeOf = (x: number, byTime: boolean) => (byTime ? (isMs ? x : x / 1000) : barTime(bars, x));
+  const timeOf = (x: number, xloc: 'bar_index' | 'bar_time') => (xloc === 'bar_time' ? (isMs ? x : x / 1000) : barTime(bars, x));
   return result(
-    allLines.map((ln) => ({
-      time1: timeOf(ln.x1, ln.byTime), price1: ln.y, time2: timeOf(ln.x2, ln.byTime), price2: ln.y, color: ln.color, width: ln.width,
-      ...(ln.style ? { style: ln.style } : {}), ...(ln.extend ? { extend: ln.extend } : {}),
+    line.all().map((ln) => ({
+      time1: timeOf(ln.x1, ln.xloc), price1: ln.y1, time2: timeOf(ln.x2, ln.xloc), price2: ln.y2, color: String(ln.color),
+      width: ln.width ?? 1, ...(ln.style === 'dashed' ? { style: 'dashed' as const } : {}),
+      ...(ln.extend === 'right' ? { extend: 'right' as const } : {}),
     })),
-    allBoxes.map((b) => ({
-      time1: timeOf(b.left, true), price1: b.top, time2: timeOf(b.right, true), price2: b.bottom, bgColor: b.bg,
+    box.all().map((b) => ({
+      time1: timeOf(b.left, 'bar_time'), price1: b.top, time2: timeOf(b.right, 'bar_time'), price2: b.bottom, bgColor: String(b.bgcolor),
       borderColor: BOX_BORDER, borderWidth: 0, extend: 'right' as const,
     })),
-    allLabels.map((l) => ({
-      time: timeOf(l.x, l.byTime), price: l.y, text: l.text, color: l.color, textColor: l.color, style: 'none' as const,
-      size: 'small' as const, ...(l.yloc !== 'price' ? { yloc: l.yloc } : {}),
+    label.all().map((l) => ({
+      time: timeOf(l.x, l.xloc), price: l.y, text: l.text ?? '', color: String(l.color), textColor: String(l.textcolor),
+      style: 'none' as const, size: 'small' as const, ...(l.yloc !== 'price' ? { yloc: l.yloc } : {}),
     })),
   );
 }

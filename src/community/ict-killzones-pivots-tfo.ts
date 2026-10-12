@@ -19,8 +19,8 @@
  * the last entry of the list (the previous bar test of the loop reads the last entry).
  *
  * Limits of the port:
- * - New days / weeks / months come from the UTC calendar and the bars (see anchor-period): equal on UTC symbols
- *   and on symbols whose trading day is inside one UTC day.
+ * - Without the chart context, new days / weeks / months come from the UTC calendar and the bars (see
+ *   anchor-period): equal on UTC symbols and on symbols whose trading day is inside one UTC day.
  * - The original rounds range levels, the average range of the table and the prices of merged labels with the
  *   symbol price tick. The port reads the tick from the chart context (third argument); without it the tick is
  *   0.01.
@@ -30,9 +30,6 @@
  * - The chart timeframe is the one of the chart context, else it is read from the bars (the most frequent gap
  *   between two bars). With fewer than 2 bars and no context value it is not known and only the table header is
  *   given.
- * - With a time zone that has summer time (America/New_York), on the day the clocks go forward the original puts
- *   the bars from 01:00 to 01:59 inside a session that starts at 02:00; the session test of oakscriptjs does not.
- *   The other days are equal.
  *
  * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
  * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
@@ -46,7 +43,7 @@
  */
 
 import { array, color, math, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import { chartTimeframe, periodStarts } from '../anchor-period';
+import { chartTimeframe, periodChanges } from '../anchor-period';
 import { backgroundColorOf, foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PineSize, TableCellData, TableData, TablePosition } from '../types';
 
@@ -479,6 +476,8 @@ export function calculate(
   const tz = cfg.gmt_tz;
   const tfName = chartTimeframe(bars, chart);
   const chartSec = tfName === '' ? NaN : timeframe.in_seconds(tfName);
+  // bar duration for the session test on the days around a clock change
+  const barMs = Number.isNaN(chartSec) ? undefined : chartSec * 1000;
   const limitSec = cfg.tf_limit.trim() === '' ? chartSec : timeframe.in_seconds(cfg.tf_limit);
   // timeframe.in_seconds("") <= timeframe.in_seconds(tf_limit)
   const tfOK = chartSec <= limitSec;
@@ -549,7 +548,7 @@ export function calculate(
     { tf: 'M' as const, period: 'Month', open: cfg.show_m_open, hl: cfg.mhl, mid: cfg.mmid, sep: cfg.ms, col: cfg.m_color },
   ].map((d) => ({
     ...d, info: newInfo(d.tf), data: newHl(), sepLines: [] as Ln[], openLines: [] as Ln[], openLabels: [] as Lb[],
-    starts: periodStarts(bars, d.tf, chart),
+    changes: periodChanges(bars, d.tf, chart),
   }));
   const dwmLimit = dwmRecent ? 1 : maxDays;
   const dwmTip = (period: string, what: string, price: number, t0: number, T: Track | null) => {
@@ -621,13 +620,13 @@ export function calculate(
     const bar = bars[i];
     const { open, high, low, close } = bar;
     const t = tMs[i];
-    const tCo = cfg.use_cutoff && pineTime.inSession(t, cfg.cutoff, tz);
+    const tCo = cfg.use_cutoff && pineTime.inSession(t, cfg.cutoff, tz, barMs);
     const last = i === n - 1;
 
     // Killzones
     for (const kz of kzs) {
       kz.t1 = kz.t;
-      kz.t = pineTime.inSession(t, kz.session, tz);
+      kz.t = pineTime.inSession(t, kz.session, tz, barMs);
     }
     for (const kz of kzs) {
       if (!(tfOK && kz.use)) continue;
@@ -778,7 +777,7 @@ export function calculate(
     }
 
     // Day / week / month
-    const changes = dwmSets.map((d) => i > 0 && d.starts[i] !== d.starts[i - 1]);
+    const changes = dwmSets.map((d) => d.changes[i]);
     dwmSets.forEach((d, k) => {
       if (!(d.hl || d.open)) return;
       const nfo = d.info;
@@ -953,7 +952,7 @@ export function calculate(
     if (cfg.show_timestamps && tfOK && stampSessions.length > 0) {
       const t1 = i === 0 ? true : lastStampPrev;
       for (let k = 0; k < stampSessions.length; k++) {
-        const inStamp = pineTime.inSession(t, stampSessions[k], tz);
+        const inStamp = pineTime.inSession(t, stampSessions[k], tz, barMs);
         if (inStamp && !t1) {
           vlLines.unshift(newLine(i, high * 1.0001, i, low, false, stampCols[k], vlStyle, cfg.vl_width, 'both'));
           vlOwner.unshift(k);
@@ -973,7 +972,7 @@ export function calculate(
       const tPrev = lastHzPrev;
       for (let k = 0; k < hzs.length; k++) {
         const h = hzs[k];
-        const inOpen = pineTime.inSession(t, h.session, tz);
+        const inOpen = pineTime.inSession(t, h.session, tz, barMs);
         if (inOpen && !tPrev) {
           h.LN.unshift(newLine(i, open, i, open, false, h.col, hzStyle, cfg.hz_width));
           h.LB.unshift(newLabel(i, open, false, h.txt, opaque(h.col), 'label_left', str.format('{0}: {1}\nDate: {2}', h.tip, open, fmtDate(t))));

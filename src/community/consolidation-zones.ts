@@ -1,220 +1,150 @@
 /**
  * Consolidation Zones - Live
  *
- * Identifies consolidation ranges via zigzag pivot tracking.
- * When price pivots remain within a range for a minimum period,
- * a consolidation zone (top/bottom) is plotted with dashed boundary lines.
+ * A zig zag of the bars whose high (low) is the highest (lowest) of the loopback period gives the pivot of the
+ * current swing (its most extreme point). While the pivot stays the same, or moves inside the zone, the count of
+ * consolidation bars grows; a pivot outside the zone resets it. When the count reaches the minimum length, the zone
+ * is the highest high / lowest low of that length; while the count goes on, the zone takes the new highs and lows.
+ *
+ * Drawings: the zone top and bottom as invisible step plots with a fill (painted while the consolidation is longer
+ * than the minimum length), and two dashed lines over the bars of the consolidation, replaced on every bar of it.
  *
  * Reference: "Consolidation Zones - Live" by LonesomeTheBlue
+ * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
+ * Original notice: © LonesomeTheBlue
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, line, resetDrawings, setDrawingBar, varDrawing, drawingOutputs,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line,
+} from 'oakscriptjs';
 import type { LineDrawingData } from '../types';
 
 export interface ConsolidationZonesInputs {
   period: number;
   consLen: number;
+  paintcons: boolean;
+  zonecol: string;
 }
 
 export const defaultInputs: ConsolidationZonesInputs = {
   period: 10,
   consLen: 5,
+  paintcons: true,
+  zonecol: 'rgba(33, 150, 243, 0.3)',
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'period', type: 'int', title: 'Loopback Period', defval: 10, min: 2 },
-  { id: 'consLen', type: 'int', title: 'Min Consolidation Length', defval: 5, min: 2 },
+  { id: 'period', type: 'int', title: 'Loopback Period', defval: 10, min: 2, max: 50 },
+  { id: 'consLen', type: 'int', title: 'Min Consolidation Length', defval: 5, min: 2, max: 20 },
+  { id: 'paintcons', type: 'bool', title: 'Paint Consolidation Area ', defval: true },
+  { id: 'zonecol', type: 'color', title: 'Zone Color', defval: 'rgba(33, 150, 243, 0.3)' },
 ];
 
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Zone Top', color: '#EF5350', lineWidth: 2, style: 'stepline' },
-  { id: 'plot1', title: 'Zone Bottom', color: '#26A69A', lineWidth: 2, style: 'stepline' },
+  { id: 'plot0', title: 'Plot', color: 'transparent', lineWidth: 1, style: 'stepline' },
+  { id: 'plot1', title: 'Plot', color: 'transparent', lineWidth: 1, style: 'stepline' },
 ];
 
 export const metadata = {
   title: 'Consolidation Zones - Live',
-  shortTitle: 'ConsZones',
+  shortTitle: 'Consolidation Zones - Live',
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<ConsolidationZonesInputs> = {}): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[] } {
-  const { period, consLen } = { ...defaultInputs, ...inputs };
+/** Pine `if x` on a float: true when x is neither na nor 0 */
+const truthy = (x: number) => !Number.isNaN(x) && x !== 0;
+
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<ConsolidationZonesInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[] } {
+  const { period: prd, consLen: conslen, paintcons, zonecol } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
-  // highestbars/lowestbars: returns how many bars ago the highest/lowest was
   const highSeries = new Series(bars, (b) => b.high);
   const lowSeries = new Series(bars, (b) => b.low);
-  const hbArr = ta.highestbars(highSeries, period).toArray();
-  const lbArr = ta.lowestbars(lowSeries, period).toArray();
+  const hbArr = ta.highestbars(highSeries, prd).toArray();
+  const lbArr = ta.lowestbars(lowSeries, prd).toArray();
+  const hArr = ta.highest(highSeries, conslen).toArray();
+  const lArr = ta.lowest(lowSeries, conslen).toArray();
 
-  // highest/lowest over consLen for zone boundaries
-  const hArr = ta.highest(highSeries, consLen).toArray();
-  const lArr = ta.lowest(lowSeries, consLen).toArray();
-
-  // Zigzag direction and pivot tracking
   const dirArr: number[] = new Array(n).fill(0);
   const zzArr: number[] = new Array(n).fill(NaN);
-  const ppArr: number[] = new Array(n).fill(NaN);
-
-  // Consolidation state
-  const condHighArr: number[] = new Array(n).fill(NaN);
-  const condLowArr: number[] = new Array(n).fill(NaN);
-
   let dir = 0;
+  let ppPrev = NaN;
   let conscnt = 0;
   let condhigh = NaN;
   let condlow = NaN;
 
-  // Track line drawing data: Pine uses var line upline/dnline (single persistent pair).
-  // When conscnt == consLen (new zone), previous pair is kept (not deleted), new pair starts.
-  // When conscnt > consLen (zone extends), old pair is deleted and recreated.
-  // Result: one finalized line pair per completed zone + one active pair for current zone.
-  const lines: LineDrawingData[] = [];
-  // Index in lines[] where the current active pair starts (-1 = no active pair)
-  let activeLineIdx = -1;
+  const plot0: Array<{ time: number; value: number }> = [];
+  const plot1: Array<{ time: number; value: number }> = [];
+  const fillColors: string[] = [];
+
+  resetDrawings(); // max_lines_count 50
+  const upline = varDrawing<Line>(); // var line upline
+  const dnline = varDrawing<Line>(); // var line dnline
 
   for (let i = 0; i < n; i++) {
-    const hb = hbArr[i];
-    const lb = lbArr[i];
-
-    // hb_ = highestbars(prd) == 0 ? high : na
-    // highestbars returns negative offset (0 means current bar is highest)
-    const isHighPivot = (hb != null && !isNaN(hb) && hb === 0);
-    const isLowPivot = (lb != null && !isNaN(lb) && lb === 0);
-
-    const hb_ = isHighPivot ? bars[i].high : NaN;
-    const lb_ = isLowPivot ? bars[i].low : NaN;
-
-    // Update direction
-    if (!isNaN(hb_) && isNaN(lb_)) {
-      dir = 1;
-    } else if (isNaN(hb_) && !isNaN(lb_)) {
-      dir = -1;
-    }
+    setDrawingBar(i, i === n - 1);
+    const hb = hbArr[i] === 0 ? bars[i].high : NaN;
+    const lb = lbArr[i] === 0 ? bars[i].low : NaN;
+    if (truthy(hb) && Number.isNaN(lb)) dir = 1;
+    else if (truthy(lb) && Number.isNaN(hb)) dir = -1;
     dirArr[i] = dir;
+    let zz: number;
+    if (truthy(hb) && truthy(lb)) zz = dir === 1 ? hb : lb;
+    else zz = truthy(hb) ? hb : truthy(lb) ? lb : NaN;
+    zzArr[i] = zz;
 
-    // Determine zz value
-    if (!isNaN(hb_) && !isNaN(lb_)) {
-      if (dir === 1) {
-        zzArr[i] = hb_;
-      } else {
-        zzArr[i] = lb_;
-      }
-    } else if (!isNaN(hb_)) {
-      zzArr[i] = hb_;
-    } else if (!isNaN(lb_)) {
-      zzArr[i] = lb_;
-    } else {
-      zzArr[i] = NaN;
-    }
-
-    // Backward scan: find the most extreme pivot in the current direction run
+    // the most extreme point of the bars of the current direction (at most 1,000 bars back)
     let pp = NaN;
-    for (let x = 0; x <= Math.min(i, 1000); x++) {
-      const idx = i - x;
-      if (idx < 0) break;
-      // Break if direction changes
-      if (dirArr[idx] !== dir) break;
-      const zzVal = zzArr[idx];
-      if (!isNaN(zzVal)) {
-        if (isNaN(pp)) {
-          pp = zzVal;
-        } else {
-          if (dirArr[idx] === 1 && zzVal > pp) pp = zzVal;
-          if (dirArr[idx] === -1 && zzVal < pp) pp = zzVal;
+    for (let x = 0; x <= 1000 && x <= i; x++) {
+      if (dir !== dirArr[i - x]) break;
+      const z = zzArr[i - x];
+      if (truthy(z)) {
+        if (Number.isNaN(pp)) pp = z;
+        else {
+          if (dirArr[i - x] === 1 && z > pp) pp = z;
+          if (dirArr[i - x] === -1 && z < pp) pp = z;
         }
       }
     }
-    ppArr[i] = pp;
 
-    // Consolidation logic: triggered when pp changes
-    const prevPp = i > 0 ? ppArr[i - 1] : NaN;
-    const ppChanged = (isNaN(prevPp) && !isNaN(pp)) || (!isNaN(prevPp) && !isNaN(pp) && prevPp !== pp);
-
-    if (ppChanged) {
-      if (conscnt > consLen) {
-        // Breakout detected (we don't need to track breakout signals for the plot)
-      }
-      if (conscnt > 0 && !isNaN(condhigh) && !isNaN(condlow) && pp <= condhigh && pp >= condlow) {
-        conscnt = conscnt + 1;
-      } else {
-        conscnt = 0;
-      }
+    // Pine `if change(pp)`: na (first pivot) and 0 are false
+    if (truthy(pp - ppPrev)) {
+      if (conscnt > 0 && pp <= condhigh && pp >= condlow) conscnt += 1;
+      else conscnt = 0;
     } else {
-      conscnt = conscnt + 1;
+      conscnt += 1;
     }
+    ppPrev = pp;
 
-    // Zone boundary updates
-    if (conscnt >= consLen) {
-      if (conscnt === consLen) {
-        condhigh = (hArr[i] != null && !isNaN(hArr[i] as number)) ? hArr[i] as number : NaN;
-        condlow = (lArr[i] != null && !isNaN(lArr[i] as number)) ? lArr[i] as number : NaN;
+    if (conscnt >= conslen) {
+      if (conscnt === conslen) {
+        condhigh = hArr[i];
+        condlow = lArr[i];
       } else {
-        if (!isNaN(condhigh)) condhigh = Math.max(condhigh, bars[i].high);
-        if (!isNaN(condlow)) condlow = Math.min(condlow, bars[i].low);
+        if (upline.value) line.delete(upline.value);
+        if (dnline.value) line.delete(dnline.value);
+        condhigh = Math.max(condhigh, bars[i].high);
+        condlow = Math.min(condlow, bars[i].low);
       }
+      upline.value = line.new(i, condhigh, i - conscnt, condhigh, 'bar_index', 'none', '#FF5252', 'dashed');
+      dnline.value = line.new(i, condlow, i - conscnt, condlow, 'bar_index', 'none', '#00E676', 'dashed');
     }
 
-    condHighArr[i] = conscnt >= consLen ? condhigh : NaN;
-    condLowArr[i] = conscnt >= consLen ? condlow : NaN;
-
-    // Pine: line.new(bar_index, condhigh, bar_index - conscnt, condhigh, style=dashed)
-    // Pine uses var line upline/dnline - one persistent pair at a time.
-    // When conscnt == consLen: old pair stays (finalized), new pair created.
-    // When conscnt > consLen: line.delete(upline/dnline), then recreate.
-    if (conscnt >= consLen && !isNaN(condhigh) && !isNaN(condlow)) {
-      const startIdx = Math.max(0, i - conscnt);
-      if (conscnt === consLen) {
-        // New zone starting - finalize previous pair (keep it), start new active pair
-        activeLineIdx = lines.length;
-      } else if (activeLineIdx >= 0) {
-        // Zone extending - delete (replace) the active pair
-        lines.splice(activeLineIdx, 2);
-        // activeLineIdx stays the same since we removed at that position
-      }
-      lines.push({
-        time1: bars[startIdx].time,
-        price1: condhigh,
-        time2: bars[i].time,
-        price2: condhigh,
-        color: '#EF5350',
-        width: 1,
-        style: 'dashed',
-      });
-      lines.push({
-        time1: bars[startIdx].time,
-        price1: condlow,
-        time2: bars[i].time,
-        price2: condlow,
-        color: '#00FF00',
-        width: 1,
-        style: 'dashed',
-      });
-    } else {
-      // Not in a consolidation zone - no active line pair
-      activeLineIdx = -1;
-    }
+    plot0.push({ time: bars[i].time, value: condhigh });
+    plot1.push({ time: bars[i].time, value: condlow });
+    fillColors.push(paintcons && conscnt > conslen ? zonecol : 'transparent');
   }
-
-  const warmup = period;
-
-  const plot0 = condHighArr.map((v, i) => ({
-    time: bars[i].time,
-    value: (i < warmup || isNaN(v)) ? NaN : v,
-  }));
-
-  const plot1 = condLowArr.map((v, i) => ({
-    time: bars[i].time,
-    value: (i < warmup || isNaN(v)) ? NaN : v,
-  }));
+  setDrawingBar(null);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1 },
-    fills: [
-      { plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(33,150,243,0.15)' } },
-    ],
-    lines,
+    plots: { plot0, plot1 },
+    fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: zonecol }, colors: fillColors }],
+    lines: drawingOutputs(bars).lines ?? [],
   };
 }
 

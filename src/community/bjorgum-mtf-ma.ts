@@ -27,11 +27,11 @@
  */
 
 import {
-  ta, Series, getSourceSeries, color, timeframe, barInterval,
+  ta, Series, getSourceSeries, color, timeframe, mapToChart, heikinAshi,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { BarColorData } from '../types';
-import { periodStarts, chartTimeframe, securityBars, hasCalendar } from '../anchor-period';
+import { periodStarts, chartTimeframe, higherTimeframeBars, hasCalendar } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
 
 type MaType = 'EMA' | 'HEMA' | 'SMA' | 'HMA' | 'WMA' | 'DEMA' | 'VWMA' | 'VWAP' | 'T3' | 'IT';
@@ -211,6 +211,8 @@ const nz = (v: number) => (Number.isNaN(v) ? 0 : v);
 interface TimeframeBars {
   /** Bars of the timeframe built from the chart bars (the chart bars themselves for the chart timeframe) */
   htf: Bar[];
+  /** Index of the bar of the timeframe of each chart bar */
+  group: number[];
   /** Index of the first chart bar of each bar of the timeframe */
   first: number[];
   /** For each chart bar, the index of the latest completed bar of the timeframe (-1: none yet) */
@@ -225,78 +227,14 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): Timefra
   const chart = chartTimeframe(bars, context);
   if (tf.trim() === '' || chart === '' || timeframe.in_seconds(tf) === timeframe.in_seconds(chart)) {
     const own = bars.map((_b, i) => i);
-    return { htf: bars, first: own, latest: own };
+    return { htf: bars, group: own, first: own, latest: own };
   }
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`Bjorgum MTF MA: the timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
   }
-  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
-  // complete them come from the library rule (see anchor-period.ts)
-  const exchange = securityBars(bars, tf, context);
-  if (exchange) return { htf: exchange.htf, first: exchange.first, latest: exchange.latest };
-  const n = bars.length;
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const first: number[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-      first.push(i);
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
-
-  // A bar completes its period when its close reaches the end of the period. Symbols that trade every day follow
-  // the UTC calendar: the period of the close time is another period. Other symbols: the last bar of a period.
-  const ms = n > 0 && bars[0].time >= 1e12;
-  const weekend = (t: number) => {
-    const wd = new Date(ms ? t : t * 1000).getUTCDay();
-    return wd === 0 || wd === 6;
-  };
-  const interval = barInterval(bars);
-  const closes = bars.map((b) => ({ time: b.time + interval }));
-  const calendar = bars.some((b) => weekend(b.time)) && closes.some((b) => weekend(b.time));
-  const closeStarts = calendar ? periodStarts(closes, tf) : [];
-  // The last bar of a symbol that does not trade every day: its period is complete when the next possible bar is in
-  // another period. The next bar is on the same day while the bar is earlier in the day than the last bar of the
-  // trading day before; else it is on the next weekday.
-  let lastEnds = true;
-  if (!calendar && n > 1) {
-    const DAY = 86400000;
-    const toMs = (t: number) => (ms ? t : t * 1000);
-    const lastMs = toMs(bars[n - 1].time);
-    const day = Math.floor(lastMs / DAY) * DAY;
-    let next = lastMs + toMs(interval);
-    let sessionOver = true;
-    if (toMs(interval) < DAY) {
-      let j = n - 2;
-      while (j >= 0 && toMs(bars[j].time) >= day) j--;
-      sessionOver = j < 0 || lastMs - day >= toMs(bars[j].time) % DAY;
-    }
-    if (sessionOver) {
-      next = day + DAY;
-      while (weekend(ms ? next : next / 1000)) next += DAY;
-    }
-    const withNext = periodStarts([...bars, { time: ms ? next : next / 1000 }], tf);
-    lastEnds = withNext[n] !== withNext[n - 1];
-  }
-  const latest: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let done = i === 0 ? -1 : latest[i - 1];
-    if (i > 0 && group[i] !== group[i - 1]) done = Math.max(done, group[i] - 1);
-    const ends = i === n - 1 ? lastEnds : starts[i + 1] !== starts[i];
-    const reaches = !calendar || closeStarts[i] !== starts[i];
-    if (ends && reaches) done = Math.max(done, group[i]);
-    latest.push(done);
-  }
-  return { htf, first, latest };
+  // The periods and the bars that complete them: the exchange calendar of the chart context (time zone and
+  // session), else the UTC calendar rule; grouped and completed by the library (see anchor-period.ts)
+  return higherTimeframeBars(bars, tf, context);
 }
 
 export function calculate(
@@ -320,13 +258,9 @@ export function calculate(
     const close = S(b.map((x) => x.close));
     const volume = b.map((x) => x.volume ?? NaN);
 
-    // _haOpen(): haOpen := na(haOpen[1]) ? (open + close) / 2 : (nz(haOpen[1]) + nz(haClose[1])) / 2
-    const haOpen: number[] = new Array(m);
-    for (let i = 0; i < m; i++) {
-      const prevO = i > 0 ? haOpen[i - 1] : NaN;
-      const prevC = i > 0 ? (b[i - 1].open + b[i - 1].high + b[i - 1].low + b[i - 1].close) / 4 : NaN;
-      haOpen[i] = Number.isNaN(prevO) ? (b[i].open + b[i].close) / 2 : (prevO + nz(prevC)) / 2;
-    }
+    // _haOpen(): haOpen := na(haOpen[1]) ? (open + close) / 2 : (nz(haOpen[1]) + nz(haClose[1])) / 2, the open of
+    // the Heikin Ashi bars
+    const haOpen = heikinAshi(b).map((x) => x.open);
 
     // _itrend(): Ehlers instantaneous trendline of the source input
     const inp = A(getSourceSeries(b, cfg.inp as Parameters<typeof getSourceSeries>[1]));
@@ -357,13 +291,8 @@ export function calculate(
       }
       dayStarts ??= periodStarts(bars, 'D', chart);
       const days = dayStarts;
-      let sumPv = 0;
-      let sumV = 0;
-      return hlc3.map((v, i) => {
-        if (i > 0 && days[ctx.first[i]] !== days[ctx.first[i - 1]]) { sumPv = 0; sumV = 0; }
-        if (!Number.isNaN(v) && !Number.isNaN(volume[i])) { sumPv += v * volume[i]; sumV += volume[i]; }
-        return sumPv / sumV;
-      });
+      const newDay = b.map((_x, i) => (i === 0 || days[ctx.first[i]] !== days[ctx.first[i - 1]] ? 1 : 0));
+      return A(ta.vwap(S(hlc3), S(volume), S(newDay)));
     };
 
     // getMA(type, length)
@@ -429,14 +358,14 @@ export function calculate(
         bar: ma.map((v, i) => ge(closeOf(i), v)),
       };
     }
-    const { latest } = ctx;
+    const { group, latest } = ctx;
     // _NRPrt: security(tf, src, gaps_off)[1]; _NRP: security(tf, src, gaps_on)[1]
-    const step = (values: number[]) => bars.map((_b, i) => (i > 0 && latest[i - 1] >= 0 ? values[latest[i - 1]] : NaN));
-    const gaps = (values: number[]) => bars.map((_b, i) => {
-      if (i === 0) return NaN;
-      const before = i > 1 ? latest[i - 2] : -1;
-      return latest[i - 1] !== before ? values[latest[i - 1]] : NaN;
-    });
+    const security = (values: number[], gapsOn: boolean) => {
+      const onChart = mapToChart(values, group, latest, false, gapsOn);
+      return onChart.map((_v, i) => (i > 0 ? onChart[i - 1] : NaN));
+    };
+    const step = (values: number[]) => security(values, false);
+    const gaps = (values: number[]) => security(values, true);
     const maStep = step(ma);
     return {
       plot: cfg.smooth ? gaps(ma) : maStep,

@@ -15,7 +15,7 @@
  *   bars in the high / low of that timeframe (without lookahead), with "Left Bars" x m bars before and
  *   "Right Bars" + m bars after, m = timeframe / chart timeframe. As in the original, their mitigated copies use the
  *   colours of the chart timeframe levels.
- * - At most 50 lines and 50 boxes are kept (the oldest are removed).
+ * - At most 50 lines and 50 boxes are kept (the oldest are removed; drawing registry of the library).
  *
  * Times: the levels are placed by time. The end of a level that follows the current bar is the bar time plus 20
  * times the gap between the two bars before.
@@ -38,8 +38,11 @@
  * Original notice: © Sonarlab
  */
 
-import { ta, Series, color, timeframe, barInterval, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import {
+  ta, Series, color, timeframe, line, box, resetDrawings, setDrawingBar,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line, type Box,
+} from 'oakscriptjs';
+import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
 import type { BoxData, LineDrawingData } from '../types';
 
@@ -217,27 +220,6 @@ const truthy = (v: number) => !isNaN(v) && v !== 0;
 type Dash = 'solid' | 'dashed' | 'dotted';
 const dash = (name: StyleName): Dash => (name === 'Solid' ? 'solid' : name === 'Dashed' ? 'dashed' : 'dotted');
 
-/** A line or a box, with times as x (xloc.bar_time). y2 is only used by boxes (the bottom). */
-interface Obj {
-  x1: number; y1: number; x2: number; y2: number;
-  color: string; border: string; style: Dash; width: number; extend: boolean; dead: boolean;
-}
-
-/** Live drawings of one kind: above max + 5 objects the oldest are deleted until max remain */
-class Live {
-  list: Obj[] = [];
-  add(o: Obj): Obj {
-    this.list.push(o);
-    if (this.list.length > MAX_COUNT + 5) for (const old of this.list.splice(0, this.list.length - MAX_COUNT)) old.dead = true;
-    return o;
-  }
-  delete(o: Obj): void {
-    if (o.dead) return;
-    o.dead = true;
-    this.list.splice(this.list.indexOf(o), 1);
-  }
-}
-
 /**
  * request.security(syminfo.tickerid, tf, ...) without lookahead: the bars of timeframe `tf` built from the chart
  * bars (time = the start of the period), and for each chart bar the index of the latest completed bar of that
@@ -251,71 +233,9 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`Liquidity Levels: the timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
   }
-  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
-  // complete them come from the library rule (see anchor-period.ts)
-  const exchange = securityBars(bars, tf, context);
-  if (exchange) return { htf: exchange.htf, latest: exchange.latest };
-  const n = bars.length;
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
-
-  // A bar completes its period when its close reaches the end of the period. Symbols that trade every day follow
-  // the UTC calendar: the period of the close time is another period. Other symbols: the last bar of a period.
-  const ms = n > 0 && bars[0].time >= 1e12;
-  const weekend = (t: number) => {
-    const wd = new Date(ms ? t : t * 1000).getUTCDay();
-    return wd === 0 || wd === 6;
-  };
-  const interval = barInterval(bars);
-  const closes = bars.map((b) => ({ time: b.time + interval }));
-  const calendar = bars.some((b) => weekend(b.time)) && closes.some((b) => weekend(b.time));
-  const closeStarts = calendar ? periodStarts(closes, tf) : [];
-  // The last bar of a symbol that does not trade every day: its period is complete when the next possible bar is in
-  // another period. The next bar is on the same day while the bar is earlier in the day than the last bar of the
-  // trading day before; else it is on the next weekday.
-  let lastEnds = true;
-  if (!calendar && n > 1) {
-    const DAY = 86400000;
-    const toMs = (t: number) => (ms ? t : t * 1000);
-    const lastMs = toMs(bars[n - 1].time);
-    const day = Math.floor(lastMs / DAY) * DAY;
-    let next = lastMs + toMs(interval);
-    let sessionOver = true;
-    if (toMs(interval) < DAY) {
-      let j = n - 2;
-      while (j >= 0 && toMs(bars[j].time) >= day) j--;
-      sessionOver = j < 0 || lastMs - day >= toMs(bars[j].time) % DAY;
-    }
-    if (sessionOver) {
-      next = day + DAY;
-      while (weekend(ms ? next : next / 1000)) next += DAY;
-    }
-    const withNext = periodStarts([...bars, { time: ms ? next : next / 1000 }], tf);
-    lastEnds = withNext[n] !== withNext[n - 1];
-  }
-  const latest: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let done = i === 0 ? -1 : latest[i - 1];
-    if (i > 0 && group[i] !== group[i - 1]) done = Math.max(done, group[i] - 1);
-    const ends = i === n - 1 ? lastEnds : starts[i + 1] !== starts[i];
-    const reaches = !calendar || closeStarts[i] !== starts[i];
-    if (ends && reaches) done = Math.max(done, group[i]);
-    latest.push(done);
-  }
-  return { htf, latest };
+  // The periods and the bars that complete them: the exchange calendar of the chart context (time zone and
+  // session), else the UTC calendar rule; grouped and completed by the library (see anchor-period.ts)
+  return higherTimeframeBars(bars, tf, context);
 }
 
 export function calculate(
@@ -338,8 +258,10 @@ export function calculate(
   const highStyle = dash(cfg.highLineStyle);
   const lowStyle = dash(cfg.lowLineStyle);
 
-  const lines = new Live();
-  const boxes = new Live();
+  // Lines and boxes: library objects in the drawing registry (above max + 5 objects the oldest are deleted until max
+  // remain; a deleted object reads na). x values are bar times (xloc.bar_time, in the unit of the bar times).
+  resetDrawings({ line: MAX_COUNT, box: MAX_COUNT });
+  const extend = extentionMax ? 'right' : 'none';
 
   // Chart timeframe pivots, read one bar later
   const pivotHigh = A(ta.pivothigh(new Series(bars, (b) => b.high), leftBars, rightBars));
@@ -365,14 +287,14 @@ export function calculate(
   const T = (i: number) => (i >= 0 ? bars[i].time : NaN);
 
   /** One side of one timeframe: the open levels (lines and boxes) */
-  const makeSide = (isHigh: boolean) => ({ isHigh, lineArray: [] as Obj[], boxArray: [] as Obj[] });
+  const makeSide = (isHigh: boolean) => ({ isHigh, lineArray: [] as Line[], boxArray: [] as Box[] });
   const high = makeSide(true);
   const low = makeSide(false);
   const highHTF = makeSide(true);
   const lowHTF = makeSide(false);
 
   // remove_mitigated_lines() / remove_mitigated_boxes(): the mitigated copies use the chart timeframe colours
-  const removeMitigated = (i: number, arr: Obj[], isHigh: boolean, live: Live, isBox: boolean) => {
+  const removeMitigatedLines = (i: number, arr: Line[], isHigh: boolean) => {
     if (arr.length > 0 && cfg.removeMitigated) {
       const b = bars[i];
       const prevClose = i > 0 ? bars[i - 1].close : NaN;
@@ -380,151 +302,168 @@ export function calculate(
       const ll = byClose ? prevClose : b.low;
       for (let k = arr.length - 1; k >= 0; k--) {
         const l = arr[k];
-        // a deleted object returns na: no comparison is true
-        const level = l.dead ? NaN : l.y1;
+        // a deleted line reads na: no comparison is true
+        const level = line.get_y1(l);
         if (isHigh ? gt(hh, level) : lt(ll, level)) {
           arr.splice(k, 1);
           if (show) {
-            if (isBox) {
-              live.add({
-                x1: l.x1, y1: l.y1, x2: b.time, y2: l.y2,
-                color: String(color.new(isHigh ? cfg.highBoxBgColor : cfg.lowBoxBgColor, 90)),
-                border: String(color.new(isHigh ? cfg.highBoxBorderColor : cfg.lowBoxBorderColor, 90)),
-                style: isHigh ? highStyle : lowStyle, width: 1, extend: false, dead: false,
-              });
-            } else {
-              live.add({
-                x1: l.x1, y1: l.y1, x2: b.time, y2: l.y1,
-                color: String(color.new(isHigh ? cfg.highLineColor : cfg.lowLineColor, 70)), border: '',
-                style: 'solid', width: 1, extend: false, dead: false,
-              });
-            }
+            line.new(line.get_x1(l), level, b.time, level, 'bar_time', 'none', String(color.new(isHigh ? cfg.highLineColor : cfg.lowLineColor, 70)));
           }
-          live.delete(l);
+          line.delete(l);
         }
       }
     }
-    // display_limit_line() / display_limit_box()
-    if (arr.length > limit) live.delete(arr.shift() as Obj);
+    // display_limit_line()
+    if (arr.length > limit) line.delete(arr.shift() as Line);
+  };
+  const removeMitigatedBoxes = (i: number, arr: Box[], isHigh: boolean) => {
+    if (arr.length > 0 && cfg.removeMitigated) {
+      const b = bars[i];
+      const prevClose = i > 0 ? bars[i - 1].close : NaN;
+      const hh = byClose ? prevClose : b.high;
+      const ll = byClose ? prevClose : b.low;
+      for (let k = arr.length - 1; k >= 0; k--) {
+        const l = arr[k];
+        // the low boxes also compare with the top (the low), as the original
+        const level = box.get_top(l);
+        if (isHigh ? gt(hh, level) : lt(ll, level)) {
+          arr.splice(k, 1);
+          if (show) {
+            box.new(
+              box.get_left(l), level, b.time, box.get_bottom(l),
+              String(color.new(isHigh ? cfg.highBoxBorderColor : cfg.lowBoxBorderColor, 90)), 1, isHigh ? highStyle : lowStyle, 'none',
+              'bar_time', String(color.new(isHigh ? cfg.highBoxBgColor : cfg.lowBoxBgColor, 90)),
+            );
+          }
+          box.delete(l);
+        }
+      }
+    }
+    // display_limit_box()
+    if (arr.length > limit) box.delete(arr.shift() as Box);
   };
 
-  // extend_line_to_current() / extend_box_to_current()
-  const extend = (i: number, arr: Obj[]) => {
+  // extend_line_to_current() / extend_box_to_current() (the setters of a deleted object do nothing)
+  const extendLines = (i: number, arr: Line[]) => {
     if (arr.length === 0) return;
     const timeExt = T(i) + (T(i - 1) - T(i - 2)) * 20;
-    for (const o of arr) if (!o.dead) o.x2 = timeExt;
+    for (const o of arr) line.set_x2(o, timeExt);
+  };
+  const extendBoxes = (i: number, arr: Box[]) => {
+    if (arr.length === 0) return;
+    const timeExt = T(i) + (T(i - 1) - T(i - 2)) * 20;
+    for (const o of arr) box.set_right(o, timeExt);
   };
 
-  for (let i = 0; i < n; i++) {
-    // Chart timeframe levels
-    if (cfg.currentTF && i >= rightBars + 1) {
-      const p = bars[i - rightBars - 1];
-      if (truthy(i > 0 ? pivotHigh[i - 1] : NaN)) {
-        if (asLines) {
-          high.lineArray.push(lines.add({
-            x1: p.time, y1: p.high, x2: T(i - 1), y2: p.high, color: cfg.highLineColor, border: '',
-            style: highStyle, width: cfg.lineWidth, extend: extentionMax, dead: false,
-          }));
-        } else {
-          high.boxArray.push(boxes.add({
-            x1: p.time, y1: p.high, x2: T(i - 1), y2: Math.max(p.open, p.close), color: cfg.highBoxBgColor,
-            border: cfg.highBoxBorderColor, style: highStyle, width: cfg.lineWidth, extend: extentionMax, dead: false,
-          }));
+  try {
+    for (let i = 0; i < n; i++) {
+      setDrawingBar(i, i === n - 1);
+      // Chart timeframe levels
+      if (cfg.currentTF && i >= rightBars + 1) {
+        const p = bars[i - rightBars - 1];
+        if (truthy(i > 0 ? pivotHigh[i - 1] : NaN)) {
+          if (asLines) {
+            high.lineArray.push(line.new(p.time, p.high, T(i - 1), p.high, 'bar_time', extend, cfg.highLineColor, highStyle, cfg.lineWidth));
+          } else {
+            high.boxArray.push(box.new(
+              p.time, p.high, T(i - 1), Math.max(p.open, p.close), cfg.highBoxBorderColor, cfg.lineWidth, highStyle, extend, 'bar_time',
+              cfg.highBoxBgColor,
+            ));
+          }
+        }
+        if (truthy(i > 0 ? pivotLow[i - 1] : NaN)) {
+          if (asLines) {
+            low.lineArray.push(line.new(p.time, p.low, T(i - 1), p.low, 'bar_time', extend, cfg.lowLineColor, lowStyle, cfg.lineWidth));
+          } else {
+            low.boxArray.push(box.new(
+              p.time, p.low, T(i - 1), Math.min(p.open, p.close), cfg.lowBoxBorderColor, cfg.lineWidth, lowStyle, extend, 'bar_time',
+              cfg.lowBoxBgColor,
+            ));
+          }
         }
       }
-      if (truthy(i > 0 ? pivotLow[i - 1] : NaN)) {
-        if (asLines) {
-          low.lineArray.push(lines.add({
-            x1: p.time, y1: p.low, x2: T(i - 1), y2: p.low, color: cfg.lowLineColor, border: '',
-            style: lowStyle, width: cfg.lineWidth, extend: extentionMax, dead: false,
-          }));
-        } else {
-          low.boxArray.push(boxes.add({
-            x1: p.time, y1: p.low, x2: T(i - 1), y2: Math.min(p.open, p.close), color: cfg.lowBoxBgColor,
-            border: cfg.lowBoxBorderColor, style: lowStyle, width: cfg.lineWidth, extend: extentionMax, dead: false,
-          }));
+
+      removeMitigatedLines(i, high.lineArray, true);
+      removeMitigatedLines(i, low.lineArray, false);
+      removeMitigatedBoxes(i, high.boxArray, true);
+      removeMitigatedBoxes(i, low.boxArray, false);
+
+      if (extentionCurrent) {
+        extendLines(i, high.lineArray);
+        extendLines(i, low.lineArray);
+        extendBoxes(i, high.boxArray);
+        extendBoxes(i, low.boxArray);
+      }
+
+      // Higher timeframe levels
+      if (cfg.htfBool) {
+        const p = i >= dis ? sec[i - dis] : null;
+        const prev = i >= 1 ? sec[i - 1] : null;
+        const time1 = p ? p.time : NaN;
+        const time2 = prev ? prev.time : NaN;
+        if (truthy(pivotHighHTF[i])) {
+          const level = p ? p.high : NaN;
+          if (asLines) {
+            highHTF.lineArray.push(line.new(
+              time1, level, time2, level, 'bar_time', extend, cfg.highLineColorHTF, dash(cfg.highLineStyleHTF), cfg.lineWidthHTF,
+            ));
+          } else {
+            highHTF.boxArray.push(box.new(
+              time1, level, time2, p ? Math.max(p.open, p.close) : NaN, cfg.highBoxBorderColorHTF, cfg.lineWidthHTF,
+              dash(cfg.highLineStyleHTF), extend, 'bar_time', cfg.highBoxBgColorHTF,
+            ));
+          }
+        }
+        if (truthy(pivotLowHTF[i])) {
+          const level = p ? p.low : NaN;
+          if (asLines) {
+            lowHTF.lineArray.push(line.new(
+              time1, level, time2, level, 'bar_time', extend, cfg.lowLineColorHTF, dash(cfg.lowLineStyleHTF), cfg.lineWidthHTF,
+            ));
+          } else {
+            lowHTF.boxArray.push(box.new(
+              time1, level, time2, p ? Math.min(p.open, p.close) : NaN, cfg.lowBoxBorderColorHTF, cfg.lineWidthHTF,
+              dash(cfg.lowLineStyleHTF), extend, 'bar_time', cfg.lowBoxBgColorHTF,
+            ));
+          }
         }
       }
-    }
 
-    removeMitigated(i, high.lineArray, true, lines, false);
-    removeMitigated(i, low.lineArray, false, lines, false);
-    removeMitigated(i, high.boxArray, true, boxes, true);
-    removeMitigated(i, low.boxArray, false, boxes, true);
+      removeMitigatedLines(i, highHTF.lineArray, true);
+      removeMitigatedLines(i, lowHTF.lineArray, false);
+      removeMitigatedBoxes(i, highHTF.boxArray, true);
+      removeMitigatedBoxes(i, lowHTF.boxArray, false);
 
-    if (extentionCurrent) {
-      extend(i, high.lineArray);
-      extend(i, low.lineArray);
-      extend(i, high.boxArray);
-      extend(i, low.boxArray);
-    }
-
-    // Higher timeframe levels
-    if (cfg.htfBool) {
-      const p = i >= dis ? sec[i - dis] : null;
-      const prev = i >= 1 ? sec[i - 1] : null;
-      const time1 = p ? p.time : NaN;
-      const time2 = prev ? prev.time : NaN;
-      if (truthy(pivotHighHTF[i])) {
-        const level = p ? p.high : NaN;
-        if (asLines) {
-          highHTF.lineArray.push(lines.add({
-            x1: time1, y1: level, x2: time2, y2: level, color: cfg.highLineColorHTF, border: '',
-            style: dash(cfg.highLineStyleHTF), width: cfg.lineWidthHTF, extend: extentionMax, dead: false,
-          }));
-        } else {
-          highHTF.boxArray.push(boxes.add({
-            x1: time1, y1: level, x2: time2, y2: p ? Math.max(p.open, p.close) : NaN, color: cfg.highBoxBgColorHTF,
-            border: cfg.highBoxBorderColorHTF, style: dash(cfg.highLineStyleHTF), width: cfg.lineWidthHTF,
-            extend: extentionMax, dead: false,
-          }));
-        }
-      }
-      if (truthy(pivotLowHTF[i])) {
-        const level = p ? p.low : NaN;
-        if (asLines) {
-          lowHTF.lineArray.push(lines.add({
-            x1: time1, y1: level, x2: time2, y2: level, color: cfg.lowLineColorHTF, border: '',
-            style: dash(cfg.lowLineStyleHTF), width: cfg.lineWidthHTF, extend: extentionMax, dead: false,
-          }));
-        } else {
-          lowHTF.boxArray.push(boxes.add({
-            x1: time1, y1: level, x2: time2, y2: p ? Math.min(p.open, p.close) : NaN, color: cfg.lowBoxBgColorHTF,
-            border: cfg.lowBoxBorderColorHTF, style: dash(cfg.lowLineStyleHTF), width: cfg.lineWidthHTF,
-            extend: extentionMax, dead: false,
-          }));
-        }
+      if (extentionCurrent) {
+        extendLines(i, highHTF.lineArray);
+        extendLines(i, lowHTF.lineArray);
+        extendBoxes(i, highHTF.boxArray);
+        extendBoxes(i, lowHTF.boxArray);
       }
     }
-
-    removeMitigated(i, highHTF.lineArray, true, lines, false);
-    removeMitigated(i, lowHTF.lineArray, false, lines, false);
-    removeMitigated(i, highHTF.boxArray, true, boxes, true);
-    removeMitigated(i, lowHTF.boxArray, false, boxes, true);
-
-    if (extentionCurrent) {
-      extend(i, highHTF.lineArray);
-      extend(i, lowHTF.lineArray);
-      extend(i, highHTF.boxArray);
-      extend(i, lowHTF.boxArray);
-    }
+  } finally {
+    setDrawingBar(null);
   }
 
   // an object with an na coordinate is not drawn
-  const drawn = (o: Obj) => ![o.x1, o.y1, o.x2, o.y2].some((v) => isNaN(v));
+  const drawn = (v: number[]) => !v.some((x) => isNaN(x));
+  const lines = line.all().filter((l) => drawn([l.x1, l.y1, l.x2, l.y2])).map((l) => ({
+    time1: l.x1, price1: l.y1, time2: l.x2, price2: l.y2, color: String(l.color), width: l.width,
+    ...(l.style !== 'solid' ? { style: l.style as Dash } : {}),
+    ...(l.extend === 'right' ? { extend: 'right' as const } : {}),
+  }));
+  const boxes = box.all().filter((b) => drawn([b.left, b.top, b.right, b.bottom])).map((b) => ({
+    time1: b.left, price1: b.top, time2: b.right, price2: b.bottom, bgColor: String(b.bgcolor), borderColor: String(b.border_color),
+    borderWidth: b.border_width,
+    ...(b.border_style !== 'solid' ? { borderStyle: b.border_style } : {}),
+    ...(b.extend === 'right' ? { extend: 'right' as const } : {}),
+  }));
+  resetDrawings();
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
-    lines: lines.list.filter(drawn).map((l) => ({
-      time1: l.x1, price1: l.y1, time2: l.x2, price2: l.y2, color: l.color, width: l.width,
-      ...(l.style !== 'solid' ? { style: l.style } : {}),
-      ...(l.extend ? { extend: 'right' as const } : {}),
-    })),
-    boxes: boxes.list.filter(drawn).map((b) => ({
-      time1: b.x1, price1: b.y1, time2: b.x2, price2: b.y2, bgColor: b.color, borderColor: b.border, borderWidth: b.width,
-      ...(b.style !== 'solid' ? { borderStyle: b.style } : {}),
-      ...(b.extend ? { extend: 'right' as const } : {}),
-    })),
+    lines,
+    boxes,
   };
 }
 

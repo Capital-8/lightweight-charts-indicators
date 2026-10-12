@@ -22,7 +22,10 @@
  * Original notice: © BigBeluga
  */
 
-import { ta, str, color, math, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, str, color, math, Series, line, box, label, resetDrawings, setDrawingBar,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Box, type Line,
+} from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, MarkerData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { foregroundColorOf, type ChartContext } from '../chart-context';
@@ -76,8 +79,8 @@ export const metadata = {
   overlay: true,
 };
 
-/** Default max_labels_count */
-const MAX_LABELS = 50;
+/** max_lines_count of indicator() (boxes and labels: the default 50) */
+const MAX_LINES = 500;
 /** The levels are followed on the last 1,500 bars */
 const FOLLOW_BARS = 1500;
 /** Colour constants of the original Pine version */
@@ -88,27 +91,6 @@ const BLACK = '#363A45';
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
-
-interface Ln {
-  x1: number;
-  x2: number;
-  y: number;
-  color: string;
-  dashed: boolean;
-  width: number;
-  deleted: boolean;
-}
-interface Bx {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-  color: string;
-  bg: string | null;
-  borderWidth: number;
-  text: string;
-  deleted: boolean;
-}
 
 export function calculate(
   bars: Bar[],
@@ -138,14 +120,14 @@ export function calculate(
     return gt(c, 100) ? 100 : c;
   });
 
-  const allLines: Ln[] = []; // line.all: the lines alive, in creation order
-  const allBoxes: Bx[] = []; // box.all
-  const lineArr: Array<Ln | null> = []; // var line[] lines
-  const boxArr: Bx[] = []; // var box[] boxes
-  const labels: LabelData[] = [];
+  // Drawings of the library registry (line.all / box.all / label.all, maximum counts of indicator())
+  resetDrawings({ line: MAX_LINES });
+  const lineArr: Array<Line | null> = []; // var line[] lines (line(na) = null)
+  const boxArr: Box[] = []; // var box[] boxes
   const markers: MarkerData[] = [];
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === last);
     const b = bars[i];
     const back = i >= rightBars && rightBars >= 0 ? i - rightBars : -1;
     const strength = back >= 0 ? normalizedVol[back] : NaN;
@@ -161,15 +143,9 @@ export function calculate(
       const css = String(color.from_gradient(colorIntense[back], 0, 100, color.new(base, isHigh ? 60 : 80), color.new(base, 0)));
       const price = isHigh ? pivot.high : pivot.low;
       const level = isHigh ? price + distance : price - distance;
-      const bx: Bx = {
-        left: back, top: level, right: back + 8, bottom: price, color: css, bg: css, borderWidth: 2,
-        text: `Volume:\n${str.tostring(math.round(avgVol[back], 2))}`, deleted: false,
-      };
-      allBoxes.push(bx);
-      boxArr.push(bx);
-      const ln: Ln = { x1: back, x2: i, y: level, color: css, dashed: false, width: 2, deleted: false };
-      allLines.push(ln);
-      lineArr.push(ln);
+      boxArr.push(box.new(back, level, back + 8, price, css, 2, 'solid', 'none', 'bar_index', css,
+        `Volume:\n${str.tostring(math.round(avgVol[back], 2))}`, 'small', fg));
+      lineArr.push(line.new(back, level, i, level, 'bar_index', 'none', css, 'solid', 2));
     }
 
     // extend_line(): extend the levels, mark the grabbed ones
@@ -177,32 +153,28 @@ export function calculate(
       for (let k = lineArr.length - 1; k >= 0; k--) {
         const ln = lineArr[k];
         // a deleted line (or na) gives na coordinates
-        const x2 = ln !== null && !ln.deleted ? ln.x2 : NaN;
-        const y = ln !== null && !ln.deleted ? ln.y : NaN;
+        const x2 = ln ? line.get_x2(ln) : NaN;
+        const y = ln ? line.get_y1(ln) : NaN;
         const through = gt(b.high, y) && lt(b.low, y);
-        if (i === x2 && !through) ln!.x2 = i + 1;
+        if (i === x2 && !through) line.set_x2(ln!, i + 1);
         if (through) {
-          ln!.dashed = true;
-          ln!.width = 1;
-          const bx = boxArr[k];
-          if (!bx.deleted) {
-            bx.text = 'Liquidity\nGrabbed';
-            bx.borderWidth = 1;
-            bx.bg = null;
-          }
+          line.set_style(ln!, 'dashed');
+          line.set_width(ln!, 1);
+          box.set_text(boxArr[k], 'Liquidity\nGrabbed');
+          box.set_border_width(boxArr[k], 1);
+          box.set_bgcolor(boxArr[k], 'transparent');
           lineArr[k] = null;
-          labels.push({
-            time: b.time, price: y, text: '〇', color: 'transparent', style: 'label_center', textColor: '#df1c1c',
-            tooltip: 'Claim Liquidity Point',
-          });
-          if (labels.length > MAX_LABELS + 5) labels.splice(0, labels.length - MAX_LABELS);
+          label.new(i, y, '〇', 'bar_index', 'price', 'transparent', 'label_center', '#df1c1c', undefined, undefined,
+            'Claim Liquidity Point');
         }
       }
     }
 
     // Keep the latest zones: one box and one line are deleted per bar
-    if (allBoxes.length > qty) allBoxes.shift()!.deleted = true;
-    if (allLines.length > qty) allLines.shift()!.deleted = true;
+    const allBoxes = box.all();
+    if (allBoxes.length > qty) box.delete(allBoxes[0]);
+    const allLines = line.all();
+    if (allLines.length > qty) line.delete(allLines[0]);
 
     // Filtered pivots: plotshape(..., location.absolute, offset = -rightBars)
     if (strong && hidePivot && (isHigh || isLow)) {
@@ -215,6 +187,7 @@ export function calculate(
       if (isLow) draw(bars[back].low, lowerCol);
     }
   }
+  setDrawingBar(null);
 
   // Dashboard
   const qtyBg = color.from_gradient(qty, 1, 50, null as unknown as string, color.new(lowerCol, 50));
@@ -239,15 +212,18 @@ export function calculate(
     plots: {},
     markers,
     // an object with an na coordinate is not drawn
-    lines: allLines.filter((l) => !isNaN(l.y)).map((l) => ({
-      time1: T(l.x1), price1: l.y, time2: T(l.x2), price2: l.y, color: l.color, width: l.width,
-      ...(l.dashed ? { style: 'dashed' as const } : {}),
+    lines: line.all().filter((l) => !isNaN(l.y1)).map((l) => ({
+      time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: String(l.color), width: l.width,
+      ...(l.style === 'dashed' ? { style: 'dashed' as const } : {}),
     })),
-    boxes: allBoxes.filter((b) => !isNaN(b.top) && !isNaN(b.bottom)).map((b) => ({
-      time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom, bgColor: b.bg ?? 'transparent', borderColor: b.color,
-      borderWidth: b.borderWidth, text: b.text, textColor: fg, textSize: 'small' as const,
+    boxes: box.all().filter((b) => !isNaN(b.top) && !isNaN(b.bottom)).map((b) => ({
+      time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom, bgColor: String(b.bgcolor),
+      borderColor: String(b.border_color), borderWidth: b.border_width, text: b.text, textColor: fg, textSize: 'small' as const,
     })),
-    labels,
+    labels: label.all().map((l): LabelData => ({
+      time: T(l.x), price: l.y, text: l.text ?? '', color: 'transparent', style: 'label_center', textColor: String(l.textcolor),
+      tooltip: l.tooltip,
+    })),
     tables,
   };
 }

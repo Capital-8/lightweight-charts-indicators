@@ -318,8 +318,8 @@ export function calculate(
         // Uses the low and the high of the bars, whatever the source
         const kijunLow = A(ta.lowest(lowSeries, len));
         const kijunHigh = A(ta.highest(highSeries, len));
-        // len / kidiv is a float in Pine v6: the length argument takes its integer part
-        const convLen = Math.trunc(len / cfg.kidiv);
+        // len / kidiv is a float in Pine v6: ta.lowest / ta.highest take its integer part
+        const convLen = len / cfg.kidiv;
         const convLow = A(ta.lowest(lowSeries, convLen));
         const convHigh = A(ta.highest(highSeries, convLen));
         return kijunLow.map((v, i) => ((v + kijunHigh[i]) / 2 + (convLow[i] + convHigh[i]) / 2) / 2);

@@ -30,7 +30,7 @@
  */
 
 import {
-  array, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  array, str, timeframe, time as pineTime, resample, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import { chartTimeframe, periodStarts } from '../anchor-period';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
@@ -282,20 +282,8 @@ export function calculate(
     if (300 % tfSeconds !== 0) {
       throw new Error(`DR/IDR: on a chart below 5 minutes the script reads the 5-minute bars, which cannot be built from the bars of a "${tf}" chart`);
     }
-    const starts = periodStarts(bars, '5', chart);
-    for (let i = 0; i < n; ) {
-      let j = i;
-      let high = bars[i].high;
-      let low = bars[i].low;
-      while (j + 1 < n && starts[j + 1] === starts[i]) {
-        j++;
-        high = Math.max(high, bars[j].high);
-        low = Math.min(low, bars[j].low);
-      }
-      const period = { open: bars[i].open, high, low, close: bars[j].close };
-      for (let k = i; k <= j; k++) values[k] = period;
-      i = j + 1;
-    }
+    const { bars: m5, group } = resample(bars, periodStarts(bars, '5', chart));
+    for (let i = 0; i < n; i++) values[i] = m5[group[i]];
   }
 
   const styleOf = (option: LineStyleOption): Style => (option === 'Dashed' ? 'dashed' : option === 'Dotted' ? 'dotted' : 'solid');
@@ -448,7 +436,7 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     const time = bars[i].time * unit;
     const { open, high, low, close } = values[i];
-    const inSessionOf = (session: string) => pineTime.inSession(time, session, TIMEZONE);
+    const inSessionOf = (session: string) => pineTime.inSession(time, session, TIMEZONE, tfSeconds * 1000);
 
     const inRegularSession = inSessionOf(cfg.regularTime) && cfg.showRegular;
     const inRegularExtend = inSessionOf(cfg.regularExtend) && cfg.showRegular;

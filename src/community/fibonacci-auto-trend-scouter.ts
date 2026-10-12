@@ -41,7 +41,7 @@
  */
 
 import {
-  ta, Series, getSourceSeries, color, timeframe, str, array,
+  ta, Series, getSourceSeries, color, timeframe, str, array, resample, mapToChart,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
@@ -461,23 +461,10 @@ function timeframeBars(bars: Bar[], tf: string, name: string, context?: ChartCon
     throw new Error(`Fibonacci Auto Trend Scouter: the timeframe "${tf}" of ${name} is lower than the chart timeframe "${chart}": the chart bars do not have that data (choose another timeframe or switch "Show Plot" and "Show Label" of that level off)`);
   }
   const exchange = securityBars(bars, tf, context);
-  if (exchange) return { htf: exchange.htf, toChart: (values) => exchange.group.map((g) => values[g]) };
-  const starts = periodStarts(bars, tf, context);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
-  return { htf, toChart: (values) => group.map((g) => values[g]) };
+  if (exchange) return { htf: exchange.htf, toChart: (values) => mapToChart(values, exchange.group, exchange.latest, true, false) };
+  // Without it: periods of the UTC calendar and the bars, grouped by the library
+  const { bars: htf, group } = resample(bars, periodStarts(bars, tf, context));
+  return { htf, toChart: (values) => mapToChart(values, group, group, true, false) };
 }
 
 export function calculate(bars: Bar[], inputs: Partial<FibonacciAutoTrendScouterInputs> = {}, chart?: ChartContext): IndicatorResult {

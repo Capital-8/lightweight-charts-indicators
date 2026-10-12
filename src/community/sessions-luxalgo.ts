@@ -28,8 +28,12 @@
  * Original notice: © LuxAlgo
  */
 
-import { color, str, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  box, label, line, color, str, time as pineTime, timeframe, resetDrawings, setDrawingBar, varDrawing, type DrawingVariable,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { MarkerData, LineDrawingData, BoxData, LabelData, TableData, TableCellData, TableMergeData, PineSize } from '../types';
+import { chartTimeframe } from '../anchor-period';
 import { mintickOf, timezoneOf, type ChartContext } from '../chart-context';
 
 export interface SessionsLuxalgoInputs {
@@ -234,27 +238,35 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 const POSITIONS = { 'Top Right': 'top_right', 'Bottom Right': 'bottom_right', 'Bottom Left': 'bottom_left' } as const;
 
 /**
- * Live drawings of one kind, in creation order. Pine keeps at most max objects: a creation that brings the count
- * above max + 5 deletes the oldest until max remain. An object that a `var` variable of the script still refers to is
- * not deleted (measured on the original platform): the box, the label and the lines of the current session of each
- * session stay, however old they are.
+ * Live drawings of one kind, in creation order, kept by the drawing registry of the library: each output object has
+ * an object of the registry, which applies the limit of the script (max_*_count) with the rules of the original
+ * platform. An object that a `var` variable of the script still refers to is not deleted by the limit: the box, the
+ * label and the lines of the current session of each session stay, however old they are.
  */
-class Live<T extends object> {
-  items: T[] = [];
-  private held = new Map<string, T>();
+class Live<T extends object, R extends object> {
+  private readonly data = new Map<R, T>();
+  private readonly refs = new WeakMap<T, R>();
+  private readonly vars = new Map<string, DrawingVariable<R>>();
+  constructor(private readonly make: (o: T) => R, private readonly live: () => R[]) {}
   add(o: T): T {
-    this.items.push(o);
-    if (this.items.length > MAX_OBJECTS + 5) {
-      const kept = new Set(this.held.values());
-      let excess = this.items.length - MAX_OBJECTS;
-      this.items = this.items.filter((x) => kept.has(x) || excess-- <= 0);
-    }
+    const ref = this.make(o);
+    this.data.set(ref, o);
+    this.refs.set(o, ref);
     return o;
   }
   /** The `var` variable `name` now refers to `o` (the object it referred to before can be deleted) */
   hold(name: string, o: T): T {
-    this.held.set(name, o);
+    let v = this.vars.get(name);
+    if (!v) {
+      v = varDrawing<R>();
+      this.vars.set(name, v);
+    }
+    v.value = this.refs.get(o);
     return o;
+  }
+  /** The objects alive, in creation order */
+  get items(): T[] {
+    return this.live().map((ref) => this.data.get(ref)!);
   }
 }
 
@@ -295,6 +307,9 @@ export function calculate(
   const inMs = n > 0 && bars[0].time >= 1e12;
   const ms = (t: number) => (inMs ? t : t * 1000);
   const transparency = Math.trunc(cfg.rangeTransparency);
+  // bar size for the clock-change rule of the session test (intraday bars)
+  const chartTf = chartTimeframe(bars, chart);
+  const barMs = chartTf !== '' && timeframe.info(chartTf).isintraday ? timeframe.in_seconds(chartTf) * 1000 : undefined;
 
   const keys = ['A', 'B', 'C', 'D'] as const;
   const c = cfg as unknown as Record<string, boolean | string | number>;
@@ -332,9 +347,12 @@ export function calculate(
     prevActive: false,
   }));
 
-  const lines = new Live<LineDrawingData>();
-  const boxes = new Live<BoxData>();
-  const labels = new Live<LabelData>();
+  // max_lines_count / max_boxes_count / max_labels_count; objects of the registry placed by time (xloc.bar_time, ms)
+  resetDrawings({ line: MAX_OBJECTS, box: MAX_OBJECTS, label: MAX_OBJECTS });
+  const lines = new Live((l: LineDrawingData) => line.new(ms(l.time1), l.price1, ms(l.time2), l.price2, 'bar_time'), line.all);
+  const boxes = new Live((b: BoxData) => box.new(ms(b.time1), b.price1, ms(b.time2), b.price2, undefined, undefined, undefined,
+    undefined, 'bar_time'), box.all);
+  const labels = new Live((l: LabelData) => label.new(ms(l.time), l.price, l.text, 'bar_time'), label.all);
   const markers: MarkerData[] = [];
   const plots: Record<string, Point[]> = {};
   for (let k = 0; k < 12; k++) plots[`plot${k}`] = [];
@@ -382,9 +400,10 @@ export function calculate(
     const volume = bar.volume ?? NaN;
     const first = i === 0;
     const last = i === n - 1;
+    setDrawingBar(i, last);
 
     // sessionXActive = not na(time(timeframe.period, sessionXTimeInput, sessionTimezone))
-    const active = sessions.map((s) => pineTime.inSession(tMs, s.hours, tz));
+    const active = sessions.map((s) => pineTime.inSession(tMs, s.hours, tz, barMs));
     const started = sessions.map((s, k) => active[k] && !s.prevActive);
 
     if (first && cfg.dashboard) {
@@ -569,6 +588,7 @@ export function calculate(
     prevDay = day;
     sessions.forEach((s, k) => { s.prevActive = active[k]; });
   }
+  setDrawingBar(null);
 
   const tables: TableData[] = n === 0 ? [] : [{
     position: POSITIONS[cfg.dashboardPosition] ?? 'top_right',

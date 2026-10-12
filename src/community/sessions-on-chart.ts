@@ -17,7 +17,11 @@
  * Original notice: © Aurocks_AIF
  */
 
-import { color, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  barInterval, color, periodTime, time as pineTime,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SessionContext,
+} from 'oakscriptjs';
+import { chartTimeframe } from '../anchor-period';
 import type { BgColorData } from '../types';
 
 export interface SessionsOnChartInputs {
@@ -90,46 +94,19 @@ const SYDNEY_COLOR = String(color.new('#2962FF', 90));
 const DAY = 86400000;
 
 /**
- * time(res, session, "America/New_York") of a bar inside the session, as a period number that grows with time: the
- * period of the "Resolution" timeframe ("D", "W" or "M") that holds the trading day of the bar. The trading day is
- * the New York date of the bar, or the next date when the bar is in the evening part of a range that goes over
- * midnight (such a range belongs to the day it ends).
- */
-function periodOfSession(tMs: number, session: string, res: string): number {
-  const minute = pineTime.hour(tMs, TIMEZONE) * 60 + pineTime.minute(tMs, TIMEZONE);
-  let sameDay = false;
-  let nextDay = false;
-  for (const range of session.match(/\d{4}-\d{4}/g) ?? []) {
-    const start = (Number(range.slice(0, 2)) * 60 + Number(range.slice(2, 4))) % 1440;
-    const end = (Number(range.slice(5, 7)) * 60 + Number(range.slice(7, 9))) % 1440;
-    if (start < end || (start === 0 && end === 0)) {
-      if (minute >= start && (minute < end || end === 0)) sameDay = true;
-    } else if (minute >= start) {
-      nextDay = true;
-    }
-  }
-  let day = Date.UTC(pineTime.year(tMs, TIMEZONE), pineTime.month(tMs, TIMEZONE) - 1, pineTime.dayofmonth(tMs, TIMEZONE));
-  if (nextDay && !sameDay) day += DAY;
-  const d = new Date(day);
-  if (res === 'W') return day - ((d.getUTCDay() + 6) % 7) * DAY;
-  if (res === 'M') return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
-  return day;
-}
-
-/**
  * time(res, session, "America/New_York") of a bar outside the session: the session bars of one period make one bar
  * of the "Resolution" timeframe, and a chart bar between the first and the last session bar of a period is inside
  * that bar (the pause of a session in two parts with "D", the hours between two sessions of a week with "W"). Gives
  * the period, or NaN when the chart bar is between two periods. Only needed on the first bar: afterwards the period
- * of the last session bar is kept.
+ * of the last session bar is kept. (The library gives na outside the session: own code.)
  */
-function periodAround(tMs: number, session: string, res: string): number {
+function periodAround(tMs: number, session: string, res: string, ctx: SessionContext, barMs: number | undefined): number {
   const MINUTE = 60000;
   const LIMIT = 8 * 1440;
   const find = (step: number) => {
     for (let k = 1; k <= LIMIT; k++) {
       const t = tMs + k * step;
-      if (pineTime.inSession(t, session, TIMEZONE)) return periodOfSession(t, session, res);
+      if (pineTime.inSession(t, session, TIMEZONE, barMs)) return periodTime(t, res, ctx);
     }
     return NaN;
   };
@@ -146,13 +123,25 @@ export function calculate(
   const n = bars.length;
   const inMs = n > 0 && bars[0].time >= 1e12;
   const res = cfg.res.replace(/^1/, '');
+  // bar size in ms on intraday bars, for the clock-change rule of time.inSession
+  const interval = barInterval(bars) * (inMs ? 1 : 1000);
+  const barMs = interval > 0 && interval < DAY ? interval : undefined;
+  const chartTf = chartTimeframe(bars);
 
   const sessions = [
     { hours: cfg.london, show: cfg.London, col: LONDON_COLOR },
     { hours: cfg.ny, show: cfg.NY, col: NY_COLOR },
     { hours: cfg.tokyo, show: cfg.Tokyo, col: ASIA_COLOR },
     { hours: cfg.sydney, show: cfg.Sydney, col: SYDNEY_COLOR },
-  ].map((s) => ({ ...s, prevT: NaN, low: NaN, high: NaN, fill: [] as string[] }));
+  ].map((s) => ({
+    ...s,
+    // the session as its own calendar, read in New York time (bar times in ms): periodTime gives time(res, session)
+    ctx: { timeframe: chartTf, timezone: TIMEZONE, session: s.hours, timeUnit: 'ms' } as SessionContext,
+    prevT: NaN,
+    low: NaN,
+    high: NaN,
+    fill: [] as string[],
+  }));
 
   const plots: Record<string, Array<{ time: number; value: number }>> = {};
   for (let k = 0; k < 8; k++) plots[`plot${k}`] = [];
@@ -163,13 +152,14 @@ export function calculate(
     const tMs = inMs ? time : time * 1000;
     sessions.forEach((s, k) => {
       // is_session(): not na(time(timeframe.period, sess, "America/New_York"))
-      const inSession = pineTime.inSession(tMs, s.hours, TIMEZONE);
+      const inSession = pineTime.inSession(tMs, s.hours, TIMEZONE, barMs);
       // is_newbar(): t = time(res, sess, "America/New_York"); na(t[1]) and not na(t) or t[1] < t
       // t is the period of the last bar inside the session (it keeps its value on the bars outside the session)
       let newBar = false;
-      if (i === 0 && !inSession) s.prevT = periodAround(tMs, s.hours, res);
+      if (i === 0 && !inSession) s.prevT = periodAround(tMs, s.hours, res, s.ctx, barMs);
       if (inSession) {
-        const t = periodOfSession(tMs, s.hours, res);
+        // the period of the trading day of the bar (a session over midnight belongs to the day it ends)
+        const t = periodTime(tMs, res, s.ctx);
         newBar = Number.isNaN(s.prevT) || s.prevT < t;
         s.prevT = t;
       }

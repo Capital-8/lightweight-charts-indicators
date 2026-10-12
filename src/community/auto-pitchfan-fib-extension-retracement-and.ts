@@ -21,7 +21,10 @@
  * Original notice: © dgtrd
  */
 
-import { ta, str, math, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, str, math, color, line, label, linefill, resetDrawings, setDrawingBar, varDrawing, holdDrawing,
+  type Label, type Line, type Linefill, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { LabelData, LineDrawingData, LinefillData, TableData } from '../types';
 import { mintickOf, type ChartContext } from '../chart-context';
 import { barInterval, barTime } from '../bar-time';
@@ -214,30 +217,6 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
-interface Ln {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  /** null = na */
-  color: string | null;
-  width: number;
-  style: 'solid' | 'dashed' | 'dotted';
-  extend: 'none' | 'right' | 'both';
-  /** kept in a variable of the script: the limit of 500 lines does not delete it */
-  held: boolean;
-}
-interface Lb {
-  x: number;
-  y: number;
-  text: string;
-  color: string;
-  textColor: string;
-  style: 'label_left' | 'label_right' | 'circle';
-  size: 'small' | 'normal' | 'auto';
-  tooltip: string;
-}
-
 /** ta.valuewhen(ta.change(x), x, occurrence): the values of x on the bars where it changed (na changes do not count) */
 function changeValues(): { update: (v: number) => void; get: (occurrence: number) => number } {
   const values: number[] = [];
@@ -269,20 +248,10 @@ export function calculate(
   const priceText = (v: number) => str.tostring(v, 'mintick', mintick);
   const atr10 = ta.atr(bars, 10).toArray();
 
-  // Limit of 500 lines: the zigzag lines are the only ones that it can delete (`zzLines`, in creation order); the
-  // other live lines (kept in a variable of the script, or made on a bar and deleted on the next one) only count
-  const zzLines: Ln[] = [];
-  let otherLines = 0;
-  const lineCreated = (zz?: Ln) => {
-    if (zz) zzLines.push(zz);
-    else otherLines++;
-    if (zzLines.length + otherLines > MAX_LINES + 5) {
-      let excess = zzLines.length + otherLines - MAX_LINES;
-      const kept = zzLines.filter((l) => l.held || excess-- <= 0);
-      zzLines.length = 0;
-      zzLines.push(...kept);
-    }
-  };
+  // Drawings of the library registry (500 lines, the default 50 labels). As in the script, the pitchfan rays and
+  // their fills are deleted and made again on each bar, the lines and labels of f_drawLineX / f_drawLabelX are `var`
+  // objects made on their first call and moved on each bar, and the zigzag lines stay until the line maximum.
+  resetDrawings({ line: MAX_LINES, label: MAX_LABELS });
 
   // Zigzag. pivots(src, i_depth / 2, isHigh): the division keeps its fraction (5.5 for a depth of 11); the history
   // index is truncated and the loop runs up to twice the length.
@@ -296,7 +265,7 @@ export function calculate(
     }
     return [i >= back ? i - back : NaN, c];
   };
-  let lineLast: Ln | null = null;
+  const lineLast = varDrawing<Line>(); // var line lineLast = na
   let iLast = 0;
   let pLast = 0;
   let isHighLast = false;
@@ -312,36 +281,30 @@ export function calculate(
   const swing = (i: number, isHigh: boolean, index: number, price: number) => {
     const dev = (100 * (price - pLast)) / price;
     // pivotFound()
-    let id: Ln | null = null;
+    const before = lineLast.value;
+    let id: Line | undefined;
     let direction = isHighLast;
-    if (isHighLast === isHigh && lineLast !== null) {
+    if (isHighLast === isHigh && before) {
       if (isHighLast ? gt(price, pLast) : lt(price, pLast)) {
-        lineLast.x2 = index;
-        lineLast.y2 = price;
-        id = lineLast;
+        line.set_xy2(before, index, price);
+        id = before;
       }
     } else if (gt(Math.abs(dev), ((atr10[i] ?? NaN) / bars[i].close) * 100 * cfg.deviation)) {
-      id = {
-        x1: iLast, y1: pLast, x2: index, y2: price, color: show ? cfg.zzColor : null, width: show ? cfg.zzWidth : 1,
-        style: show ? lineStyle(cfg.zzStyle) : 'dashed', extend: 'none', held: true,
-      };
-      // without the zigzag option the line before is deleted below: only the running line is alive
-      lineCreated(show ? id : undefined);
+      id = show
+        ? line.new(iLast, pLast, index, price, 'bar_index', 'none', cfg.zzColor, lineStyle(cfg.zzStyle), cfg.zzWidth)
+        : line.new(iLast, pLast, index, price, 'bar_index', 'none', undefined, 'dashed', 1); // color = na
       direction = isHigh;
     }
-    if (id === null) return;
+    if (!id) return;
     // `id != lineLast` is also true while lineLast is na (the first line): the four values become na
-    if (id !== lineLast) {
-      iPrevPivotRef = lineLast?.x1 ?? NaN;
-      pPrevPivotRef = lineLast?.y1 ?? NaN;
-      iLastPivotRef = lineLast?.x2 ?? NaN;
-      pLastPivotRef = lineLast?.y2 ?? NaN;
-      if (lineLast !== null) {
-        lineLast.held = false;
-        if (!show) otherLines--;
-      }
+    if (id !== before) {
+      iPrevPivotRef = before ? line.get_x1(before) : NaN;
+      pPrevPivotRef = before ? line.get_y1(before) : NaN;
+      iLastPivotRef = before ? line.get_x2(before) : NaN;
+      pLastPivotRef = before ? line.get_y2(before) : NaN;
+      if (!show && before) line.delete(before);
     }
-    lineLast = id;
+    lineLast.value = id;
     isHighLast = direction;
     iLast = index;
     pLast = price;
@@ -352,17 +315,38 @@ export function calculate(
   }));
   const fibLevels = FIB_LEVELS.map(([k]) => ({ show: cfg[`show${k}`], level: cfg[`value${k}`], css: cfg[`color${k}`] }));
   const ext = cfg.fibTool === 'Extentions';
-  // Lines kept in a variable of a function (made on the first bar, moved on each bar)
-  const varLines = (cfg.pitch ? 1 : 0) + (cfg.isFib ? fibLevels.length * (ext ? 2 : 1) + fibLevels.filter((l) => l.show).length : 0);
   const hist = cfg.histPivot;
   const sizeOf = (s: TextSize) => (s === 'Small' ? 'small' : 'normal');
 
-  // Drawings of a bar: the pitchfan rays are deleted and made again on each bar, the other objects are moved
-  let rays: Ln[] = [];
-  let fixed: Ln[] = [];
-  let labels: Lb[] = [];
-  let linefills: Array<{ a: Ln; b: Ln; color: string }> = [];
-  const draw = (i: number, keep: boolean): number => {
+  // `var` objects of f_drawLineX / f_drawLabelX, one per call site (made on the first call)
+  const varLines = new Map<string, Line>();
+  const varLabels = new Map<string, Label>();
+  /** f_drawLineX(): `var id = line.new(...)`, then moved */
+  const drawLineX = (site: string, x1: number, y1: number, x2: number, y2: number, extend: 'none' | 'right' | 'both', css: string,
+    style: 'solid' | 'dashed' | 'dotted', width: number) => {
+    let id = varLines.get(site);
+    if (!id) varLines.set(site, (id = holdDrawing(line.new(x1, y1, x2, y2, 'bar_index', extend, css, style, width))));
+    line.set_xy1(id, x1, y1);
+    line.set_xy2(id, x2, y2);
+  };
+  /** f_drawLabelX(): `var id = label.new(...)`, then moved; its text gets two line breaks. The text is only needed
+   *  on the last bar (`keep`). */
+  const drawLabelX = (site: string, keep: boolean, x: number, y: number, text: () => string, css: string, style: 'label_left' | 'label_right' | 'circle',
+    textColor: string, size: 'small' | 'normal' | 'auto', tooltip: () => string) => {
+    let id = varLabels.get(site);
+    if (!id) varLabels.set(site, (id = holdDrawing(label.new(x, y, '', 'bar_index', 'price', css, style, textColor, size, 'left', ''))));
+    label.set_xy(id, x, y);
+    if (keep) {
+      label.set_text(id, `${text()}\n\n`);
+      label.set_tooltip(id, tooltip());
+    }
+  };
+
+  // a_lnr, a_lns, a_lf: the pitchfan rays and fills of the bar
+  let lnr: Line[] = [];
+  let lns: Line[] = [];
+  let fills: Linefill[] = [];
+  const draw = (i: number, keep: boolean) => {
     const iStartMedian = iPrevValues.get(hist > 0 ? hist + 1 : 1);
     const pStartMedian = pPrevValues.get(hist > 0 ? hist + 1 : 1);
     const iLastPivot = iLastValues.get(hist > 0 ? hist : 0);
@@ -371,26 +355,17 @@ export function calculate(
     const pPrevPivot = pPrevValues.get(hist > 0 ? hist : 0);
     const iEndMedian = Math.trunc(avg(iPrevPivot, iLastPivot));
     const pEndMedian = avg(pPrevPivot, pLastPivot);
-    let made = 0;
-    const lnr: Ln[] = [];
-    const lns: Ln[] = [];
     // f_drawPitchLine()
-    const ray = (iEnd: number, pEnd: number, css: string, width: number, style: Ln['style'], hg: boolean) => {
+    const ray = (iEnd: number, pEnd: number, css: string, width: number, style: 'solid' | 'dashed' | 'dotted', hg: boolean) => {
       if (!lt(iEnd, i)) return;
-      made++;
-      (hg ? lnr : lns).push({ x1: iStartMedian, y1: pStartMedian, x2: iEnd, y2: pEnd, color: css, width, style, extend: 'right', held: false });
+      (hg ? lnr : lns).push(line.new(iStartMedian, pStartMedian, iEnd, pEnd, 'bar_index', 'right', css, style, width));
     };
-    const fills: Array<{ a: Ln; b: Ln; color: string }> = [];
-    // linefill.new() on two lines that already have a fill replaces it
-    const fill = (a: Ln, b: Ln, css: string) => {
-      const old = fills.find((f) => f.a === a && f.b === b);
-      if (old) old.color = css;
-      else fills.push({ a, b, color: css });
-    };
-    const lbs: Lb[] = [];
-    const fix: Ln[] = [];
-    const label = (x: number, y: number, text: string, css: string, textColor: string, style: Lb['style'], size: Lb['size'], tooltip: string) => {
-      if (keep) lbs.push({ x, y, text: `${text}\n\n`, color: css, textColor, style, size, tooltip });
+    // linefill.new() on two lines that already have a fill replaces it (rule measured with the first port; the library
+    // adds a second fill)
+    const fill = (a: Line, b: Line, css: string) => {
+      const old = fills.find((f) => f.line1 === a && f.line2 === b);
+      if (old) linefill.set_color(old, css);
+      else fills.push(linefill.new(a, b, css));
     };
     const size = sizeOf(cfg.pitchLabelSize);
 
@@ -398,102 +373,83 @@ export function calculate(
       const mStyle = lineStyle(cfg.medianStyle);
       ray(iEndMedian, pEndMedian, cfg.medianColor, cfg.medianWidth, mStyle, true);
       ray(iEndMedian, pEndMedian, cfg.medianColor, cfg.medianWidth, mStyle, false);
-      fix.push({
-        x1: iPrevPivot, y1: pPrevPivot, x2: iLastPivot, y2: pLastPivot, color: cfg.medianColor, width: cfg.medianWidth, style: 'solid',
-        extend: 'none', held: true,
-      });
+      drawLineX('median', iPrevPivot, pPrevPivot, iLastPivot, pLastPivot, 'none', cfg.medianColor, 'solid', cfg.medianWidth);
       const slope = (pEndMedian - pStartMedian) / (iEndMedian - iStartMedian);
       const mPrice = slope * i + pStartMedian - slope * iStartMedian;
       if (cfg.pitchLabels !== 'None') {
-        const tip = priceText(mPrice);
-        const text = cfg.pitchLabels === 'Prices' ? tip : cfg.pitchLabels === 'Levels (Prices)' ? `PF M (${tip})` : 'PF M';
-        label(i, mPrice, text, CLEAR, cfg.medianColor, 'label_left', size, tip);
-        label(i, mPrice, '', cfg.medianColor, CLEAR, 'circle', 'auto', '');
-      }
-
-      // processPitchLevel()
-      for (const { show: on, level, css, width, style } of pitchLevels) {
-        const iDiff = Math.abs(iPrevPivot - iLastPivot) / 2;
-        const pDiff = Math.abs(pPrevPivot - pLastPivot) / 2;
-        const down = gt(pPrevPivot, pLastPivot);
-        const iEndX = Math.trunc(round(down ? iEndMedian - iDiff * level : iEndMedian + iDiff * level));
-        const pEndX = pEndMedian + pDiff * level;
-        const iEndY = Math.trunc(round(down ? iEndMedian + iDiff * level : iEndMedian - iDiff * level));
-        const pEndY = pEndMedian - pDiff * level;
-        if (!on) continue;
-        ray(iEndX, pEndX, css, width, style, true);
-        ray(iEndY, pEndY, css, width, style, false);
-        const slopeX = (pEndX - pStartMedian) / (iEndX - iStartMedian);
-        const slopeY = (pEndY - pStartMedian) / (iEndY - iStartMedian);
-        const rPrice = slopeX * i + pStartMedian - slopeX * iStartMedian;
-        const sPrice = slopeY * i + pStartMedian - slopeY * iStartMedian;
-        if (cfg.pitchLabels !== 'None') {
-          const text = (price: number, side: string) => {
-            const tip = priceText(price);
-            const lv = `PF ${str.tostring(level)} ${side}`;
-            return cfg.pitchLabels === 'Prices' ? tip : cfg.pitchLabels === 'Levels (Prices)' ? `${lv} (${tip})` : lv;
-          };
-          if (keep) {
-            label(i, rPrice, text(rPrice, 'R'), CLEAR, css, 'label_left', size, priceText(rPrice));
-            label(i, sPrice, text(sPrice, 'S'), CLEAR, css, 'label_left', size, priceText(sPrice));
-            label(i, rPrice, '', css, CLEAR, 'circle', 'auto', '');
-            label(i, sPrice, '', css, CLEAR, 'circle', 'auto', '');
-          }
-        }
-        if (cfg.pitchBackground) {
-          const paint = String(color.new(css, 89));
-          if (lnr.length > 1) fill(lnr[lnr.length - 2], lnr[lnr.length - 1], paint);
-          if (lns.length > 1) fill(lns[lns.length - 2], lns[lns.length - 1], paint);
-        }
+        const tip = () => priceText(mPrice);
+        const text = () => (cfg.pitchLabels === 'Prices' ? tip() : cfg.pitchLabels === 'Levels (Prices)' ? `PF M (${tip()})` : 'PF M');
+        drawLabelX('m', keep, i, mPrice, text, CLEAR, 'label_left', cfg.medianColor, size, tip);
+        drawLabelX('m circle', keep, i, mPrice, () => '', cfg.medianColor, 'circle', CLEAR, 'auto', () => '');
       }
     }
 
+    // processPitchLevel()
+    pitchLevels.forEach(({ show: on, level, css, width, style }, k) => {
+      if (!cfg.pitch) return;
+      const iDiff = Math.abs(iPrevPivot - iLastPivot) / 2;
+      const pDiff = Math.abs(pPrevPivot - pLastPivot) / 2;
+      const down = gt(pPrevPivot, pLastPivot);
+      const iEndX = Math.trunc(round(down ? iEndMedian - iDiff * level : iEndMedian + iDiff * level));
+      const pEndX = pEndMedian + pDiff * level;
+      const iEndY = Math.trunc(round(down ? iEndMedian + iDiff * level : iEndMedian - iDiff * level));
+      const pEndY = pEndMedian - pDiff * level;
+      if (!on) return;
+      ray(iEndX, pEndX, css, width, style, true);
+      ray(iEndY, pEndY, css, width, style, false);
+      const slopeX = (pEndX - pStartMedian) / (iEndX - iStartMedian);
+      const slopeY = (pEndY - pStartMedian) / (iEndY - iStartMedian);
+      const rPrice = slopeX * i + pStartMedian - slopeX * iStartMedian;
+      const sPrice = slopeY * i + pStartMedian - slopeY * iStartMedian;
+      if (cfg.pitchLabels !== 'None') {
+        const text = (price: number, side: string) => () => {
+          const tip = priceText(price);
+          const lv = `PF ${str.tostring(level)} ${side}`;
+          return cfg.pitchLabels === 'Prices' ? tip : cfg.pitchLabels === 'Levels (Prices)' ? `${lv} (${tip})` : lv;
+        };
+        drawLabelX(`p${k} r`, keep, i, rPrice, text(rPrice, 'R'), CLEAR, 'label_left', css, size, () => priceText(rPrice));
+        drawLabelX(`p${k} s`, keep, i, sPrice, text(sPrice, 'S'), CLEAR, 'label_left', css, size, () => priceText(sPrice));
+        drawLabelX(`p${k} r circle`, keep, i, rPrice, () => '', css, 'circle', CLEAR, 'auto', () => '');
+        drawLabelX(`p${k} s circle`, keep, i, sPrice, () => '', css, 'circle', CLEAR, 'auto', () => '');
+      }
+      if (cfg.pitchBackground) {
+        const paint = String(color.new(css, 89));
+        if (lnr.length > 1) fill(lnr[lnr.length - 2], lnr[lnr.length - 1], paint);
+        if (lns.length > 1) fill(lns[lns.length - 2], lns[lns.length - 1], paint);
+      }
+    });
+
     // processFibLevel()
-    if (cfg.isFib && keep) {
+    if (cfg.isFib) {
       const diff = Math.abs(pPrevPivot - pLastPivot);
       const sign = cfg.reverse ? -1 : 1;
-      const dashed = (x1: number, y1: number, x2: number, y2: number) =>
-        fix.push({ x1, y1, x2, y2, color: GRAY, width: 1, style: 'dashed', extend: 'none', held: true });
-      for (const { show: on, level, css } of fibLevels) {
+      fibLevels.forEach(({ show: on, level, css }, k) => {
         let price: number;
         if (ext) {
-          dashed(iStartMedian, pStartMedian, iPrevPivot, pPrevPivot);
-          dashed(iPrevPivot, pPrevPivot, iLastPivot, pLastPivot);
+          drawLineX(`f${k} ext1`, iStartMedian, pStartMedian, iPrevPivot, pPrevPivot, 'none', GRAY, 'dashed', 1);
+          drawLineX(`f${k} ext2`, iPrevPivot, pPrevPivot, iLastPivot, pLastPivot, 'none', GRAY, 'dashed', 1);
           const offset = Math.abs(pPrevPivot - pStartMedian);
           price = lt(pLastPivot, pPrevPivot) ? pPrevPivot - diff + sign * offset * level : pPrevPivot + diff - sign * offset * level;
         } else {
-          dashed(iPrevPivot, pPrevPivot, iLastPivot, pLastPivot);
+          drawLineX(`f${k} ret`, iPrevPivot, pPrevPivot, iLastPivot, pLastPivot, 'none', GRAY, 'dashed', 1);
           const from = cfg.reverse ? pLastPivot : pPrevPivot;
           price = lt(pLastPivot, pPrevPivot) ? from - sign * diff * level : from + sign * diff * level;
         }
-        if (!on) continue;
-        fix.push({ x1: iPrevPivot, y1: price, x2: i, y2: price, color: css, width: 1, style: 'solid', extend: cfg.extend ? 'both' : 'right', held: true });
+        if (!on) return;
+        drawLineX(`f${k}`, iPrevPivot, price, i, price, cfg.extend ? 'both' : 'right', css, 'solid', 1);
         if (cfg.levels !== 'None') {
-          const tip = priceText(price);
-          const txt = cfg.levels === 'Levels' ? str.tostring(level) : cfg.levels === 'Prices' ? tip : `${str.tostring(level)} (${tip})`;
+          const tip = () => priceText(price);
+          const txt = () => (cfg.levels === 'Levels' ? str.tostring(level) : cfg.levels === 'Prices' ? tip() : `${str.tostring(level)} (${tip()})`);
           const lastBar = cfg.levelsP === 'Last Bar';
-          label(lastBar ? i : iPrevPivot, price, `${ext ? 'EXT ' : 'RET '}${txt}`, CLEAR, css, lastBar ? 'label_left' : 'label_right', sizeOf(cfg.levelsF), tip);
+          drawLabelX(`f${k}`, keep, lastBar ? i : iPrevPivot, price, () => `${ext ? 'EXT ' : 'RET '}${txt()}`, CLEAR, lastBar ? 'label_left' : 'label_right',
+            css, sizeOf(cfg.levelsF), tip);
         }
-      }
+      });
     }
-    if (keep) {
-      rays = [...lnr, ...lns];
-      fixed = fix;
-      // All labels are made on the first bar, in this order, then moved on each bar. Above 55 labels the oldest are
-      // deleted until 50 remain (default limit of 50 labels): with many levels the first labels are lost there.
-      let alive: Lb[] = [];
-      for (const l of lbs) {
-        alive.push(l);
-        if (alive.length > MAX_LABELS + 5) alive = alive.slice(alive.length - MAX_LABELS);
-      }
-      labels = alive;
-      linefills = fills;
-    }
-    return made;
   };
 
-  let tempLines = 0;
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === last);
     const [iH, pH] = pivotAt(i, true);
     if (!isNaN(iH)) swing(i, true, iH, pH);
     else {
@@ -505,32 +461,36 @@ export function calculate(
     iLastValues.update(iLastPivotRef);
     pLastValues.update(pLastPivotRef);
 
-    // The rays of the bar before are deleted, then made again
-    otherLines -= tempLines;
-    if (i === 0) for (let k = 0; k < varLines; k++) lineCreated();
-    // the rays only count for the limit of 500 lines, which the zigzag lines alone can reach
-    tempLines = show || i === last ? draw(i, i === last) : 0;
-    for (let k = 0; k < tempLines; k++) lineCreated();
+    // if ta.change(time): the rays and fills of the bar before are deleted
+    for (const l of lnr) line.delete(l);
+    for (const l of lns) line.delete(l);
+    for (const f of fills) linefill.delete(f);
+    lnr = [];
+    lns = [];
+    fills = [];
+    draw(i, i === last);
   }
+  setDrawingBar(null);
 
   const interval = barInterval(bars);
-  const toLine = (l: Ln): LineDrawingData => ({
-    time1: barTime(bars, l.x1, interval), price1: l.y1, time2: barTime(bars, l.x2, interval), price2: l.y2, color: l.color ?? 'transparent',
-    width: l.width, ...(l.style === 'solid' ? {} : { style: l.style }), ...(l.extend === 'none' ? {} : { extend: l.extend }),
+  const toLine = (l: Line): LineDrawingData => ({
+    time1: barTime(bars, l.x1, interval), price1: l.y1, time2: barTime(bars, l.x2, interval), price2: l.y2,
+    color: l.color === undefined ? 'transparent' : String(l.color), width: l.width ?? 1, ...(l.style === 'solid' ? {} : { style: l.style }),
+    ...(l.extend === 'none' ? {} : { extend: l.extend }),
   });
   // an object with an na (or infinite) coordinate is not drawn
   const drawn = (l: LineDrawingData) => [l.time1, l.time2, l.price1, l.price2].every((v) => isFinite(v));
-  const running: Ln[] = !show && lineLast !== null ? [lineLast] : [];
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
-    lines: [...zzLines, ...running, ...fixed, ...rays].map(toLine).filter(drawn),
-    labels: labels.map((l): LabelData => ({
-      time: barTime(bars, l.x, interval), price: l.y, text: l.text, color: l.color, textColor: l.textColor, style: l.style, size: l.size,
-      textAlign: 'left', ...(l.tooltip === '' ? {} : { tooltip: l.tooltip }),
+    lines: line.all().map(toLine).filter(drawn),
+    labels: label.all().map((l): LabelData => ({
+      time: barTime(bars, l.x, interval), price: l.y, text: l.text ?? '', color: String(l.color), textColor: String(l.textcolor),
+      style: l.style as LabelData['style'], size: l.size as LabelData['size'], textAlign: 'left', ...(l.tooltip ? { tooltip: l.tooltip } : {}),
     })).filter((l) => isFinite(l.time) && isFinite(l.price)),
-    linefills: linefills.map((f) => ({ line1: toLine(f.a), line2: toLine(f.b), color: f.color })).filter((f) => drawn(f.line1) && drawn(f.line2)),
+    linefills: linefill.all().map((f) => ({ line1: toLine(f.line1), line2: toLine(f.line2), color: String(f.color) }))
+      .filter((f) => drawn(f.line1) && drawn(f.line2)),
     // var table logo = table.new(position.bottom_right, 1, 1) with one cell
     tables: n > 0
       ? [{ position: 'bottom_right', columns: 1, rows: 1, cells: [{ column: 0, row: 0, text: '☼☾  ', textSize: 'normal', textColor: TEAL }] }]

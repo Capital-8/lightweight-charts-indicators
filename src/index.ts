@@ -6280,6 +6280,12 @@ export type { LiquidityPriceDepthChartInputs } from './community/liquidity-price
 import * as signalTableAutofibSmaEmaRsiAtrVolIndicator from './community/signal-table-autofib-sma-ema-rsi-atr-vol';
 export { MulticatorTable, calculate as calculateMulticatorTable } from './community/signal-table-autofib-sma-ema-rsi-atr-vol';
 export type { MulticatorTableInputs } from './community/signal-table-autofib-sma-ema-rsi-atr-vol';
+import * as machineLearningRsiBullvisionIndicator from './community/machine-learning-rsi-bullvision';
+export { MachineLearningRsiBullvision, calculate as calculateMachineLearningRsiBullvision } from './community/machine-learning-rsi-bullvision';
+export type { MachineLearningRsiBullvisionInputs } from './community/machine-learning-rsi-bullvision';
+import * as wedgeAndFlagFinderIndicator from './community/wedge-and-flag-finder';
+export { WedgeAndFlagFinder, calculate as calculateWedgeAndFlagFinder } from './community/wedge-and-flag-finder';
+export type { WedgeAndFlagFinderInputs } from './community/wedge-and-flag-finder';
 
 export type IndicatorCategory =
   | 'Moving Averages'
@@ -26231,6 +26237,33 @@ const registryPart8: IndicatorRegistryEntry[] = [
     usesVisibleRange: true,
     defaultInputs: { ...signalTableAutofibSmaEmaRsiAtrVolIndicator.defaultInputs },
     calculate: signalTableAutofibSmaEmaRsiAtrVolIndicator.calculate,
+  },
+  {
+    id: 'machine-learning-rsi-bullvision',
+    group: 'community',
+    name: 'Machine Learning RSI ║ BullVision',
+    shortName: machineLearningRsiBullvisionIndicator.metadata.shortTitle,
+    category: 'Oscillators',
+    overlay: false,
+    metadata: machineLearningRsiBullvisionIndicator.metadata,
+    inputConfig: machineLearningRsiBullvisionIndicator.inputConfig as InputConfig[],
+    plotConfig: machineLearningRsiBullvisionIndicator.plotConfig as PlotConfig[],
+    fillConfig: machineLearningRsiBullvisionIndicator.fillConfig,
+    defaultInputs: { ...machineLearningRsiBullvisionIndicator.defaultInputs },
+    calculate: machineLearningRsiBullvisionIndicator.calculate,
+  },
+  {
+    id: 'wedge-and-flag-finder',
+    group: 'community',
+    name: 'Wedge and Flag Finder (Multi - zigzag)',
+    shortName: wedgeAndFlagFinderIndicator.metadata.shortTitle,
+    category: 'Trend',
+    overlay: true,
+    metadata: wedgeAndFlagFinderIndicator.metadata,
+    inputConfig: wedgeAndFlagFinderIndicator.inputConfig as InputConfig[],
+    plotConfig: wedgeAndFlagFinderIndicator.plotConfig as PlotConfig[],
+    defaultInputs: { ...wedgeAndFlagFinderIndicator.defaultInputs },
+    calculate: wedgeAndFlagFinderIndicator.calculate,
   },
 ];
 

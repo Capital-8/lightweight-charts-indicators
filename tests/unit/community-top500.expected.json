@@ -1084,6 +1084,38 @@
    "labels": 52
   }
  },
+ "machine-learning-rsi-bullvision": {
+  "daily": {
+   "plots": {
+    "plot0": 3184,
+    "plot1": 3200,
+    "plot2": 3200,
+    "plot3": 3200,
+    "plot4": 3200,
+    "plot5": 3200,
+    "plot6": 3200,
+    "plot7": 3200
+   },
+   "barColors": 3200,
+   "tables": 1,
+   "fills": 1
+  },
+  "m15": {
+   "plots": {
+    "plot0": 3984,
+    "plot1": 4000,
+    "plot2": 4000,
+    "plot3": 4000,
+    "plot4": 4000,
+    "plot5": 4000,
+    "plot6": 4000,
+    "plot7": 4000
+   },
+   "barColors": 4000,
+   "tables": 1,
+   "fills": 1
+  }
+ },
  "fibo-levels-with-volume-profile-and-targets": {
   "daily": {
    "plots": {},
@@ -1176,6 +1208,76 @@
    "lines": 501,
    "labels": 82,
    "linefills": 149
+  }
+ },
+ "signal-table-autofib-sma-ema-rsi-atr-vol": {
+  "daily": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0,
+    "plot8": 0,
+    "plot9": 0,
+    "plot10": 0,
+    "plot11": 0,
+    "plot12": 0,
+    "plot13": 0,
+    "plot14": 0,
+    "plot15": 0,
+    "plot16": 0,
+    "plot17": 0,
+    "plot18": 0,
+    "plot19": 0,
+    "plot20": 0,
+    "plot21": 0,
+    "plot22": 0,
+    "plot23": 0
+   },
+   "markers": 119,
+   "boxes": 5,
+   "labels": 5,
+   "polylines": 7,
+   "tables": 1,
+   "fills": 2
+  },
+  "m15": {
+   "plots": {
+    "plot0": 0,
+    "plot1": 0,
+    "plot2": 0,
+    "plot3": 0,
+    "plot4": 0,
+    "plot5": 0,
+    "plot6": 0,
+    "plot7": 0,
+    "plot8": 0,
+    "plot9": 0,
+    "plot10": 0,
+    "plot11": 0,
+    "plot12": 0,
+    "plot13": 0,
+    "plot14": 0,
+    "plot15": 0,
+    "plot16": 0,
+    "plot17": 0,
+    "plot18": 0,
+    "plot19": 0,
+    "plot20": 0,
+    "plot21": 0,
+    "plot22": 0,
+    "plot23": 0
+   },
+   "markers": 147,
+   "boxes": 5,
+   "labels": 5,
+   "polylines": 7,
+   "tables": 1,
+   "fills": 2
   }
  },
  "signal-forge": {
@@ -2465,6 +2567,18 @@
    "labels": 24,
    "polylines": 10,
    "fills": 1
+  }
+ },
+ "wedge-and-flag-finder": {
+  "daily": {
+   "plots": {},
+   "lines": 303,
+   "labels": 300
+  },
+  "m15": {
+   "plots": {},
+   "lines": 389,
+   "labels": 384
   }
  },
  "liquidity-voids": {

@@ -13,14 +13,19 @@
  * without bars (weekends, holidays) count too. The first visible bar comes from the chart context (third argument of
  * calculate, `leftVisibleBarTime`); without it the first bar given to the indicator is used. The indicator must be
  * calculated again when the user scrolls or zooms the chart. As in the original, a lookback of 0 bars or of more
- * than 15,000 bars is a runtime error, and nothing is drawn when the lookback is longer than the history.
+ * than 15,000 bars is a runtime error (the second one from the library window limit), a line start more than 10,000
+ * bars before the last bar too (runtime error of the library drawing functions), and nothing is drawn when the
+ * lookback is longer than the history.
  *
  * Reference: "Volume Profile" by kv4coins
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © kv4coins
  */
 
-import { ta, array, math, timeframe, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, array, math, timeframe, line, Series, resetDrawings, setDrawingBar,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line,
+} from 'oakscriptjs';
 import type { LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
@@ -156,9 +161,6 @@ const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 const eq = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) <= EPS;
 
-/** Longest window of ta.highest / ta.lowest */
-const MAX_WINDOW = 15000;
-
 export function calculate(
   bars: Bar[], inputs: Partial<VolumeProfileKv4coinsInputs> = {}, chart?: ChartContext,
 ): IndicatorResult & { lines: LineDrawingData[] } {
@@ -181,12 +183,10 @@ export function calculate(
     lookback = math.round((bars[n - 1].time * toMs - visibleRangeOf(bars, chart).leftTime) / barMs);
   }
   if (isNaN(lookback)) return result([]);
-  // ta.highest(lookback_bars) / ta.lowest(lookback_bars) stop the script on the first bar
+  // ta.highest(lookback_bars) / ta.lowest(lookback_bars) stop the script on the first bar. A length above 15,000 bars
+  // throws in the library; a length of 0 or less gives na there, so the port throws the error of the original itself
   if (lookback <= 0) {
     throw new Error(`Error on bar 0: Invalid value of the 'length' argument (${lookback.toFixed(1)}) in the 'highest' function. It must be > 0.`);
-  }
-  if (lookback > MAX_WINDOW) {
-    throw new Error(`Error on bar 0: The 'highest' function references too many historical candles (${lookback}), the limit is ${MAX_WINDOW}.`);
   }
 
   // the lines are created on the first bar and placed on the last bar (barstate.islast)
@@ -217,7 +217,21 @@ export function calculate(
   // a bar index before the first bar: the same step back in time
   const timeAt = (index: number) => (index < 0 ? bars[0].time + index * interval : barTime(bars, index, interval));
   const lines: LineDrawingData[] = [];
-  const add = (x1: number, x2: number, y: number, color: string, width: number) => {
+  // The original creates its lines on the first bar and moves them on the last bar (line.set_xy1 / set_xy2): the
+  // library lines do the same, for the runtime error of an x more than 10,000 bars back
+  resetDrawings({ line: 500 });
+  const libLine = () => line.new(0, bars[0].close, 0, bars[0].close);
+  setDrawingBar(0);
+  const levelLines = Array.from({ length: numBars }, libLine);
+  const pocLine = cfg.displayPoc ? libLine() : null;
+  const vahLine = cfg.displayVa && cfg.displayVaLines ? libLine() : null;
+  const valLine = cfg.displayVa && cfg.displayVaLines ? libLine() : null;
+  setDrawingBar(last, true);
+  const add = (target: Line | null, x1: number, x2: number, y: number, color: string, width: number) => {
+    if (target) {
+      line.set_xy1(target, x1, y);
+      line.set_xy2(target, x2, y);
+    }
     // a line with an na coordinate is not drawn
     if (isNaN(x1) || isNaN(x2) || isNaN(y)) return;
     lines.push({ time1: timeAt(x1), price1: y, time2: timeAt(x2), price2: y, color, width });
@@ -243,17 +257,29 @@ export function calculate(
       }
     }
   }
-  for (let i = 0; i < numBars; i++) {
-    const lineColor = maxIdx === i ? cfg.pocLineColor : cfg.displayVa && i >= vaDn && i <= vaUp ? cfg.vaBarColor : cfg.barColor;
-    add(x2 - scaleVolume(volumes[i]), x2, lowestPrice + priceInterval * i, lineColor, cfg.barThickness);
-  }
-  if (cfg.displayPoc) {
-    add(last - lookback, x2 - scaleVolume(maxVol) - 10, lowestPrice + priceInterval * maxIdx, cfg.pocLineColor, cfg.pocLineThickness);
-  }
-  if (cfg.displayVa && cfg.displayVaLines) {
-    const vaX1 = last - lookback;
-    add(vaX1, x2 - scaleVolume(volumes[vaUp]) - 10, lowestPrice + priceInterval * vaUp, cfg.vaBarColor, cfg.vaLinesThickness);
-    add(vaX1, x2 - scaleVolume(volumes[vaDn]) - 10, lowestPrice + priceInterval * vaDn, cfg.vaBarColor, cfg.vaLinesThickness);
+  try {
+    for (let i = 0; i < numBars; i++) {
+      const lineColor = maxIdx === i ? cfg.pocLineColor : cfg.displayVa && i >= vaDn && i <= vaUp ? cfg.vaBarColor : cfg.barColor;
+      add(levelLines[i], x2 - scaleVolume(volumes[i]), x2, lowestPrice + priceInterval * i, lineColor, cfg.barThickness);
+    }
+    if (cfg.displayPoc) {
+      add(pocLine, last - lookback, x2 - scaleVolume(maxVol) - 10, lowestPrice + priceInterval * maxIdx, cfg.pocLineColor, cfg.pocLineThickness);
+    }
+    if (cfg.displayVa && cfg.displayVaLines) {
+      const vaX1 = last - lookback;
+      // set_xy1 of both lines, then set_xy2 of both, as the original
+      const vahY = lowestPrice + priceInterval * vaUp;
+      const valY = lowestPrice + priceInterval * vaDn;
+      if (vahLine && valLine) {
+        line.set_xy1(vahLine, vaX1, vahY);
+        line.set_xy1(valLine, vaX1, valY);
+      }
+      add(null, vaX1, x2 - scaleVolume(volumes[vaUp]) - 10, vahY, cfg.vaBarColor, cfg.vaLinesThickness);
+      add(null, vaX1, x2 - scaleVolume(volumes[vaDn]) - 10, valY, cfg.vaBarColor, cfg.vaLinesThickness);
+    }
+  } finally {
+    setDrawingBar(null);
+    resetDrawings();
   }
   return result(lines);
 }

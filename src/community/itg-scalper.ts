@@ -31,9 +31,12 @@
  * Original notice: © Complector
  */
 
-import { ta, Series, color, str, timeframe, barInterval, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, color, str, timeframe, label, resetDrawings, setDrawingBar, varDrawing,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Label,
+} from 'oakscriptjs';
 import type { LabelData, MarkerData } from '../types';
-import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
+import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface ItgScalperInputs {
@@ -136,76 +139,9 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   if (timeframe.in_seconds(tf) < timeframe.in_seconds(chart)) {
     throw new Error(`ITG Scalper: the timeframe "${tf}" is lower than the chart timeframe "${chart}": the chart bars do not have that data`);
   }
-  // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
-  // complete them come from the library rule (see anchor-period.ts)
-  const exchange = securityBars(bars, tf, context);
-  if (exchange) return { htf: exchange.htf, latest: exchange.latest };
-  const n = bars.length;
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
-
-  // A bar completes its period when its close reaches the end of the period. Symbols that trade every day follow
-  // the UTC calendar: the period of the close time is another period. Other symbols: the last bar of a period.
-  const ms = n > 0 && bars[0].time >= 1e12;
-  const weekend = (t: number) => {
-    const wd = new Date(ms ? t : t * 1000).getUTCDay();
-    return wd === 0 || wd === 6;
-  };
-  const interval = barInterval(bars);
-  const closes = bars.map((b) => ({ time: b.time + interval }));
-  const calendar = bars.some((b) => weekend(b.time)) && closes.some((b) => weekend(b.time));
-  const closeStarts = calendar ? periodStarts(closes, tf) : [];
-  // The last bar of a symbol that does not trade every day: its period is complete when the next possible bar is in
-  // another period. The next bar is on the same day while the bar is earlier in the day than the last bar of the
-  // trading day before; else it is on the next weekday.
-  let lastEnds = true;
-  if (!calendar && n > 1) {
-    const DAY = 86400000;
-    const toMs = (t: number) => (ms ? t : t * 1000);
-    const lastMs = toMs(bars[n - 1].time);
-    const day = Math.floor(lastMs / DAY) * DAY;
-    let next = lastMs + toMs(interval);
-    let sessionOver = true;
-    if (toMs(interval) < DAY) {
-      let j = n - 2;
-      while (j >= 0 && toMs(bars[j].time) >= day) j--;
-      sessionOver = j < 0 || lastMs - day >= toMs(bars[j].time) % DAY;
-    }
-    if (sessionOver) {
-      next = day + DAY;
-      while (weekend(ms ? next : next / 1000)) next += DAY;
-    }
-    const withNext = periodStarts([...bars, { time: ms ? next : next / 1000 }], tf);
-    lastEnds = withNext[n] !== withNext[n - 1];
-  }
-  const latest: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let done = i === 0 ? -1 : latest[i - 1];
-    if (i > 0 && group[i] !== group[i - 1]) done = Math.max(done, group[i] - 1);
-    const ends = i === n - 1 ? lastEnds : starts[i + 1] !== starts[i];
-    const reaches = !calendar || closeStarts[i] !== starts[i];
-    if (ends && reaches) done = Math.max(done, group[i]);
-    latest.push(done);
-  }
-  return { htf, latest };
-}
-
-/** A label of the script (`dead` = deleted) */
-interface Lb extends LabelData {
-  dead: boolean;
+  // The periods and the bars that complete them: the exchange calendar of the chart context (time zone and
+  // session), else the UTC calendar rule; grouped and completed by the library (see anchor-period.ts)
+  return higherTimeframeBars(bars, tf, context);
 }
 
 export function calculate(
@@ -237,100 +173,84 @@ export function calculate(
 
   const plot0: Array<{ time: number; value: number; color: string }> = [];
   const markers: MarkerData[] = [];
-  const labels: Lb[] = [];
-  const addLabel = (label: Lb) => {
-    labels.push(label);
-    // above max + 5 labels the oldest are deleted until max remain (the label of a `var` variable is kept)
-    if (labels.length > MAX_LABELS + 5) {
-      let extra = labels.length - MAX_LABELS;
-      for (let k = 0; k < labels.length && extra > 0;) {
-        if (labels[k] === percLab) {
-          k++;
-        } else {
-          labels[k].dead = true;
-          labels.splice(k, 1);
-          extra--;
-        }
-      }
-    }
-  };
-  let percLab: Lb | null = null;
+  // Labels: library objects in the drawing registry (a creation that brings the count above max + 5 deletes the
+  // oldest until max remain; the label of the `var` variable percLab is not deleted by this limit, but counts)
+  resetDrawings({ label: MAX_LABELS });
+  const percLab = varDrawing<Label>();
 
   let buyprice = 0;
   let sellprice = 0;
   let lastTran = false;
-  for (let i = 0; i < n; i++) {
-    const bar = bars[i];
-    const prev = i > 0 ? out1[i - 1] : NaN;
-    const maUp = ge(out1[i], prev);
-    const maDown = lt(out1[i], prev);
-    const col = cfg.cc ? (maUp ? LIME : maDown ? RED : LIME) : AQUA;
-    const tNon = maUp === maDown;
+  try {
+    for (let i = 0; i < n; i++) {
+      setDrawingBar(i, i === n - 1);
+      const bar = bars[i];
+      const prev = i > 0 ? out1[i - 1] : NaN;
+      const maUp = ge(out1[i], prev);
+      const maDown = lt(out1[i], prev);
+      const col = cfg.cc ? (maUp ? LIME : maDown ? RED : LIME) : AQUA;
+      const tNon = maUp === maDown;
 
-    const outMacD = latest[i] >= 0 ? fMacd[latest[i]] : NaN;
-    const outSignal = latest[i] >= 0 ? fSignal[latest[i]] : NaN;
-    const fBuy = ge(outMacD, outSignal) || !cfg.nfilter;
-    const fSell = lt(outMacD, outSignal) || !cfg.nfilter;
+      const outMacD = latest[i] >= 0 ? fMacd[latest[i]] : NaN;
+      const outSignal = latest[i] >= 0 ? fSignal[latest[i]] : NaN;
+      const fBuy = ge(outMacD, outSignal) || !cfg.nfilter;
+      const fSell = lt(outMacD, outSignal) || !cfg.nfilter;
 
-    // plot(out1, color = col, transp = iff(shc, 0, 100))
-    plot0.push({ time: bar.time, value: out1[i], color: cfg.shc ? col : String(color.new(col, 100)) });
+      // plot(out1, color = col, transp = iff(shc, 0, 100))
+      plot0.push({ time: bar.time, value: out1[i], color: cfg.shc ? col : String(color.new(col, 100)) });
 
-    const confirmed = i < n - 1 || lastBarConfirmedOf(chart);
-    const long = maUp && !lastTran && !tNon && fBuy && confirmed;
-    const short = maDown && lastTran && !tNon && fSell && confirmed;
-    if (long) {
-      buyprice = bar.close;
-      lastTran = true;
-    }
-    if (short) {
-      sellprice = bar.close;
-      lastTran = false;
-    }
-
-    // Percent change since the last buy / sell: one label, made again on each bar
-    if (cfg.showperc) {
-      const percVal = lastTran ? (100 * (bar.close - buyprice)) / buyprice : (100 * (bar.close - sellprice)) / sellprice;
-      const percCol = ge(percVal, 0) ? LIME : ORANGE;
-      if (percLab) {
-        percLab.dead = true;
-        labels.splice(labels.indexOf(percLab), 1);
+      const confirmed = i < n - 1 || lastBarConfirmedOf(chart);
+      const long = maUp && !lastTran && !tNon && fBuy && confirmed;
+      const short = maDown && lastTran && !tNon && fSell && confirmed;
+      if (long) {
+        buyprice = bar.close;
+        lastTran = true;
       }
-      percLab = {
-        dead: false, time: bar.time, price: bar.high, yloc: 'abovebar', color: BLACK, textColor: percCol, style: 'none',
-        text: `${str.tostring(truncate(percVal, 2))} %`,
-      };
-      addLabel(percLab);
-    }
-
-    const goodshort = short && gt(sellprice, buyprice);
-    const sellColor = goodshort ? RED : YELLOW;
-    if (cfg.showtext && long) {
-      if (cfg.uselabel) {
-        addLabel({
-          dead: false, time: bar.time, price: bar.high, text: str.tostring(truncate(buyprice, 8)), yloc: 'belowbar',
-          color: LIME, textColor: WHITE, style: 'triangleup', size: 'small',
-        });
-      } else {
-        markers.push({ time: bar.time, position: 'belowBar', shape: 'triangleUp', color: LIME, size: 'small' });
+      if (short) {
+        sellprice = bar.close;
+        lastTran = false;
       }
-    }
-    if (cfg.showtext && short) {
-      if (cfg.uselabel) {
-        addLabel({
-          dead: false, time: bar.time, price: bar.high, text: str.tostring(truncate(sellprice, 8)), yloc: 'abovebar',
-          color: sellColor, textColor: WHITE, style: 'triangledown', size: 'small',
-        });
-      } else {
-        markers.push({ time: bar.time, position: 'aboveBar', shape: 'triangleDown', color: sellColor, size: 'small' });
+
+      // Percent change since the last buy / sell: one label, made again on each bar
+      if (cfg.showperc) {
+        const percVal = lastTran ? (100 * (bar.close - buyprice)) / buyprice : (100 * (bar.close - sellprice)) / sellprice;
+        const percCol = ge(percVal, 0) ? LIME : ORANGE;
+        // label.delete(percLab); percLab := label.new(...); label.set_text(percLab, ...)
+        if (percLab.value) label.delete(percLab.value);
+        percLab.value = label.new(i, bar.high, `${str.tostring(truncate(percVal, 2))} %`, 'bar_index', 'abovebar', BLACK, 'none', percCol);
+      }
+
+      const goodshort = short && gt(sellprice, buyprice);
+      const sellColor = goodshort ? RED : YELLOW;
+      if (cfg.showtext && long) {
+        if (cfg.uselabel) {
+          label.new(i, bar.high, str.tostring(truncate(buyprice, 8)), 'bar_index', 'belowbar', LIME, 'triangleup', WHITE, 'small');
+        } else {
+          markers.push({ time: bar.time, position: 'belowBar', shape: 'triangleUp', color: LIME, size: 'small' });
+        }
+      }
+      if (cfg.showtext && short) {
+        if (cfg.uselabel) {
+          label.new(i, bar.high, str.tostring(truncate(sellprice, 8)), 'bar_index', 'abovebar', sellColor, 'triangledown', WHITE, 'small');
+        } else {
+          markers.push({ time: bar.time, position: 'aboveBar', shape: 'triangleDown', color: sellColor, size: 'small' });
+        }
       }
     }
+  } finally {
+    setDrawingBar(null);
   }
 
+  const labels: LabelData[] = label.all().map((l) => ({
+    time: bars[l.x].time, price: l.y, text: l.text ?? '', yloc: l.yloc, color: String(l.color), textColor: String(l.textcolor),
+    style: l.style, ...(l.size !== undefined ? { size: l.size as LabelData['size'] } : {}),
+  }));
+  resetDrawings();
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     markers,
-    labels: labels.map(({ dead: _dead, ...label }) => label),
+    labels,
   };
 }
 

@@ -38,7 +38,10 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, color, timeframe, barInterval, barTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, color, timeframe, barInterval, barTime, line, linefill, resetDrawings, setDrawingBar,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line,
+} from 'oakscriptjs';
 import type { LineDrawingData, LabelData, LinefillData, TableData } from '../types';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import { tickeridOf, type ChartContext } from '../chart-context';
@@ -229,7 +232,7 @@ export const metadata = {
   overlay: true,
 };
 
-/** Pine: indicator(max_lines_count = 500): above 505 lines the oldest are deleted until 500 remain */
+/** Pine: indicator(max_lines_count = 500), applied by the drawing registry of the library (lines and linefills) */
 const MAX_LINES = 500;
 /** Pine: indicator(max_bars_back = 4999) */
 const MAX_BARS_BACK = 4999;
@@ -257,18 +260,7 @@ function resInMinutes(tf: string): number {
   return info.multiplier * unit;
 }
 
-/** A line of the script (x in bar indexes; NaN = na) */
-interface Ln {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  color: string;
-  style: 'solid' | 'dotted' | 'dashed';
-  width: number;
-  extend: 'right' | 'none';
-  deleted: boolean;
-}
+type LineStyleName = 'solid' | 'dotted' | 'dashed';
 interface Lbl {
   x: number;
   y: number;
@@ -300,10 +292,10 @@ interface TimeFrame {
   supZoneAt: number[];
   /** ta.change(time(TF)) != 0 */
   starts: number[];
-  upperRes: Array<Ln | null>;
-  lowerRes: Array<Ln | null>;
-  upperSup: Array<Ln | null>;
-  lowerSup: Array<Ln | null>;
+  upperRes: Array<Line | null>;
+  lowerRes: Array<Line | null>;
+  upperSup: Array<Line | null>;
+  lowerSup: Array<Line | null>;
   resLabel: Lbl | null;
   supLabel: Lbl | null;
   /** barssince(FractalUp != FractalUp[1]) / barssince(FractalDown != FractalDown[1]) is not na */
@@ -435,10 +427,10 @@ export function calculate(
       resZone: get<string>('ResZoneColor'),
       supLines: get<string>('SupLinesColor'),
       supZone: get<string>('SupZoneColor'),
-      upperRes: new Array<Ln | null>(numZones).fill(null),
-      lowerRes: new Array<Ln | null>(numZones).fill(null),
-      upperSup: new Array<Ln | null>(numZones).fill(null),
-      lowerSup: new Array<Ln | null>(numZones).fill(null),
+      upperRes: new Array<Line | null>(numZones).fill(null),
+      lowerRes: new Array<Line | null>(numZones).fill(null),
+      upperSup: new Array<Line | null>(numZones).fill(null),
+      lowerSup: new Array<Line | null>(numZones).fill(null),
       resLabel: null,
       supLabel: null,
       upChanged: false,
@@ -473,42 +465,24 @@ export function calculate(
     };
   });
 
-  // ---- Drawings
-  const allLines: Ln[] = [];
-  let liveLines = 0;
-  const fills: Array<{ a: Ln; b: Ln; color: string }> = [];
-  const filled = new Map<Ln, Set<Ln>>();
-  const newLine = (x1: number, y: number, x2: number, col: string, style: Ln['style'], width: number): Ln => {
-    const l: Ln = { x1, y1: y, x2, y2: y, color: col, style, width, extend: 'right', deleted: false };
-    allLines.push(l);
-    liveLines++;
-    if (liveLines > MAX_LINES + 5) {
-      for (const old of allLines) {
-        if (liveLines <= MAX_LINES) break;
-        if (!old.deleted) {
-          old.deleted = true;
-          liveLines--;
-        }
-      }
-    }
-    return l;
-  };
-  const deleteLine = (l: Ln | null | undefined) => {
-    if (l && !l.deleted) {
-      l.deleted = true;
-      liveLines--;
-    }
-  };
+  // ---- Drawings: lines and linefills live in the library registry (max_lines_count = 500, also for linefills)
+  resetDrawings({ line: MAX_LINES });
+  /**
+   * linefill.new on two lines that already have a linefill makes no new object (one linefill per pair, as the
+   * object ids of the reference runs show); a pair with a deleted line gets none
+   */
+  const filled = new Map<Line, Set<Line>>();
   /** One side of a zone: the new line closes the previous one of its array, which loses its oldest line */
-  const pushLine = (arr: Array<Ln | null>, tf: TimeFrame, x1: number, y: number, i: number, col: string, style: Ln['style'], width: number) => {
-    const l = newLine(x1, y, i, col, style, width);
+  const pushLine = (arr: Array<Line | null>, tf: TimeFrame, x1: number, y: number, i: number, col: string, style: LineStyleName, width: number) => {
+    const l = line.new(x1, y, i, y, 'bar_index', 'right', col, style, width);
     const prev = arr[tf.numZones - 1];
     if (prev) {
-      prev.extend = tf.extRight ? 'right' : 'none';
-      if (cfg.extendLines1) prev.x2 = x1;
+      line.set_extend(prev, tf.extRight ? 'right' : 'none');
+      if (cfg.extendLines1) line.set_x2(prev, x1);
     }
     arr.push(l);
-    deleteLine(arr.shift());
+    const old = arr.shift();
+    if (old) line.delete(old);
   };
   /** TF_ResistanceLineA / B and TF_SupportLineA / B: `x1` is the left bar of the lines, `labelX` that of a left label */
   const zone = (tf: TimeFrame, res: boolean, i: number, x1: number, labelX: number, text: string) => {
@@ -531,19 +505,33 @@ export function calculate(
     }
   };
 
-  // ta.highestbars(high, length) / ta.lowestbars(low, length) for each length used (the length is a series in the
-  // original; each value is the library function with that length, read at the bar)
+  // TFx_bi1 / TFx_bi5: the bar of the new period 1 / 5 occurrences back; TFx_bb1 and TFx_br of each bar
+  for (const tf of tfs) {
+    if (!tf.known) continue;
+    for (let i = 0; i < n; i++) {
+      if (i > 0 && tf.starts[i] !== tf.starts[i - 1]) tf.newBars.push(i);
+      const c = tf.newBars.length;
+      const bi1 = c >= 2 ? tf.newBars[c - 2] : NaN;
+      const bi5 = c >= 6 ? tf.newBars[c - 6] : NaN;
+      tf.bb1.push(i - bi1);
+      tf.br.push((i - bi5) - (i - bi1));
+    }
+  }
+
+  // ta.highestbars(high, nz(TFx_br, 1)) / ta.lowestbars(low, nz(TFx_br, 1)): the library function with a length per
+  // bar. The script calls them only where TFx_bb1 + TFx_br <= 4999, so a length above 4999 is never used (length 1)
   const highSeries = Series.fromArray(bars, bars.map((b) => b.high));
   const lowSeries = Series.fromArray(bars, bars.map((b) => b.low));
-  const extremeCache = new Map<string, number[]>();
-  const extremeBars = (j: number, length: number, lowest: boolean): number => {
-    const key = `${lowest ? 'l' : 'h'}${length}`;
-    let values = extremeCache.get(key);
+  const extremeCache = new Map<TimeFrame, { high: number[]; low: number[] }>();
+  const extremeBars = (tf: TimeFrame, j: number, lowest: boolean): number => {
+    let values = extremeCache.get(tf);
     if (!values) {
-      values = (lowest ? ta.lowestbars(lowSeries, length) : ta.highestbars(highSeries, length)).toArray().map((v) => v ?? NaN);
-      extremeCache.set(key, values);
+      const lengths = Series.fromArray(bars, tf.br.map((v) => (Number.isNaN(v) || v > MAX_BARS_BACK ? 1 : v)));
+      const arr = (s: Series) => s.toArray().map((v) => v ?? NaN);
+      values = { high: arr(ta.highestbars(highSeries, lengths)), low: arr(ta.lowestbars(lowSeries, lengths)) };
+      extremeCache.set(tf, values);
     }
-    return values[j];
+    return (lowest ? values.low : values.high)[j];
   };
   /** TFx_Hi_Bi / TFx_Lo_Bi at bar i: bars back to the highest high / lowest low of the fractal periods */
   const extremeBack = (tf: TimeFrame, i: number, lowest: boolean): number => {
@@ -553,8 +541,7 @@ export function calculate(
     // math.abs(ta.highestbars(high, nz(br, 1)))[bb1] + bb1 (a history offset na reads the current bar)
     const j = Number.isNaN(bb1) ? i : i - bb1;
     if (j < 0) return NaN;
-    const length = Number.isNaN(tf.br[j]) ? 1 : tf.br[j];
-    return Math.abs(extremeBars(j, length, lowest)) + bb1;
+    return Math.abs(extremeBars(tf, j, lowest)) + bb1;
   };
   const back = (i: number, k: number) => (Number.isNaN(k) ? i : i - k >= 0 ? i - k : NaN);
 
@@ -562,7 +549,9 @@ export function calculate(
     throw new Error(`${message} is below the chart timeframe "${chartTf}": the chart bars do not carry its data.`);
   };
 
+  try {
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const chartOnLower = (tf: TimeFrame) => !Number.isNaN(tf.minutes[i]) && !gt(currentMinutes, tf.minutes[i]);
     const chartEqual = (tf: TimeFrame) => eq(currentMinutes, tf.minutes[i]) && tf.menuOn;
     // TF1_text
@@ -574,15 +563,6 @@ export function calculate(
     const tf1Free = !chartEqual(tfs[1]) && !chartEqual(tfs[2]) && !chartEqual(tfs[3]);
 
     tfs.forEach((tf, k) => {
-      if (tf.known) {
-        // TFx_bi1 / TFx_bi5: the bar of the new period 1 / 5 occurrences back
-        if (i > 0 && tf.starts[i] !== tf.starts[i - 1]) tf.newBars.push(i);
-        const c = tf.newBars.length;
-        const bi1 = c >= 2 ? tf.newBars[c - 2] : NaN;
-        const bi5 = c >= 6 ? tf.newBars[c - 6] : NaN;
-        tf.bb1.push(i - bi1);
-        tf.br.push((i - bi5) - (i - bi1));
-      }
       const on = chartOnLower(tf) && (k > 0 || tf1Free);
       for (const res of [true, false]) {
         const f = res ? tf.fractalUp : tf.fractalDown;
@@ -604,10 +584,12 @@ export function calculate(
         if (tf.zones) {
           const a = (res ? tf.upperRes : tf.upperSup)[tf.numZones - 1];
           const b = (res ? tf.lowerRes : tf.lowerSup)[tf.numZones - 1];
-          if (a && b && !a.deleted && !b.deleted && !filled.get(a)?.has(b)) {
+          if (a && b && !filled.get(a)?.has(b)) {
             if (!filled.has(a)) filled.set(a, new Set());
             filled.get(a)!.add(b);
-            fills.push({ a, b, color: res ? tf.resZone : tf.supZone });
+            // a deleted line stays deleted: the pair never gets a linefill
+            const live = line.all();
+            if (live.includes(a) && live.includes(b)) linefill.new(a, b, res ? tf.resZone : tf.supZone);
           }
         }
         // A label after the last bar, made again on every bar
@@ -621,8 +603,8 @@ export function calculate(
         for (const arr of [tf.upperRes, tf.lowerRes, tf.upperSup, tf.lowerSup]) {
           const l = arr[tf.numZones - 1];
           if (l) {
-            l.extend = 'none';
-            l.x2 = i;
+            line.set_extend(l, 'none');
+            line.set_x2(l, i);
           }
         }
       }
@@ -661,18 +643,23 @@ export function calculate(
       }
     }
   }
+  } finally {
+    setDrawingBar(null);
+  }
 
-  // ---- Outputs: the objects alive after the last bar; an object with an na coordinate is not drawn
+  // ---- Outputs: the objects alive after the last bar; an object with an na coordinate is not drawn (a deleted line
+  // has na coordinates)
   const interval = barInterval(bars);
   const tOf = (x: number) => barTime(bars, x, interval);
-  const drawn = (l: Ln) => !l.deleted && !Number.isNaN(l.x1) && !Number.isNaN(l.x2) && !Number.isNaN(l.y1);
-  const toLine = (l: Ln): LineDrawingData => ({
-    time1: tOf(l.x1), price1: l.y1, time2: tOf(l.x2), price2: l.y2, color: l.color, width: l.width,
-    ...(l.style !== 'solid' ? { style: l.style } : {}),
+  const drawn = (l: Line) => !Number.isNaN(l.x1) && !Number.isNaN(l.x2) && !Number.isNaN(l.y1);
+  const toLine = (l: Line): LineDrawingData => ({
+    time1: tOf(l.x1), price1: l.y1, time2: tOf(l.x2), price2: l.y2, color: String(l.color), width: l.width ?? 1,
+    ...(l.style !== 'solid' ? { style: l.style as LineStyleName } : {}),
     ...(l.extend !== 'none' ? { extend: l.extend } : {}),
   });
-  const lines = allLines.filter(drawn).map(toLine);
-  const linefills = fills.filter((f) => drawn(f.a) && drawn(f.b)).map((f) => ({ line1: toLine(f.a), line2: toLine(f.b), color: f.color }));
+  const lines = line.all().filter(drawn).map(toLine);
+  const linefills = linefill.all().filter((f) => drawn(f.line1) && drawn(f.line2))
+    .map((f) => ({ line1: toLine(f.line1), line2: toLine(f.line2), color: String(f.color) }));
   const labels: LabelData[] = [];
   for (const tf of tfs) {
     for (const l of [tf.resLabel, tf.supLabel]) {

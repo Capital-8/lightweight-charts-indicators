@@ -14,7 +14,8 @@
  * - the last candles of a higher timeframe, drawn to the right of the last bar with boxes and wick lines;
  * - a table with the bars left in the hour and the change of the close since the previous 1-hour, 4-hour and daily
  *   close; and a warning table when the chart timeframe is 15 minutes or more.
- * At most 100 lines, 100 labels and 50 boxes are kept.
+ * At most 100 lines, 100 labels and 50 boxes are kept (drawing registry of the library: the objects of the `var`
+ * variables of the script are not deleted by this limit).
  *
  * The clock hours are read in the exchange time zone and the chart timeframe is needed: both come from the chart
  * context (optional third argument of calculate); without it the port uses UTC and the spacing of the bars. The
@@ -28,8 +29,8 @@
  */
 
 import {
-  ta, str, color, timeframe, Series, time as pineTime,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  ta, str, color, timeframe, Series, time as pineTime, resample, line, box, label, resetDrawings, setDrawingBar,
+  varDrawing, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line, type Box, type Label,
 } from 'oakscriptjs';
 import type { BarColorData, BoxData, LabelData, LineDrawingData, MarkerData, PlotCandleData, TableCellData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
@@ -190,39 +191,6 @@ const ne = (a: number, b: number) => gt(a, b) || lt(a, b);
 type DrawStyle = 'solid' | 'dotted' | 'dashed';
 const styleOf = (name: LineStyleName): DrawStyle => (name === 'Dotted' ? 'dotted' : name === 'Dashed' ? 'dashed' : 'solid');
 
-/** A drawing of the script: x values are bar times (`byTime`) or bar indices */
-interface Ln {
-  byTime: boolean;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  color: string;
-  style: DrawStyle;
-  width: number;
-  deleted: boolean;
-}
-interface Bx {
-  byTime: boolean;
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-  bg: string;
-  border: string | null;
-  borderStyle: DrawStyle;
-  borderWidth: number;
-  deleted: boolean;
-}
-interface Lb {
-  x: number;
-  y: number;
-  text: string;
-  color: string;
-  style: 'label_down' | 'label_up';
-  deleted: boolean;
-}
-
 /**
  * request.security(syminfo.tickerid, tf, ..., lookahead = barmerge.lookahead_on): the bars of timeframe `tf` built
  * from the chart bars, and for each chart bar the index of its bar of that timeframe.
@@ -237,21 +205,8 @@ function timeframeBars(bars: Bar[], tf: string, chartTf: string, context?: Chart
   // With the exchange calendar of the chart context (time zone and session): the periods come from the library rule
   const exchange = securityBars(bars, tf, context);
   if (exchange) return { htf: exchange.htf, group: exchange.group };
-  const starts = periodStarts(bars, tf, context);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
+  // Without it: periods of the UTC calendar and the bars (src/anchor-period.ts), grouped by the library
+  const { bars: htf, group } = resample(bars, periodStarts(bars, tf, context));
   return { htf, group };
 }
 
@@ -298,58 +253,20 @@ export function calculate(
     ? ta.wma(new Series(bars, (b) => b.volume ?? NaN), cfg.volLen).toArray().map((v) => v ?? NaN)
     : [];
 
-  // Live drawings in creation order: when a creation brings the count above max + 5, the oldest are deleted until
-  // max remain. An object held by a `var` variable of the script (the latest hour line, hour zone, 4-hour line and
-  // current High / Low labels) is never deleted by this limit, but it counts. A deleted object ignores later changes.
-  const held = new Set<object>();
-  const limit = <O extends { deleted: boolean }>(list: O[], max: number) => {
-    if (list.length <= max + 5) return;
-    for (let k = 0; k < list.length && list.length > max; ) {
-      if (held.has(list[k])) k++;
-      else list.splice(k, 1)[0].deleted = true;
-    }
-  };
-  /** `variable := object`: the variable holds the new object and releases the one before */
-  const hold = <O extends object>(before: O | null, now: O): O => {
-    if (before) held.delete(before);
-    held.add(now);
-    return now;
-  };
-  const remove = <O extends { deleted: boolean }>(list: O[], o: O | null) => {
-    if (!o || o.deleted) return;
-    o.deleted = true;
-    list.splice(list.indexOf(o), 1);
-  };
-  const lines: Ln[] = [];
-  const boxes: Bx[] = [];
-  const labels: Lb[] = [];
-  const newLine = (l: Omit<Ln, 'deleted'>): Ln => {
-    const o = { ...l, deleted: false };
-    lines.push(o);
-    limit(lines, MAX_LINES);
-    return o;
-  };
-  const newBox = (b: Omit<Bx, 'deleted'>): Bx => {
-    const o = { ...b, deleted: false };
-    boxes.push(o);
-    limit(boxes, MAX_BOXES);
-    return o;
-  };
-  const newLabel = (l: Omit<Lb, 'deleted'>): Lb => {
-    const o = { ...l, deleted: false };
-    labels.push(o);
-    limit(labels, MAX_LABELS);
-    return o;
-  };
-
+  // Lines, boxes and labels: library objects in the drawing registry (a creation that brings the count above max + 5
+  // deletes the oldest until max remain; the objects held by a `var` variable of the script are not deleted by this
+  // limit, but count; a deleted object reads na and ignores later changes). Their x values are bar times
+  // (xloc.bar_time, in the unit of the bar times) or bar indices.
+  resetDrawings({ line: MAX_LINES, box: MAX_BOXES, label: MAX_LABELS });
+  const deletedLabel = (o: Label) => Number.isNaN(label.get_x(o));
   const hStyle = styleOf(cfg.hStyle);
   const h4Style = styleOf(cfg.h4Style);
   const zoneBg = String(color.new(cfg.hCol, 75));
 
   // Script state
-  let line2: Ln | null = null; // 1-hour open line
-  let line1: Ln | null = null; // 4-hour open line
-  let box2: Bx | null = null; // 1-hour open zone
+  const line2 = varDrawing<Line>(); // 1-hour open line
+  const line1 = varDrawing<Line>(); // 4-hour open line
+  const box2 = varDrawing<Box>(); // 1-hour open zone
   let count = 0;
   let end = NaN;
   let pos = false;
@@ -361,9 +278,10 @@ export function calculate(
   let prevHourHigh = NaN;
   let prevHourLow = NaN;
   /** Labels of the past hours in creation order: high then low of each hour */
-  const hourLabels: Lb[] = [];
-  let highLabel: Lb | null = null;
-  let lowLabel: Lb | null = null;
+  const hourLabels: Label[] = [];
+  // the `var label lab` of the two Label() calls (current High / Low)
+  const highLabel = varDrawing<Label>();
+  const lowLabel = varDrawing<Label>();
   let avgSum = NaN;
   let avgLen = 0;
   let hourlyChange = NaN;
@@ -371,9 +289,9 @@ export function calculate(
   let dailyChange = NaN;
   let retestCount = 0;
   // Candles of the higher timeframe: boxes and wick lines, oldest first (none at the start)
-  const candleBoxes: Array<Bx | null> = new Array(Math.max(numb, 0)).fill(null);
-  const wickHigh: Array<Ln | null> = new Array(Math.max(numb, 0)).fill(null);
-  const wickLow: Array<Ln | null> = new Array(Math.max(numb, 0)).fill(null);
+  const candleBoxes: Array<Box | null> = new Array(Math.max(numb, 0)).fill(null);
+  const wickHigh: Array<Line | null> = new Array(Math.max(numb, 0)).fill(null);
+  const wickLow: Array<Line | null> = new Array(Math.max(numb, 0)).fill(null);
   let prevO = NaN;
 
   const plot0: Array<{ time: number; value: number; color: string }> = [];
@@ -381,192 +299,204 @@ export function calculate(
   const barColors: BarColorData[] = [];
   const markers: MarkerData[] = [];
 
-  for (let i = 0; i < n; i++) {
-    const b = bars[i];
-    const t = b.time;
-    if (i === 0) {
-      startPoint = b.close;
-      hourHigh = b.high;
-      hourLow = b.low;
-    }
-    const newHour = i > 0 && hours[i] !== hours[i - 1];
-
-    // 1-hour open
-    if (newHour) {
-      startPoint = b.open;
-      if (cfg.hLineBox === 'Line') {
-        line2 = hold(line2, newLine({ byTime: true, x1: t, y1: b.open, x2: t + HOUR, y2: b.open, color: cfg.hCol, style: hStyle, width: cfg.hWidth }));
-      } else {
-        box2 = hold(box2, newBox({
-          byTime: true, left: t, top: b.open * (1 + zoneDev), right: t + HOUR, bottom: b.open * (1 - zoneDev),
-          bg: zoneBg, border: cfg.hCol, borderStyle: hStyle, borderWidth: cfg.hWidth,
-        }));
-      }
-      count = 0;
-      end = t + HOUR;
-      pos = true;
-
-      if (cfg.hourlyHl) {
-        // The labels of the hours before move one rank back (only the labels that still exist: the oldest go first)
-        for (let k = 0; ; k++) {
-          const low = hourLabels[hourLabels.length - 1 - 2 * k];
-          const high = hourLabels[hourLabels.length - 2 - 2 * k];
-          if (!low || (low.deleted && high.deleted)) break;
-          if (!high.deleted) high.text = `H[${k + 2}]`;
-          if (!low.deleted) low.text = `L[${k + 2}]`;
-        }
-        hourLabels.push(newLabel({ x: hourHighTime, y: hourHigh, text: 'H[1]', color: GREEN, style: 'label_down' }));
-        hourLabels.push(newLabel({ x: hourLowTime, y: hourLow, text: 'L[1]', color: RED, style: 'label_up' }));
+  try {
+    for (let i = 0; i < n; i++) {
+      setDrawingBar(i, i === n - 1);
+      const b = bars[i];
+      const t = b.time;
+      if (i === 0) {
+        startPoint = b.close;
         hourHigh = b.high;
         hourLow = b.low;
       }
-    }
+      const newHour = i > 0 && hours[i] !== hours[i - 1];
 
-    // High and low of the current hour: one label each, replaced when the value changes
-    if (cfg.hourlyHl) {
-      hourHigh = Math.max(b.high, hourHigh);
-      hourLow = Math.min(b.low, hourLow);
-      if (ne(hourHigh, prevHourHigh)) {
-        const before: Lb | null = highLabel;
-        highLabel = hold(before, newLabel({ x: t, y: hourHigh, text: 'High', color: GREEN, style: 'label_down' }));
-        remove(labels, before);
-        hourHighTime = t;
-      }
-      if (ne(hourLow, prevHourLow)) {
-        const before: Lb | null = lowLabel;
-        lowLabel = hold(before, newLabel({ x: t, y: hourLow, text: 'Low', color: RED, style: 'label_up' }));
-        remove(labels, before);
-        hourLowTime = t;
-      }
-    }
-    prevHourHigh = hourHigh;
-    prevHourLow = hourLow;
-
-    // 4-hour open
-    if (isIntraday && minutes[i] === 0 && hours[i] % 4 === 0) {
-      line1 = hold(line1, newLine({ byTime: true, x1: t, y1: b.open, x2: t + 4 * HOUR, y2: b.open, color: cfg.h4Col, style: h4Style, width: cfg.h4Width }));
-      count = 0;
-      end = t + 4 * HOUR;
-      pos = true;
-    }
-
-    // Average close of the hour
-    let maHour = NaN;
-    if (cfg.average) {
+      // 1-hour open
       if (newHour) {
-        avgSum = b.close;
-        avgLen = 1;
-      } else {
-        avgSum = (isNaN(avgSum) ? 0 : avgSum) + b.close;
-        avgLen += 1;
-      }
-      maHour = avgSum / avgLen;
-    }
+        startPoint = b.open;
+        if (cfg.hLineBox === 'Line') {
+          line2.value = line.new(t, b.open, t + HOUR, b.open, 'bar_time', 'none', cfg.hCol, hStyle, cfg.hWidth);
+        } else {
+          box2.value = box.new(
+            t, b.open * (1 + zoneDev), t + HOUR, b.open * (1 - zoneDev), cfg.hCol, cfg.hWidth, hStyle, 'none', 'bar_time', zoneBg,
+          );
+        }
+        count = 0;
+        end = t + HOUR;
+        pos = true;
 
-    // Side of the close against the hour open
-    const up = ge(b.close, startPoint);
-    const col = up ? cfg.cUp : cfg.cDn;
-    plot0.push({ time: t, value: maHour, color: i >= 2 && hours[i] === hours[i - 2] ? (up ? cfg.maUp : cfg.maDn) : 'transparent' });
-    if (cfg.candle) candlesticks.push({ time: t, open: b.open, high: b.high, low: b.low, close: b.close, color: col, borderColor: col, wickColor: col });
-    if (cfg.bar) barColors.push({ time: t, color: col });
-
-    // Changes since the previous 1-hour, 4-hour and daily close
-    const change = (src: { htf: Bar[]; group: number[] }, before: number) => {
-      const prev = prevClose(src, i);
-      return isNaN(prev) ? before : ((b.close - prev) / prev) * 100;
-    };
-    hourlyChange = change(h1, hourlyChange);
-    fourHourChange = change(h4, fourHourChange);
-    dailyChange = change(day, dailyChange);
-
-    // Candles of the higher timeframe, to the right of the current bar
-    if (candles) {
-      const bar = candles.htf[candles.group[i]];
-      const o = bar.open, h = bar.high, l = bar.low, c = bar.close;
-      const top = Math.max(o, c);
-      const bottom = Math.min(o, c);
-      const down = gt(o, c);
-      if (i > 0 && ne(o, prevO)) {
-        // A new candle: the oldest one is deleted
-        remove(boxes, candleBoxes.shift() ?? null);
-        remove(lines, wickHigh.shift() ?? null);
-        remove(lines, wickLow.shift() ?? null);
-        const x = i + numb * 4 + loc;
-        const body = down ? cfg.dnCol : cfg.upCol;
-        candleBoxes.push(newBox({ byTime: false, left: x, top, right: x + 2, bottom, bg: body, border: null, borderStyle: 'solid', borderWidth: 1 }));
-        wickHigh.push(newLine({ byTime: false, x1: x + 1, y1: top, x2: x + 1, y2: h, color: body, style: 'solid', width: 1 }));
-        wickLow.push(newLine({ byTime: false, x1: x + 1, y1: bottom, x2: x + 1, y2: l, color: body, style: 'solid', width: 1 }));
-      } else {
-        // The candles follow the current bar; the last one also follows the prices of its period
-        let d = loc;
-        for (let k = 0; k < candleBoxes.length; k++) {
-          const box = candleBoxes[k];
-          const wh = wickHigh[k];
-          const wl = wickLow[k];
-          const x = i + d * 2;
-          if (box && !box.deleted) {
-            box.left = x;
-            box.right = x + 2;
+        if (cfg.hourlyHl) {
+          // The labels of the hours before move one rank back (only the labels that still exist: the oldest go first)
+          for (let k = 0; ; k++) {
+            const low = hourLabels[hourLabels.length - 1 - 2 * k];
+            const high = hourLabels[hourLabels.length - 2 - 2 * k];
+            if (!low || (deletedLabel(low) && deletedLabel(high))) break;
+            label.set_text(high, `H[${k + 2}]`);
+            label.set_text(low, `L[${k + 2}]`);
           }
-          if (wh && !wh.deleted) wh.x1 = wh.x2 = x + 1;
-          if (wl && !wl.deleted) wl.x1 = wl.x2 = x + 1;
-          if (k >= numb - 1) {
-            const wick = down ? cfg.dnWick : cfg.upWick;
-            if (box && !box.deleted) {
-              box.top = top;
-              box.bottom = bottom;
-              box.bg = down ? cfg.dnCol : cfg.upCol;
-            }
-            if (wh && !wh.deleted) {
-              wh.y1 = top;
-              wh.y2 = h;
-              wh.color = wick;
-            }
-            if (wl && !wl.deleted) {
-              wl.y1 = bottom;
-              wl.y2 = l;
-              wl.color = wick;
-            }
-          }
-          d += 2;
+          hourLabels.push(label.new(hourHighTime, hourHigh, 'H[1]', 'bar_time', 'price', GREEN, 'label_down', WHITE));
+          hourLabels.push(label.new(hourLowTime, hourLow, 'L[1]', 'bar_time', 'price', RED, 'label_up', WHITE));
+          hourHigh = b.high;
+          hourLow = b.low;
         }
       }
-      prevO = o;
-    }
 
-    // Retests of the 1-hour zone (the original tests the zone only: in the 'Line' mode there is no zone, no retest)
-    const zoneTop = box2 ? box2.top : NaN;
-    const zoneBottom = box2 ? box2.bottom : NaN;
-    const prevLow = i > 0 ? bars[i - 1].low : NaN;
-    const prevHigh = i > 0 ? bars[i - 1].high : NaN;
-    let positiveRetest = false;
-    let negativeRetest = false;
-    if (pos && count > 1 && t <= end && retestCount < cfg.retests
-      && gt(prevLow, zoneTop) && le(b.low, zoneTop) && ge(b.close, zoneBottom)) {
-      positiveRetest = true;
-      pos = false;
-      count = 0;
-      retestCount += 1;
-    }
-    if (pos && count > 1 && t <= end && retestCount < cfg.retests
-      && lt(prevHigh, zoneBottom) && ge(b.high, zoneBottom) && le(b.close, zoneTop)) {
-      negativeRetest = true;
-      pos = false;
-      count = 0;
-      retestCount += 1;
-    }
-    count += 1;
-    if (count > 1) pos = true;
-    if (newHour) retestCount = 0;
+      // High and low of the current hour: one label each, replaced when the value changes
+      if (cfg.hourlyHl) {
+        hourHigh = Math.max(b.high, hourHigh);
+        hourLow = Math.min(b.low, hourLow);
+        if (ne(hourHigh, prevHourHigh)) {
+          const before = highLabel.value;
+          highLabel.value = label.new(t, hourHigh, 'High', 'bar_time', 'price', GREEN, 'label_down', WHITE);
+          if (before) label.delete(before);
+          hourHighTime = t;
+        }
+        if (ne(hourLow, prevHourLow)) {
+          const before = lowLabel.value;
+          lowLabel.value = label.new(t, hourLow, 'Low', 'bar_time', 'price', RED, 'label_up', WHITE);
+          if (before) label.delete(before);
+          hourLowTime = t;
+        }
+      }
+      prevHourHigh = hourHigh;
+      prevHourLow = hourLow;
 
-    const volumeOk = !cfg.vol || gt(b.volume ?? NaN, volumeWma[i]);
-    // plotshape(retest ? low : na, ...): a price of 0 draws nothing
-    if (cfg.hourTest && positiveRetest && volumeOk && b.low !== 0) {
-      markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: cfg.reUp, size: 'tiny' });
+      // 4-hour open
+      if (isIntraday && minutes[i] === 0 && hours[i] % 4 === 0) {
+        line1.value = line.new(t, b.open, t + 4 * HOUR, b.open, 'bar_time', 'none', cfg.h4Col, h4Style, cfg.h4Width);
+        count = 0;
+        end = t + 4 * HOUR;
+        pos = true;
+      }
+
+      // Average close of the hour
+      let maHour = NaN;
+      if (cfg.average) {
+        if (newHour) {
+          avgSum = b.close;
+          avgLen = 1;
+        } else {
+          avgSum = (isNaN(avgSum) ? 0 : avgSum) + b.close;
+          avgLen += 1;
+        }
+        maHour = avgSum / avgLen;
+      }
+
+      // Side of the close against the hour open
+      const up = ge(b.close, startPoint);
+      const col = up ? cfg.cUp : cfg.cDn;
+      plot0.push({ time: t, value: maHour, color: i >= 2 && hours[i] === hours[i - 2] ? (up ? cfg.maUp : cfg.maDn) : 'transparent' });
+      if (cfg.candle) candlesticks.push({ time: t, open: b.open, high: b.high, low: b.low, close: b.close, color: col, borderColor: col, wickColor: col });
+      if (cfg.bar) barColors.push({ time: t, color: col });
+
+      // Changes since the previous 1-hour, 4-hour and daily close
+      const change = (src: { htf: Bar[]; group: number[] }, before: number) => {
+        const prev = prevClose(src, i);
+        return isNaN(prev) ? before : ((b.close - prev) / prev) * 100;
+      };
+      hourlyChange = change(h1, hourlyChange);
+      fourHourChange = change(h4, fourHourChange);
+      dailyChange = change(day, dailyChange);
+
+      // Candles of the higher timeframe, to the right of the current bar
+      if (candles) {
+        const bar = candles.htf[candles.group[i]];
+        const o = bar.open, h = bar.high, l = bar.low, c = bar.close;
+        const top = Math.max(o, c);
+        const bottom = Math.min(o, c);
+        const down = gt(o, c);
+        if (i > 0 && ne(o, prevO)) {
+          // A new candle: the oldest one is deleted
+          const oldBox = candleBoxes.shift();
+          const oldHigh = wickHigh.shift();
+          const oldLow = wickLow.shift();
+          if (oldBox) box.delete(oldBox);
+          if (oldHigh) line.delete(oldHigh);
+          if (oldLow) line.delete(oldLow);
+          const x = i + numb * 4 + loc;
+          const body = down ? cfg.dnCol : cfg.upCol;
+          // box.new(..., color(na), bgcolor = ...): no border
+          candleBoxes.push(box.new(x, top, x + 2, bottom, undefined, 1, 'solid', 'none', 'bar_index', body));
+          wickHigh.push(line.new(x + 1, top, x + 1, h, 'bar_index', 'none', body, 'solid', 1));
+          wickLow.push(line.new(x + 1, bottom, x + 1, l, 'bar_index', 'none', body, 'solid', 1));
+        } else {
+          // The candles follow the current bar; the last one also follows the prices of its period
+          let d = loc;
+          // (the setters of a deleted object do nothing)
+          for (let k = 0; k < candleBoxes.length; k++) {
+            const bx = candleBoxes[k];
+            const wh = wickHigh[k];
+            const wl = wickLow[k];
+            const x = i + d * 2;
+            if (bx) {
+              box.set_left(bx, x);
+              box.set_right(bx, x + 2);
+            }
+            for (const w of [wh, wl]) {
+              if (!w) continue;
+              line.set_x1(w, x + 1);
+              line.set_x2(w, x + 1);
+            }
+            if (k >= numb - 1) {
+              const wick = down ? cfg.dnWick : cfg.upWick;
+              if (bx) {
+                box.set_top(bx, top);
+                box.set_bottom(bx, bottom);
+                box.set_bgcolor(bx, down ? cfg.dnCol : cfg.upCol);
+              }
+              if (wh) {
+                line.set_y1(wh, top);
+                line.set_y2(wh, h);
+                line.set_color(wh, wick);
+              }
+              if (wl) {
+                line.set_y1(wl, bottom);
+                line.set_y2(wl, l);
+                line.set_color(wl, wick);
+              }
+            }
+            d += 2;
+          }
+        }
+        prevO = o;
+      }
+
+      // Retests of the 1-hour zone (the original tests the zone only: in the 'Line' mode there is no zone, no retest)
+      const zoneTop = box2.value ? box.get_top(box2.value) : NaN;
+      const zoneBottom = box2.value ? box.get_bottom(box2.value) : NaN;
+      const prevLow = i > 0 ? bars[i - 1].low : NaN;
+      const prevHigh = i > 0 ? bars[i - 1].high : NaN;
+      let positiveRetest = false;
+      let negativeRetest = false;
+      if (pos && count > 1 && t <= end && retestCount < cfg.retests
+        && gt(prevLow, zoneTop) && le(b.low, zoneTop) && ge(b.close, zoneBottom)) {
+        positiveRetest = true;
+        pos = false;
+        count = 0;
+        retestCount += 1;
+      }
+      if (pos && count > 1 && t <= end && retestCount < cfg.retests
+        && lt(prevHigh, zoneBottom) && ge(b.high, zoneBottom) && le(b.close, zoneTop)) {
+        negativeRetest = true;
+        pos = false;
+        count = 0;
+        retestCount += 1;
+      }
+      count += 1;
+      if (count > 1) pos = true;
+      if (newHour) retestCount = 0;
+
+      const volumeOk = !cfg.vol || gt(b.volume ?? NaN, volumeWma[i]);
+      // plotshape(retest ? low : na, ...): a price of 0 draws nothing
+      if (cfg.hourTest && positiveRetest && volumeOk && b.low !== 0) {
+        markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: cfg.reUp, size: 'tiny' });
+      }
+      if (cfg.hourTest && negativeRetest && volumeOk && b.high !== 0) {
+        markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: cfg.reDn, size: 'tiny' });
+      }
     }
-    if (cfg.hourTest && negativeRetest && volumeOk && b.high !== 0) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: cfg.reDn, size: 'tiny' });
-    }
+  } finally {
+    setDrawingBar(null);
   }
 
   // Tables (the values of the last bar)
@@ -615,7 +545,11 @@ export function calculate(
     }
     return bars[lo].time;
   };
-  const X = (byTime: boolean, x: number) => (byTime ? atTime(x) : atIndex(x));
+  const X = (xloc: 'bar_time' | 'bar_index', x: number) => (xloc === 'bar_time' ? atTime(x) : atIndex(x));
+  const lines = line.all();
+  const boxes = box.all();
+  const labels = label.all();
+  resetDrawings();
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -624,13 +558,18 @@ export function calculate(
     barColors,
     markers,
     lines: lines.map((l) => ({
-      time1: X(l.byTime, l.x1), price1: l.y1, time2: X(l.byTime, l.x2), price2: l.y2, color: l.color, width: l.width, style: l.style,
+      time1: X(l.xloc, l.x1), price1: l.y1, time2: X(l.xloc, l.x2), price2: l.y2, color: String(l.color), width: l.width as number,
+      style: l.style as DrawStyle,
     })),
     boxes: boxes.map((b) => ({
-      time1: X(b.byTime, b.left), price1: b.top, time2: X(b.byTime, b.right), price2: b.bottom, bgColor: b.bg,
-      borderColor: b.border ?? 'transparent', borderWidth: b.borderWidth, borderStyle: b.borderStyle,
+      time1: X(b.xloc, b.left), price1: b.top, time2: X(b.xloc, b.right), price2: b.bottom, bgColor: String(b.bgcolor),
+      borderColor: b.border_color === undefined ? 'transparent' : String(b.border_color), borderWidth: b.border_width as number,
+      borderStyle: b.border_style as DrawStyle,
     })),
-    labels: labels.map((l) => ({ time: atTime(l.x), price: l.y, text: l.text, color: l.color, textColor: WHITE, style: l.style })),
+    labels: labels.map((l) => ({
+      time: atTime(l.x), price: l.y, text: l.text ?? '', color: String(l.color), textColor: WHITE,
+      style: l.style as 'label_down' | 'label_up',
+    })),
     tables,
   };
 }

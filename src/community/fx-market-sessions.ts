@@ -29,9 +29,8 @@
  * Chart context (third argument), all optional:
  * - Price tick of the symbol: the pips and the prices of the texts; 0.01 without it.
  * - Ticker of the symbol: the title of the opening range table ("Opening range(BTCUSD)"); empty without it.
- * - Regular session hours and exchange time zone: the information table marks a session as open only when the
- *   market is open (session.ismarket: the last bar is in the regular session). Without the hours every bar is
- *   taken as a market bar.
+ * - Session and exchange time zone: the information table marks a session as open only when the market is open
+ *   (session.ismarket of the last bar, from the exchange calendar). Without them every bar is taken as a market bar.
  *
  * Chart timeframe: `timeframe` of the chart context (optional third argument of calculate) when given; without it
  * the chart timeframe is read from the bar spacing (the most frequent gap between two bars).
@@ -42,16 +41,17 @@
  */
 
 import {
-  color, str, array, callsite, timeframe, time as pineTime,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  color, str, array, callsite, timeframe, time as pineTime, line, box, label, linefill, resetDrawings, setDrawingBar, varDrawing,
+  type Line, type Box, type Label, type Linefill, type DrawingVariable, type IndicatorResult, type InputConfig, type PlotConfig,
+  type Bar,
 } from 'oakscriptjs';
 import type {
   MarkerData, LineDrawingData, BoxData, LabelData, LinefillData, TableData, TableCellData, TableMergeData, PineSize,
   BarColorData, PlotCandleData, LabelStyle,
 } from '../types';
 import { barTime } from '../bar-time';
-import { chartTimeframe } from '../anchor-period';
-import { mintickOf, tickerOf, timezoneOf, type ChartContext } from '../chart-context';
+import { chartTimeframe, sessionFlags } from '../anchor-period';
+import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
 
 type YesNo = 'Yes' | '× No';
 type ChartOption = 'Bar color' | 'Candles' | '× No';
@@ -368,8 +368,6 @@ export const metadata = {
 /** max_lines_count / max_boxes_count / max_labels_count of the script */
 const MAX_OBJECTS = 200;
 const MAX_BARS = 500;
-/** Longest window of ta.highest() / ta.lowest() in Pine */
-const MAX_HISTORY = 15000;
 const ICON_SEPARATOR = ' • ';
 const WHITE = '#FFFFFF';
 // TRANSPARENT = color.new(color.black, 100)
@@ -399,54 +397,56 @@ const ge = (a: number, b: number) => a - b >= -EPS;
 type Style = 'solid' | 'dashed' | 'dotted';
 type Extend = 'none' | 'left' | 'right' | 'both';
 
-/** A line / box / label of the script: x in bars (NaN = na), `deleted` after line.delete() or the object limit */
+/** The properties of a line / box / label of the script: x in bars (NaN = na) */
 interface LineObj {
   x1: number; y1: number; x2: number; y2: number; color: string; width: number; style: Style; extend: Extend;
-  deleted?: boolean;
 }
 interface BoxObj {
   left: number; top: number; right: number; bottom: number; borderColor: string; borderWidth: number;
-  borderStyle: Style; bgColor: string; extend: Extend; deleted?: boolean;
+  borderStyle: Style; bgColor: string; extend: Extend;
 }
 interface LabelObj {
   x: number; y: number; text: string; style: LabelStyle; color: string; textColor: string; size: PineSize;
-  yloc: 'price' | 'abovebar'; tooltip?: string; textAlign?: 'left'; deleted?: boolean;
+  yloc: 'price' | 'abovebar'; tooltip?: string; textAlign?: 'left';
 }
 interface FillObj { line1: LineObj; line2: LineObj; color: string }
 
 /**
- * Live drawings of one kind, in creation order. Pine keeps at most max objects: a creation that brings the count
- * above max + 5 deletes the oldest until max remain. An object that a `var` variable of the script still refers to is
- * not deleted by this rule.
+ * Drawings of one kind: each object of the script has its object in the drawing registry of the library, which
+ * applies the count limit of the script, the `var` variables and the deletes; its properties are kept here.
  */
-class Pool<T extends { deleted?: boolean }> {
-  items: T[] = [];
-  private held = new Map<string, T | null>();
+class Pool<T extends object, R extends object> {
+  private data = new Map<R, T>();
+  private refs = new Map<T, R>();
+  private vars = new Map<string, DrawingVariable<R>>();
+  constructor(private create: (o: T) => R, private destroy: (r: R) => void, private live: () => R[]) {}
   add(o: T): T {
-    this.items.push(o);
-    if (this.items.length > MAX_OBJECTS + 5) {
-      const kept = new Set(this.held.values());
-      let excess = this.items.length - MAX_OBJECTS;
-      this.items = this.items.filter((x) => {
-        if (kept.has(x) || excess <= 0) return true;
-        excess--;
-        x.deleted = true;
-        return false;
-      });
-    }
+    const r = this.create(o);
+    this.data.set(r, o);
+    this.refs.set(o, r);
     return o;
   }
   /** The `var` variable `name` now refers to `o` (the object it referred to before can be deleted) */
   hold(name: string, o: T | null): T | null {
-    this.held.set(name, o);
+    let v = this.vars.get(name);
+    if (!v) {
+      v = varDrawing<R>();
+      this.vars.set(name, v);
+    }
+    v.value = o ? this.refs.get(o) : undefined;
     return o;
   }
-  /** line.delete() / box.delete() / label.delete(); na and deleted objects are left alone */
+  /** line.delete() / box.delete() / label.delete(); na is left alone */
   remove(o: T | null | undefined): void {
-    if (!o || o.deleted) return;
-    o.deleted = true;
-    const k = this.items.indexOf(o);
-    if (k >= 0) this.items.splice(k, 1);
+    if (o) this.destroy(this.refs.get(o)!);
+  }
+  /** The registry object of `o` */
+  ref(o: T): R {
+    return this.refs.get(o)!;
+  }
+  /** The live objects, in creation order */
+  get items(): T[] {
+    return this.live().map((r) => this.data.get(r)!);
   }
 }
 
@@ -487,15 +487,12 @@ export function calculate(
   const toPips = (v: number) => v / (MINTICK * 10);
   const hist = Math.trunc(cfg.historyPeriod);
   const tf = chartTimeframe(bars, chart);
-  // session.ismarket on the last bar: on intraday bars, the bar is in the regular session hours of the chart context
-  // (read in the exchange time zone). Without these hours every bar is taken as a market bar.
-  const regularSpec = chart?.regularSession ?? chart?.session;
-  const regular = typeof regularSpec === 'string' ? regularSpec : regularSpec?.session;
-  const isMarket = n > 0 && tf !== '' && timeframe.in_seconds(tf) < 86400
-    && typeof regular === 'string' && /^(24x7|\d{4}-\d{4}(,\d{4}-\d{4})*(:\d+)?)$/.test(regular.trim())
-    ? pineTime.inSession(inMs ? bars[n - 1].time : bars[n - 1].time * 1000, regular.trim(), timezoneOf(chart))
-    : true;
+  // session.ismarket on the last bar, from the exchange calendar of the chart context. Without it every bar is taken
+  // as a market bar.
+  const isMarket = n > 0 ? sessionFlags(bars, chart)?.ismarket[n - 1] ?? true : true;
   const multiplier = tf === '' ? 1 : timeframe.info(tf).multiplier;
+  // The bar size, for the session test on the days of a clock change
+  const barMs = tf !== '' && timeframe.info(tf).isintraday ? timeframe.in_seconds(tf) * 1000 : undefined;
 
   // Styles
   const boxStyle = cfg.boxStyle;
@@ -523,10 +520,16 @@ export function calculate(
   const fLineWidth = Math.trunc(cfg.fLineWidth);
   const infoPeriod = Math.trunc(cfg.infoPeriod);
 
-  const lines = new Pool<LineObj>();
-  const boxes = new Pool<BoxObj>();
-  const labels = new Pool<LabelObj>();
-  const fills: FillObj[] = [];
+  resetDrawings({ line: MAX_OBJECTS, box: MAX_OBJECTS, label: MAX_OBJECTS });
+  const lines = new Pool<LineObj, Line>((o) => line.new(o.x1, o.y1, o.x2, o.y2), (r) => line.delete(r), () => line.all());
+  const boxes = new Pool<BoxObj, Box>((o) => box.new(o.left, o.top, o.right, o.bottom), (r) => box.delete(r), () => box.all());
+  const labels = new Pool<LabelObj, Label>((o) => label.new(o.x, o.y), (r) => label.delete(r), () => label.all());
+  // Line fills in the registry too (limit of max_lines_count; deleting a line deletes its fills)
+  const fillData = new Map<Linefill, FillObj>();
+  const newFill = (f: FillObj): FillObj => {
+    fillData.set(linefill.new(lines.ref(f.line1), lines.ref(f.line2)), f);
+    return f;
+  };
   const newLine = (x1: number, y1: number, x2: number, y2: number, col: string, width = 1, style: Style = 'solid',
     extend: Extend = 'none') => lines.add({ x1, y1, x2, y2, color: col, width, style, extend });
   const newBox = (left: number, top: number, right: number, bottom: number, borderColor: string, borderWidth: number,
@@ -649,6 +652,7 @@ export function calculate(
   const opMerges: TableMergeData[] = [];
 
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     const bar = bars[i];
     const { time, open, high, low, close } = bar;
     const tMs = inMs ? time : time * 1000;
@@ -658,15 +662,13 @@ export function calculate(
     sessions.forEach((s, k) => {
       // ---- draw() ----
       // Session.update(): t = time(timeframe.period, sess, tz)
-      const inS = pineTime.inSession(tMs, s.sess, tz);
+      const inS = pineTime.inSession(tMs, s.sess, tz, barMs);
       const started = inS && !s.prevIn;
       const ended = !inS && s.prevIn;
       if (started) s.startBar = i;
       const max = i - s.startBar + 1;
-      // The original stops here when a session has had no bar for 15,000 bars (e.g. a night session on a stock)
-      if (max > MAX_HISTORY) {
-        throw new Error(`The 'highest' function references too many historical candles (${max}), the limit is ${MAX_HISTORY}.`);
-      }
+      // The original (and the library) stops here when a session has had no bar for 15,000 bars (e.g. a night
+      // session on a stock)
       const top = s.highest(high, max);
       const bottom = s.lowest(low, max);
       const col = s.colour;
@@ -733,7 +735,7 @@ export function calculate(
             s.ocLineL = newLine(x1, close, x2, close, dotColor, 1, 'dotted');
             lines.hold(site('ocU'), s.ocLineU);
             lines.hold(site('ocL'), s.ocLineL);
-            fills.push({ line1: s.ocLineU, line2: s.ocLineL, color: String(color.new(col, bgOpacity2)) });
+            newFill({ line1: s.ocLineU, line2: s.ocLineL, color: String(color.new(col, bgOpacity2)) });
             s.oclines.push(s.ocLineU, s.ocLineL);
             s.dotOpen = open;
           } else if (inS) {
@@ -774,7 +776,7 @@ export function calculate(
             }
             lines.hold(site('above'), s.aboveLine);
             lines.hold(site('below'), s.belowLine);
-            fills.push({ line1: s.aboveLine, line2: s.belowLine, color: String(color.new(col, bgOpacity)) });
+            newFill({ line1: s.aboveLine, line2: s.belowLine, color: String(color.new(col, bgOpacity)) });
             s.lines.push(s.aboveLine, s.belowLine);
             if (s.extended) {
               s.aboveLine.extend = vertical ? 'both' : 'right';
@@ -940,7 +942,8 @@ export function calculate(
                 const m = s.oprLines.length;
                 const fillS = { line1: s.oprLines[m - 1], line2: s.oprLines[m - 3], color: String(color.new(btmColor, 96)) };
                 const fillR = { line1: s.oprLines[m - 2], line2: s.oprLines[m - 4], color: String(color.new(topColor, 96)) };
-                fills.push(fillS, fillR);
+                newFill(fillS);
+                newFill(fillR);
                 s.oprLinefills.unshift(fillS);
                 s.oprLinefills.unshift(fillR);
               }
@@ -1188,6 +1191,8 @@ export function calculate(
     });
   }
 
+  setDrawingBar(null);
+
   // ---- Outputs: the drawings alive after the last bar ----
   const at = (x: number) => (x >= 0 && x < n ? bars[x].time : barTime(bars, x));
   const drawn = (...xs: number[]) => xs.every((x) => !Number.isNaN(at(x)));
@@ -1210,7 +1215,7 @@ export function calculate(
     ...(l.tooltip !== undefined ? { tooltip: l.tooltip } : {}),
   }));
   const linefills: LinefillData[] = [];
-  for (const f of fills) {
+  for (const f of linefill.all().map((r) => fillData.get(r)!)) {
     const a = lineOut.get(f.line1);
     const b = lineOut.get(f.line2);
     if (a && b) linefills.push({ line1: a, line2: b, color: f.color });

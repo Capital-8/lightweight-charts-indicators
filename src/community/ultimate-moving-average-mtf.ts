@@ -26,7 +26,7 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, timeframe, resample, mapToChart, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
 
@@ -128,23 +128,13 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   // With the exchange calendar of the chart context (time zone and session): the periods and the bars that
   // complete them come from the library rule (see anchor-period.ts)
   const exchange = securityBars(bars, tf, context);
-  if (exchange) return { htf: exchange.htf, toChart: (values) => exchange.group.map((g) => values[g]) };
-  const starts = periodStarts(bars, tf);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
-  return { htf, toChart: (values) => group.map((g) => values[g]) };
+  if (exchange) {
+    return { htf: exchange.htf, toChart: (values) => mapToChart(values, exchange.group, exchange.latest, true, false) };
+  }
+  // Without it: the periods of the UTC calendar rule (see anchor-period.ts), grouped by the library
+  const { bars: htf, group } = resample(bars, periodStarts(bars, tf));
+  // lookahead on: the latest completed period is not read
+  return { htf, toChart: (values) => mapToChart(values, group, group, true, false) };
 }
 
 export function calculate(bars: Bar[], inputs: Partial<UltimateMovingAverageMtfInputs> = {}, chart?: ChartContext): IndicatorResult {

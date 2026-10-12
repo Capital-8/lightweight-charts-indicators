@@ -23,8 +23,8 @@
  *   timeframe that are older than the first chart bar: they count in the average body and give the bar two periods
  *   before on the first two periods. When the chart history is shorter than the history of the timeframe (intraday
  *   charts), the average body, and so the set of gaps, differs from the original.
- * - Drawing limits as in the original: 500 boxes and 50 lines. A box deleted by the limit stays in the list of the
- *   script with na prices, as in the original.
+ * - Drawing limits as in the original: 500 boxes and 50 lines (drawing registry of the library). A box deleted by the
+ *   limit stays in the list of the script with na prices, as in the original.
  * - A box end given as a time between two bars is the time of the next bar, where it is drawn. Objects with an na
  *   coordinate are not drawn and are left out.
  *
@@ -33,7 +33,10 @@
  * Original notice: © Zeiierman
  */
 
-import { ta, str, math, color, timeframe, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, str, math, color, timeframe, Series, resample, box, line, resetDrawings, setDrawingBar,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Box, type Line,
+} from 'oakscriptjs';
 import type { BoxData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
@@ -124,35 +127,8 @@ const MAX_BOXES = 500; // indicator(max_boxes_count = 500)
 const MAX_LINES = 50; // default max_lines_count
 const MAX_BARS_BACK = 5000;
 
-/** A box of the script: `left` / `right` are times in ms, or bar indexes for the boxes of the table */
-interface Bx {
-  left: number; top: number; right: number; bottom: number;
-  bg: string; border: string; byIndex?: boolean; text?: string; dead: boolean;
-}
-interface Ln { x1: number; x2: number; y: number; dead: boolean }
-
-/** Live drawings of one kind: above max + 5 objects the oldest are deleted until max remain */
-class Live<T extends { dead: boolean }> {
-  readonly list: T[] = [];
-
-  constructor(private readonly max: number) {}
-
-  add(o: T): T {
-    this.list.push(o);
-    if (this.list.length > this.max + 5) for (const old of this.list.splice(0, this.list.length - this.max)) old.dead = true;
-    return o;
-  }
-
-  delete(o: T | undefined): void {
-    if (!o || o.dead) return;
-    o.dead = true;
-    const k = this.list.indexOf(o);
-    if (k >= 0) this.list.splice(k, 1);
-  }
-}
-
 /** Pine type Data: the gap boxes, their buy and sell volume boxes and their mid lines (newest first) */
-interface Data { fvg: Bx[]; bv: Bx[]; sv: Bx[]; mid: Ln[] }
+interface Data { fvg: Box[]; bv: Box[]; sv: Box[]; mid: Line[] }
 
 /**
  * request.security(syminfo.tickerid, tf, ..., lookahead = barmerge.lookahead_on): the bars of timeframe `tf` built
@@ -169,21 +145,8 @@ function timeframeBars(bars: Bar[], tf: string, context?: ChartContext): { htf: 
   // With the exchange calendar of the chart context (time zone and session): the periods come from the library rule
   const exchange = securityBars(bars, tf, context);
   if (exchange) return { htf: exchange.htf, group: exchange.group };
-  const starts = periodStarts(bars, tf, context);
-  const htf: Bar[] = [];
-  const group: number[] = [];
-  bars.forEach((b, i) => {
-    if (i === 0 || starts[i] !== starts[i - 1]) {
-      htf.push({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-    } else {
-      const last = htf[htf.length - 1];
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
-      last.close = b.close;
-      last.volume = (last.volume ?? NaN) + (b.volume ?? NaN);
-    }
-    group.push(htf.length - 1);
-  });
+  // Without it: periods of the UTC calendar and the bars (src/anchor-period.ts), grouped by the library
+  const { bars: htf, group } = resample(bars, periodStarts(bars, tf, context));
   return { htf, group };
 }
 
@@ -198,7 +161,7 @@ export function calculate(
   const tableRight = cfg.tableRight * 10;
   const tMs = (i: number) => (bars[i].time as number) * 1000;
 
-  // The bars of the timeframe (the calendar functions come first: they clear the drawing registry of the library)
+  // The bars of the timeframe
   const { htf, group } = timeframeBars(bars, cfg.tf, chart);
   // getCandle(): wick = body of the bar; avgFVG = array.avg of the bodies up to the bar
   const body: number[] = new Array(htf.length);
@@ -213,12 +176,13 @@ export function calculate(
   const chartTf = chartTimeframe(bars, chart);
   const barMs = chartTf === '' ? NaN : timeframe.in_seconds(chartTf) * 1000;
 
-  const boxes = new Live<Bx>(MAX_BOXES);
-  const lines = new Live<Ln>(MAX_LINES);
+  // Boxes and lines: library objects in the drawing registry (above max + 5 objects the oldest are deleted until max
+  // remain; a deleted object reads na). x values are times in ms (xloc.bar_time) or, for the table, bar indexes.
+  resetDrawings({ box: MAX_BOXES, line: MAX_LINES });
   const bv: Data = { fvg: [], bv: [], sv: [], mid: [] };
   const sv: Data = { fvg: [], bv: [], sv: [], mid: [] };
-  let tableBoxes: Bx[] = []; // var FVGs
-  let frame: Bx | undefined; // b[1] of the table frame
+  let tableBoxes: Box[] = []; // var FVGs
+  let frame: Box | undefined; // b[1] of the table frame
   let tLine = 0.0; // array.get(TLine, 0)
 
   // BarsBack(val, hl): the time of the latest bar, among the last 5000, whose high / low equals val; else `time`
@@ -233,9 +197,9 @@ export function calculate(
     math.round((math.round((v * (buy ? c - l : h - c)) / (h - l)) / v) * 100)
   );
   // box getters: na on a deleted box
-  const top = (e: Bx) => (e.dead ? NaN : e.top);
-  const bottom = (e: Bx) => (e.dead ? NaN : e.bottom);
-  const left = (e: Bx) => (e.dead ? NaN : e.left);
+  const top = (e: Box) => box.get_top(e);
+  const bottom = (e: Box) => box.get_bottom(e);
+  const left = (e: Box) => box.get_left(e);
 
   // method Cleaner(Data d, cond): `for [i, e] in d.fvg` with a removal inside skips the element after the removed one
   const cleaner = (d: Data, cond: boolean, low: number, high: number) => {
@@ -246,10 +210,10 @@ export function calculate(
       const mid = (t + b) / 2;
       const hit = cfg.mit ? (cond ? le(low, mid) : ge(high, mid)) : (cond ? le(low, b) : ge(high, t));
       if (hit) {
-        boxes.delete(e);
-        lines.delete(d.mid[i]);
-        boxes.delete(d.bv[i]);
-        boxes.delete(d.sv[i]);
+        box.delete(e);
+        line.delete(d.mid[i]);
+        box.delete(d.bv[i]);
+        box.delete(d.sv[i]);
         d.fvg.splice(i, 1);
         d.mid.splice(i, 1);
         d.bv.splice(i, 1);
@@ -268,80 +232,86 @@ export function calculate(
   const zone = timezoneOf(chart);
   const textColor = foregroundColorOf(chart);
 
-  for (let i = 0; i < n; i++) {
-    const bar = bars[i];
-    const g = group[i];
-    // [close, high, low, high[2], low[2], volume] of the timeframe
-    const c1 = htf[g].close;
-    const h = htf[g].high;
-    const l = htf[g].low;
-    const h2 = g >= 2 ? htf[g - 2].high : NaN;
-    const l2 = g >= 2 ? htf[g - 2].low : NaN;
-    const v = htf[g].volume ?? NaN;
-    const wick = body[g];
-    const avgFVG = avgBody[g];
-    hSec[i] = h;
-    lSec[i] = l;
+  try {
+    for (let i = 0; i < n; i++) {
+      setDrawingBar(i, i === n - 1);
+      const bar = bars[i];
+      const g = group[i];
+      // [close, high, low, high[2], low[2], volume] of the timeframe
+      const c1 = htf[g].close;
+      const h = htf[g].high;
+      const l = htf[g].low;
+      const h2 = g >= 2 ? htf[g - 2].high : NaN;
+      const l2 = g >= 2 ? htf[g - 2].low : NaN;
+      const v = htf[g].volume ?? NaN;
+      const wick = body[g];
+      const avgFVG = avgBody[g];
+      hSec[i] = h;
+      lSec[i] = l;
 
-    const hBack = barsBack(h, false, i);
-    const lBack = barsBack(l, true, i);
-    const h2Back = barsBack(h2, false, i);
-    const l2Back = barsBack(l2, true, i);
-    const buyVol = volumePower(v, c1, l, h, true);
-    const sellVol = volumePower(v, c1, l, h, false);
+      const hBack = barsBack(h, false, i);
+      const lBack = barsBack(l, true, i);
+      const h2Back = barsBack(h2, false, i);
+      const l2Back = barsBack(l2, true, i);
+      const buyVol = volumePower(v, c1, l, h, true);
+      const sellVol = volumePower(v, c1, l, h, false);
 
-    // FVG(...)
-    const bullFVG = gt(l, h2) && gt(c1, h2);
-    const bearFVG = lt(h, l2) && lt(c1, l2);
-    const strong = ge(wick, avgFVG * cfg.bodySens);
-    const ohlc4 = (bar.open + bar.high + bar.low + bar.close) / 4;
-    const gap = (d: Data, start: number, end: number, boxTop: number, boxBottom: number) => {
-      tLine = (ohlc4 + tLine) / 2;
-      // getBarTime(t, extendLength)
-      const future = end + cfg.extendLength * barMs;
-      d.fvg.unshift(boxes.add({ left: start, top: boxTop, right: future, bottom: boxBottom, bg: cfg.col, border: cfg.col, dead: false }));
-      const mid = (boxTop + boxBottom) / 2;
-      d.mid.unshift(lines.add({ x1: start, x2: future, y: mid, dead: false }));
-      const dist = future - start;
-      d.bv.unshift(boxes.add({
-        left: start, top: mid, right: Math.trunc(start + dist * (buyVol / 100)), bottom: boxTop, bg: cfg.upCol, border: cfg.upCol, dead: false,
-      }));
-      d.sv.unshift(boxes.add({
-        left: start, top: boxBottom, right: Math.trunc(start + dist * (sellVol / 100)), bottom: mid, bg: cfg.dnCol, border: cfg.dnCol, dead: false,
-      }));
-    };
-    if (bullFVG && !prevBull && strong) gap(bv, h2Back, hBack, l, h2);
-    // the `else` of the source belongs to the bearish test only
-    if (bearFVG && !prevBear && strong) gap(sv, l2Back, lBack, l2, h);
-    prevBull = bullFVG;
-    prevBear = bearFVG;
+      // FVG(...)
+      const bullFVG = gt(l, h2) && gt(c1, h2);
+      const bearFVG = lt(h, l2) && lt(c1, l2);
+      const strong = ge(wick, avgFVG * cfg.bodySens);
+      const ohlc4 = (bar.open + bar.high + bar.low + bar.close) / 4;
+      const gap = (d: Data, start: number, end: number, boxTop: number, boxBottom: number) => {
+        tLine = (ohlc4 + tLine) / 2;
+        // getBarTime(t, extendLength)
+        const future = end + cfg.extendLength * barMs;
+        d.fvg.unshift(box.new(start, boxTop, future, boxBottom, cfg.col, undefined, undefined, 'none', 'bar_time', cfg.col));
+        const mid = (boxTop + boxBottom) / 2;
+        d.mid.unshift(line.new(start, mid, future, mid, 'bar_time', 'none', String(color.white), 'dashed'));
+        const dist = future - start;
+        d.bv.unshift(box.new(
+          start, mid, Math.trunc(start + dist * (buyVol / 100)), boxTop, cfg.upCol, undefined, undefined, 'none', 'bar_time', cfg.upCol,
+        ));
+        d.sv.unshift(box.new(
+          start, boxBottom, Math.trunc(start + dist * (sellVol / 100)), mid, cfg.dnCol, undefined, undefined, 'none', 'bar_time', cfg.dnCol,
+        ));
+      };
+      if (bullFVG && !prevBull && strong) gap(bv, h2Back, hBack, l, h2);
+      // the `else` of the source belongs to the bearish test only
+      if (bearFVG && !prevBear && strong) gap(sv, l2Back, lBack, l2, h);
+      prevBull = bullFVG;
+      prevBear = bearFVG;
 
-    cleaner(bv, true, bar.low, bar.high);
-    cleaner(sv, false, bar.low, bar.high);
+      cleaner(bv, true, bar.low, bar.high);
+      cleaner(sv, false, bar.low, bar.high);
 
-    cumHigh = isNaN(cumHigh) ? bar.high : Math.max(cumHigh, bar.high);
-    cumLow = isNaN(cumLow) ? bar.low : Math.min(cumLow, bar.low);
-    if (cfg.showActive) {
-      const b = boxes.add({
-        left: i + tableLeft, top: cumHigh, right: i + tableRight, bottom: cumLow,
-        bg: String(color.new(color.gray, 100)), border: String(color.gray), byIndex: true, dead: false,
-      });
-      boxes.delete(frame);
-      frame = b;
-      for (const e of tableBoxes) boxes.delete(e);
-      tableBoxes = [];
-      // UpdateFVG(Box)
-      for (const d of [bv, sv]) {
-        for (const e of d.fvg) {
-          const date = str.format_time(left(e), 'yyyy-MM-dd HH:mm', zone);
-          tableBoxes.push(boxes.add({
-            left: i + tableLeft, top: top(e), right: i + tableRight, bottom: bottom(e),
-            bg: lt(bar.close, bottom(e)) ? cfg.dnCol : cfg.upCol, border: 'transparent', byIndex: true, text: date, dead: false,
-          }));
+      cumHigh = isNaN(cumHigh) ? bar.high : Math.max(cumHigh, bar.high);
+      cumLow = isNaN(cumLow) ? bar.low : Math.min(cumLow, bar.low);
+      if (cfg.showActive) {
+        const b = box.new(
+          i + tableLeft, cumHigh, i + tableRight, cumLow, String(color.gray), undefined, undefined, 'none', 'bar_index',
+          String(color.new(color.gray, 100)),
+        );
+        if (frame) box.delete(frame);
+        frame = b;
+        for (const e of tableBoxes) box.delete(e);
+        tableBoxes = [];
+        // UpdateFVG(Box)
+        for (const d of [bv, sv]) {
+          for (const e of d.fvg) {
+            const date = str.format_time(left(e), 'yyyy-MM-dd HH:mm', zone);
+            // border_color = color(na), text_color = chart.fg_color
+            tableBoxes.push(box.new(
+              i + tableLeft, top(e), i + tableRight, bottom(e), 'transparent', undefined, undefined, 'none', 'bar_index',
+              lt(bar.close, bottom(e)) ? cfg.dnCol : cfg.upCol, date, undefined, textColor,
+            ));
+          }
         }
       }
+      trendMean[i] = tLine;
     }
-    trendMean[i] = tLine;
+  } finally {
+    setDrawingBar(null);
   }
 
   // Trend: Chebyshev low-pass filter of math.avg(h, l, Trend)
@@ -384,20 +354,21 @@ export function calculate(
     }
     return bars[lo].time as number;
   };
-  const x = (e: Bx, value: number) => (e.byIndex ? barTime(bars, value, step) : drawnTime(value));
+  const x = (e: Box, value: number) => (e.xloc === 'bar_index' ? barTime(bars, value, step) : drawnTime(value));
   const outBoxes: BoxData[] = [];
-  for (const e of boxes.list) {
+  for (const e of box.all()) {
     if ([e.left, e.right, e.top, e.bottom].some((value) => isNaN(value))) continue;
     outBoxes.push({
-      time1: x(e, e.left), price1: e.top, time2: x(e, e.right), price2: e.bottom, bgColor: e.bg, borderColor: e.border,
-      ...(e.text !== undefined ? { text: e.text, textColor } : {}),
+      time1: x(e, e.left), price1: e.top, time2: x(e, e.right), price2: e.bottom, bgColor: String(e.bgcolor),
+      borderColor: String(e.border_color), ...(e.text !== undefined ? { text: e.text, textColor: String(e.text_color) } : {}),
     });
   }
   const outLines: LineDrawingData[] = [];
-  for (const e of lines.list) {
-    if ([e.x1, e.x2, e.y].some((value) => isNaN(value))) continue;
-    outLines.push({ time1: drawnTime(e.x1), price1: e.y, time2: drawnTime(e.x2), price2: e.y, color: String(color.white), style: 'dashed' });
+  for (const e of line.all()) {
+    if ([e.x1, e.x2, e.y1].some((value) => isNaN(value))) continue;
+    outLines.push({ time1: drawnTime(e.x1), price1: e.y1, time2: drawnTime(e.x2), price2: e.y2, color: String(e.color), style: 'dashed' });
   }
+  resetDrawings();
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },

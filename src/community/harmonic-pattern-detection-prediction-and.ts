@@ -30,7 +30,7 @@
  */
 
 import {
-  ta, str, math, array, color, Series, barInterval, barTime,
+  ta, str, math, array, color, Series, barInterval, barTime, line, label, linefill, resetDrawings, setDrawingBar,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { LabelData, LabelStyle, LineDrawingData, LinefillData, PineSize, TableCellData, TableData } from '../types';
@@ -552,15 +552,9 @@ const harmonicSymbol = (tp: number) => ['Ɠ', '🦇', '🦋', '🦀', '🦈', '�
 /** A bool that can be na */
 type Tri = boolean | null;
 
-interface Ln {
-  x1: number; y1: number; x2: number; y2: number;
-  color: string; width: number; style: NonNullable<LineDrawingData['style']>; deleted: boolean;
-}
-interface Lb {
-  x: number; y: number; text: string; color: string; textColor: string; style: LabelStyle; size: PineSize; tooltip: string;
-  deleted: boolean;
-}
-interface Fill { line1: Ln; line2: Ln; color: string; deleted: boolean }
+type Ln = ReturnType<typeof line.new>;
+type Lb = ReturnType<typeof label.new>;
+type Fill = ReturnType<typeof linefill.new>;
 
 /** reees/Pattern: point */
 interface Pt { x: number; y: number }
@@ -599,39 +593,21 @@ export function calculate(
   const H = (k: number) => (bi - k >= 0 && k >= 0 ? bars[bi - k].high : NaN);
   const L = (k: number) => (bi - k >= 0 && k >= 0 ? bars[bi - k].low : NaN);
 
-  // ── Drawings: when a creation brings the count above max + 5, the oldest are deleted until max remain ──
-  const lines: Ln[] = [];
-  const labels: Lb[] = [];
-  const fills: Fill[] = [];
-  const newLine = (x1: number, y1: number, x2: number, y2: number, css: string, width = 1, style: Ln['style'] = 'solid'): Ln => {
+  // ── Drawings: in the library registry (max_lines_count = max_labels_count = 500; linefills follow
+  // max_lines_count), which applies the count limit with its rules ──
+  resetDrawings({ line: MAX_OBJECTS, label: MAX_OBJECTS });
+  const newLine = (x1: number, y1: number, x2: number, y2: number, css: string, width = 1, style: NonNullable<LineDrawingData['style']> = 'solid'): Ln =>
     // a bar index with a fraction (a division of two bar counts) is truncated
-    const o: Ln = { x1: Math.trunc(x1), y1, x2: Math.trunc(x2), y2, color: css, width, style, deleted: false };
-    lines.push(o);
-    if (lines.length > MAX_OBJECTS + 5) for (const old of lines.splice(0, lines.length - MAX_OBJECTS)) old.deleted = true;
-    return o;
-  };
+    line.new(Math.trunc(x1), y1, Math.trunc(x2), y2, 'bar_index', 'none', css, style, width);
   const deleteLine = (l: Ln | null) => {
-    if (!l || l.deleted) return;
-    l.deleted = true;
-    lines.splice(lines.indexOf(l), 1);
+    if (l) line.delete(l);
   };
-  const newLabel = (x: number, y: number, text: string, style: LabelStyle, css: string, textColor: string, size: PineSize, tooltip = ''): Lb => {
-    const o: Lb = { x: Math.trunc(x), y, text, color: css, textColor, style, size, tooltip, deleted: false };
-    labels.push(o);
-    if (labels.length > MAX_OBJECTS + 5) for (const old of labels.splice(0, labels.length - MAX_OBJECTS)) old.deleted = true;
-    return o;
-  };
+  const newLabel = (x: number, y: number, text: string, style: LabelStyle, css: string, textColor: string, size: PineSize, tooltip = ''): Lb =>
+    label.new(Math.trunc(x), y, text, 'bar_index', 'price', css, style, textColor, size, undefined, tooltip);
   const deleteLabel = (l: Lb | null) => {
-    if (!l || l.deleted) return;
-    l.deleted = true;
-    labels.splice(labels.indexOf(l), 1);
+    if (l) label.delete(l);
   };
-  const newFill = (line1: Ln | null, line2: Ln | null, css: string): Fill | null => {
-    if (!line1 || !line2) return null;
-    const f: Fill = { line1, line2, color: css, deleted: false };
-    fills.push(f);
-    return f;
-  };
+  const newFill = (line1: Ln | null, line2: Ln | null, css: string): Fill | null => (line1 && line2 ? linefill.new(line1, line2, css) : null);
 
   // ── Data structures of the script ──
   /** Completed patterns, by "a" (bullish) / "b" (bearish) + type */
@@ -745,7 +721,7 @@ export function calculate(
       const l4 = p.pLines[3];
       // line.get_x2() / line.get_y2() of a deleted line are na
       lbl = l4
-        ? newLabel(l4.deleted ? NaN : l4.x2, l4.deleted ? NaN : l4.y2, txt, lbstyle, clr, txtClr, 'small', tooltip)
+        ? newLabel(line.get_x2(l4), line.get_y2(l4), txt, lbstyle, clr, txtClr, 'small', tooltip)
         : newLabel(p.c.x, p.c.y, txt, lbstyle, clr, txtClr, 'small', tooltip);
     } else {
       lbl = newLabel(p.c.x, p.c.y, txt, lbstyle, clr, txtClr, 'small', tooltip);
@@ -1009,7 +985,7 @@ export function calculate(
     drawPatternLines(p, p.bull ? cfg.bullLineColor : cfg.bearLineColor);
     if (p.invalidD) {
       const l4 = p.pLines[3];
-      if (l4 && !l4.deleted) l4.style = 'dashed';
+      if (l4) line.set_style(l4, 'dashed');
     }
     drawLabel(p, labelCss(p), cfg.labelTextColor, text, tt);
   };
@@ -1096,7 +1072,7 @@ export function calculate(
     fullIpL.length = 0;
     for (const ln of fullIpLn) deleteLine(ln);
     fullIpLn.length = 0;
-    for (const lf of fullIpLf) lf.deleted = true;
+    for (const lf of fullIpLf) linefill.delete(lf);
     fullIpLf.length = 0;
   };
 
@@ -1443,6 +1419,7 @@ export function calculate(
 
   // ── Main ──
   for (bi = 0; bi < n; bi++) {
+    setDrawingBar(bi, bi === n - 1);
     inc = updateIncompletePatterns();
     pending = updatePendingPatterns();
     if (cfg.bullOn) for (let len = 3; len <= 20; len++) findPattern(len, true);
@@ -1674,22 +1651,25 @@ export function calculate(
     if (f) fullIpLf.push(f);
   }
 
+  setDrawingBar(null);
+
   const interval = barInterval(bars);
   const T = (index: number) => barTime(bars, index, interval);
   const drawn = (l: Ln) => !na(l.x1) && !na(l.x2) && !na(l.y1) && !na(l.y2);
   const outLine = (l: Ln): LineDrawingData => ({
-    time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: l.color, width: l.width, style: l.style,
+    time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: String(l.color), width: l.width, style: l.style,
   });
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     // an object with an na coordinate counts in the limit but is not drawn
-    lines: lines.filter(drawn).map(outLine),
+    lines: line.all().filter(drawn).map(outLine),
     // a fill whose line was deleted is not drawn
-    linefills: fills.filter((f) => !f.deleted && !f.line1.deleted && !f.line2.deleted && drawn(f.line1) && drawn(f.line2))
-      .map((f) => ({ line1: outLine(f.line1), line2: outLine(f.line2), color: f.color })),
-    labels: labels.filter((l) => !na(l.x) && !na(l.y)).map((l) => ({
-      time: T(l.x), price: l.y, text: l.text, color: l.color, textColor: l.textColor, style: l.style, size: l.size,
+    linefills: linefill.all().filter((f) => drawn(f.line1) && drawn(f.line2))
+      .map((f) => ({ line1: outLine(f.line1), line2: outLine(f.line2), color: String(f.color) })),
+    labels: label.all().filter((l) => !na(l.x) && !na(l.y)).map((l) => ({
+      time: T(l.x), price: l.y, text: l.text ?? '', color: String(l.color), textColor: String(l.textcolor),
+      style: l.style as LabelStyle, size: l.size as PineSize,
       ...(l.tooltip ? { tooltip: l.tooltip } : {}),
     })),
     tables,

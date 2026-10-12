@@ -22,7 +22,7 @@ import { ta, Series, getSourceSeries, timeframe, type IndicatorResult, type Inpu
 import type { BarColorData, MarkerData } from '../types';
 import { barInterval } from '../bar-time';
 import type { ChartContext } from '../chart-context';
-import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
+import { executeScript, ta as scriptTa, hlc3 as scriptHlc3 } from 'oakscriptjs/script';
 
 export type AssetRiskMaType = 'SMA' | 'EMA' | 'SMMA (RMA)' | 'WMA' | 'VWMA' | 'HMA';
 
@@ -175,28 +175,14 @@ const gt = (a: number, b: number) => a - b > EPS;
 const DAY_SECONDS = 86400;
 
 /**
- * First bar of each trading day of the exchange on intraday bars (Pine timeframe.change("1D")), found by the library
- * from the time zone and the session of the chart context. Null when the context does not give both, or when the bars
- * are not intraday.
+ * ta.vwap(hlc3) on intraday bars: the script API function with its default anchor, a new trading day of the exchange
+ * (from the time zone and the session of the chart context); as in Pine, the sums start on the first bar
  */
-function tradingDayStarts(bars: Bar[], chart?: ChartContext): boolean[] | null {
-  const interval = barInterval(bars);
-  if (chart?.timezone === undefined || chart.session === undefined || !(interval > 0 && interval < 86400)) return null;
-  let change: Array<number | null> = [];
-  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(interval) };
-  executeScript(() => { change = scriptTimeframe.change('1D').toArray(); }, bars, {}, context);
-  return change.map((v) => v === 1);
-}
-
-/**
- * ta.vwap (hlc3) on intraday bars: sum(hlc3 * volume) / sum(volume) since the first bar of the trading day (since the
- * first bar on the first day)
- */
-function intradayVwap(bars: Bar[], dayStarts: boolean[]): number[] {
-  const hlc3 = Series.fromArray(bars, bars.map((b) => (b.high + b.low + b.close) / 3));
-  const volume = Series.fromArray(bars, bars.map((b) => b.volume ?? NaN));
-  const anchor = Series.fromArray(bars, dayStarts.map((v, i) => Number(i === 0 || v)));
-  return ta.vwap(hlc3, volume, anchor).toArray().map((v) => v ?? NaN);
+function intradayVwap(bars: Bar[], chart: ChartContext): number[] {
+  let vwap: number[] = [];
+  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(barInterval(bars)) };
+  executeScript(() => { vwap = scriptTa.vwap(scriptHlc3).toArray().map((v) => v ?? NaN); }, bars, {}, context);
+  return vwap;
 }
 
 export function calculate(
@@ -208,8 +194,8 @@ export function calculate(
   const n = bars.length;
 
   const interval = barInterval(bars);
-  const dayStarts = tradingDayStarts(bars, chart);
-  if (interval > 0 && interval < DAY_SECONDS && dayStarts === null) {
+  const intraday = interval > 0 && interval < DAY_SECONDS;
+  if (intraday && (chart?.timezone === undefined || chart.session === undefined)) {
     throw new Error(
       'Asset risk metrics supports daily and higher timeframes only: on intraday bars ta.vwap resets '
       + 'on each trading day, which needs the exchange time zone and session.',
@@ -250,7 +236,7 @@ export function calculate(
   // ta.vwap (hlc3, anchor timeframe.change("1D")). Intraday bars: the sums restart on each trading day of the
   // exchange. Daily or higher bars: a new anchor on every bar, so sum(hlc3 * volume) / sum(volume) over the bar
   // alone (0 / 0 = na when the volume is 0, na when it is na)
-  const vwap = dayStarts ? intradayVwap(bars, dayStarts)
+  const vwap = intraday && chart ? intradayVwap(bars, chart)
     : bars.map((b, i) => (((b.high + b.low + b.close) / 3) * vol[i]) / vol[i]);
   const rsi2 = A(ta.rsi(S(vwap), cfg.rsi2Length));
   const rsi2MA = ma(rsi2, cfg.ma2Length, cfg.ma2Type);

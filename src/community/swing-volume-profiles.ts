@@ -19,7 +19,7 @@
  *   optionally the price, the price change and the volume as text.
  * - On the last bar, the same profile for the bars since the last swing.
  * "Present" mode only draws the profiles confirmed in the last `back` bars. At most 500 boxes, 500 lines and 500
- * labels are kept (the oldest are removed).
+ * labels are kept (the oldest are removed, by the rules of the library drawing registry).
  *
  * Chart values (third argument): the symbol tick for the prices of the texts (without it 0.01) and the chart
  * foreground colour for the labels (without it #DBDBDB, a dark chart).
@@ -29,7 +29,10 @@
  * Original notice: © LuxAlgo
  */
 
-import { ta, str, array, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, str, array, callsite, Series, box, line, label, linefill, resetDrawings, setDrawingBar, holdDrawing,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, LinefillData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
@@ -176,15 +179,8 @@ const ge = (a: number, b: number) => a - b > -EPS;
 /** math.sign(a) != math.sign(b): false with an na side */
 const signsDiffer = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.sign(a) !== Math.sign(b);
 
-interface Bx {
-  left: number; top: number; right: number; bottom: number;
-  border: string; bg: string; borderStyle?: 'dotted'; deleted: boolean;
-}
-interface Ln { x1: number; y1: number; x2: number; y2: number; color: string; deleted: boolean }
-interface Lb {
-  x: number; y: number; text: string; color: string; style: 'label_down' | 'label_up'; size: 'tiny' | 'small' | 'normal';
-  tooltip: string; deleted: boolean;
-}
+type Bx = ReturnType<typeof box.new>;
+type Ln = ReturnType<typeof line.new>;
 /** Pine type liquidity */
 interface Liquidity { b: boolean[]; bx: Bx[] }
 
@@ -218,29 +214,17 @@ export function calculate(
   /** nz(volume) of a bar (na before the first bar) */
   const NZV = (i: number) => (i >= 0 && i < n ? (isNaN(V(i)) ? 0 : V(i)) : NaN);
 
-  // Live drawings in creation order: when a creation brings the count above max + 5, the oldest are deleted until
-  // max remain (boxes made with na coordinates count too).
-  const boxes: Bx[] = [];
-  const lines: Ln[] = [];
-  const labels: Lb[] = [];
-  const add = <T extends { deleted: boolean }>(list: T[], o: T): T => {
-    list.push(o);
-    if (list.length > MAX_OBJECTS + 5) for (const old of list.splice(0, list.length - MAX_OBJECTS)) old.deleted = true;
-    return o;
-  };
-  const remove = <T extends { deleted: boolean }>(list: T[], o: T) => {
-    if (!o.deleted) {
-      o.deleted = true;
-      list.splice(list.indexOf(o), 1);
-    }
-  };
-  const newBox = (left: number, top: number, right: number, bottom: number, border: string, bg: string, borderStyle?: 'dotted') =>
-    add(boxes, { left, top, right, bottom, border, bg, ...(borderStyle ? { borderStyle } : {}), deleted: false });
+  // Drawings live in the library registry (max_boxes_count, max_lines_count, max_labels_count = 500; boxes made with na
+  // coordinates count too)
+  resetDrawings({ box: MAX_OBJECTS, line: MAX_OBJECTS, label: MAX_OBJECTS });
+  const newBox = (left: number, top: number, right: number, bottom: number, border: string, bg: string, borderStyle: 'solid' | 'dotted' = 'solid') =>
+    box.new(left, top, right, bottom, border, 1, borderStyle, 'none', 'bar_index', bg);
   const newLine = (x1: number, y1: number, x2: number, y2: number, css: string) =>
-    add(lines, { x1, y1, x2, y2, color: css, deleted: false });
-  const linefills: Array<{ a: Ln; b: Ln }> = [];
+    line.new(x1, y1, x2, y2, 'bar_index', 'none', css, 'solid', 2);
+  const newLabel = (x: number, y: number, text: string, color: string, style: 'label_down' | 'label_up', size: string, tooltip: string) =>
+    label.new(x, y, text, 'bar_index', 'price', color, style, fg, size, 'center', tooltip);
   /** math.avg(box.get_bottom(), box.get_top()): na for a deleted box */
-  const middle = (bx: Bx) => (bx.deleted ? NaN : (bx.bottom + bx.top) / 2);
+  const middle = (bx: Bx) => (box.get_bottom(bx) + box.get_top(bx)) / 2;
 
   const phArr = ta.pivothigh(new Series(bars, (b) => b.high), ppLen, ppLen).toArray();
   const plArr = ta.pivotlow(new Series(bars, (b) => b.low), ppLen, ppLen).toArray();
@@ -327,15 +311,16 @@ export function calculate(
         const cBX = set.bx[no];
         const mBX = middle(cBX);
         if (signsDiffer(C(t - 1) - mBX, L(t) - mBX) || signsDiffer(C(t - 1) - mBX, H(t) - mBX)) {
-          remove(boxes, cBX);
+          box.delete(cBX);
           set.bx.splice(no, 1);
-        } else if (!cBX.deleted) cBX.right = right;
+        } else box.set_right(cBX, right);
       }
     }
   };
 
 
   for (let t = 0; t < n; t++) {
+    setDrawingBar(t, t === last);
     const per = cfg.mode === 'Present' ? last - t <= back : true;
     const nzV = NZV(t);
     // volumeProfile aVP / aVPa: new on every bar
@@ -372,7 +357,7 @@ export function calculate(
     const pSpa = (pHta - pLta) / vpLev;
 
     if (go && nzV !== 0 && gt(pStp, 0) && t > vpLen && vpLen > 0 && per) {
-      for (const l of dPCa) remove(lines, l);
+      for (const l of dPCa) line.delete(l);
       dPCa = [];
 
       for (let bIt = 1; bIt <= vpLen; bIt++) addVolume(aVPvs, t - (bIt + ppLen), pLst, pHst, pStp);
@@ -412,7 +397,7 @@ export function calculate(
             const mBX = middle(cBX);
             if (signsDiffer(C(i - 1) - mBX, L(i) - mBX) || signsDiffer(C(i - 1) - mBX, H(i) - mBX)
               || signsDiffer(C(i - 1) - mBX, C(i) - mBX)) {
-              if (!cBX.deleted) cBX.left = i;
+              box.set_left(cBX, i);
               cLIQ.b[no] = false;
             }
           }
@@ -443,7 +428,7 @@ export function calculate(
       const valY = pLst + (lbP + 0.0) * pStp;
       const vah = newLine(t - ppLen - vpLen, vahY, t - ppLen, vahY, vhShw ? vaHC : NO_COLOR);
       const val = newLine(t - ppLen - vpLen, valY, t - ppLen, valY, vlShw ? vaLC : NO_COLOR);
-      if (vaB) linefills.push({ a: vah, b: val });
+      if (vaB) linefill.new(vah, val, vaBC);
 
       const statTip = '\n -Traded Volume : ' + vol(volumeSum) + ' (' + str.tostring(vpLen - 1) + ' bars)'
         + '\n  *Average Volume/Bar : ' + vol(volumeSum / (vpLen - 1))
@@ -465,29 +450,19 @@ export function calculate(
         const lTx = (ppP ? tick(lPl) : '') + (!isNaN(ppL) ? dnChange + volText : '');
         // b.i[ppLen] - vpLen / 2: a float division; the bar index of the label is its integer part
         const x = Math.trunc(t - ppLen - vpLen / 2);
-        add(labels, {
-          x, y: uPl, text: uTx, color: NO_COLOR, style: 'label_down', size: ppS, deleted: false,
-          tooltip: ' Profile High : ' + tick(pHst) + '\n %' + pct(((pHst - pLst) / pLst) * 100) + ' higher than the Profile Low' + statTip,
-        });
-        add(labels, {
-          x, y: lPl, text: lTx, color: NO_COLOR, style: 'label_up', size: ppS, deleted: false,
-          tooltip: ' Profile Low : ' + tick(pLst) + '\n %' + pct(((pHst - pLst) / pHst) * 100) + ' lower than the Profile High' + statTip,
-        });
+        newLabel(x, uPl, uTx, NO_COLOR, 'label_down', ppS,
+          ' Profile High : ' + tick(pHst) + '\n %' + pct(((pHst - pLst) / pLst) * 100) + ' higher than the Profile Low' + statTip);
+        newLabel(x, lPl, lTx, NO_COLOR, 'label_up', ppS,
+          ' Profile Low : ' + tick(pLst) + '\n %' + pct(((pHst - pLst) / pHst) * 100) + ' lower than the Profile High' + statTip);
       } else {
         const plain = !ppP && !ppC && !ppV;
         if (!isNaN(ppH)) {
-          add(labels, {
-            x: t - ppLen, y: pp.h, text: (ppP ? tick(pp.h) : '') + upChange + volText, color: plain ? fg : NO_COLOR,
-            style: 'label_down', size: plain ? 'tiny' : ppS, deleted: false,
-            tooltip: 'Swing High : ' + tick(pp.h) + '\n -Price Change : %' + pct(((pp.h - pp.l) * 100) / pp.l) + statTip,
-          });
+          newLabel(t - ppLen, pp.h, (ppP ? tick(pp.h) : '') + upChange + volText, plain ? fg : NO_COLOR, 'label_down', plain ? 'tiny' : ppS,
+            'Swing High : ' + tick(pp.h) + '\n -Price Change : %' + pct(((pp.h - pp.l) * 100) / pp.l) + statTip);
         }
         if (!isNaN(ppL)) {
-          add(labels, {
-            x: t - ppLen, y: pp.l, text: (ppP ? tick(pp.l) : '') + dnChange + volText, color: plain ? fg : NO_COLOR,
-            style: 'label_up', size: plain ? 'tiny' : ppS, deleted: false,
-            tooltip: 'Swing Low : ' + tick(pp.l) + '\n -Price Change : %' + pct(((pp.h - pp.l) * 100) / pp.h) + statTip,
-          });
+          newLabel(t - ppLen, pp.l, (ppP ? tick(pp.l) : '') + dnChange + volText, plain ? fg : NO_COLOR, 'label_up', plain ? 'tiny' : ppS,
+            'Swing Low : ' + tick(pp.l) + '\n -Price Change : %' + pct(((pp.h - pp.l) * 100) / pp.h) + statTip);
         }
       }
     }
@@ -503,7 +478,7 @@ export function calculate(
           const ted = signsDiffer(C(t - 1) - mBX, L(t) - mBX) || signsDiffer(C(t - 1) - mBX, H(t) - mBX);
           if (ced && pcE === 'Until Bar Cross') aPOC.splice(no, 1);
           else if (ted && pcE === 'Until Bar Touch') aPOC.splice(no, 1);
-          else if (!cBX.deleted) cBX.right = t;
+          else box.set_right(cBX, t);
         }
       }
     }
@@ -529,12 +504,12 @@ export function calculate(
           if (bI === last - pp.x) {
             if (dPCa.length > 0) {
               const prev = dPCa[dPCa.length - 1];
-              dPOC.push(newLine(t - bI, prev.deleted ? NaN : prev.y2, t - bI + 1, level(), dpcC));
+              dPOC.push(newLine(t - bI, line.get_y2(prev), t - bI + 1, level(), dpcC));
             }
           } else if (bI < last - pp.x) {
             if (dPOC.length > 0) {
               const prev = dPOC[dPOC.length - 1];
-              dPOC.push(newLine(t - bI, prev.deleted ? NaN : prev.y2, t - bI + 1, level(), dpcC));
+              dPOC.push(newLine(t - bI, line.get_y2(prev), t - bI + 1, level(), dpcC));
             }
           }
         }
@@ -573,7 +548,7 @@ export function calculate(
             const mBX = middle(cBX);
             if (signsDiffer(C(i - 1) - mBX, L(i) - mBX) || signsDiffer(C(i - 1) - mBX, H(i) - mBX)
               || signsDiffer(C(i - 1) - mBX, C(i) - mBX)) {
-              if (!cBX.deleted) cBX.left = i;
+              box.set_left(cBX, i);
               flags[no] = false;
             }
           }
@@ -585,9 +560,10 @@ export function calculate(
 
       const vahY = pLst + (laP + 1.0) * pStp;
       const valY = pLst + (lbP + 0.0) * pStp;
-      const vah = newLine(t - vpLen, vahY, t, vahY, vhShw ? vaHC : NO_COLOR);
-      const val = newLine(t - vpLen, valY, t, valY, vlShw ? vaLC : NO_COLOR);
-      if (vaB) linefills.push({ a: vah, b: val });
+      // f_drawLineX / f_drawLabelX: `var id = line.new(...)` / `label.new(...)`, held by the variable
+      const vah = holdDrawing(newLine(t - vpLen, vahY, t, vahY, vhShw ? vaHC : NO_COLOR));
+      const val = holdDrawing(newLine(t - vpLen, valY, t, valY, vlShw ? vaLC : NO_COLOR));
+      if (vaB) linefill.new(vah, val, vaBC);
 
       if (ppLev !== 'Swing High/Low') {
         const close = C(t);
@@ -609,37 +585,38 @@ export function calculate(
         const lTx = (ppP ? tick(lPl) : '')
           + (pp.s === 'H' ? (ppC ? (ppP ? ' ↓ %' : '↓ %') + pct(((pp.h - close) * 100) / pp.h) + '*' : '') + volText : '');
         const x = Math.trunc(t - vpLen / 2);
-        add(labels, {
-          x, y: uPl, text: uTx, color: NO_COLOR, style: 'label_down', size: ppS, deleted: false,
-          tooltip: 'Profile High : ' + tick(pHst) + '\n %' + pct(((pHst - pLst) / pLst) * 100) + ' higher than the Profile Low' + statTip,
-        });
-        add(labels, {
-          x, y: lPl, text: lTx, color: NO_COLOR, style: 'label_up', size: ppS, deleted: false,
-          tooltip: 'Profile Low : ' + tick(pLst) + '\n %' + pct(((pHst - pLst) / pHst) * 100) + ' lower than the Profile High' + statTip,
-        });
+        holdDrawing(newLabel(x, uPl, uTx, NO_COLOR, 'label_down', ppS,
+          'Profile High : ' + tick(pHst) + '\n %' + pct(((pHst - pLst) / pLst) * 100) + ' higher than the Profile Low' + statTip));
+        holdDrawing(newLabel(x, lPl, lTx, NO_COLOR, 'label_up', ppS,
+          'Profile Low : ' + tick(pLst) + '\n %' + pct(((pHst - pLst) / pHst) * 100) + ' lower than the Profile High' + statTip));
       }
     }
   }
 
+  setDrawingBar(null);
+
   const interval = barInterval(bars);
   const T = (index: number) => barTime(bars, index, interval);
   const lineData = (l: Ln): LineDrawingData => ({
-    time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: l.color, width: 2,
+    time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: String(l.color), width: 2,
   });
+  const drawn = (l: Ln) => !isNaN(l.y1) && !isNaN(l.y2);
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     // an object with an na coordinate is not drawn
-    boxes: boxes.filter((b) => !isNaN(b.left) && !isNaN(b.top) && !isNaN(b.bottom) && !isNaN(b.right)).map((b) => ({
-      time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom, bgColor: b.bg, borderColor: b.border,
-      ...(b.borderStyle ? { borderStyle: b.borderStyle } : {}),
+    boxes: box.all().filter((b) => !isNaN(b.left) && !isNaN(b.top) && !isNaN(b.bottom) && !isNaN(b.right)).map((b) => ({
+      time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom, bgColor: String(b.bgcolor), borderColor: String(b.border_color),
+      ...(b.border_style === 'dotted' ? { borderStyle: 'dotted' as const } : {}),
     })),
-    lines: lines.filter((l) => !isNaN(l.y1) && !isNaN(l.y2)).map(lineData),
-    labels: labels.map((l) => ({
-      time: T(l.x), price: l.y, text: l.text, color: l.color, textColor: fg, style: l.style, size: l.size,
-      textAlign: 'center' as const, tooltip: l.tooltip,
+    lines: line.all().filter(drawn).map(lineData),
+    labels: label.all().map((l) => ({
+      time: T(l.x), price: l.y, text: l.text ?? '', color: String(l.color), textColor: fg,
+      style: l.style as 'label_down' | 'label_up', size: l.size as 'tiny' | 'small' | 'normal',
+      textAlign: 'center' as const, tooltip: l.tooltip ?? '',
     })),
-    linefills: linefills.filter((f) => !f.a.deleted && !f.b.deleted).map((f) => ({ line1: lineData(f.a), line2: lineData(f.b), color: vaBC })),
+    linefills: linefill.all().filter((f) => drawn(f.line1) && drawn(f.line2))
+      .map((f) => ({ line1: lineData(f.line1), line2: lineData(f.line2), color: vaBC })),
   };
 }
 

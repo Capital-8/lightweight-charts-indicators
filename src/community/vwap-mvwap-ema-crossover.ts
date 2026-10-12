@@ -2,21 +2,20 @@
  * VWAP/MVWAP/EMA Crossover
  *
  * Trading signals from VWAP/MVWAP/EMA crossovers with RSI filtering.
- * Custom VWAP calculation (cumulative volume-weighted price).
  * Includes Senkou span cloud for trend context.
  *
  * The VWAP restarts on each day. On intraday bars the port reads the exchange time zone and the session of the
  * symbol from the optional third argument (see src/chart-context.ts) and uses the trading day of the exchange, as
- * the original. Without them the day is the UTC date.
+ * the original. Without them the day is the UTC date. While the volume of the day is zero or na the VWAP is na
+ * (0 / 0); the averages of the VWAP skip na values, as in Pine.
  *
  * Reference: "VWAP/MVWAP/EMA CROSSOVER" by DerrickLaFlame
  */
 
-import { ta, Series, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
 import type { ChartContext } from '../chart-context';
-import { executeScript, timeframe as scriptTimeframe } from 'oakscriptjs/script';
-import { barInterval } from '../bar-time';
+import { periodChanges } from '../anchor-period';
 
 export interface VwapMvwapEmaCrossoverInputs {
   vwapLength: number;
@@ -70,20 +69,6 @@ export const metadata = {
   overlay: true,
 };
 
-/**
- * First bar of each trading day of the exchange on intraday bars (Pine timeframe.change("1D")), found by the library
- * from the time zone and the session of the chart context. Null when the context does not give both, or when the bars
- * are not intraday.
- */
-function tradingDayStarts(bars: Bar[], chart?: ChartContext): boolean[] | null {
-  const interval = barInterval(bars);
-  if (chart?.timezone === undefined || chart.session === undefined || !(interval > 0 && interval < 86400)) return null;
-  let change: Array<number | null> = [];
-  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(interval) };
-  executeScript(() => { change = scriptTimeframe.change('1D').toArray(); }, bars, {}, context);
-  return change.map((v) => v === 1);
-}
-
 export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
   const {
     vwapLength, emaLength1, emaLength2, mvwapLength,
@@ -91,58 +76,18 @@ export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInpu
   } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
-  // Compute VWAP: Pine uses vwap built-in, then ema(vwap, vwapLength)
-  // Cumulative VWAP per day: the trading days of the exchange with the chart context (intraday bars), else the
-  // UTC dates
-  const dayStarts = tradingDayStarts(bars, chart);
-  const vwapArr: number[] = new Array(n).fill(NaN);
-  {
-    let cumPV = 0;
-    let cumV = 0;
-    let prevDay = -1;
-    for (let i = 0; i < n; i++) {
-      const d = new Date(bars[i].time * 1000);
-      const dayKey = d.getUTCFullYear() * 10000 + d.getUTCMonth() * 100 + d.getUTCDate();
-      if (dayStarts ? i === 0 || dayStarts[i] : dayKey !== prevDay) {
-        cumPV = 0;
-        cumV = 0;
-        prevDay = dayKey;
-      }
-      const hlc3 = (bars[i].high + bars[i].low + bars[i].close) / 3;
-      const vol = bars[i].volume ?? 0;
-      cumPV += hlc3 * vol;
-      cumV += vol;
-      vwapArr[i] = cumV > 0 ? cumPV / cumV : hlc3;
-    }
-  }
-
-  // ema(vwap, vwapLength)
-  const cvwapArr: number[] = new Array(n).fill(NaN);
-  {
-    const alpha = 2 / (vwapLength + 1);
-    for (let i = 0; i < n; i++) {
-      if (isNaN(vwapArr[i])) continue;
-      if (i === 0 || isNaN(cvwapArr[i - 1])) {
-        cvwapArr[i] = vwapArr[i];
-      } else {
-        cvwapArr[i] = alpha * vwapArr[i] + (1 - alpha) * cvwapArr[i - 1];
-      }
-    }
-  }
-
-  // MVWAP = ema(vwap, mvwapLength)
-  const mvwapArr: number[] = new Array(n).fill(NaN);
-  {
-    const alpha = 2 / (mvwapLength + 1);
-    for (let i = 0; i < n; i++) {
-      if (isNaN(vwapArr[i])) continue;
-      if (i === 0 || isNaN(mvwapArr[i - 1])) {
-        mvwapArr[i] = vwapArr[i];
-      } else {
-        mvwapArr[i] = alpha * vwapArr[i] + (1 - alpha) * mvwapArr[i - 1];
-      }
-    }
-  }
+  // vwap (hlc3, anchored on each new day; the sums start on the first bar as in Pine): the trading days of the
+  // exchange with the chart context, else the UTC dates
+  const newDay = periodChanges(bars, '1D', chart).map((change, i) => (i === 0 || change ? 1 : 0));
+  const vwap = ta.vwap(
+    Series.fromArray(bars, bars.map((b) => (b.high + b.low + b.close) / 3)),
+    Series.fromArray(bars, bars.map((b) => b.volume ?? NaN)),
+    Series.fromArray(bars, newDay),
+  );
+  const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
+  // cvwap = ema(vwap, vwapLength); MVWAP = ema(vwap, mvwapLength)
+  const cvwapArr = A(ta.ema(vwap, vwapLength));
+  const mvwapArr = A(ta.ema(vwap, mvwapLength));
 
   // EMAs
   const close = new Series(bars, (b) => b.close);

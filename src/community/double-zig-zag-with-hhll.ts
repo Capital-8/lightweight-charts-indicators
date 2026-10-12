@@ -199,9 +199,9 @@ export function calculate(
   const two = cfg.showzz === 'Show Zig Zag 2' || cfg.showzz === 'Show Both';
   const hhll1 = cfg.showhhll === 'Show HHLL 1' || cfg.showhhll === 'Show Both';
   const hhll2 = cfg.showhhll === 'Show HHLL 2' || cfg.showhhll === 'Show Both';
-  const zz1 = zigzag(Math.trunc(cfg.prd1), cfg.upcol1, cfg.dncol1, one, hhll1, cfg.zz1width,
+  const zz1 = zigzag(cfg.prd1, cfg.upcol1, cfg.dncol1, one, hhll1, cfg.zz1width,
     cfg.zz1style === 'Dashed' ? 'dashed' : 'dotted');
-  const zz2 = zigzag(Math.trunc(cfg.prd2), cfg.upcol2, cfg.dncol2, two, hhll2, cfg.zz2width, 'solid');
+  const zz2 = zigzag(cfg.prd2, cfg.upcol2, cfg.dncol2, two, hhll2, cfg.zz2width, 'solid');
   for (let i = 0; i < n; i++) {
     zz1(i);
     zz2(i);

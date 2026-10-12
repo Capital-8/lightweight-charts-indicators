@@ -25,9 +25,9 @@
  * - State of the last bar: the model does not run on a last bar that is still open (the panel then says "Last
  *   closed state", and the adaptive grid follows the open bar). Without it: the last bar is closed.
  * - Exchange time zone: the dates of the Detailed panel and of the outcome table. Without it: UTC.
- * - Session hours of the symbol ("0930-1600"): the close time of the last higher-timeframe bar in the Detailed
- *   panel is the close of its last chart bar (intraday and daily charts). Without them, and for a symbol that
- *   trades around the clock: the end of the period.
+ * - Exchange time zone and session of the symbol: the close time of the last higher-timeframe bar in the Detailed
+ *   panel is the close of that bar on the exchange calendar (session end, early closes, holidays). Without them:
+ *   the end of the period.
  * - Chart background colour (theme 'Auto': dark below 128 of red). Without it: #0F0F0F, a dark chart.
  *
  * Limits of the port:
@@ -35,8 +35,6 @@
  *   UTC calendar rule of src/anchor-period.ts. The close time of a chart bar is its time plus its timeframe (exact
  *   on symbols that trade around the clock and on intraday bars). A timeframe at or below the chart timeframe is
  *   not used by the script.
- * - Session levels: one session period ("HHmm-HHmm") in the session time zone; several periods throw an Error when
- *   the session is used.
  * - A time between two bars is given as the time of the next bar, where it is drawn. Objects without a price and
  *   tables without a cell are not returned (nothing is drawn).
  * - The alert inputs are kept but alerts have no output.
@@ -51,9 +49,12 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, color, math, str, timeframe, time as pineTime, barTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, Series, color, math, str, timeframe, time as pineTime, barTime, resample, periodClose, SessionBars, TradingCalendar,
+  type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PineSize, TableCellData, TableData, TablePosition } from '../types';
-import { securityStarts, chartTimeframe } from '../anchor-period';
+import { securityStarts, chartTimeframe, hasCalendar } from '../anchor-period';
 import { backgroundColorOf, lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
 
 export interface FibonacciStructureEngineInputs {
@@ -522,40 +523,25 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
   const htfBias: number[] = new Array(n).fill(NaN);
   const htfCloseTime: number[] = new Array(n).fill(NaN);
   if (htfValid && n > 0) {
-    const starts = securityStarts(bars, cfg.htf, chart);
-    const htf: Bar[] = [];
-    const group: number[] = [];
-    const lastOf: number[] = [];
-    bars.forEach((b, i) => {
-      if (i === 0 || starts[i] !== starts[i - 1]) {
-        htf.push({ time: starts[i], open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? NaN });
-      } else {
-        const last = htf[htf.length - 1];
-        last.high = Math.max(last.high, b.high);
-        last.low = Math.min(last.low, b.low);
-        last.close = b.close;
-      }
-      group.push(htf.length - 1);
-      lastOf[htf.length - 1] = i;
-    });
-    // time_close of a bar of the higher timeframe. With the session hours of the symbol (a symbol that does not
-    // trade around the clock) it is the close of its last chart bar: the end of an intraday bar, the end of the
-    // session of a daily bar. Without them: the end of the period.
-    const symbolSession = typeof chart?.session === 'string' ? chart.session : chart?.session?.session ?? '';
-    const sessionHours = /^(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(symbolSession);
-    const sessionEnd = sessionHours && sessionHours[1] + sessionHours[2] !== sessionHours[3] + sessionHours[4]
-      ? { hour: Number(sessionHours[3]), minute: Number(sessionHours[4]) } : null;
+    const { bars: htf, group } = resample(bars, securityStarts(bars, cfg.htf, chart));
+    // time_close of a bar of the higher timeframe: with the exchange calendar of the context (time zone and session
+    // of the symbol), the close of the library on a chart of that timeframe (intraday periods cut at the session
+    // end, the session end of the last trading day of a D / W / M period). Without it: the end of the period.
+    const htfCalendar: SessionContext | null = hasCalendar(chart)
+      ? { timeframe: cfg.htf, timezone: chart!.timezone, session: chart!.session, regularSession: chart!.regularSession, timeUnit: 'ms' }
+      : null;
+    const closes: number[] = [];
     const htfClose = (g: number): number => {
-      const last = lastOf[g];
-      if (sessionEnd !== null && isIntraday) return closeMs(last);
-      if (sessionEnd !== null && chartTf !== '' && timeframe.in_seconds(chartTf) === 86400) {
-        const t = tMs(last);
-        const at = (shift: number) => pineTime.timestamp(
-          TEXT_TZ, pineTime.year(t, TEXT_TZ), pineTime.month(t, TEXT_TZ), pineTime.dayofmonth(t, TEXT_TZ) + shift, sessionEnd.hour, sessionEnd.minute,
-        );
-        return at(0) > t ? at(0) : at(1);
+      if (closes[g] !== undefined) return closes[g];
+      const start = ms ? htf[g].time : htf[g].time * 1000;
+      let close = NaN;
+      try {
+        if (htfCalendar !== null) close = periodClose(start, cfg.htf, htfCalendar);
+      } catch {
+        // a time zone or a session that the library does not read: the end of the period
       }
-      return periodEnd(ms ? htf[g].time : htf[g].time * 1000, cfg.htf);
+      closes[g] = Number.isNaN(close) ? periodEnd(start, cfg.htf) : close;
+      return closes[g];
     };
     const ph = A(ta.pivothigh(Series.fromArray(htf, htf.map((b) => b.high)), swingLen, swingLen));
     const pl = A(ta.pivotlow(Series.fromArray(htf, htf.map((b) => b.low)), swingLen, swingLen));
@@ -588,46 +574,20 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
   const prevDayH: number[] = new Array(n).fill(NaN);
   const prevDayL: number[] = new Array(n).fill(NaN);
   if (dayValid) {
-    const days = securityStarts(bars, 'D', chart);
-    let prevHigh = NaN;
-    let prevLow = NaN;
-    let dayHigh = NaN;
-    let dayLow = NaN;
+    const { bars: days, group: dayOf } = resample(bars, securityStarts(bars, 'D', chart));
     for (let i = 0; i < n; i++) {
-      if (i === 0 || days[i] !== days[i - 1]) {
-        prevHigh = dayHigh;
-        prevLow = dayLow;
-        dayHigh = bars[i].high;
-        dayLow = bars[i].low;
-      } else {
-        dayHigh = Math.max(dayHigh, bars[i].high);
-        dayLow = Math.min(dayLow, bars[i].low);
-      }
-      prevDayH[i] = prevHigh;
-      prevDayL[i] = prevLow;
+      prevDayH[i] = dayOf[i] > 0 ? days[dayOf[i] - 1].high : NaN;
+      prevDayL[i] = dayOf[i] > 0 ? days[dayOf[i] - 1].low : NaN;
     }
   }
 
   // Session: time("1D", session, time zone) is the start of the session of the bar, time_close("1D", ...) its end
   const sessionUsed = isIntraday && (cfg.useSession || cfg.showSession);
   const sessionSpec = `${cfg.sessionHours}:${cfg.sessionDays}`;
-  const sessionPeriod = /^(\d{2})(\d{2})-(\d{2})(\d{2})$/.exec(cfg.sessionHours.trim());
-  if (sessionUsed && !sessionPeriod) {
-    throw new Error(`Session "${cfg.sessionHours}": the session levels are supported for one period "HHmm-HHmm" only.`);
-  }
-  const sessionBounds = (t: number): [number, number] => {
-    const tz = cfg.sessionTz;
-    const [startMin, endMin] = sessionPeriod
-      ? [Number(sessionPeriod[1]) * 60 + Number(sessionPeriod[2]), Number(sessionPeriod[3]) * 60 + Number(sessionPeriod[4])] : [0, 0];
-    const y = pineTime.year(t, tz);
-    const mo = pineTime.month(t, tz);
-    const d = pineTime.dayofmonth(t, tz);
-    const minutes = pineTime.hour(t, tz) * 60 + pineTime.minute(t, tz);
-    const at = (day: number, m: number) => pineTime.timestamp(tz, y, mo, day, Math.floor(m / 60), m % 60);
-    if (startMin < endMin) return [at(d, startMin), at(d, endMin)];
-    // A period over midnight (or the whole day)
-    return minutes >= startMin ? [at(d, startMin), at(d + 1, endMin)] : [at(d - 1, startMin), at(d, endMin)];
-  };
+  // time(tf, session, tz) / time_close(tf, session, tz) of the session input: the trading calendar of the library
+  // for a session string (its start and end of the day, the bar periods aligned on the session start)
+  const sessionCalendar = sessionUsed
+    ? new SessionBars(new TradingCalendar(cfg.sessionTz, { session: sessionSpec }, 'pine'), chartTf) : null;
 
   // State of the model
   let currentSessionH = NaN;
@@ -711,9 +671,10 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
     const bearEngulf = sizePattern && engulfBounds(cfg.strictEngulf, open, close, bars[i - 1].open, bars[i - 1].close, -1);
     // chart.is_standard is true: the bars are standard candles
     const ready = i >= Math.max(3 * swingLen, 50) && !na(atr[i]) && gt(atr[i], 0);
-    const inSession = sessionUsed && pineTime.inSession(time, sessionSpec, cfg.sessionTz);
-    const [sessionStartTime, sessionEndTime] = inSession ? sessionBounds(time) : [NaN, NaN];
-    const sessionBarAligned = inSession && closeMs(i) <= sessionEndTime;
+    const inSession = sessionCalendar !== null && pineTime.inSession(time, sessionSpec, cfg.sessionTz, tfSeconds * 1000);
+    const sessionStartTime = inSession ? sessionCalendar.timeOf(time, '1D') : NaN;
+    const sessionEndTime = inSession ? sessionCalendar.closeOf(time, '1D') : NaN;
+    const sessionBarAligned = inSession && sessionCalendar.timeOf(time, chartTf) === time && sessionCalendar.closeOf(time, chartTf) === closeMs(i);
 
     let confirmedBuy = false;
     let confirmedSell = false;

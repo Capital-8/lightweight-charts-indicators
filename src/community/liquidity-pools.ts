@@ -18,7 +18,7 @@
  * Original notice: © LuxAlgo
  */
 
-import { color, math, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { color, math, str, setDrawingBar, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { executeScript, indicator as declareIndicator, box, line, label } from 'oakscriptjs/script';
 import type { BoxData, LabelData, LineDrawingData, PlotCandleData } from '../types';
 
@@ -169,6 +169,8 @@ export function calculate(
     let lstB2 = NaN;
 
     for (let i = 0; i < n; i++) {
+      // the bar of the drawing registry: the rules of the last bar and the 10,000-bar limit of a bar index
+      setDrawingBar(i, i === n - 1);
       const bar = bars[i];
       const { high, low, close } = bar;
       const volume = bar.volume ?? NaN;
@@ -376,6 +378,7 @@ export function calculate(
       lstB2 = lstB1;
       lstB1 = lst.b;
     }
+    setDrawingBar(null);
   }, bars);
 
   return {

@@ -15,11 +15,10 @@
  * them it uses the open time of the bar and UTC.
  */
 
-import { array, time as pineTime, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { array, time as pineTime, periodClose, type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
 import type { ChartContext } from '../chart-context';
-import { executeScript, time_close as scriptTimeClose } from 'oakscriptjs/script';
-import { barInterval } from '../bar-time';
+import { chartTimeframe, hasCalendar } from '../anchor-period';
 
 export interface MoonPhasesInputs {
   waxingMoonColor: string;
@@ -116,18 +115,19 @@ function getUNIXTimeFromJD(julianDay: number, timezone: string): number {
 }
 
 /**
- * Close time of every bar in ms (Pine time_close), found by the library from the time zone and the session of the
- * chart context. Null without them.
+ * Close time of every bar in ms (Pine time_close), from the exchange calendar of the chart context (time zone and
+ * session of the symbol). Null without them.
  */
 function closeTimes(bars: Bar[], chart?: ChartContext): number[] | null {
-  if (chart?.timezone === undefined || chart.session === undefined) return null;
+  if (!chart || !hasCalendar(chart)) return null;
   if (bars.length === 0 || typeof bars[0].time !== 'number') return null;
-  const interval = barInterval(bars);
-  if (chart.timeframe === undefined && !(interval > 0)) return null;
-  let close: Array<number | null> = [];
-  const context = { ...chart, timeframe: chart.timeframe ?? timeframe.from_seconds(interval) };
-  executeScript(() => { close = scriptTimeClose.toArray(); }, bars, {}, context);
-  return close.map((v) => v ?? NaN);
+  const tf = chartTimeframe(bars, chart);
+  if (tf === '') return null;
+  const context: SessionContext = {
+    timeframe: tf, timezone: chart.timezone, session: chart.session, regularSession: chart.regularSession,
+    timeUnit: bars[0].time >= 1e12 ? 'ms' : 's',
+  };
+  return bars.map((b) => periodClose(b.time, tf, context));
 }
 
 function hexToRgba(hex: string, alpha: number): string {

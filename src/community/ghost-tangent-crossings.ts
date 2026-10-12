@@ -23,7 +23,7 @@
  * Original notice: © ChartPrime
  */
 
-import { ta, math, array, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { math, array, callsite, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, PolylineData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
@@ -195,16 +195,10 @@ export function calculate(
   const lowSource = bars.map((b) => (wick ? b.low : Math.min(b.open, b.close)));
   const lastConfirmed = lastBarConfirmedOf(chart);
 
-  // ta.pivothigh(source, back, forward) with a number of bars before the pivot that changes on every bar: the
-  // library function on the bars of that window (its last value is the result of the current bar)
-  const pivotAt = (source: number[], i: number, back: number, isHigh: boolean): boolean => {
-    const from = i - pivotForward - back;
-    if (from < 0) return false;
-    const window = Series.fromArray(bars.slice(from, i + 1), source.slice(from, i + 1));
-    const values = (isHigh ? ta.pivothigh(window, back, pivotForward) : ta.pivotlow(window, back, pivotForward)).toArray();
-    const v = values[values.length - 1];
-    return v !== null && v !== undefined && !isNaN(v);
-  };
+  // ta.pivothigh(source, back, forward) with a number of bars before the pivot that changes on every bar: one call
+  // site each, called on every bar with the lengths of that bar
+  const pivotHighSite = callsite.pivothigh();
+  const pivotLowSite = callsite.pivotlow();
 
   const zigZags: Poly[] = [];
   const zigZagPoints: Lb[] = [];
@@ -300,12 +294,12 @@ export function calculate(
   const sincePhSite = callsite.barssince();
 
   for (let i = 0; i < n; i++) {
-    const newPh = pivotAt(highSource, i, phBack, true);
+    const newPh = !isNaN(pivotHighSite(i, highSource[i], phBack, pivotForward));
     if (newPh) {
       pivotHigh.current = highSource[i - pivotForward];
       pivotHigh.currentIdx = i - pivotForward;
     }
-    const newPl = pivotAt(lowSource, i, plBack, false);
+    const newPl = !isNaN(pivotLowSite(i, lowSource[i], plBack, pivotForward));
     if (newPl) {
       pivotLow.current = lowSource[i - pivotForward];
       pivotLow.currentIdx = i - pivotForward;

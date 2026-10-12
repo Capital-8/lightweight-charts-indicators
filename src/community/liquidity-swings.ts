@@ -20,7 +20,10 @@
  * Original notice: © LuxAlgo
  */
 
-import { ta, str, color, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, str, color, callsite, Series, line, box, label, resetDrawings, setDrawingBar, varDrawing,
+  type Box, type Label, type Line, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 
@@ -90,31 +93,6 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
-interface Ln {
-  x1: number;
-  x2: number;
-  y: number;
-  color: string | null;
-  dashed: boolean;
-  deleted: boolean;
-}
-interface Bx {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-  bg: string;
-  deleted: boolean;
-}
-interface Lb {
-  x: number;
-  y: number;
-  text: string;
-  textColor: string;
-  style: 'label_down' | 'label_up';
-  deleted: boolean;
-}
-
 export function calculate(
   bars: Bar[],
   inputs: Partial<LiquiditySwingsInputs> = {},
@@ -133,45 +111,9 @@ export function calculate(
   const phArr = ta.pivothigh(new Series(bars, (b) => b.high), length, length).toArray();
   const plArr = ta.pivotlow(new Series(bars, (b) => b.low), length, length).toArray();
 
-  // Live drawings in creation order: when a creation brings the count above max + 5, the oldest are deleted until
-  // max remain. An object held by a `var` variable of the script (the area box of each side, and the latest zone box,
-  // level line and label of each side) is never deleted by this limit, but it counts. A deleted object ignores
-  // later changes.
-  const held = new Set<object>();
-  const limit = <T extends { deleted: boolean }>(list: T[]) => {
-    if (list.length <= MAX_OBJECTS + 5) return;
-    for (let k = 0; k < list.length && list.length > MAX_OBJECTS; ) {
-      if (held.has(list[k])) k++;
-      else list.splice(k, 1)[0].deleted = true;
-    }
-  };
-  /** `variable := object`: the variable holds the new object and releases the one before */
-  const hold = <T extends object>(before: T | null, now: T): T => {
-    if (before) held.delete(before);
-    held.add(now);
-    return now;
-  };
-  const lines: Ln[] = [];
-  const boxes: Bx[] = [];
-  const labels: Lb[] = [];
-  const newLine = (l: Omit<Ln, 'deleted'>): Ln => {
-    const o = { ...l, deleted: false };
-    lines.push(o);
-    limit(lines);
-    return o;
-  };
-  const newBox = (b: Omit<Bx, 'deleted'>): Bx => {
-    const o = { ...b, deleted: false };
-    boxes.push(o);
-    limit(boxes);
-    return o;
-  };
-  const newLabel = (l: Omit<Lb, 'deleted'>): Lb => {
-    const o = { ...l, deleted: false };
-    labels.push(o);
-    limit(labels);
-    return o;
-  };
+  // Drawings of the library registry, with the limits of indicator(): the `var` variables of the script (the area
+  // box of each side, and the zone box, level line and label of each side) hold their objects.
+  resetDrawings({ line: MAX_OBJECTS, box: MAX_OBJECTS, label: MAX_OBJECTS });
 
   /** One side (swing highs or swing lows) */
   const side = (isTop: boolean) => {
@@ -184,14 +126,14 @@ export function calculate(
     let crossed: boolean | null = null; // var bool = na
     let x1 = 0;
     // var box = box.new(na, na, na, na, bgcolor = color.new(areaCss, 80), border_color = na): made on the first bar
-    let areaBox: Bx | null = null;
+    const areaBox = varDrawing<Box>();
     // get_counts()
     let count = 0;
     let vol = 0;
-    // set_zone(), set_level(), set_label()
-    let zone: Bx | null = null;
-    let lvl: Ln | null = null;
-    let lbl: Lb | null = null;
+    // set_zone(), set_level(), set_label(): `var box bx`, `var line lvl`, `var label lbl`
+    const zone = varDrawing<Box>();
+    const lvl = varDrawing<Line>();
+    const lbl = varDrawing<Label>();
     const zoneCross = callsite.crossover();
     const labelCross = callsite.crossover();
     let prevTarget = NaN;
@@ -199,8 +141,10 @@ export function calculate(
 
     return (i: number) => {
       if (i === 0) {
-        areaBox = hold(null, newBox({ left: NaN, top: NaN, right: NaN, bottom: NaN, bg: String(color.new(areaCss, 80)) }));
+        areaBox.value = box.new(NaN, NaN, NaN, NaN, 'transparent', undefined, undefined, undefined, undefined,
+          String(color.new(areaCss, 80)));
       }
+      const area = areaBox.value!;
       const p = pivots[i] ?? NaN;
       const isPivot = !isNaN(p) && p !== 0;
       const b = bars[i];
@@ -226,15 +170,11 @@ export function calculate(
         }
         x1 = i - length;
         crossed = false;
-        if (!areaBox!.deleted) {
-          areaBox!.left = x1;
-          areaBox!.top = top;
-          areaBox!.right = x1;
-          areaBox!.bottom = btm;
-        }
+        box.set_lefttop(area, x1, top);
+        box.set_rightbottom(area, x1, btm);
       } else {
         if (isTop ? gt(b.close, top) : lt(b.close, btm)) crossed = true;
-        if (!areaBox!.deleted) areaBox!.right = crossed ? x1 : i + 3;
+        box.set_right(area, crossed ? x1 : i + 3);
       }
 
       if (!show) return;
@@ -243,50 +183,49 @@ export function calculate(
 
       // set_zone()
       if (zoneCross(target, filterValue)) {
-        zone = hold(zone, newBox({ left: x1, top, right: x1 + count, bottom: btm, bg: areaCss }));
+        zone.value = box.new(x1, top, x1 + count, btm, 'transparent', undefined, undefined, undefined, undefined, areaCss);
       }
-      if (above && zone && !zone.deleted) zone.right = x1 + count;
+      if (above && zone.value) box.set_right(zone.value, x1 + count);
 
       // set_level()
       const value = isTop ? top : btm;
       if (isPivot) {
         if (lt(prevTarget, filterValue)) {
-          if (lvl && !lvl.deleted) {
-            lvl.deleted = true;
-            lines.splice(lines.indexOf(lvl), 1);
-          }
-        } else if (!prevCrossed && lvl && !lvl.deleted) {
-          lvl.x2 = i - length;
+          if (lvl.value) line.delete(lvl.value);
+        } else if (!prevCrossed && lvl.value) {
+          line.set_x2(lvl.value, i - length);
         }
-        lvl = hold(lvl, newLine({ x1: i - length, x2: i, y: value, color: null, dashed: false }));
+        lvl.value = line.new(i - length, value, i, value, 'bar_index', undefined, 'transparent');
       }
-      if (lvl && !lvl.deleted) {
-        if (!prevCrossed) lvl.x2 = i + 3;
+      const level = lvl.value;
+      if (level) {
+        if (!prevCrossed) line.set_x2(level, i + 3);
         if (crossed && !prevCrossed) {
-          lvl.x2 = i;
-          lvl.dashed = true;
+          line.set_x2(level, i);
+          line.set_style(level, 'dashed');
         }
-        if (above) lvl.color = css;
+        if (above) line.set_color(level, css);
       }
       prevTarget = target;
       prevCrossed = crossed;
 
       // set_label()
       if (labelCross(target, filterValue)) {
-        lbl = hold(lbl, newLabel({
-          x: x1, y: value, text: str.tostring(vol, 'volume'), textColor: css, style: isTop ? 'label_down' : 'label_up',
-        }));
+        lbl.value = label.new(x1, value, str.tostring(vol, 'volume'), 'bar_index', 'price', '#00000000',
+          isTop ? 'label_down' : 'label_up', css, labelSize);
       }
-      if (above && lbl && !lbl.deleted) lbl.text = str.tostring(vol, 'volume');
+      if (above && lbl.value) label.set_text(lbl.value, str.tostring(vol, 'volume'));
     };
   };
 
   const high = side(true);
   const low = side(false);
   for (let i = 0; i < n; i++) {
+    setDrawingBar(i, i === n - 1);
     high(i);
     low(i);
   }
+  setDrawingBar(null);
 
   const interval = barInterval(bars);
   const T = (index: number) => barTime(bars, index, interval);
@@ -294,15 +233,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     // a line or a box with an na coordinate is not drawn
-    lines: lines.filter((l) => !isNaN(l.y)).map((l) => ({
-      time1: T(l.x1), price1: l.y, time2: T(l.x2), price2: l.y, color: l.color ?? 'transparent',
-      ...(l.dashed ? { style: 'dashed' as const } : {}),
+    lines: line.all().filter((l) => !isNaN(l.y1)).map((l) => ({
+      time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: String(l.color ?? 'transparent'),
+      ...(l.style === 'dashed' ? { style: 'dashed' as const } : {}),
     })),
-    boxes: boxes.filter((b) => !isNaN(b.left) && !isNaN(b.top) && !isNaN(b.bottom)).map((b) => ({
-      time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom, bgColor: b.bg, borderColor: 'transparent',
+    boxes: box.all().filter((b) => !isNaN(b.left) && !isNaN(b.top) && !isNaN(b.bottom)).map((b) => ({
+      time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom, bgColor: String(b.bgcolor), borderColor: 'transparent',
     })),
-    labels: labels.map((l) => ({
-      time: T(l.x), price: l.y, text: l.text, color: '#00000000', textColor: l.textColor, style: l.style, size: labelSize,
+    labels: label.all().map((l) => ({
+      time: T(l.x), price: l.y, text: l.text ?? '', color: '#00000000', textColor: String(l.textcolor),
+      style: l.style as 'label_down' | 'label_up', size: labelSize,
     })),
   };
 }
