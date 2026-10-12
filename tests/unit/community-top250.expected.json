@@ -886,6 +886,7 @@
     "plot10": 0,
     "plot11": 0
    },
+   "barColors": 1,
    "fills": 10
   },
   "m15": {
@@ -903,6 +904,7 @@
     "plot10": 0,
     "plot11": 0
    },
+   "barColors": 3749,
    "fills": 10
   }
  },

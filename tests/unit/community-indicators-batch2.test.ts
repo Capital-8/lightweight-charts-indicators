@@ -2428,10 +2428,10 @@ describe('WilliamsCombo', () => {
 });
 
 describe('ZeroLagEMA', () => {
-  const result = ZeroLagEMA.calculate(bars, { slowLen: 20 });
+  const result = ZeroLagEMA.calculate(bars, { length: 20 });
 
   it('returns correct shape', () => {
-    assertShape(result, ['plot0', 'plot1', 'plot2'], true);
+    assertShape(result, ['plot0'], true);
   });
 
   it('produces finite values after warmup', () => {

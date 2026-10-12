@@ -1,17 +1,24 @@
 /**
- * BetterVolume
+ * Better Volume Indicator
  *
- * Analyzes volume distribution to detect climax, churn, and low volume conditions.
- * Divides volume into bull/bear components based on open/close within the true range,
- * then identifies specific volume patterns across a lookback period.
+ * Splits the volume of each bar into a buy part v1 and a sell part v2 from the true range and the open / close, then
+ * builds 20 measures (volume, volume times range, volume per range, on one bar and on two bars). A bar is "climax
+ * up" (red), "climax down" (white), "churn" (green), "climax churn" (dark magenta) or "low volume" (yellow) when one
+ * of these measures is the highest or the lowest of the last `length` bars, else cyan. The volume columns take that
+ * colour, with an SMA of the volume; with "enableBarColors" the bars are coloured instead and the two plots are
+ * hidden.
+ *
+ * Version 1 plots have a default transparency of 35: the colours have an alpha of 0.65.
  *
  * Reference: "Better Volume Indicator [LazyBear]" by LazyBear
+ * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
 
 export interface BetterVolumeInputs {
+  /** Lookback */
   length: number;
   enableBarColors: boolean;
   use2Bars: boolean;
@@ -33,254 +40,168 @@ export const defaultInputs: BetterVolumeInputs = {
   climaxChurn: true,
 };
 
+// Untitled inputs keep their variable names as titles
 export const inputConfig: InputConfig[] = [
-  { id: 'length', type: 'int', title: 'Lookback', defval: 8, min: 1 },
-  { id: 'enableBarColors', type: 'bool', title: 'Enable Bar Colors', defval: false },
-  { id: 'use2Bars', type: 'bool', title: 'Use 2 Bars', defval: true },
-  { id: 'lowVol', type: 'bool', title: 'Low Volume', defval: true },
-  { id: 'climaxUp', type: 'bool', title: 'Climax Up', defval: true },
-  { id: 'climaxDown', type: 'bool', title: 'Climax Down', defval: true },
-  { id: 'churn', type: 'bool', title: 'Churn', defval: true },
-  { id: 'climaxChurn', type: 'bool', title: 'Climax Churn', defval: true },
+  { id: 'length', type: 'int', title: 'Lookback', defval: 8 },
+  { id: 'enableBarColors', type: 'bool', title: 'enableBarColors', defval: false },
+  { id: 'use2Bars', type: 'bool', title: 'use2Bars', defval: true },
+  { id: 'lowVol', type: 'bool', title: 'lowVol', defval: true },
+  { id: 'climaxUp', type: 'bool', title: 'climaxUp', defval: true },
+  { id: 'climaxDown', type: 'bool', title: 'climaxDown', defval: true },
+  { id: 'churn', type: 'bool', title: 'churn', defval: true },
+  { id: 'climaxChurn', type: 'bool', title: 'climaxChurn', defval: true },
 ];
 
+// Colour constants of Pine version 1, with the default plot transparency of that version (35)
+const V1 = (hex: string) => String(color.new(hex, 35));
+const LOW_VOL_COLOR = V1('#FFFF00'); // yellow
+const CLIMAX_UP_COLOR = V1('#FF0000'); // red
+const CLIMAX_DOWN_COLOR = V1('#FFFFFF'); // white
+const CHURN_COLOR = V1('#008000'); // green
+const CLIMAX_CHURN_COLOR = V1('#8B008B');
+const DEF_COLOR = V1('#00FFFF');
+const ORANGE = V1('#FF7F00');
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'vol', title: 'Volume', color: '#00FFFF', lineWidth: 1, style: 'columns' },
-  { id: 'sma', title: 'SMA', color: '#FFA500', lineWidth: 2 },
+  { id: 'vol', title: 'Volume', color: DEF_COLOR, lineWidth: 1, style: 'columns' },
+  { id: 'sma', title: 'SMA', color: ORANGE, lineWidth: 2 },
 ];
 
 export const metadata = {
-  title: 'Better Volume Indicator',
-  shortTitle: 'BVI',
+  title: 'Better Volume Indicator [LazyBear]',
+  shortTitle: 'BVI_LB',
   overlay: false,
 };
 
-const LOW_VOL_COLOR = '#FFFF00';     // yellow
-const CLIMAX_UP_COLOR = '#FF0000';   // red
-const CLIMAX_DOWN_COLOR = '#FFFFFF'; // white
-const CHURN_COLOR = '#00FF00';       // green
-const CLIMAX_CHURN_COLOR = '#8B008B'; // dark magenta
-const DEF_COLOR = '#00FFFF';         // cyan
+/** Pine float comparisons within 1e-10 (na and +-infinity compare false for ==) */
+const EPS = 1e-10;
+const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
+const gt = (a: number, b: number) => a - b > EPS;
+const ge = (a: number, b: number) => a - b >= -EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<BetterVolumeInputs> = {}): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<BetterVolumeInputs> = {},
+): IndicatorResult & { barColors: BarColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = cfg.length;
+  const use2 = cfg.use2Bars;
+  const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
+  const S = (values: number[]) => Series.fromArray(bars, values);
 
-  // Pre-compute true range, volume, and components
-  const trArr = ta.tr(bars).toArray();
-  const volArr = bars.map(b => b.volume ?? 0);
+  // range = tr (na on the first bar)
+  const range = A(ta.tr(bars, false));
+  const vol = bars.map((b) => b.volume ?? NaN);
+  const hh2 = A(ta.highest(S(bars.map((b) => b.high)), 2));
+  const ll2 = A(ta.lowest(S(bars.map((b) => b.low)), 2));
 
-  // v1 (buy volume), v2 (sell volume) per Pine formula
-  const v1Arr: number[] = new Array(n);
-  const v2Arr: number[] = new Array(n);
-
+  const v1: number[] = new Array(n);
+  const v2: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
-    const range = trArr[i] ?? 0;
-    const v = volArr[i];
-    const o = bars[i].open;
-    const c = bars[i].close;
-
-    if (range === 0) {
-      v1Arr[i] = v / 2;
-      v2Arr[i] = v / 2;
-    } else if (c >= o) {
-      // Pine: v * ((range) / ((2+(range*range)/10) * range + (open - close)))
-      const denom = (2 + (range * range) / 10) * range + (o - c);
-      v1Arr[i] = denom === 0 ? v / 2 : v * (range / denom);
-      v2Arr[i] = v - v1Arr[i];
-    } else {
-      // Pine: v * (((range + close - open)) / (2+(range*range)/10) * range + (close - open))
-      const denom = (2 + (range * range) / 10) * range + (c - o);
-      v1Arr[i] = denom === 0 ? v / 2 : v * ((range + c - o) / denom);
-      v2Arr[i] = v - v1Arr[i];
-    }
+    const r = range[i];
+    const v = vol[i];
+    const { open, close } = bars[i];
+    // Operator precedence of the original kept as written (plain divisions: x / 0 is +-infinity, 0 / 0 na)
+    v1[i] = ge(close, open)
+      ? v * (r / ((2 + (r * r) / 10) * r + (open - close)))
+      : v * (((r + close - open) / (2 + (r * r) / 10)) * r + (close - open));
+    v2[i] = v - v1[i];
   }
+  const p = (arr: number[], i: number) => (i > 0 ? arr[i - 1] : NaN);
+  const v3 = v1.map((x, i) => x + v2[i]);
+  const v4 = v1.map((x, i) => x * range[i]);
+  const v5 = v1.map((x, i) => (x - v2[i]) * range[i]);
+  const v6 = v2.map((x, i) => x * range[i]);
+  const v7 = v2.map((x, i) => (x - v1[i]) * range[i]);
+  // range != 0 is false when range is na
+  const nz0 = (i: number) => !Number.isNaN(range[i]) && range[i] !== 0;
+  const v8 = v1.map((x, i) => (nz0(i) ? x / range[i] : 1));
+  const v9 = v1.map((x, i) => (nz0(i) ? (x - v2[i]) / range[i] : 1));
+  const v10 = v2.map((x, i) => (nz0(i) ? x / range[i] : 1));
+  const v11 = v2.map((x, i) => (nz0(i) ? (x - v1[i]) / range[i] : 1));
+  const v12 = v3.map((x, i) => (nz0(i) ? x / range[i] : 1));
+  const v13 = v3.map((x, i) => (use2 ? x + p(v3, i) : 1));
+  const r2 = (i: number) => hh2[i] - ll2[i];
+  const v14 = v1.map((x, i) => (use2 ? (x + p(v1, i)) * r2(i) : 1));
+  const v15 = v1.map((x, i) => (use2 ? (x + p(v1, i) - v2[i] - p(v2, i)) * r2(i) : 1));
+  const v16 = v2.map((x, i) => (use2 ? (x + p(v2, i)) * r2(i) : 1));
+  const v17 = v2.map((x, i) => (use2 ? (x + p(v2, i) - v1[i] - p(v1, i)) * r2(i) : 1));
+  // highest(high, 2) != lowest(low, 2): false when one of them is na
+  const two = (i: number) => use2 && !Number.isNaN(hh2[i]) && !Number.isNaN(ll2[i]) && !eq(hh2[i], ll2[i]);
+  const v18 = v1.map((x, i) => (two(i) ? (x + p(v1, i)) / r2(i) : 1));
+  const v19 = v1.map((x, i) => (two(i) ? (x + p(v1, i) - v2[i] - p(v2, i)) / r2(i) : 1));
+  const v20 = v2.map((x, i) => (two(i) ? (x + p(v2, i)) / r2(i) : 1));
+  const v21 = v2.map((x, i) => (two(i) ? (x + p(v2, i) - v1[i] - p(v1, i)) / r2(i) : 1));
+  const v22 = v13.map((x, i) => (two(i) ? x / r2(i) : 1));
 
-  // Compute derived series
-  const v3Arr: number[] = new Array(n);  // v1 + v2 = v
-  const v4Arr: number[] = new Array(n);  // v1 * range
-  const v5Arr: number[] = new Array(n);  // (v1 - v2) * range
-  const v6Arr: number[] = new Array(n);  // v2 * range
-  const v7Arr: number[] = new Array(n);  // (v2 - v1) * range
-  const v8Arr: number[] = new Array(n);  // v1 / range
-  const v9Arr: number[] = new Array(n);  // (v1 - v2) / range
-  const v10Arr: number[] = new Array(n); // v2 / range
-  const v11Arr: number[] = new Array(n); // (v2 - v1) / range
-  const v12Arr: number[] = new Array(n); // v3 / range
-  const v13Arr: number[] = new Array(n); // use2Bars: v3 + v3[1]
-  const v14Arr: number[] = new Array(n);
-  const v15Arr: number[] = new Array(n);
-  const v16Arr: number[] = new Array(n);
-  const v17Arr: number[] = new Array(n);
-  const v18Arr: number[] = new Array(n);
-  const v19Arr: number[] = new Array(n);
-  const v20Arr: number[] = new Array(n);
-  const v21Arr: number[] = new Array(n);
-  const v22Arr: number[] = new Array(n);
+  const hi = (arr: number[]) => A(ta.highest(S(arr), len));
+  const lo = (arr: number[]) => A(ta.lowest(S(arr), len));
+  const l3 = lo(v3);
+  const h4 = hi(v4);
+  const h5 = hi(v5);
+  const h6 = hi(v6);
+  const h7 = hi(v7);
+  const l8 = lo(v8);
+  const l9 = lo(v9);
+  const l10 = lo(v10);
+  const l11 = lo(v11);
+  const h12 = hi(v12);
+  const l13 = lo(v13);
+  const h14 = hi(v14);
+  const h15 = hi(v15);
+  const l16 = lo(v16);
+  const l17 = lo(v17);
+  const l18 = lo(v18);
+  const l19 = lo(v19);
+  const l20 = lo(v20);
+  const l21 = lo(v21);
+  const l22 = lo(v22);
+  const sma = A(ta.sma(S(vol), len));
 
+  const vColor: string[] = new Array(n);
   for (let i = 0; i < n; i++) {
-    const range = trArr[i] ?? 0;
-    const v1 = v1Arr[i];
-    const v2 = v2Arr[i];
-    v3Arr[i] = v1 + v2;
-    v4Arr[i] = v1 * range;
-    v5Arr[i] = (v1 - v2) * range;
-    v6Arr[i] = v2 * range;
-    v7Arr[i] = (v2 - v1) * range;
-    v8Arr[i] = range !== 0 ? v1 / range : 1;
-    v9Arr[i] = range !== 0 ? (v1 - v2) / range : 1;
-    v10Arr[i] = range !== 0 ? v2 / range : 1;
-    v11Arr[i] = range !== 0 ? (v2 - v1) / range : 1;
-    v12Arr[i] = range !== 0 ? v3Arr[i] / range : 1;
+    const { open, close } = bars[i];
+    const up = gt(close, open);
+    const dn = gt(open, close);
+    const up1 = i > 0 && gt(bars[i - 1].close, bars[i - 1].open);
+    const dn1 = i > 0 && gt(bars[i - 1].open, bars[i - 1].close);
+    const c1 = eq(v3[i], l3[i]);
+    const c2 = eq(v4[i], h4[i]) && up;
+    const c3 = eq(v5[i], h5[i]) && up;
+    const c4 = eq(v6[i], h6[i]) && dn;
+    const c5 = eq(v7[i], h7[i]) && dn;
+    const c6 = eq(v8[i], l8[i]) && dn;
+    const c7 = eq(v9[i], l9[i]) && dn;
+    const c8 = eq(v10[i], l10[i]) && up;
+    const c9 = eq(v11[i], l11[i]) && up;
+    const c10 = eq(v12[i], h12[i]);
+    const c11 = use2 && eq(v13[i], l13[i]) && up && up1;
+    const c12 = use2 && eq(v14[i], h14[i]) && up && up1;
+    const c13 = use2 && eq(v15[i], h15[i]) && up && dn1;
+    const c14 = use2 && eq(v16[i], l16[i]) && dn && dn1;
+    const c15 = use2 && eq(v17[i], l17[i]) && dn && dn1;
+    const c16 = use2 && eq(v18[i], l18[i]) && dn && dn1;
+    const c17 = use2 && eq(v19[i], l19[i]) && up && dn1;
+    const c18 = use2 && eq(v20[i], l20[i]) && up && up1;
+    const c19 = use2 && eq(v21[i], l21[i]) && up && up1;
+    const c20 = use2 && eq(v22[i], l22[i]);
 
-    if (cfg.use2Bars && i > 0) {
-      v13Arr[i] = v3Arr[i] + v3Arr[i - 1];
-      const hh2 = Math.max(bars[i].high, bars[i - 1].high);
-      const ll2 = Math.min(bars[i].low, bars[i - 1].low);
-      const range2 = hh2 - ll2;
-      v14Arr[i] = (v1 + v1Arr[i - 1]) * range2;
-      v15Arr[i] = (v1 + v1Arr[i - 1] - v2 - v2Arr[i - 1]) * range2;
-      v16Arr[i] = (v2 + v2Arr[i - 1]) * range2;
-      v17Arr[i] = (v2 + v2Arr[i - 1] - v1 - v1Arr[i - 1]) * range2;
-      v18Arr[i] = range2 !== 0 ? (v1 + v1Arr[i - 1]) / range2 : 1;
-      v19Arr[i] = range2 !== 0 ? (v1 + v1Arr[i - 1] - v2 - v2Arr[i - 1]) / range2 : 1;
-      v20Arr[i] = range2 !== 0 ? (v2 + v2Arr[i - 1]) / range2 : 1;
-      v21Arr[i] = range2 !== 0 ? (v2 + v2Arr[i - 1] - v1 - v1Arr[i - 1]) / range2 : 1;
-      v22Arr[i] = range2 !== 0 ? v13Arr[i] / range2 : 1;
-    } else {
-      v13Arr[i] = 1;
-      v14Arr[i] = 1;
-      v15Arr[i] = 1;
-      v16Arr[i] = 1;
-      v17Arr[i] = 1;
-      v18Arr[i] = 1;
-      v19Arr[i] = 1;
-      v20Arr[i] = 1;
-      v21Arr[i] = 1;
-      v22Arr[i] = 1;
-    }
+    // (churn and c10 or c20) is ((churn and c10) or c20)
+    const c0 = cfg.climaxUp && (c2 || c3 || c8 || c9 || c12 || c13 || c18 || c19)
+      ? CLIMAX_UP_COLOR
+      : cfg.climaxDown && (c4 || c5 || c6 || c7 || c14 || c15 || c16 || c17)
+        ? CLIMAX_DOWN_COLOR
+        : (cfg.churn && c10) || c20 ? CHURN_COLOR : DEF_COLOR;
+    vColor[i] = cfg.climaxChurn && (c10 || c20) && (c2 || c3 || c4 || c5 || c6 || c7 || c8 || c9)
+      ? CLIMAX_CHURN_COLOR
+      : cfg.lowVol && (c1 || c11) ? LOW_VOL_COLOR : c0;
   }
 
-  // Rolling highest/lowest functions
-  function rollingHighest(arr: number[], period: number): number[] {
-    const out = new Array(arr.length).fill(NaN);
-    for (let i = 0; i < arr.length; i++) {
-      let max = -Infinity;
-      const start = Math.max(0, i - period + 1);
-      for (let j = start; j <= i; j++) max = Math.max(max, arr[j]);
-      out[i] = max;
-    }
-    return out;
-  }
-
-  function rollingLowest(arr: number[], period: number): number[] {
-    const out = new Array(arr.length).fill(NaN);
-    for (let i = 0; i < arr.length; i++) {
-      let min = Infinity;
-      const start = Math.max(0, i - period + 1);
-      for (let j = start; j <= i; j++) min = Math.min(min, arr[j]);
-      out[i] = min;
-    }
-    return out;
-  }
-
-  const hv3 = rollingLowest(v3Arr, len);
-  const hv4 = rollingHighest(v4Arr, len);
-  const hv5 = rollingHighest(v5Arr, len);
-  const hv6 = rollingHighest(v6Arr, len);
-  const hv7 = rollingHighest(v7Arr, len);
-  const lv8 = rollingLowest(v8Arr, len);
-  const lv9 = rollingLowest(v9Arr, len);
-  const lv10 = rollingLowest(v10Arr, len);
-  const lv11 = rollingLowest(v11Arr, len);
-  const hv12 = rollingHighest(v12Arr, len);
-  const hv13 = rollingLowest(v13Arr, len);
-  const hv14 = rollingHighest(v14Arr, len);
-  const hv15 = rollingHighest(v15Arr, len);
-  const lv16 = rollingLowest(v16Arr, len);
-  const lv17 = rollingLowest(v17Arr, len);
-  const lv18 = rollingLowest(v18Arr, len);
-  const lv19 = rollingLowest(v19Arr, len);
-  const lv20 = rollingLowest(v20Arr, len);
-  const lv21 = rollingLowest(v21Arr, len);
-  const lv22 = rollingLowest(v22Arr, len);
-
-  // Compute condition flags and color per bar
-  const colorArr: string[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const isUp = bars[i].close >= bars[i].open;
-    const isDn = bars[i].close < bars[i].open;
-    const prevUp = i > 0 ? bars[i - 1].close >= bars[i - 1].open : false;
-    const prevDn = i > 0 ? bars[i - 1].close < bars[i - 1].open : false;
-
-    const c1 = v3Arr[i] === hv3[i];
-    const c2 = v4Arr[i] === hv4[i] && isUp;
-    const c3 = v5Arr[i] === hv5[i] && isUp;
-    const c4 = v6Arr[i] === hv6[i] && isDn;
-    const c5 = v7Arr[i] === hv7[i] && isDn;
-    const c6 = v8Arr[i] === lv8[i] && isDn;
-    const c7 = v9Arr[i] === lv9[i] && isDn;
-    const c8 = v10Arr[i] === lv10[i] && isUp;
-    const c9 = v11Arr[i] === lv11[i] && isUp;
-    const c10 = v12Arr[i] === hv12[i];
-    const c11 = cfg.use2Bars && v13Arr[i] === hv13[i] && isUp && prevUp;
-    const c12 = cfg.use2Bars && v14Arr[i] === hv14[i] && isUp && prevUp;
-    const c13 = cfg.use2Bars && v15Arr[i] === hv15[i] && isUp && prevDn;
-    const c14 = cfg.use2Bars && v16Arr[i] === lv16[i] && isDn && prevDn;
-    const c15 = cfg.use2Bars && v17Arr[i] === lv17[i] && isDn && prevDn;
-    const c16 = cfg.use2Bars && v18Arr[i] === lv18[i] && isDn && prevDn;
-    const c17 = cfg.use2Bars && v19Arr[i] === lv19[i] && isUp && prevDn;
-    const c18 = cfg.use2Bars && v20Arr[i] === lv20[i] && isUp && prevUp;
-    const c19 = cfg.use2Bars && v21Arr[i] === lv21[i] && isUp && prevUp;
-    const c20 = cfg.use2Bars && v22Arr[i] === lv22[i];
-
-    // c0: climax up/down or churn or default
-    let c0 = DEF_COLOR;
-    if (cfg.climaxUp && (c2 || c3 || c8 || c9 || c12 || c13 || c18 || c19)) {
-      c0 = CLIMAX_UP_COLOR;
-    } else if (cfg.climaxDown && (c4 || c5 || c6 || c7 || c14 || c15 || c16 || c17)) {
-      c0 = CLIMAX_DOWN_COLOR;
-    } else if (cfg.churn && (c10 || c20)) {
-      c0 = CHURN_COLOR;
-    }
-
-    // v_color: climaxChurn overrides, then lowVol, then c0
-    let vColor = c0;
-    if (cfg.climaxChurn && (c10 || c20) && (c2 || c3 || c4 || c5 || c6 || c7 || c8 || c9)) {
-      vColor = CLIMAX_CHURN_COLOR;
-    } else if (cfg.lowVol && (c1 || c11)) {
-      vColor = LOW_VOL_COLOR;
-    }
-
-    colorArr[i] = vColor;
-  }
-
-  // SMA of volume
-  const smaArr = ta.sma(new Series(bars, (b) => b.volume ?? 0), len).toArray();
-
-  const warmup = len;
-
-  // Plots: volume columns (colored) and SMA overlay
-  // Pine: plot when NOT enableBarColors
-  const volPlot = volArr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : (cfg.enableBarColors ? NaN : v),
-    color: colorArr[i],
-  }));
-
-  const smaPlot = smaArr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : (cfg.enableBarColors ? NaN : (v ?? NaN)),
-  }));
-
-  // barcolor when enableBarColors is true
-  const barColors: BarColorData[] = [];
-  if (cfg.enableBarColors) {
-    for (let i = warmup; i < n; i++) {
-      barColors.push({ time: bars[i].time, color: colorArr[i] });
-    }
-  }
+  const show = !cfg.enableBarColors;
+  const volPlot = bars.map((b, i) => ({ time: b.time, value: show ? vol[i] : NaN, color: vColor[i] }));
+  const smaPlot = bars.map((b, i) => ({ time: b.time, value: show ? sma[i] : NaN }));
+  const barColors: BarColorData[] = cfg.enableBarColors ? bars.map((b, i) => ({ time: b.time, color: vColor[i] })) : [];
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },

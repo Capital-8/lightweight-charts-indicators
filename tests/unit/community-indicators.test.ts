@@ -867,7 +867,8 @@ describe('IFTStochRSICCI', () => {
   });
 
   it('IFT values in -1 to 1 range', () => {
-    const vals = validValues(result);
+    // the CCIv2 line is the one shown by default
+    const vals = validValues(result, 'plot2');
     expect(vals.length).toBeGreaterThan(0);
     vals.forEach((v) => {
       expect(v).toBeGreaterThanOrEqual(-1);

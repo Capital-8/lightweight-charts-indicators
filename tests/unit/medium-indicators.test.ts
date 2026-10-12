@@ -102,8 +102,6 @@ describe('CCI Stochastic', () => {
     expect(result.metadata).toBeDefined();
     expect(result.plots['plot0']).toBeDefined();
     expect(result.plots['plot0'].length).toBe(bars.length);
-    expect(result.plots['plot1']).toBeDefined();
-    expect(result.plots['plot1'].length).toBe(bars.length);
   });
 
   it('should produce non-NaN values after warmup', () => {

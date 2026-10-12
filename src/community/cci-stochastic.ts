@@ -1,183 +1,190 @@
 /**
  * CCI Stochastic
  *
- * CCI = (close - SMA(close, len)) / (0.015 * meanDev(close, len))
- * Then apply Stochastic to CCI: K = stoch(CCI, CCI, CCI, stochLen), smoothed.
+ * The stochastic of the CCI: CCI of the source over `CCI Period` bars, then the stochastic of the CCI against its
+ * own highest / lowest over `Stoch Period` bars, smoothed by an SMA (K) and a second SMA (D). The line shows D (or K)
+ * in red above the overbought level, green below the oversold level and gray between them. The zone between the
+ * overbought level and 100 is filled red while the line is above it, the zone between 0 and the oversold level green
+ * while the line is under it.
  *
- * Reference: "CCI Stochastic"
+ * Arrows at 0 / 100 (35 / 65 for the center zone): "Enter" when the line crosses under the oversold level (buy) or
+ * over the overbought level (sell), "Exit" when it crosses under the overbought level (sell) or over the oversold
+ * level (buy), "Center" (off by default) when it crosses the 50 level.
+ *
+ * Reference: "CCI Stochastic" by Daveatt
+ * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  ta, color, callsite, getSourceSeries,
+  type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar,
+} from 'oakscriptjs';
 import type { MarkerData } from '../types';
 
 export interface CCIStochasticInputs {
-  cciLen: number;
-  stochLen: number;
-  smoothK: number;
-  smoothD: number;
+  source: 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4' | 'hlcc4';
+  cciPeriod: number;
+  stochPeriod: number;
+  stochSmoothK: number;
+  stochSmoothD: number;
+  /** Line shown: the D line or the K line */
+  dOrK: 'D' | 'K';
+  overbought: number;
+  oversold: number;
   showArrows: boolean;
+  showArrowsEnter: boolean;
   showArrowsCenter: boolean;
+  showArrowsExit: boolean;
 }
 
 export const defaultInputs: CCIStochasticInputs = {
-  cciLen: 14,
-  stochLen: 14,
-  smoothK: 3,
-  smoothD: 3,
+  source: 'close',
+  cciPeriod: 28,
+  stochPeriod: 28,
+  stochSmoothK: 3,
+  stochSmoothD: 3,
+  dOrK: 'D',
+  overbought: 80,
+  oversold: 20,
   showArrows: true,
+  showArrowsEnter: true,
   showArrowsCenter: false,
+  showArrowsExit: true,
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'cciLen', type: 'int', title: 'CCI Length', defval: 14, min: 1 },
-  { id: 'stochLen', type: 'int', title: 'Stoch Length', defval: 14, min: 1 },
-  { id: 'smoothK', type: 'int', title: 'Smooth K', defval: 3, min: 1 },
-  { id: 'smoothD', type: 'int', title: 'Smooth D', defval: 3, min: 1 },
+  { id: 'source', type: 'source', title: 'source', defval: 'close' },
+  { id: 'cciPeriod', type: 'int', title: 'CCI Period', defval: 28 },
+  { id: 'stochPeriod', type: 'int', title: 'Stoch Period', defval: 28 },
+  { id: 'stochSmoothK', type: 'int', title: 'Stoch Smooth K', defval: 3 },
+  { id: 'stochSmoothD', type: 'int', title: 'Stoch Smooth D', defval: 3 },
+  { id: 'dOrK', type: 'string', title: 'd_or_k', defval: 'D', options: ['D', 'K'] },
+  { id: 'overbought', type: 'int', title: 'Overbought', defval: 80 },
+  { id: 'oversold', type: 'int', title: 'Oversold', defval: 20 },
   { id: 'showArrows', type: 'bool', title: 'Show Arrows', defval: true },
+  { id: 'showArrowsEnter', type: 'bool', title: 'Show Arrows on Enter zone', defval: true },
   { id: 'showArrowsCenter', type: 'bool', title: 'Show Arrows on Center zone', defval: false },
+  { id: 'showArrowsExit', type: 'bool', title: 'Show Arrows on Exit zone', defval: true },
 ];
 
+// Colour constants of Pine version 4
+const RED = '#FF5252';
+const LIME = '#00E676';
+const GREEN = '#4CAF50';
+const GRAY = '#787B86';
+const AQUA = '#00BCD4';
+const FUCHSIA = '#E040FB';
+const ORANGE = '#FF9800';
+const MAROON = '#880E4F';
+const NONE = String(color.new('#FFFFFF', 100));
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'K', color: '#2962FF', lineWidth: 2 },
-  { id: 'plot1', title: 'MA', color: '#787B86', lineWidth: 3 },
-  { id: 'plot2', title: 'Max Level', color: 'transparent', lineWidth: 0 },
-  { id: 'plot3', title: 'OB Level', color: 'transparent', lineWidth: 0 },
-  { id: 'plot4', title: 'Min Level', color: 'transparent', lineWidth: 0 },
-  { id: 'plot5', title: 'OS Level', color: 'transparent', lineWidth: 0 },
+  { id: 'plot0', title: 'Moving Average', color: GRAY, lineWidth: 3 },
+];
+
+export const hlineConfig: HLineConfig[] = [
+  { id: 'hline_ob', price: 80, title: 'Upper Line', color: RED, linestyle: 'solid', linewidth: 1 },
+  { id: 'hline_os', price: 20, title: 'Lower Line', color: LIME, linestyle: 'solid', linewidth: 1 },
+  { id: 'hline_mid', price: 50, title: 'Mid Line', color: GRAY, linestyle: 'solid', linewidth: 1 },
+  { id: 'hline_max', price: 100, title: 'Max Level', color: NONE, linestyle: 'dotted', linewidth: 1 },
+  { id: 'hline_min', price: 0, title: 'Min Level', color: NONE, linestyle: 'dotted', linewidth: 1 },
+];
+
+/** fill(maxLevelPlot, overbought) and fill(minLevelPlot, oversold): the colour changes per bar (result `fills`) */
+export const fillConfig: FillConfig[] = [
+  { id: 'fill_ob', plot1: 'hline_max', plot2: 'hline_ob', color: String(color.new(RED, 90)), title: 'Overbought Fill' },
+  { id: 'fill_os', plot1: 'hline_min', plot2: 'hline_os', color: String(color.new(GREEN, 90)), title: 'Oversold Fill' },
 ];
 
 export const metadata = {
   title: 'CCI Stochastic',
-  shortTitle: 'CCIStoch',
+  shortTitle: 'CCI_S',
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<CCIStochasticInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
-  const { cciLen, stochLen, smoothK, smoothD, showArrows, showArrowsCenter } = { ...defaultInputs, ...inputs };
+/** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
+const EPS = 1e-10;
+const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
+
+export function calculate(bars: Bar[], inputs: Partial<CCIStochasticInputs> = {}): IndicatorResult & { markers: MarkerData[] } {
+  const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  const OB = cfg.overbought;
+  const OS = cfg.oversold;
 
-  const close = getSourceSeries(bars, 'close');
-  const smaClose = ta.sma(close, cciLen).toArray();
-  const closeArr = close.toArray();
+  // cci = cci(source, cci_period); stoch_cci_k = sma(stoch(cci, cci, cci, stoch_period), K); stoch_cci_d = sma(k, D)
+  const cci = ta.cci(getSourceSeries(bars, cfg.source), cfg.cciPeriod);
+  const k = ta.sma(ta.stoch(cci, cci, cci, cfg.stochPeriod), cfg.stochSmoothK);
+  const d = ta.sma(k, cfg.stochSmoothD);
+  const ma = (cfg.dOrK === 'D' ? d : k).toArray().map((v) => v ?? NaN);
 
-  // CCI = (close - SMA) / (0.015 * meanDeviation)
-  const cciArr: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    if (i < cciLen - 1 || smaClose[i] == null) {
-      cciArr[i] = NaN;
-      continue;
-    }
-    // Mean deviation over cciLen
-    const mean = smaClose[i]!;
-    let sumDev = 0;
-    for (let j = 0; j < cciLen; j++) {
-      sumDev += Math.abs((closeArr[i - j] ?? 0) - mean);
-    }
-    const meanDev = sumDev / cciLen;
-    cciArr[i] = meanDev === 0 ? 0 : (closeArr[i]! - mean) / (0.015 * meanDev);
-  }
+  // Each crossing call runs only in its branch: `if showArrowsX` (an input) and the else branch of the first test
+  const enterUnder = callsite.crossunder();
+  const enterOver = callsite.crossover();
+  const exitUnder = callsite.crossunder();
+  const exitOver = callsite.crossover();
+  const centerUnder = callsite.crossunder();
+  const centerOver = callsite.crossover();
 
-  // Stochastic of CCI: use CCI as close/high/low
-  const cciSeries = Series.fromArray(bars, cciArr);
-  const rawK = ta.stoch(cciSeries, cciSeries, cciSeries, stochLen);
-  const k = ta.sma(rawK, smoothK);
-  const d = ta.sma(k, smoothD);
-
-  const kArr = k.toArray();
-  const dArr = d.toArray();
-
-  const warmup = cciLen + stochLen + smoothK + smoothD;
-
-  const plot0 = kArr.map((v, i) => ({
-    time: bars[i].time,
-    value: (v == null || i < warmup) ? NaN : v,
-  }));
-
-  const OB = 80;
-  const OS = 20;
-  const plot1 = dArr.map((v, i) => {
-    const val = (v == null || i < warmup) ? NaN : v;
-    let color: string;
-    if (!isNaN(val) && val > OB) color = '#EF5350';     // red above overbought
-    else if (!isNaN(val) && val < OS) color = '#26A69A'; // green below oversold
-    else color = '#787B86';                                // gray otherwise
-    return { time: bars[i].time, value: val, color };
-  });
-
-  // Pine markers:
-  // trend_enter: crossunder(ma, OS) => buy arrow at 0; crossover(ma, OB) => sell arrow at 100
-  // trend_exit: crossunder(ma, OB) => sell arrow at 100; crossover(ma, OS) => buy arrow at 0
+  const plot0: { time: number; value: number; color: string }[] = [];
+  const obColors: string[] = [];
+  const osColors: string[] = [];
   const markers: MarkerData[] = [];
-  // Use D line (plot1) as the "ma" per Pine default d_or_k="D"
-  for (let i = warmup + 1; i < bars.length; i++) {
-    const cur = dArr[i];
-    const prev = dArr[i - 1];
-    if (cur == null || prev == null) continue;
-
-    // Enter zone: crossunder(ma, OS=20) -> buy; crossover(ma, OB=80) -> sell
-    if (prev >= 20 && cur < 20) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#26A69A', text: 'Enter Buy' });
-    }
-    if (prev <= 80 && cur > 80) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#EF5350', text: 'Enter Sell' });
-    }
-    // Exit zone: crossunder(ma, OB=80) -> sell exit; crossover(ma, OS=20) -> buy exit
-    if (prev >= 80 && cur < 80) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#880E4F', text: 'Exit Sell' });
-    }
-    if (prev <= 20 && cur > 20) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#FF9800', text: 'Exit Buy' });
-    }
-
-    // Center zone: crossover(ma, 50) -> buy; crossunder(ma, 50) -> sell
-    if (showArrows && showArrowsCenter) {
-      if (prev <= 50 && cur > 50) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#00BCD4', text: 'Center Buy' });
-      }
-      if (prev >= 50 && cur < 50) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#E040FB', text: 'Center Sell' });
-      }
-    }
-  }
-
-  // OB/OS zone fill: Pine fills between maxLevelPlot(100)/overbought(80) and minLevelPlot(0)/oversold(20)
-  // color_fill_os = ma > OB ? red@90% : transparent  (fill between 100 and 80)
-  // color_fill_ob = ma < OS ? green@90% : transparent (fill between 0 and 20)
-  const plot2: { time: number; value: number }[] = [];
-  const plot3: { time: number; value: number }[] = [];
-  const plot4: { time: number; value: number }[] = [];
-  const plot5: { time: number; value: number }[] = [];
-  const obFillColors: string[] = [];
-  const osFillColors: string[] = [];
+  const arrow = (time: number, up: boolean, price: number, c: string) => {
+    markers.push({ time, position: 'atPriceMiddle', price, shape: up ? 'arrowUp' : 'arrowDown',
+      color: String(color.new(c, 20)), size: 'normal' });
+  };
 
   for (let i = 0; i < n; i++) {
-    plot2.push({ time: bars[i].time, value: 100 });
-    plot3.push({ time: bars[i].time, value: OB });
-    plot4.push({ time: bars[i].time, value: 0 });
-    plot5.push({ time: bars[i].time, value: OS });
+    const m = ma[i];
+    const t = bars[i].time;
+    // trend_enter = if showArrowsEnter: crossunder(ma, OS) ? 1 : crossover(ma, OB) ? -1 : na
+    let trendEnter = NaN;
+    if (cfg.showArrowsEnter) {
+      if (enterUnder(m, OS)) trendEnter = 1;
+      else if (enterOver(m, OB)) trendEnter = -1;
+    }
+    let trendExit = NaN;
+    if (cfg.showArrowsExit) {
+      if (exitUnder(m, OB)) trendExit = -1;
+      else if (exitOver(m, OS)) trendExit = 1;
+    }
+    let trendCenter = NaN;
+    if (cfg.showArrowsCenter) {
+      if (centerUnder(m, 50)) trendCenter = -1;
+      else if (centerOver(m, 50)) trendCenter = 1;
+    }
 
-    const d = dArr[i];
-    const maValid = d != null && !isNaN(d) && i >= warmup;
-    obFillColors.push(maValid && d > OB ? 'rgba(239,83,80,0.10)' : 'transparent');
-    osFillColors.push(maValid && d < OS ? 'rgba(38,166,154,0.10)' : 'transparent');
+    // ma_color = ma > OB ? red : ma < OS ? green : gray
+    plot0.push({ time: t, value: m, color: gt(m, OB) ? RED : lt(m, OS) ? GREEN : GRAY });
+    obColors.push(gt(m, OB) ? String(color.new(RED, 90)) : NONE);
+    osColors.push(lt(m, OS) ? String(color.new(GREEN, 90)) : NONE);
+
+    if (cfg.showArrows && cfg.showArrowsEnter && trendEnter === 1) arrow(t, true, 0, GREEN);
+    if (cfg.showArrows && cfg.showArrowsEnter && trendEnter === -1) arrow(t, false, 100, RED);
+    if (cfg.showArrows && cfg.showArrowsCenter && trendCenter === 1) arrow(t, true, 35, AQUA);
+    if (cfg.showArrows && cfg.showArrowsCenter && trendCenter === -1) arrow(t, false, 65, FUCHSIA);
+    if (cfg.showArrows && cfg.showArrowsExit && trendExit === 1) arrow(t, true, 0, ORANGE);
+    if (cfg.showArrows && cfg.showArrowsExit && trendExit === -1) arrow(t, false, 100, MAROON);
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3, 'plot4': plot4, 'plot5': plot5 },
-    fills: [
-      { plot1: 'plot2', plot2: 'plot3', colors: obFillColors },
-      { plot1: 'plot4', plot2: 'plot5', colors: osFillColors },
-    ],
+    plots: { plot0 },
     hlines: [
-      { value: 100, options: { color: '#FFFFFF00', linestyle: 'dotted' as const, title: 'Max Level' } },
-      { value: 80, options: { color: '#EF5350', linestyle: 'solid' as const, title: 'Overbought' } },
-      { value: 50, options: { color: '#787B86', linestyle: 'solid' as const, title: 'Mid Line' } },
-      { value: 20, options: { color: '#26A69A', linestyle: 'solid' as const, title: 'Oversold' } },
-      { value: 0, options: { color: '#FFFFFF00', linestyle: 'dotted' as const, title: 'Min Level' } },
+      { value: OB, options: { title: 'Upper Line', color: RED, linestyle: 'solid', linewidth: 1 } },
+      { value: OS, options: { title: 'Lower Line', color: LIME, linestyle: 'solid', linewidth: 1 } },
+      { value: 50, options: { title: 'Mid Line', color: GRAY, linestyle: 'solid', linewidth: 1 } },
+      { value: 100, options: { title: 'Max Level', color: NONE, linestyle: 'dotted', linewidth: 1 } },
+      { value: 0, options: { title: 'Min Level', color: NONE, linestyle: 'dotted', linewidth: 1 } },
+    ],
+    fills: [
+      { plot1: 'hline_max', plot2: 'hline_ob', options: { title: 'Overbought Fill' }, colors: obColors },
+      { plot1: 'hline_min', plot2: 'hline_os', options: { title: 'Oversold Fill' }, colors: osColors },
     ],
     markers,
   };
 }
 
-export const CCIStochastic = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const CCIStochastic = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig };

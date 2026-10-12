@@ -85,8 +85,9 @@ describe('visible chart range', () => {
 
   it('flags the indicators that read it', () => {
     expect(flagged).toEqual([
-      'liquidity-price-depth-chart', 'signal-table-autofib-sma-ema-rsi-atr-vol', 'supply-and-demand-visible-range',
-      'support-resistance-channels-mtf', 'volume-profile-kv4coins',
+      'liquidity-price-depth-chart', 'order-blocks-volume-delta-3d-flux-charts', 'signal-table-autofib-sma-ema-rsi-atr-vol',
+      'supply-and-demand-visible-range', 'support-resistance-channels-mtf', 'support-resistance-classification',
+      'volume-profile-kv4coins',
     ]);
   });
 

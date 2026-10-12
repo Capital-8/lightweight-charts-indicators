@@ -4,7 +4,10 @@
  * Volume weighted average price of hl2 that restarts on each new day, with up to five pairs of bands at a multiple
  * of the volume weighted standard deviation of hl2 since the start of the day:
  * VWAP = sum(hl2 * volume) / sum(volume), deviation = sqrt(max(sum(volume * hl2^2) / sum(volume) - VWAP^2, 0)).
- * An optional plot shows the last VWAP value of the previous day.
+ * An optional plot shows the last VWAP value of the previous day. The bars are coloured by the zone of the colour
+ * source (close by default): white between the VWAP and the second upper band, black between the first lower band and
+ * the VWAP, gray between the first and second bands, green / maroon between the second and third bands, lime / red
+ * between the third and fourth bands (the later zones take priority where they overlap).
  *
  * The day comes from the daily timeframe of the same symbol: the days are read from the UTC calendar and the bars
  * (see src/anchor-period.ts). On daily and higher bars every bar starts a new day. The first bar of the data never
@@ -20,9 +23,10 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { color, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar } from 'oakscriptjs';
+import { color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import { securityStarts } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
+import type { BarColorData } from '../types';
 
 export interface VwapStdevBandsV2ModInputs {
   devUp1: number;
@@ -35,11 +39,15 @@ export interface VwapStdevBandsV2ModInputs {
   devDn4: number;
   devUp5: number;
   devDn5: number;
+  /** Turn Barcolor ON/OFF? */
+  showBcol: boolean;
   showDv2: boolean;
   showDv3: boolean;
   showDv4: boolean;
   showDv5: boolean;
   showPrevVWAP: boolean;
+  /** Price compared with the bands for the bar colours */
+  colorSrc: 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4' | 'hlcc4';
 }
 
 export const defaultInputs: VwapStdevBandsV2ModInputs = {
@@ -53,11 +61,13 @@ export const defaultInputs: VwapStdevBandsV2ModInputs = {
   devDn4: 3.09,
   devUp5: 4.01,
   devDn5: 4.01,
+  showBcol: true,
   showDv2: true,
   showDv3: true,
   showDv4: false,
   showDv5: false,
   showPrevVWAP: false,
+  colorSrc: 'close',
 };
 
 export const inputConfig: InputConfig[] = [
@@ -71,11 +81,13 @@ export const inputConfig: InputConfig[] = [
   { id: 'devDn4', type: 'float', title: 'Stdev below (4)', defval: 3.09 },
   { id: 'devUp5', type: 'float', title: 'Stdev above (5)', defval: 4.01 },
   { id: 'devDn5', type: 'float', title: 'Stdev below (5)', defval: 4.01 },
+  { id: 'showBcol', type: 'bool', title: 'Turn Barcolor ON/OFF?', defval: true },
   { id: 'showDv2', type: 'bool', title: 'Show second group of bands?', defval: true },
   { id: 'showDv3', type: 'bool', title: 'Show third group of bands?', defval: true },
   { id: 'showDv4', type: 'bool', title: 'Show fourth group of bands?', defval: false },
   { id: 'showDv5', type: 'bool', title: 'Show fifth group of bands?', defval: false },
   { id: 'showPrevVWAP', type: 'bool', title: 'Show previous VWAP close', defval: false },
+  { id: 'colorSrc', type: 'source', title: 'ColorSrc', defval: 'close' },
 ];
 
 // Colour constants of Pine version 1, with the default plot transparency of that version (35); fills: transp = 90
@@ -85,6 +97,8 @@ const GRAY = V1('#808080');
 const RED = V1('#FF0000');
 const GREEN = V1('#008000');
 const fillOf = (c: string) => String(color.new(c, 90));
+// Bar colours: version 1 constants without transparency
+const BAR = { black: '#000000', white: '#FFFFFF', gray: '#808080', green: '#008000', maroon: '#800000', lime: '#00FF00', red: '#FF0000' };
 
 export const plotConfig: PlotConfig[] = [
   { id: 'plot0', title: 'VWAP', color: BLACK, lineWidth: 1, style: 'circles' },
@@ -120,7 +134,16 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<VwapStdevBandsV2ModInputs> = {}, chart?: ChartContext): IndicatorResult {
+/** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
+const EPS = 1e-10;
+const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
+
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<VwapStdevBandsV2ModInputs> = {},
+  chart?: ChartContext,
+): IndicatorResult & { barColors: BarColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -157,6 +180,37 @@ export function calculate(bars: Bar[], inputs: Partial<VwapStdevBandsV2ModInputs
     color: b.close - prevwap[i] > 1e-10 ? GREEN : RED,
   }));
 
+  // barcolor(showBcol ? Color... : na) x 8: a later call with a colour replaces the earlier ones
+  const price = getSourceSeries(bars, cfg.colorSrc).toArray().map((v) => v ?? NaN);
+  const barColors: BarColorData[] = [];
+  if (cfg.showBcol) {
+    for (let i = 0; i < n; i++) {
+      const p = price[i];
+      const v = myvwap[i];
+      const d = dev[i];
+      const u1 = v + cfg.devUp1 * d;
+      const d1 = v - cfg.devDn1 * d;
+      const u2 = v + cfg.devUp2 * d;
+      const u3 = v + cfg.devUp3 * d;
+      const d2 = v - cfg.devDn2 * d;
+      const d3 = v - cfg.devDn3 * d;
+      // myvwapu4 = myvwap + devDn4 * dev (as in the original)
+      const u4 = v + cfg.devDn4 * d;
+      const d4 = v - cfg.devDn4 * d;
+      const between = (lo: number, hi: number) => gt(p, lo) && lt(p, hi);
+      let c: string | null = null;
+      if (between(d1, v)) c = BAR.black;
+      if (between(v, u2)) c = BAR.white;
+      if (between(d2, d1)) c = BAR.gray;
+      if (between(u1, u2)) c = BAR.gray;
+      if (between(d3, d2)) c = BAR.green;
+      if (between(u2, u3)) c = BAR.maroon;
+      if (between(d4, d3)) c = BAR.lime;
+      if (between(u3, u4)) c = BAR.red;
+      if (c !== null) barColors.push({ time: bars[i].time, color: c });
+    }
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -174,6 +228,7 @@ export function calculate(bars: Bar[], inputs: Partial<VwapStdevBandsV2ModInputs
       plot11,
     },
     fills: fillConfig.map((f) => ({ plot1: f.plot1, plot2: f.plot2, options: { color: f.color, title: f.title } })),
+    barColors,
   };
 }
 
