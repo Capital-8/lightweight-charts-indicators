@@ -35,8 +35,8 @@
  */
 
 import {
-  callsite, color, math, str, time as pineTime, timeframe, SessionBars, TradingCalendar,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  callsite, color, math, str, time as pineTime, timeframe, periodTime,
+  type IndicatorResult, type SessionContext, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, PineSize, TableData, TableCellData } from '../types';
 import { barInterval, barTime } from '../bar-time';
@@ -348,20 +348,17 @@ export function calculate(
   const tfInfo = timeframe.info(chartTimeframe(bars, chart) || '1D');
   const unit = n > 0 && bars[0].time >= 1e12 ? 1 : 1000; // bar time unit in ms
   const tMs = (i: number) => (bars[i].time as number) * unit;
-  // bar size for the clock-change rule of the session test (intraday bars)
-  const barMs = tfInfo.isintraday ? timeframe.in_seconds(tfInfo.period) * 1000 : undefined;
-  // time("1440", session, tz): na outside the session, else the start of the 1440-minute period counted from the
-  // start of the session run of the bar, from the session periods of the library calendar (only compared with the
-  // value of the bar before: a new value is a new session)
-  const sessionTimes = new Map<string, (t: number) => number>();
+  // time("1440", session, tz) of the library: na outside the session, else the start of the 1440-minute period
+  // counted from the start of the session run of the bar (only compared with the value of the bar before: a new
+  // value is a new session). The chart session of the context is not read when the session argument is given.
+  const sessionContexts = new Map<string, SessionContext>();
   const sessTime = (i: number, session: string): number => {
-    let fn = sessionTimes.get(session);
-    if (!fn) {
-      const cal = new SessionBars(new TradingCalendar(tz, { session }, 'pine'), tfInfo.period);
-      fn = (t) => (pineTime.inSession(t, session, tz, barMs) ? cal.timeOf(t, '1440') : NaN);
-      sessionTimes.set(session, fn);
+    let ctx = sessionContexts.get(session);
+    if (!ctx) {
+      ctx = { timeframe: tfInfo.period, timezone: tz, session, timeUnit: 'ms' };
+      sessionContexts.set(session, ctx);
     }
-    return fn(tMs(i));
+    return periodTime(tMs(i), '1440', ctx, session, tz);
   };
   const sess24hr = `0000-0000:${cfg.sessDays}`;
   const sessions = [

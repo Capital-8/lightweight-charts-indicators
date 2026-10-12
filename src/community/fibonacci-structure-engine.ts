@@ -50,7 +50,7 @@
  */
 
 import {
-  ta, Series, color, math, str, timeframe, time as pineTime, barTime, resample, periodClose, SessionBars, TradingCalendar,
+  ta, Series, color, math, str, timeframe, barTime, resample, periodClose, periodTime,
   type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PineSize, TableCellData, TableData, TablePosition } from '../types';
@@ -584,10 +584,12 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
   // Session: time("1D", session, time zone) is the start of the session of the bar, time_close("1D", ...) its end
   const sessionUsed = isIntraday && (cfg.useSession || cfg.showSession);
   const sessionSpec = `${cfg.sessionHours}:${cfg.sessionDays}`;
-  // time(tf, session, tz) / time_close(tf, session, tz) of the session input: the trading calendar of the library
-  // for a session string (its start and end of the day, the bar periods aligned on the session start)
-  const sessionCalendar = sessionUsed
-    ? new SessionBars(new TradingCalendar(cfg.sessionTz, { session: sessionSpec }, 'pine'), chartTf) : null;
+  // time(tf, session, tz) / time_close(tf, session, tz) of the session input from the library (its start and end of
+  // the day, the bar periods aligned on the session start); the chart session of the context is not read
+  const sessionCtx: SessionContext | null = sessionUsed
+    ? { timeframe: chartTf, timezone: cfg.sessionTz, session: sessionSpec, timeUnit: 'ms' } : null;
+  const sessionTime = (t: number, tf: string) => (sessionCtx ? periodTime(t, tf, sessionCtx, sessionSpec, cfg.sessionTz) : NaN);
+  const sessionClose = (t: number, tf: string) => (sessionCtx ? periodClose(t, tf, sessionCtx, sessionSpec, cfg.sessionTz) : NaN);
 
   // State of the model
   let currentSessionH = NaN;
@@ -671,10 +673,11 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
     const bearEngulf = sizePattern && engulfBounds(cfg.strictEngulf, open, close, bars[i - 1].open, bars[i - 1].close, -1);
     // chart.is_standard is true: the bars are standard candles
     const ready = i >= Math.max(3 * swingLen, 50) && !na(atr[i]) && gt(atr[i], 0);
-    const inSession = sessionCalendar !== null && pineTime.inSession(time, sessionSpec, cfg.sessionTz, tfSeconds * 1000);
-    const sessionStartTime = inSession ? sessionCalendar.timeOf(time, '1D') : NaN;
-    const sessionEndTime = inSession ? sessionCalendar.closeOf(time, '1D') : NaN;
-    const sessionBarAligned = inSession && sessionCalendar.timeOf(time, chartTf) === time && sessionCalendar.closeOf(time, chartTf) === closeMs(i);
+    const barSessionTime = sessionTime(time, chartTf);
+    const inSession = !Number.isNaN(barSessionTime);
+    const sessionStartTime = sessionTime(time, '1D');
+    const sessionEndTime = sessionClose(time, '1D');
+    const sessionBarAligned = inSession && barSessionTime === time && sessionClose(time, chartTf) === closeMs(i);
 
     let confirmedBuy = false;
     let confirmedSell = false;

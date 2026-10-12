@@ -11,8 +11,7 @@
  * that goes over midnight is one trading day (the day it ends). The low and high restart on the first session bar
  * of a new period only: with "D" once per trading day (the second part of a session in two parts has no low / high),
  * with "W" / "M" on the first session of the week / month (the other sessions have no low / high).
- * `time(res, session, timezone)` comes from the session calendar of the library (clock-change days placed as in the
- * original), except "D" for a session in several runs, see `pausedDayTime`.
+ * `time(res, session, timezone)` comes from the library (clock-change days placed as in the original).
  *
  * Reference: "Sessions" by Aurocks_AIF
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -20,7 +19,7 @@
  */
 
 import {
-  barInterval, color, timeframe, time as pineTime, periodTime, SessionBars, TradingCalendar,
+  color, periodTime,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SessionContext,
 } from 'oakscriptjs';
 import { chartTimeframe } from '../anchor-period';
@@ -93,59 +92,16 @@ const NY_COLOR = String(color.new('#FF5252', 90));
 const ASIA_COLOR = String(color.new('#FFEB3B', 90));
 const SYDNEY_COLOR = String(color.new('#2962FF', 90));
 
-const DAY = 86400000;
-
 /**
- * time(tf, session, "America/New_York") of a bar (ms), from the session as a PineScript session calendar of the
- * library: an intraday timeframe is na outside the session (time.inSession); "D" tests the bar against the day's
- * session period (clock-change days placed as PineScript does); "W" / "M" have no session test and keep the period's
- * time (a bar between two sessions of a week is in that week).
+ * time(tf, session, "America/New_York") of a bar (ms), from the library: an intraday timeframe is na outside the
+ * session; "D" tests the bar against the day's session period (clock-change days placed as PineScript does; the
+ * pause between two runs of a day is inside it); "W" / "M" have no session test and keep the period's time (a bar
+ * between two sessions of a week is in that week).
  */
-function sessionTime(session: string, tf: string, chartTf: string, barMs: number | undefined): (tMs: number) => number {
-  const info = timeframe.info(tf);
-  if (info.isintraday) return (tMs) => (pineTime.inSession(tMs, session, TIMEZONE, barMs) ? tMs : NaN);
-  const daily = info.isdaily && info.multiplier === 1;
-  if (daily && hasPause(session)) return pausedDayTime(session, chartTf, barMs);
-  const cal = new SessionBars(new TradingCalendar(TIMEZONE, { session }, 'pine', true), chartTf);
-  if (daily) return (tMs) => (cal.inside(tMs) ? cal.timeOf(tMs, tf) : NaN);
-  return (tMs) => cal.timeOf(tMs, tf);
-}
-
-/** True when a section of the session string has several runs ("0900-1200,1300-1500"). */
-function hasPause(session: string): boolean {
-  return session.split('|').some((section) => section.split(':')[0].split(',').filter((r) => r.trim() !== '').length > 1);
-}
-
-/**
- * time("D", session, "America/New_York") of a session in several runs, own code: the library's "D" test is na in the
- * pause between two runs of the day, where the original keeps the day (BTCUSD 60, Tokyo "0900-1200,1300-1500": the
- * run from 13:00 New York time starts no new low / high in the reference). The day of the last session bar is kept
- * on the bars outside the session; on the first bar, the day of the session bars around it (or na between two days).
- */
-function pausedDayTime(session: string, chartTf: string, barMs: number | undefined): (tMs: number) => number {
+function sessionTime(session: string, tf: string, chartTf: string): (tMs: number) => number {
+  // the chart session of the context is not read when the session argument is given
   const ctx: SessionContext = { timeframe: chartTf, timezone: TIMEZONE, session, timeUnit: 'ms' };
-  let kept: number | undefined;
-  return (tMs) => {
-    if (pineTime.inSession(tMs, session, TIMEZONE, barMs)) kept = periodTime(tMs, 'D', ctx);
-    else if (kept === undefined) kept = periodAround(tMs, session, ctx, barMs);
-    return kept;
-  };
-}
-
-/** The day of the session bars before and after a bar outside the session, or NaN when they differ. */
-function periodAround(tMs: number, session: string, ctx: SessionContext, barMs: number | undefined): number {
-  const MINUTE = 60000;
-  const LIMIT = 8 * 1440;
-  const find = (step: number) => {
-    for (let k = 1; k <= LIMIT; k++) {
-      const t = tMs + k * step;
-      if (pineTime.inSession(t, session, TIMEZONE, barMs)) return periodTime(t, 'D', ctx);
-    }
-    return NaN;
-  };
-  const before = find(-MINUTE);
-  if (Number.isNaN(before)) return NaN;
-  return find(MINUTE) === before ? before : NaN;
+  return (tMs) => periodTime(tMs, tf, ctx, session, TIMEZONE);
 }
 
 export function calculate(
@@ -156,9 +112,6 @@ export function calculate(
   const n = bars.length;
   const inMs = n > 0 && bars[0].time >= 1e12;
   const res = cfg.res.replace(/^1/, '');
-  // bar size in ms on intraday bars, for the clock-change rule of time.inSession
-  const interval = barInterval(bars) * (inMs ? 1 : 1000);
-  const barMs = interval > 0 && interval < DAY ? interval : undefined;
   const chartTf = chartTimeframe(bars) || '1D';
 
   const sessions = [
@@ -169,8 +122,8 @@ export function calculate(
   ].map((s) => ({
     ...s,
     // is_session(): time(timeframe.period, sess, "America/New_York"); is_newbar(): time(res, sess, ...)
-    sessionT: sessionTime(s.hours, chartTf, chartTf, barMs),
-    periodT: sessionTime(s.hours, res, chartTf, barMs),
+    sessionT: sessionTime(s.hours, chartTf, chartTf),
+    periodT: sessionTime(s.hours, res, chartTf),
     prevT: NaN,
     low: NaN,
     high: NaN,

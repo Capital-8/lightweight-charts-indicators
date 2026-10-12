@@ -37,8 +37,8 @@
  */
 
 import {
-  ta, Series, array, callsite, time as pineTime, box, line, label, SessionBars, TradingCalendar,
-  resetDrawings, setDrawingBar, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  ta, Series, array, callsite, time as pineTime, box, line, label, periodTime,
+  resetDrawings, setDrawingBar, type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { LineDrawingData, BoxData, LabelData } from '../types';
 import { barInterval } from '../bar-time';
@@ -187,10 +187,11 @@ export function calculate(
   const interval = barInterval(bars);
   // time(timeframe.period, '0000-2400', 'GMT'): the start of the chart timeframe period that contains the bar, with
   // periods counted from 00:00 GMT (measured: 13:30 gives 13:00 on 60-minute bars, 12:00 on 240-minute bars, and
-  // 00:00 of the day on daily and higher bars), from the library calendar of the session string
+  // 00:00 of the day on daily and higher bars), from the library (the chart session is not read)
   const chartTf = chartTimeframe(bars, chart);
-  const gmtDays = chartTf === '' ? null : new SessionBars(new TradingCalendar('GMT', { session: '0000-2400' }, 'pine'), chartTf);
-  const sessionTime = (tMs: number) => (gmtDays === null ? tMs : gmtDays.timeOf(tMs, chartTf));
+  const gmtCtx: SessionContext | null = chartTf === ''
+    ? null : { timeframe: chartTf, timezone: 'GMT', session: '0000-2400', timeUnit: 'ms' };
+  const sessionTime = (tMs: number) => (gmtCtx === null ? tMs : periodTime(tMs, chartTf, gmtCtx, '0000-2400', 'GMT'));
   /** Time of a bar index (a bar before the first bar: by the bar interval) */
   const timeOf = (index: number) => (index >= 0 ? bars[Math.min(index, n - 1)].time : bars[0].time + index * interval);
 

@@ -45,7 +45,7 @@
 
 import {
   ta, Series, color, str, timeframe, time as pineTime, label, resetDrawings, setDrawingBar, resample, barInterval, barsUntil,
-  chartSessions, TradingCalendar, type Label, type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig,
+  chartSessions, periodTime, type Label, type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig,
   type Bar,
 } from 'oakscriptjs';
 import type { BgColorData, LineDrawingData, LabelData, PineSize } from '../types';
@@ -394,17 +394,16 @@ export function calculate(
   /** not na(time(timeframe.period, ses)); the bar size is needed on the days of a clock change */
   const barMs = info?.isintraday ? timeframe.in_seconds(period) * 1000 : undefined;
   const inSession = (tMs: number, ses: string) => pineTime.inSession(tMs, ses + WEEKDAYS, TZ, barMs);
-  /** time("D", ses): the start of the session period that contains the bar (na outside the session) */
-  const calendars = new Map<string, TradingCalendar>();
+  /** time("D", ses) of the library: the start of the day's session period (na outside it); the chart session of the
+   * context is not read when the session argument is given */
+  const sessionContexts = new Map<string, SessionContext>();
   const sessionStart = (tMs: number, ses: string): number => {
-    if (!inSession(tMs, ses)) return NaN;
-    let calendar = calendars.get(ses);
-    if (!calendar) {
-      calendar = new TradingCalendar(TZ, { session: ses + WEEKDAYS }, 'pine');
-      calendars.set(ses, calendar);
+    let ctx = sessionContexts.get(ses);
+    if (!ctx) {
+      ctx = { timeframe: period || '1D', timezone: TZ, session: ses + WEEKDAYS, timeUnit: 'ms' };
+      sessionContexts.set(ses, ctx);
     }
-    const at = calendar.locate(tMs);
-    return at && at.inside ? calendar.periods(at.date)[at.index][0] : NaN;
+    return periodTime(tMs, 'D', ctx, ses + WEEKDAYS);
   };
 
   // Daily and weekly bars of the symbol (security(..., lookahead_on)), on the resolutions that use them
@@ -494,7 +493,7 @@ export function calculate(
       const openBar = (Number.isNaN(s.t) && !Number.isNaN(t)) || s.t < t;
       s.t = t;
       s.prevActive = s.active;
-      s.active = !Number.isNaN(t);
+      s.active = inSession(tMs, s.ses);
       s.prevLow = s.low;
       s.prevHigh = s.high;
       if (s.active) {

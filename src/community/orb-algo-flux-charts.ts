@@ -42,8 +42,8 @@
  */
 
 import {
-  ta, str, timeframe, time as pineTime, line, label, Series, SessionBars, TradingCalendar, chartSessionFlags, resetDrawings,
-  setDrawingBar, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  ta, str, timeframe, line, label, Series, periodTime, chartSessionFlags, resetDrawings,
+  setDrawingBar, type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TableMergeData, TablePosition } from '../types';
 import { chartTimeframe, periodStarts, sessionFlags } from '../anchor-period';
@@ -235,12 +235,11 @@ export function calculate(
   // (t[1] < t). The function is called from bar 1 on: t[1] is na on its first call.
   // The session hours are read in the exchange time zone (chart context; UTC without it).
   const chartTf = chartTimeframe(bars, chart);
-  const barMs = timeframe.in_seconds(chartTf) * 1000;
   const tz = timezoneOf(chart);
-  /** time('1440', sess) of each bar in ms, NaN outside the session (library calendar of the session string) */
+  /** time('1440', sess) of each bar in ms, NaN outside the session (library; the chart session is not read) */
   const sessionRunTime = (sess: string): number[] => {
-    const days = new SessionBars(new TradingCalendar(tz, { session: sess }, 'pine'), chartTf);
-    return tMs.map((t) => (pineTime.inSession(t, sess, tz, barMs) ? days.timeOf(t, '1440') : NaN));
+    const ctx: SessionContext = { timeframe: chartTf, timezone: tz, session: sess, timeUnit: 'ms' };
+    return tMs.map((t) => periodTime(t, '1440', ctx, sess));
   };
   const customRun = cfg.customSessionEnabled ? sessionRunTime(cfg.customSessionTime) : [];
   const customBegins = (i: number): boolean => !isNaN(customRun[i])

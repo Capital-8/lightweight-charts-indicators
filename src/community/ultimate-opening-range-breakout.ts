@@ -37,12 +37,12 @@
  */
 
 import {
-  ta, str, color, time, timeframe, callsite, Series, label, resetDrawings, setDrawingBar, SessionBars, TradingCalendar,
-  type Label, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  ta, str, color, time, timeframe, callsite, Series, label, resetDrawings, setDrawingBar, periodTime,
+  type SessionContext, type Label, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import { chartTimeframe, hasCalendar } from '../anchor-period';
 import { barInterval, barTime } from '../bar-time';
-import { foregroundColorOf, mintickOf, sessionHoursOf, type ChartContext } from '../chart-context';
+import { foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
 import type { BgColorData, BoxData, LabelData, TableCellData, TableData, TableMergeData } from '../types';
 
 export interface UltimateOpeningRangeBreakoutInputs {
@@ -237,19 +237,19 @@ interface Lb { x: number; y: number; text: string; color: string; style: 'label_
 
 /**
  * time("D", "", timezone) of each bar: the day of the bar with the session hours of the symbol read in `timezone`
- * (NaN: the bar opens outside these hours). With the session of the chart context the value comes from the session
- * calendar of the library (the symbol hours in `timezone`, without corrections and holidays, as the script API
- * `time("D", "", timezone)`); without it every bar is inside the hours and the value is the day number in `timezone`.
+ * (NaN: the bar opens outside these hours). With the session of the chart context the value comes from the library
+ * (the symbol hours in `timezone`, without corrections and holidays); without it every bar is inside the hours and
+ * the value is the day number in `timezone`.
  */
 function dayTimes(bars: Bar[], timezone: string, chart?: ChartContext): number[] {
   const ms = bars.length > 0 && bars[0].time >= 1e12;
   const tf = chartTimeframe(bars, chart);
   if (chart && hasCalendar(chart) && tf !== '') {
-    const days = new SessionBars(new TradingCalendar(timezone, { session: sessionHoursOf(chart) }, 'symbol'), tf);
-    return bars.map((b) => {
-      const t = ms ? b.time : b.time * 1000;
-      return days.inside(t) ? days.timeOf(t, 'D') : NaN;
-    });
+    const ctx: SessionContext = {
+      timeframe: tf, timezone: chart.timezone, session: chart.session, regularSession: chart.regularSession,
+      timeUnit: ms ? 'ms' : 's',
+    };
+    return bars.map((b) => periodTime(b.time, 'D', ctx, '', timezone));
   }
   return bars.map((b) => {
     const t = ms ? b.time : b.time * 1000;

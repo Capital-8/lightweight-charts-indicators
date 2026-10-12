@@ -28714,4 +28714,4 @@ export {
 } from './other-symbol';
 
 // Package version
-export const version = '0.12.0';
+export const version = '0.12.1';

@@ -31,7 +31,10 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { color, time, timeframe, resample, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  color, time, timeframe, resample, periodTime,
+  type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+} from 'oakscriptjs';
 import { periodStarts, securityStarts, chartTimeframe } from '../anchor-period';
 import type { MarkerData, BgColorData } from '../types';
 import { timezoneOf, type ChartContext } from '../chart-context';
@@ -164,25 +167,16 @@ export function calculate(
   const inSess = (t: number, barMs: number) =>
     allDay || time.inSession(ms ? t : t * 1000, sessToUse, tz, Number.isFinite(barMs) ? barMs : undefined);
   const chartMs = chartTf === '' ? NaN : timeframe.in_seconds(chartTf) * 1000;
-  // time('D', session) is read on the bars of the range timeframe (inside the security call)
-  const resMs = cfg.res.trim() === '' ? chartMs : timeframe.in_seconds(cfg.res) * 1000;
 
-  // time('D', session): the start of the trading day of the session that contains the bar (the latest session
-  // start at or before the bar; the first range of a session with several ranges), na outside the session.
+  // time('D', session) of the library on the bars of the range timeframe: the start of the day's session period, na
+  // outside it (the chart session of the context is not read when the session argument is given).
   // time('D'): the start of the day of the symbol.
   const dayStarts = periodStarts(bars, 'D', chart);
-  const startMin = (Number(picked.slice(0, 2)) * 60 + Number(picked.slice(2, 4))) % 1440;
-  const minuteOfDay = (t: number) => time.hour(t, tz) * 60 + time.minute(t, tz);
+  const resTf = cfg.res.trim() === '' ? chartTf : cfg.res;
+  const resCtx: SessionContext = { timeframe: resTf || '1D', timezone: tz, session: sessToUse, timeUnit: ms ? 'ms' : 's' };
   const sessionDay = (barTime: number, firstBar: number): number => {
-    if (!inSess(barTime, resMs)) return NaN;
     if (allDay) return dayStarts[firstBar];
-    const t = Math.floor((ms ? barTime : barTime * 1000) / 60000) * 60000;
-    const start = t - (((minuteOfDay(t) - startMin) % 1440 + 1440) % 1440) * 60000;
-    // a clock change between the session start and the bar moves the start by one hour
-    for (const shift of [0, 3600000, -3600000]) {
-      if (start + shift <= t && minuteOfDay(start + shift) === startMin) return start + shift;
-    }
-    return start;
+    return periodTime(barTime, 'D', resCtx, sessToUse);
   };
 
   // Range timeframe: bartimeSess = time('D', session), newbarSess = bartimeSess != bartimeSess[1] (false with na),

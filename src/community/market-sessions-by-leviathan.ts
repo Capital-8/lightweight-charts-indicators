@@ -31,9 +31,8 @@
  */
 
 import {
-  box, label, line, color, str, timeframe, time as pineTime, resetDrawings, setDrawingBar, varDrawing,
-  SessionBars, TradingCalendar,
-  type DrawingVariable, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
+  box, label, line, color, str, timeframe, time as pineTime, resetDrawings, setDrawingBar, varDrawing, periodTime,
+  type SessionContext, type DrawingVariable, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData, LineDrawingData, BoxData, LabelData, PineSize } from '../types';
 import { barTime } from '../bar-time';
@@ -269,20 +268,17 @@ export function calculate(
 
   // bar size for the clock-change rule of the session test (intraday bars)
   const barMs = isIntraday ? timeframe.in_seconds(chartTf) * 1000 : undefined;
-  // time(timeframe.period, session) in the exchange time zone, from the session periods of the library calendar:
-  // intraday, the chart periods counted from the start of the session run, na outside the session (session
-  // 0030-0900 on 60-minute bars: 00:30, 01:30, ... never a bar time); daily, the session period of the day, na
-  // outside it; weekly and monthly, the period time without a session test.
+  // time(timeframe.period, session) in the exchange time zone, from the library: intraday, the chart periods
+  // counted from the start of the session run, na outside the session (session 0030-0900 on 60-minute bars: 00:30,
+  // 01:30, ... never a bar time); daily, the session period of the day, na outside it; weekly and monthly, the
+  // period time without a session test. The chart session of the context is not read when the session is given.
   const tf = chartTf || '1D';
-  const dayTf = timeframe.info(tf).isdaily && timeframe.info(tf).multiplier === 1;
   const sessionTimes = new Map<string, (tMs: number) => number>();
   const sessionTime = (session: string): ((tMs: number) => number) => {
     let fn = sessionTimes.get(session);
     if (!fn) {
-      const cal = new SessionBars(new TradingCalendar(exchangeZone, { session }, 'pine', !isIntraday), tf);
-      fn = isIntraday
-        ? (tMs) => (pineTime.inSession(tMs, session, exchangeZone, barMs) ? cal.timeOf(tMs, tf) : NaN)
-        : dayTf ? (tMs) => (cal.inside(tMs) ? cal.timeOf(tMs, tf) : NaN) : (tMs) => cal.timeOf(tMs, tf);
+      const ctx: SessionContext = { timeframe: tf, timezone: exchangeZone, session, timeUnit: 'ms' };
+      fn = (tMs) => periodTime(tMs, tf, ctx, session);
       sessionTimes.set(session, fn);
     }
     return fn;

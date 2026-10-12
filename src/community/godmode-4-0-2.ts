@@ -118,7 +118,6 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const ge = (a: number, b: number) => b - a <= EPS;
 const le = (a: number, b: number) => a - b <= EPS;
-const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 
 export function calculate(bars: Bar[], inputs: Partial<Godmode402Inputs> = {}, chart?: ChartContext): IndicatorResult {
   const cfg = { ...defaultInputs, ...inputs };
@@ -150,12 +149,11 @@ export function calculate(bars: Bar[], inputs: Partial<Godmode402Inputs> = {}, c
   };
   const mf = (): number[] => {
     const volume = bars.map((b) => b.volume ?? NaN);
-    const up = A(math.sum(S(src.map((v, i) => volume[i] * (le(change[i], 0) ? 0 : v))), len2) as Series);
-    const down = A(math.sum(S(src.map((v, i) => volume[i] * (ge(change[i], 0) ? 0 : v))), len2) as Series);
-    // rsi(x, y) with two series: y == 0 ? 100 : x == 0 ? 0 : 100 - 100 / (1 + x / y) (== within 1e-10, as ta.rsi).
-    // Not the library ta.rsi(x, y): it gives na where 1 + x / y is 0 (x = -y, rounding residuals of the sums), the
-    // original -infinity, which sets the support levels on that bar
-    return up.map((u, i) => (eq(down[i], 0) ? 100 : eq(u, 0) ? 0 : 100 - 100 / (1 + u / down[i])));
+    const up = math.sum(S(src.map((v, i) => volume[i] * (le(change[i], 0) ? 0 : v))), len2) as Series;
+    const down = math.sum(S(src.map((v, i) => volume[i] * (ge(change[i], 0) ? 0 : v))), len2) as Series;
+    // rsi(x, y) with two series (Pine version 3): -infinity where 1 + x / y is 0 (rounding residuals of the sums),
+    // which sets the support levels on that bar
+    return A(ta.rsi(up, down));
   };
   const rsi = () => A(ta.rsi(S(src), len2));
 

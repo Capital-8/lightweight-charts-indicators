@@ -54,7 +54,7 @@
  */
 
 import {
-  ta, Series, color, math, str, timeframe, time as pineTime, label, resetDrawings, setDrawingBar, resample, periodClose, barsUntil,
+  ta, Series, color, math, str, timeframe, time as pineTime, label, resetDrawings, setDrawingBar, resample, periodClose, periodTime, barsUntil,
   chartSessions, type Label, type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BgColorData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TableMergeData, TablePosition } from '../types';
@@ -754,8 +754,9 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   const pivotHigh = A(ta.pivothigh(S(bars.map((b) => b.high)), cfg.pivotLen, cfg.pivotLen));
   const pivotLow = A(ta.pivotlow(S(bars.map((b) => b.low)), cfg.pivotLen, cfg.pivotLen));
   const sessionSpec = `${cfg.sessionHours}:${cfg.sessionDays}`;
-  /** time("1D", session, time zone) of a whole-day session: the start of the day in the session time zone */
-  const dayStart = (t: number) => pineTime.timestamp(sessionTZ, pineTime.year(t, sessionTZ), pineTime.month(t, sessionTZ), pineTime.dayofmonth(t, sessionTZ));
+  /** time("1D", session, time zone) of the library (the chart session of the context is not read) */
+  const sessionCtx: SessionContext = { timeframe: chartTf || '1D', timezone: sessionTZ, session: sessionSpec, timeUnit: 'ms' };
+  const dayStart = (t: number) => periodTime(t, '1D', sessionCtx, sessionSpec, sessionTZ);
 
   // Theme palette of the dashboard, journal and watermark
   const luminance = 0.2126 * (color.r(CHART_BG) as number) + 0.7152 * (color.g(CHART_BG) as number) + 0.0722 * (color.b(CHART_BG) as number);
