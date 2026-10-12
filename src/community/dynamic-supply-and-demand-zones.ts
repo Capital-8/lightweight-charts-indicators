@@ -206,7 +206,7 @@ export function calculate(
   for (let i = 0; i <= res - 1; i++) {
     const right = bi + 7 + cfg.scale;
     // box_left = box_right - math.round(bin) / math.round(max) * scale is a fractional bar index; given to the int
-    // parameter of box.new it is truncated (measured: the reference box of 5537.94 starts on bar 5537)
+    // parameter of box.new it is truncated (measured: the reference box of 5537.94 starts on bar 5537; library: oakScriptJS #176)
     const left = Math.trunc(right - (math.round(binlen[i] ?? NaN) / math.round(binMax)) * cfg.scale);
     boxes.push(cfg.h
       ? box.new(left, top[i] ?? NaN, right, bottom[i] ?? NaN, BLACK, 1, 'solid', 'none', 'bar_index', GRAY)
