@@ -8,7 +8,7 @@
  */
 
 import type { Bar, InputConfig, PlotConfig, HLineConfig, FillConfig, ArrowConfig } from 'oakscriptjs';
-import type { ChartContext } from './chart-context';
+import type { ChartContext, SymbolRequest } from './chart-context';
 export type { InputConfig, PlotConfig, HLineConfig, FillConfig } from 'oakscriptjs';
 
 // SMA - Simple Moving Average
@@ -6831,6 +6831,12 @@ export interface IndicatorRegistryEntry {
    * the chart context): calculate it again when the user scrolls or zooms
    */
   usesVisibleRange?: boolean;
+  /**
+   * Bars of other symbols the indicator needs with these inputs (PineScript `request.security` of another ticker):
+   * give them through the `bars` accessor of the chart context. Without them `calculate` throws a
+   * `MissingSymbolDataError` that lists the same requests.
+   */
+  requiredSymbols?: (inputs: any, chart?: ChartContext) => SymbolRequest[];
   /** `chart`: what the caller knows about the chart and its symbol (tick, time zone, ...), see ChartContext */
   calculate: (bars: Bar[], inputs?: any, chart?: ChartContext) => any;
 }
@@ -28435,11 +28441,14 @@ const registryPart9: IndicatorRegistryEntry[] = [
 export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9];
 
 // Chart context (third argument of calculate)
-export type { ChartContext, VisibleRange } from './chart-context';
+export type { ChartContext, VisibleRange, SymbolRequest } from './chart-context';
+export { MissingSymbolDataError, symbolBarsOf } from './chart-context';
 export {
   mintickOf, timezoneOf, tickeridOf, tickerOf, symbolTypeOf, currencyOf, foregroundColorOf, backgroundColorOf,
   lastBarConfirmedOf, nowOf, visibleRangeOf,
 } from './chart-context';
+// Other symbols (PineScript request.security of another ticker)
+export { securityOther, securityOtherValues, type OtherSymbolOptions } from './other-symbol';
 
 // Package version
 export const version = '0.11.0';

@@ -66,6 +66,37 @@ A few indicators draw from the bars visible on the chart. Give the time (in ms) 
 `leftVisibleBarTime` and `rightVisibleBarTime` (fallback: all the bars); their registry entry has
 `usesVisibleRange: true`, so calculate them again when the user scrolls or zooms the chart.
 
+**Other symbols.** Some indicators read the bars of another symbol, e.g. an index to compare with. The app gives
+them with `bars(symbol, timeframe)` in the context, from its own cache, in the time unit of the chart bars. When bars
+are missing, `calculate` throws a `MissingSymbolDataError`. Its `requests` list every symbol and timeframe needed.
+Load them, then calculate again. The registry entry of such an indicator has `requiredSymbols(inputs)`: call it to
+preload the bars.
+
+```typescript
+import { indicatorRegistry, MissingSymbolDataError, type ChartContext } from 'lightweight-charts-indicators';
+
+const cache = new Map<string, Bar[]>(); // bars loaded by the app, by "symbol|timeframe"
+const load = async (symbol: string, timeframe: string) => {
+  cache.set(`${symbol}|${timeframe}`, await fetchBars(symbol, timeframe)); // the app's own data feed
+};
+const chart: ChartContext = { timeframe: '1D', bars: (symbol, timeframe) => cache.get(`${symbol}|${timeframe}`) };
+
+async function run(entry: (typeof indicatorRegistry)[number], inputs: Record<string, unknown>) {
+  for (const r of entry.requiredSymbols?.(inputs, chart) ?? []) await load(r.symbol, r.timeframe);
+  try {
+    return entry.calculate(bars, inputs, chart);
+  } catch (err) {
+    if (!(err instanceof MissingSymbolDataError)) throw err;
+    await Promise.all(err.requests.map((r) => load(r.symbol, r.timeframe)));
+    return entry.calculate(bars, inputs, chart);
+  }
+}
+```
+
+Give the exchange time zone and session of the other symbols with `symbolInfo(symbol)` in the context: the bars of a
+stock requested on a crypto chart close and change trading day by its exchange hours. Ports align the other bars on
+the chart bars with `securityOther(chartBars, otherBars, timeframe, options, chart)` (see `src/other-symbol.ts`).
+
 ## Drawing Results with the Renderer
 
 `lightweight-charts-indicators/render` draws a complete indicator result (plots, fills, hlines, markers, arrows, bar

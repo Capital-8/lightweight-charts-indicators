@@ -8,6 +8,7 @@
  * argument existed.
  */
 
+import type { Bar } from 'oakscriptjs';
 import type { ChartContext as ScriptChartContext } from 'oakscriptjs/script';
 
 export interface ChartContext extends ScriptChartContext {
@@ -22,6 +23,55 @@ export interface ChartContext extends ScriptChartContext {
    * entry) must be calculated again when the user scrolls or zooms the chart.
    */
   rightVisibleBarTime?: number;
+  /**
+   * Bars of another symbol (PineScript `request.security` of another ticker): the caller returns the bars it has
+   * loaded for `symbol` ("NASDAQ:MSFT", "CRYPTOCAP:BTC") on `timeframe` (the timeframe the indicator asks for, the
+   * chart timeframe when the script uses `timeframe.period`), in the time unit of the chart bars, or `undefined`
+   * when it has not loaded them yet. The indicator then throws a `MissingSymbolDataError` that lists what it needs:
+   * load those bars and calculate again. An indicator that reads other symbols has `requiredSymbols` in its registry
+   * entry.
+   */
+  bars?: (symbol: string, timeframe: string) => Bar[] | undefined;
+  /**
+   * Exchange time zone and session of another symbol (as `timezone` / `session` of this context), for the indicators
+   * that read its bars: they need them to know when its bars close and which trading day they belong to. Without
+   * them the other symbol is taken as trading around the clock in UTC when its bars include weekends, else as
+   * trading on the calendar of the chart symbol.
+   */
+  symbolInfo?: (symbol: string) => Pick<ChartContext, 'timezone' | 'session'> | undefined;
+}
+
+/** Bars of another symbol that an indicator needs */
+export interface SymbolRequest {
+  /** Ticker id, e.g. "NASDAQ:MSFT" */
+  symbol: string;
+  /** Timeframe, e.g. "1D", "60" */
+  timeframe: string;
+}
+
+/**
+ * Thrown by an indicator that needs bars of another symbol that the chart context does not give (no `bars`
+ * accessor, or the accessor returned `undefined`): load the bars of `requests` and calculate again.
+ */
+export class MissingSymbolDataError extends Error {
+  readonly requests: SymbolRequest[];
+
+  constructor(requests: SymbolRequest[]) {
+    super(`Bars of other symbols are needed: ${requests.map((r) => `${r.symbol} (${r.timeframe})`).join(', ')}`);
+    this.name = 'MissingSymbolDataError';
+    this.requests = requests;
+  }
+}
+
+/**
+ * Bars of other symbols from the chart context, all at once: throws one `MissingSymbolDataError` that lists every
+ * request the context cannot give, so that the caller loads them together.
+ */
+export function symbolBarsOf(requests: SymbolRequest[], chart?: ChartContext): Bar[][] {
+  const out = requests.map((r) => chart?.bars?.(r.symbol, r.timeframe));
+  const missing = requests.filter((_, i) => out[i] === undefined);
+  if (missing.length) throw new MissingSymbolDataError(missing);
+  return out as Bar[][];
 }
 
 /** Symbol tick (PineScript `syminfo.mintick`); fallback 0.01 */
