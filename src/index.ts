@@ -26277,4 +26277,4 @@ export {
 } from './chart-context';
 
 // Package version
-export const version = '0.10.0';
+export const version = '0.11.0';
