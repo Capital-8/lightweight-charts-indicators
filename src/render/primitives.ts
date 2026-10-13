@@ -34,49 +34,88 @@ import { isTransparent, parseColor, type GradientPart, gradientPart } from './co
 // ─── Bar grid (bars after the last bar) ────────────────────────────────────
 
 /**
+ * Bar slots after the last bar of a time after it, on the host's calendar: the number of future bars that open after
+ * the last bar and at or before `time` (the slot of the bar that holds the time). `lastTime` and `time` in the units
+ * of the bar times.
+ */
+export type FutureSlots = (time: number, lastTime: number) => number;
+
+/** The x coordinates of a drawing are times given by the script (xloc.bar_time), not bar indexes */
+export function scriptTimes(item: object): boolean {
+  return (item as { xloc?: string }).xloc === 'bar_time';
+}
+
+/**
  * Bars of the chart and the slots after the last bar.
  * Indicators give points on future bars (Pine bar_index + k, plot offsets) the time lastTime + k * interval
- * (barTime). With extendTimeScale the renderer adds whitespace points at these times to the time scale, so they get
- * their own bar slots; x() also places a later time that is not on the time scale by its bar count after the last bar.
+ * (barTime): slot k. A drawing in script times (xloc.bar_time) may end at any later time: it is drawn on the slot of
+ * the future bar that holds the time, counted on the host's calendar when it gives one (`futureSlots`: the trading
+ * sessions, as the time scale of a stock skips nights, weekends and holidays), else one slot per bar interval of
+ * calendar time. With extendTimeScale the renderer adds whitespace points up to the last slot drawn.
  */
 export class BarGrid {
   bars: Bar[] = [];
   byTime = new Map<number, Bar>();
   interval = 0;
+  /** Host's count of the bar slots after the last bar of a script time (null: calendar time) */
+  futureSlots: FutureSlots | null = null;
+  private slotCache = new Map<number, number>();
 
   setBars(bars: Bar[]): void {
     this.bars = bars;
     this.byTime = new Map(bars.map(b => [b.time, b]));
     this.interval = barInterval(bars);
+    this.slotCache.clear();
+  }
+
+  /** Count the slots of script times with `futureSlots` from now on (null: calendar time) */
+  setFutureSlots(futureSlots: FutureSlots | null): void {
+    this.futureSlots = futureSlots;
+    this.slotCache.clear();
   }
 
   get lastTime(): number {
     return this.bars.length ? this.bars[this.bars.length - 1].time : NaN;
   }
 
-  /** Number of bar slots after the last bar needed to show `time` (0 when time is not after the last bar) */
-  slotsAfter(time: number): number {
-    if (!(time > this.lastTime) || !(this.interval > 0)) return 0;
-    return Math.ceil((time - this.lastTime) / this.interval - 1e-9);
+  /**
+   * Bar slot after the last bar that holds `time` (0 when time is not after the last bar or the slot is unknown).
+   * `script`: a time given by the script (xloc.bar_time), counted on the host's calendar.
+   */
+  slotsAfter(time: number, script = false): number {
+    if (!(time > this.lastTime)) return 0;
+    if (!script || !this.futureSlots) return this.interval > 0 ? Math.floor((time - this.lastTime) / this.interval + 1e-9) : 0;
+    let k = this.slotCache.get(time);
+    if (k === undefined) {
+      k = this.futureSlots(time, this.lastTime);
+      k = Number.isFinite(k) ? Math.max(0, Math.floor(k)) : 0;
+      this.slotCache.set(time, k);
+    }
+    return k;
   }
 
-  /** A time after the last bar moved to the nearest future slot; other times unchanged */
-  snap(time: number): number {
+  /** A time after the last bar moved to the time of its slot on the bar interval grid; other times unchanged */
+  snap(time: number, script = false): number {
     if (!(time > this.lastTime) || !(this.interval > 0)) return time;
-    return this.lastTime + Math.max(1, Math.round((time - this.lastTime) / this.interval)) * this.interval;
+    return this.lastTime + this.slotsAfter(time, script) * this.interval;
   }
 
-  /** x coordinate of a time: its bar slot, or for a later time off the grid, its bar count after the last bar */
-  x(timeScale: ReturnType<IChartApi['timeScale']>, time: number): number | null {
+  /**
+   * x coordinate of a time: its bar on the time scale, or for a time after the last bar, its slot counted from the
+   * last bar (the time scale may hold whitespace points of other drawings after the last bar, not one per slot). Always
+   * a whole bar position: the time scale places no fractional logical index (it answers 0 for one).
+   */
+  x(timeScale: ReturnType<IChartApi['timeScale']>, time: number, script = false): number | null {
+    if (time > this.lastTime) {
+      if (!(this.interval > 0) && !(script && this.futureSlots)) return null;
+      const lastX = timeScale.timeToCoordinate(this.lastTime as unknown as Time);
+      const lastLogical = lastX == null ? null : timeScale.coordinateToLogical(lastX);
+      if (lastLogical == null) return null;
+      const c = timeScale.logicalToCoordinate((Math.round(lastLogical) + this.slotsAfter(time, script)) as never);
+      return c == null ? null : (c as number);
+    }
     const x = timeScale.timeToCoordinate(time as unknown as Time);
-    if (x != null) return x as number;
-    if (!(time > this.lastTime) || !(this.interval > 0)) return null;
-    const lastX = timeScale.timeToCoordinate(this.lastTime as unknown as Time);
-    const lastLogical = lastX == null ? null : timeScale.coordinateToLogical(lastX);
-    if (lastLogical == null) return null;
-    const logical = Math.round(lastLogical) + (time - this.lastTime) / this.interval;
-    const c = timeScale.logicalToCoordinate(logical as never);
-    return c == null ? null : (c as number);
+    return x == null ? null : (x as number);
   }
 }
 
@@ -115,11 +154,11 @@ export function markerSizeMult(size: MarkerData['size']): number {
  * Anchor line data (invisible series that holds a primitive): one point per time, sorted, future times on the
  * bar grid, so the time scale and the autoscale include the drawings.
  */
-export function anchorData(points: Array<{ time: number; value: number }>, grid: BarGrid): LineData<Time>[] {
+export function anchorData(points: Array<{ time: number; value: number; script?: boolean }>, grid: BarGrid): LineData<Time>[] {
   const byTime = new Map<number, number>();
   for (const p of points) {
     if (p.value == null || Number.isNaN(p.value) || p.time == null || Number.isNaN(p.time)) continue;
-    const t = grid.snap(p.time);
+    const t = grid.snap(p.time, p.script);
     if (!byTime.has(t)) byTime.set(t, p.value);
   }
   return Array.from(byTime.entries())
@@ -985,9 +1024,10 @@ export function arrowHead(ctx: CanvasRenderingContext2D, tipX: number, tipY: num
  * the line extension (extend.left continues the line beyond its left point). null when a point is not on the chart.
  */
 export function linePoints(env: DrawEnv, line: LineDrawingData): [number, number, number, number] | null {
-  const x1 = env.grid.x(env.timeScale, line.time1);
+  const script = scriptTimes(line);
+  const x1 = env.grid.x(env.timeScale, line.time1, script);
   const y1 = env.series.priceToCoordinate(line.price1);
-  const x2 = env.grid.x(env.timeScale, line.time2);
+  const x2 = env.grid.x(env.timeScale, line.time2, script);
   const y2 = env.series.priceToCoordinate(line.price2);
   if (x1 == null || y1 == null || x2 == null || y2 == null) return null;
   const extend = line.extend ?? 'none';
@@ -1068,8 +1108,9 @@ export function polylinePath(pts: Array<[number, number]>, curved: boolean, clos
 /** polyline.new: line through the points (curved, closed), fill of the area inside */
 export function drawPolyline(env: DrawEnv, poly: PolylineData): void {
   const pts: Array<[number, number]> = [];
+  const script = scriptTimes(poly);
   for (const p of poly.points) {
-    const x = env.grid.x(env.timeScale, p.time);
+    const x = env.grid.x(env.timeScale, p.time, script);
     const y = env.series.priceToCoordinate(p.price);
     if (x != null && y != null) pts.push([x, y as number]);
   }
@@ -1243,9 +1284,10 @@ export function drawBoxText(ctx: CanvasRenderingContext2D, box: BoxData, left: n
 }
 
 export function drawBox(env: DrawEnv, box: BoxData): void {
-  const x1 = env.grid.x(env.timeScale, box.time1);
+  const script = scriptTimes(box);
+  const x1 = env.grid.x(env.timeScale, box.time1, script);
   const y1 = env.series.priceToCoordinate(box.price1);
-  const x2 = env.grid.x(env.timeScale, box.time2);
+  const x2 = env.grid.x(env.timeScale, box.time2, script);
   const y2 = env.series.priceToCoordinate(box.price2);
   if (x1 == null || y1 == null || x2 == null || y2 == null) return;
   const { ctx } = env;
@@ -1302,7 +1344,7 @@ export const LABEL_CORNERS: Record<string, [number, number]> = {
  * point is the bar high / low, and a centred box, a shape or a text is moved above / below it.
  */
 export function drawLabel(env: DrawEnv, label: LabelData): void {
-  const x = env.grid.x(env.timeScale, label.time);
+  const x = env.grid.x(env.timeScale, label.time, scriptTimes(label));
   if (x == null) return;
   const yloc = label.yloc ?? 'price';
   let y: number | null;

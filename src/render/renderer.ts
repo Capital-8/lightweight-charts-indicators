@@ -64,6 +64,8 @@ import { isTransparent, withOpacity } from './color';
 import {
   BarGrid,
   anchorData,
+  scriptTimes,
+  type FutureSlots,
   markerSizeMult,
   gradientAt,
   BUILTIN_MARKER_SHAPES,
@@ -121,6 +123,12 @@ export interface IndicatorRendererOptions {
   mainSeries?: ISeriesApi<SeriesType, Time>;
   /** Add bar slots after the last bar for drawings on future bars (default false: placed without extending) */
   extendTimeScale?: boolean;
+  /**
+   * Slots after the last bar of a time given by a script drawing (xloc.bar_time) on the chart's calendar: the number
+   * of future bars that open after the last bar and at or before the time (see {@link FutureSlots}). Default: one slot
+   * per bar interval of calendar time.
+   */
+  futureSlots?: FutureSlots;
   /** Keep the indicator pane when clear() empties it (pane height kept; default false) */
   preserveEmptyPane?: boolean;
 }
@@ -177,6 +185,13 @@ export class IndicatorRenderer {
 
   constructor(private readonly chart: IChartApi, options: IndicatorRendererOptions = {}) {
     this.opts = { ...options };
+    this.grid.setFutureSlots(options.futureSlots ?? null);
+  }
+
+  /** Calendar of the slots after the last bar for the next render() (null: calendar time) */
+  setFutureSlots(futureSlots: FutureSlots | null): void {
+    this.opts.futureSlots = futureSlots ?? undefined;
+    this.grid.setFutureSlots(futureSlots);
   }
 
   /** Pane of a non-overlay indicator for the next render() */
@@ -233,7 +248,7 @@ export class IndicatorRenderer {
     if (r.boxes?.length) this.drawBoxes(r.boxes, pane);
     if (r.linefills?.length) this.drawLinefills(r.linefills, pane);
     if (r.polylines?.length) this.drawPolylines(r.polylines, pane);
-    if (this.opts.extendTimeScale) this.addFutureSlots(lastOutputTime(r));
+    if (this.opts.extendTimeScale) this.addFutureSlots(lastOutputSlot(r, this.grid));
     if (r.tables?.length) this.drawTables(r.tables, pane);
   }
 
@@ -843,7 +858,7 @@ export class IndicatorRenderer {
     items: T[],
     pane: number,
     forceOverlay: (item: T) => boolean | undefined,
-    points: (item: T) => Array<{ time: number; value: number }>,
+    points: (item: T) => Array<{ time: number; value: number; script?: boolean }>,
     draw: (env: DrawEnv, item: T) => void,
     zOrder: 'bottom' | 'normal' | 'top',
     autoscale = true
@@ -862,39 +877,38 @@ export class IndicatorRenderer {
   }
 
   private drawLabels(labels: LabelData[], pane: number): void {
-    this.drawLayers(labels, pane, (l) => l.forceOverlay, (l) => [{ time: l.time, value: l.price }], drawLabel, 'top');
+    this.drawLayers(labels, pane, (l) => l.forceOverlay, (l) => [{ time: l.time, value: l.price, script: scriptTimes(l) }], drawLabel, 'top');
   }
 
   private drawLines(lines: LineDrawingData[], pane: number): void {
     this.drawLayers(lines, pane, (l) => l.forceOverlay, (l) => [
-      { time: l.time1, value: l.price1 },
-      { time: l.time2, value: l.price2 },
+      { time: l.time1, value: l.price1, script: scriptTimes(l) },
+      { time: l.time2, value: l.price2, script: scriptTimes(l) },
     ], drawLine, 'normal');
   }
 
   private drawBoxes(boxes: BoxData[], pane: number): void {
     this.drawLayers(boxes, pane, (b) => b.forceOverlay, (b) => [
-      { time: b.time1, value: b.price1 },
-      { time: b.time2, value: b.price2 },
+      { time: b.time1, value: b.price1, script: scriptTimes(b) },
+      { time: b.time2, value: b.price2, script: scriptTimes(b) },
     ], drawBox, 'bottom');
   }
 
   private drawLinefills(fills: LinefillData[], pane: number): void {
     this.drawLayers(fills, pane, (f) => f.line1.forceOverlay, (f) => [
-      { time: f.line1.time1, value: f.line1.price1 },
-      { time: f.line1.time2, value: f.line1.price2 },
-      { time: f.line2.time1, value: f.line2.price1 },
-      { time: f.line2.time2, value: f.line2.price2 },
+      { time: f.line1.time1, value: f.line1.price1, script: scriptTimes(f.line1) },
+      { time: f.line1.time2, value: f.line1.price2, script: scriptTimes(f.line1) },
+      { time: f.line2.time1, value: f.line2.price1, script: scriptTimes(f.line2) },
+      { time: f.line2.time2, value: f.line2.price2, script: scriptTimes(f.line2) },
     ], drawLinefill, 'bottom');
   }
 
   private drawPolylines(polylines: PolylineData[], pane: number): void {
-    this.drawLayers(polylines, pane, (p) => p.forceOverlay, (p) => p.points.map((pt) => ({ time: pt.time, value: pt.price })), drawPolyline, 'normal');
+    this.drawLayers(polylines, pane, (p) => p.forceOverlay, (p) => p.points.map((pt) => ({ time: pt.time, value: pt.price, script: scriptTimes(p) })), drawPolyline, 'normal');
   }
 
-  /** Whitespace points after the last bar up to `maxTime` (bar slots for drawings and plot points on future bars) */
-  private addFutureSlots(maxTime: number): void {
-    const k = this.grid.slotsAfter(maxTime);
+  /** Whitespace points after the last bar up to slot `k` (bar slots for drawings and plot points on future bars) */
+  private addFutureSlots(k: number): void {
     if (k <= 0) return;
     const series = this.anchor(0, false);
     const data: WhitespaceData<Time>[] = [];
@@ -1000,10 +1014,10 @@ function samePoint(a: unknown, b: unknown): boolean {
 }
 
 /** Latest time of the outputs (last non-na plot points, markers, arrows, drawings) */
-function lastOutputTime(r: Record<string, any>): number {
-  let max = -Infinity;
-  const see = (t: unknown) => {
-    if (typeof t === 'number' && t > max) max = t;
+function lastOutputSlot(r: Record<string, any>, grid: BarGrid): number {
+  let max = 0;
+  const see = (t: unknown, script = false) => {
+    if (typeof t === 'number') max = Math.max(max, grid.slotsAfter(t, script));
   };
   for (const points of Object.values(r.plots ?? {}) as PlotPoint[][]) {
     for (let i = points.length - 1; i >= 0; i--) {
@@ -1016,10 +1030,12 @@ function lastOutputTime(r: Record<string, any>): number {
   }
   for (const m of r.markers ?? []) see(m.time);
   for (const a of r.arrows ?? []) see(a.time);
-  for (const l of r.labels ?? []) see(l.time);
-  for (const l of r.lines ?? []) { see(l.time1); see(l.time2); }
-  for (const b of r.boxes ?? []) { see(b.time1); see(b.time2); }
-  for (const f of r.linefills ?? []) { see(f.line1.time1); see(f.line1.time2); see(f.line2.time1); see(f.line2.time2); }
-  for (const p of r.polylines ?? []) for (const pt of p.points) see(pt.time);
+  for (const l of r.labels ?? []) see(l.time, scriptTimes(l));
+  for (const l of r.lines ?? []) { see(l.time1, scriptTimes(l)); see(l.time2, scriptTimes(l)); }
+  for (const b of r.boxes ?? []) { see(b.time1, scriptTimes(b)); see(b.time2, scriptTimes(b)); }
+  for (const f of r.linefills ?? []) {
+    for (const l of [f.line1, f.line2]) { see(l.time1, scriptTimes(l)); see(l.time2, scriptTimes(l)); }
+  }
+  for (const p of r.polylines ?? []) for (const pt of p.points) see(pt.time, scriptTimes(p));
   return max;
 }

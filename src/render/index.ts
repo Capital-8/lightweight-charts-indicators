@@ -16,3 +16,4 @@ export {
 } from './renderer';
 export { ThinHistogramPaneView, type HistogramItem, type ThinHistogramOptions } from './histogram-series';
 export { parseColor, withOpacity, isTransparent, type Rgba } from './color';
+export { type FutureSlots } from './primitives';
