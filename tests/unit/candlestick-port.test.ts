@@ -95,3 +95,33 @@ describe('All Candlestick Patterns composite', () => {
     ]);
   });
 });
+
+describe('candlestick port alert conditions', () => {
+  const entries = indicatorRegistry.filter((e) => e.group === 'candlestick');
+
+  it('every pattern declares its "New pattern detected" condition', () => {
+    for (const e of entries.filter((x) => x.id !== 'all-patterns')) {
+      expect(e.alertConditions, e.id).toHaveLength(1);
+      expect(e.alertConditions![0]).toMatchObject({ id: 'alert0', title: 'New pattern detected' });
+      expect(e.alertConditions![0].message).toMatch(/^New .+ pattern detected$/);
+    }
+    const byId = (id: string) => entries.find((x) => x.id === id)!.alertConditions![0].message;
+    expect(byId('engulfing-bullish')).toBe('New Engulfing – Bullish pattern detected');
+    expect(byId('doji')).toBe('New Doji pattern detected');
+    expect(byId('spinning-top-white')).toBe('New Spinning Top White pattern detected');
+  });
+
+  it('the composite declares one condition per pattern', () => {
+    const all = entries.find((x) => x.id === 'all-patterns')!;
+    expect(all.alertConditions).toHaveLength(44);
+    expect(all.alertConditions!.map((c) => c.title)).toContain('Engulfing – Bullish');
+  });
+
+  it('the result gives the bars on which a condition is true, matching the pattern labels', () => {
+    const e = entries.find((x) => x.id === 'engulfing-bullish')!;
+    const r = e.calculate(bars, e.defaultInputs);
+    const times: number[] = r.alerts[0].times;
+    expect(times.length).toBeGreaterThan(0);
+    expect(times).toEqual([...new Set(r.markers.map((m: { time: number }) => m.time))]);
+  });
+});

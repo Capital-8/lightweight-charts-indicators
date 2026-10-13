@@ -7005,6 +7005,11 @@ export interface IndicatorRegistryEntry {
    * `MissingSymbolDataError` that lists the same requests.
    */
   requiredSymbols?: (inputs: any, chart?: ChartContext) => SymbolRequest[];
+  /**
+   * The alert conditions the indicator declares (PineScript `alertcondition()`): id, title and default message. The
+   * result of `calculate` has an `alerts` array with, per condition id, the times of the bars on which it is true.
+   */
+  alertConditions?: { id: string; title: string; message?: string }[];
   /** `chart`: what the caller knows about the chart and its symbol (tick, time zone, ...), see ChartContext */
   calculate: (bars: Bar[], inputs?: any, chart?: ChartContext) => any;
 }
@@ -7013,7 +7018,7 @@ export interface IndicatorRegistryEntry {
  * Generate candlestick pattern registry entries
  */
 function candlestickEntries(
-  pairs: [string, { metadata: any; inputConfig: any; plotConfig: any; defaultInputs: any; calculate: any }][]
+  pairs: [string, { metadata: any; inputConfig: any; plotConfig: any; defaultInputs: any; alertConditions?: { id: string; title: string; message?: string }[]; calculate: any }][]
 ): IndicatorRegistryEntry[] {
   return pairs.map(([id, ind]) => ({
     id,
@@ -7026,6 +7031,7 @@ function candlestickEntries(
     inputConfig: ind.inputConfig as InputConfig[],
     plotConfig: ind.plotConfig as PlotConfig[],
     defaultInputs: { ...ind.defaultInputs },
+    ...(ind.alertConditions?.length ? { alertConditions: ind.alertConditions } : {}),
     calculate: ind.calculate,
   }));
 }
@@ -29153,4 +29159,4 @@ export {
 } from './other-symbol';
 
 // Package version
-export const version = '0.13.1';
+export const version = '0.13.2';

@@ -5,7 +5,7 @@
  * Each pattern runs through `executeScript(() => patternScript(def), bars, inputs)`, which returns the
  * IndicatorResult shape of this package (markers, bgColors, barColors); the result is passed through.
  */
-import { executeScript, type ScriptRunResult } from 'oakscriptjs/script';
+import { executeScript, type AlertConditionConfig, type ScriptRunResult } from 'oakscriptjs/script';
 import type { ChartContext } from '../chart-context';
 import type { Bar, IndicatorResult, InputConfig, PlotConfig } from 'oakscriptjs';
 import type { BarColorData, BgColorData, MarkerData } from '../types';
@@ -31,6 +31,8 @@ export interface PortIndicator {
   inputConfig: InputConfig[];
   plotConfig: PlotConfig[];
   defaultInputs: Record<string, unknown>;
+  /** The script's alertcondition() declarations; the result's `alerts` gives the bars on which each one is true. */
+  alertConditions: AlertConditionConfig[];
   calculate: (bars: Bar[], inputs?: Record<string, unknown>, chart?: ChartContext) => PortResult;
 }
 
@@ -51,6 +53,7 @@ function buildIndicator(body: () => void, shortName: string): PortIndicator {
     inputConfig: probe.inputConfig as InputConfig[],
     plotConfig: probe.plotConfig as PlotConfig[],
     defaultInputs: probe.defaultInputs,
+    alertConditions: probe.alertConfig,
     calculate: (bars, inputs = {}, chart) => convert(executeScript(body, bars, inputs, chart)),
   };
 }
