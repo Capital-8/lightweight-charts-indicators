@@ -275,9 +275,9 @@
     "exportName": "RCIRibbon",
     "skipInitial": 200
   },
-  "rma": {
+  "smma": {
     "dataFile": "export/data/20251207/Smoothed Moving Average.csv",
-    "exportName": "RMA"
+    "exportName": "SMMA"
   },
   "roc": {
     "dataFile": "export/data/20251207/Rate Of Change.csv",

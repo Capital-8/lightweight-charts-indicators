@@ -2,7 +2,7 @@
 
 **[Live Demo](https://deepentropy.github.io/lightweight-charts-indicators/)**
 
-1691 technical analysis indicators for the lightweight-charts library — 95 standard indicators, 1551 community indicators, and 45 candlestick patterns. PineScript v6 compatible with full drawing primitive support (lines, boxes, labels, tables).
+1713 technical analysis indicators for the lightweight-charts library — 117 standard indicators, 1551 community indicators, and 45 candlestick patterns. PineScript v6 compatible with full drawing primitive support (lines, boxes, labels, tables).
 
 ## Installation
 
@@ -217,7 +217,7 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
 });
 ```
 
-## Available Indicators (1,691)
+## Available Indicators (1,713)
 
 ### Moving Averages
 
@@ -226,7 +226,6 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
 | Simple Moving Average | `SMA` | Arithmetic mean over a specified period |
 | Exponential Moving Average | `EMA` | Weighted average giving more weight to recent prices |
 | Weighted Moving Average | `WMA` | Linearly increasing weights |
-| Smoothed Moving Average (RMA) | `RMA` | Wilder smoothing (alpha = 1/length) |
 | Double EMA | `DEMA` | Reduces lag by applying EMA twice |
 | Triple EMA | `TEMA` | Further reduces lag with triple exponential smoothing |
 | Hull Moving Average | `HMA` | Reduces lag while maintaining smoothness |
@@ -238,6 +237,8 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
 | MA Cross | `MACross` | Two moving averages for crossover signals |
 | Moving Average Ribbon | `MARibbon` | Multiple MAs showing trend direction and momentum |
 | Zero Lag LSMA | `ZLSMA` | Double linreg to cancel LSMA lag |
+| Kaufman's Adaptive Moving Average | `KaufmansAdaptiveMovingAverage` | Moving average whose speed follows the efficiency ratio of the price |
+| Visible Average Price | `VisibleAveragePrice` | Average price of the bars visible on the chart |
 
 ### Oscillators
 
@@ -268,6 +269,10 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
 | WaveTrend | `WaveTrend` | Channel index oscillator with cross signals |
 | Forecast Oscillator | `ForecastOscillator` | Percentage deviation from linear regression |
 | Schaff Trend Cycle | `SchaffTrendCycle` | Double stochastic smoothing of MACD |
+| Correlation Coefficient | `CorrelationCoefficient` | Correlation between the chart symbol and another symbol |
+| RSI Divergence Indicator | `RsiDivergenceIndicator` | RSI with regular and hidden divergence lines and labels |
+| Stochastic Momentum Index | `StochasticMomentumIndexStandard` | Close relative to the midpoint of the high-low range, double smoothed |
+| Technical Ratings | `TechnicalRatingsStandard` | Buy and sell rating from moving averages and oscillators |
 
 ### Momentum
 
@@ -287,6 +292,10 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
 | MACD 4C | `MACD4C` | MACD histogram with 4-color coding |
 | Squeeze Momentum | `SqueezeMomentum` | BB/KC squeeze with momentum oscillator |
 | Impulse MACD | `ImpulseMACD` | ZLEMA vs SMMA channel impulse |
+| Advance/Decline Ratio (Bars) | `AdvanceDeclineRatioBars` | Ratio of up bars to down bars over a lookback period |
+| Performance | `Performance` | Table of price changes over several periods for a list of symbols |
+| Price Momentum Oscillator | `PriceMomentumOscillatorStandard` | Double-smoothed rate of change with a signal line |
+| Seasonality | `Seasonality` | Monthly price changes per year in a heatmap table, with averages |
 
 ### Trend
 
@@ -312,6 +321,13 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
 | Coral Trend | `CoralTrend` | Cascaded EMA filter for smooth trend detection |
 | Chandelier Exit | `ChandelierExit` | ATR-based trailing stop system |
 | Donchian Trend Ribbon | `DonchianTrendRibbon` | Multi-layer Donchian breakout composite score |
+| Auto Fib Extension | `AutoFibExtension` | Fibonacci extension levels drawn from the last three pivots |
+| Auto Fib Retracement | `AutoFibRetracement` | Fibonacci retracement levels drawn on the last zigzag leg |
+| Auto Pitchfork | `AutoPitchfork` | Andrews pitchfork drawn from the last three zigzag pivots |
+| Chandelier Exit | `ChandelierExitStandard` | ATR trailing stops from the highest high and lowest low |
+| Multi-Time Period Charts | `MultiTimePeriodCharts` | Higher-timeframe candles drawn as boxes on the chart |
+| Pivot Points High Low | `PivotPointsHighLow` | Labels on pivot highs and pivot lows |
+| Rob Booker - Ziv Ghost Pivots | `RobBookerZivGhostPivots` | Typical prices of the current 4-hour, day, week and month periods |
 
 ### Volatility
 
@@ -323,6 +339,8 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
 | Historical Volatility | `HistoricalVolatility` | Annualized standard deviation of log returns |
 | Bollinger BandWidth | `BBBandWidth` | Width of Bollinger Bands as percentage |
 | Bollinger Bars | `BollingerBars` | Colored candles based on BB position |
+| Gaps | `Gaps` | Boxes on price gaps until they are closed |
+| Trading Sessions | `TradingSessions` | Ranges and averages of the Asian, London and New York sessions |
 
 ### Channels & Bands
 
@@ -333,6 +351,8 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
 | Donchian Channels | `DonchianChannels` | Highest high and lowest low over period |
 | Envelope | `Envelope` | Moving average with fixed percentage bands |
 | Median | `Median` | Median price with ATR bands |
+| Linear Regression Channel | `LinearRegressionChannelStandard` | Linear regression line with deviation bands on the last bars |
+| Pivot Points Standard | `PivotPointsStandard` | Pivot levels of higher-timeframe periods (Traditional, Fibonacci, Woodie, Classic, DM, Camarilla) |
 
 ### Volume
 
@@ -352,6 +372,8 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
 | Relative Volume at Time | `RelativeVolumeAtTime` | Current volume vs historical average |
 | Colored Volume Bars | `ColoredVolume` | Volume colored by price/volume trend |
 | OBV MACD | `OBVMACD` | MACD applied to On Balance Volume |
+| 24-hour Volume | `TwentyFourHourVolume` | Sum of the traded value of the last 24 hours, from lower-timeframe bars |
+| Accumulation/Distribution | `AccumulationDistribution` | Cumulative volume weighted by the close location inside the bar range |
 
 ### Community Indicators (1,551)
 

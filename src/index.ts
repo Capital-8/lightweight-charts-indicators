@@ -116,10 +116,6 @@ import * as parabolicSarIndicator from './standard/parabolic-sar';
 export { ParabolicSAR, calculate as calculateParabolicSAR } from './standard/parabolic-sar';
 export type { ParabolicSARInputs } from './standard/parabolic-sar';
 
-// RMA - Smoothed Moving Average
-import * as rmaIndicator from './standard/rma';
-export { RMA, calculate as calculateRMA } from './standard/rma';
-export type { RMAInputs } from './standard/rma';
 
 // ROC - Rate of Change
 import * as rocIndicator from './standard/roc';
@@ -1869,6 +1865,121 @@ export type { AutoKeyLevelsInputs } from './standard/auto-key-levels';
 import * as autoTrendDetectorIndicator from './standard/auto-trend-detector';
 export { AutoTrendDetector, calculate as calculateAutoTrendDetector } from './standard/auto-trend-detector';
 export type { AutoTrendDetectorInputs } from './standard/auto-trend-detector';
+
+// 24-hour Volume
+import * as n24HourVolumeStd from './standard/24-hour-volume';
+export { TwentyFourHourVolume, calculate as calculateTwentyFourHourVolume } from './standard/24-hour-volume';
+export type { TwentyFourHourVolumeInputs } from './standard/24-hour-volume';
+
+// Accumulation/Distribution
+import * as accumulationDistributionStd from './standard/accumulation-distribution';
+export { AccumulationDistribution, calculate as calculateAccumulationDistribution } from './standard/accumulation-distribution';
+export type { AccumulationDistributionInputs } from './standard/accumulation-distribution';
+
+// Advance/Decline Ratio (Bars)
+import * as adrBarsStd from './standard/adr-bars';
+export { AdvanceDeclineRatioBars, calculate as calculateAdvanceDeclineRatioBars } from './standard/adr-bars';
+export type { AdvanceDeclineRatioBarsInputs } from './standard/adr-bars';
+
+// Auto Fib Extension
+import * as autoFibExtensionStd from './standard/auto-fib-extension';
+export { AutoFibExtension, calculate as calculateAutoFibExtension } from './standard/auto-fib-extension';
+export type { AutoFibExtensionInputs } from './standard/auto-fib-extension';
+
+// Auto Fib Retracement
+import * as autoFibRetracementStd from './standard/auto-fib-retracement';
+export { AutoFibRetracement, calculate as calculateAutoFibRetracement } from './standard/auto-fib-retracement';
+export type { AutoFibRetracementInputs } from './standard/auto-fib-retracement';
+
+// Auto Pitchfork
+import * as autoPitchforkStd from './standard/auto-pitchfork';
+export { AutoPitchfork, calculate as calculateAutoPitchfork } from './standard/auto-pitchfork';
+export type { AutoPitchforkInputs } from './standard/auto-pitchfork';
+
+// Chandelier Exit
+import * as chandelierStd from './standard/chandelier';
+export { ChandelierExitStandard, calculate as calculateChandelierExitStandard } from './standard/chandelier';
+export type { ChandelierExitStandardInputs } from './standard/chandelier';
+
+// Correlation Coefficient
+import * as correlationCoefficientStd from './standard/correlation-coefficient';
+export { CorrelationCoefficient, calculate as calculateCorrelationCoefficient } from './standard/correlation-coefficient';
+export type { CorrelationCoefficientInputs } from './standard/correlation-coefficient';
+
+// Gaps
+import * as gapsStd from './standard/gaps';
+export { Gaps, calculate as calculateGaps } from './standard/gaps';
+export type { GapsInputs } from './standard/gaps';
+
+// Kaufman's Adaptive Moving Average
+import * as kamaStd from './standard/kama';
+export { KaufmansAdaptiveMovingAverage, calculate as calculateKaufmansAdaptiveMovingAverage } from './standard/kama';
+export type { KaufmansAdaptiveMovingAverageInputs } from './standard/kama';
+
+// Linear Regression Channel
+import * as linregChannelStd from './standard/linreg-channel';
+export { LinearRegressionChannelStandard, calculate as calculateLinearRegressionChannelStandard } from './standard/linreg-channel';
+export type { LinRegChannelInputs } from './standard/linreg-channel';
+
+// Multi-Time Period Charts
+import * as multiTimePeriodChartsStd from './standard/multi-time-period-charts';
+export { MultiTimePeriodCharts, calculate as calculateMultiTimePeriodCharts } from './standard/multi-time-period-charts';
+export type { MultiTimePeriodChartsInputs } from './standard/multi-time-period-charts';
+
+// Performance
+import * as performanceStd from './standard/performance';
+export { Performance, calculate as calculatePerformance } from './standard/performance';
+export type { PerformanceInputs } from './standard/performance';
+
+// Pivot Points High Low
+import * as pivotPointsHighLowStd from './standard/pivot-points-high-low';
+export { PivotPointsHighLow, calculate as calculatePivotPointsHighLow } from './standard/pivot-points-high-low';
+export type { PivotPointsHighLowInputs } from './standard/pivot-points-high-low';
+
+// Pivot Points Standard
+import * as pivotPointsStandardStd from './standard/pivot-points-standard';
+export { PivotPointsStandard, calculate as calculatePivotPointsStandard } from './standard/pivot-points-standard';
+export type { PivotPointsStandardInputs } from './standard/pivot-points-standard';
+
+// Price Momentum Oscillator
+import * as pmoStd from './standard/pmo';
+export { PriceMomentumOscillatorStandard, calculate as calculatePriceMomentumOscillatorStandard } from './standard/pmo';
+export type { PriceMomentumOscillatorInputs } from './standard/pmo';
+
+// Rob Booker - Ziv Ghost Pivots
+import * as robBookerZivGhostPivotsStd from './standard/rob-booker-ziv-ghost-pivots';
+export { RobBookerZivGhostPivots, calculate as calculateRobBookerZivGhostPivots } from './standard/rob-booker-ziv-ghost-pivots';
+export type { RobBookerZivGhostPivotsInputs } from './standard/rob-booker-ziv-ghost-pivots';
+
+// RSI Divergence Indicator
+import * as rsiDivergenceIndicatorStd from './standard/rsi-divergence-indicator';
+export { RsiDivergenceIndicator, calculate as calculateRsiDivergenceIndicator } from './standard/rsi-divergence-indicator';
+export type { RsiDivergenceIndicatorInputs } from './standard/rsi-divergence-indicator';
+
+// Seasonality
+import * as seasonalityStd from './standard/seasonality';
+export { Seasonality, calculate as calculateSeasonality } from './standard/seasonality';
+export type { SeasonalityInputs } from './standard/seasonality';
+
+// Stochastic Momentum Index
+import * as smiStd from './standard/smi';
+export { StochasticMomentumIndexStandard, calculate as calculateStochasticMomentumIndexStandard } from './standard/smi';
+export type { StochasticMomentumIndexStandardInputs } from './standard/smi';
+
+// Technical Ratings
+import * as technicalsStd from './standard/technicals';
+export { TechnicalRatingsStandard, calculate as calculateTechnicalRatingsStandard } from './standard/technicals';
+export type { TechnicalsInputs } from './standard/technicals';
+
+// Trading Sessions
+import * as tradingSessionsStd from './standard/trading-sessions';
+export { TradingSessions, calculate as calculateTradingSessions } from './standard/trading-sessions';
+export type { TradingSessionsInputs } from './standard/trading-sessions';
+
+// Visible Average Price
+import * as visibleAveragePriceStd from './standard/visible-average-price';
+export { VisibleAveragePrice, calculate as calculateVisibleAveragePrice } from './standard/visible-average-price';
+export type { VisibleAveragePriceInputs } from './standard/visible-average-price';
 
 // ── Community batch 1 (Pine v6 ports) ──
 // Trend Filter (2-pole)
@@ -7180,20 +7291,6 @@ const registryPart1: IndicatorRegistryEntry[] = [
     plotConfig: obvIndicator.plotConfig as PlotConfig[],
     defaultInputs: { ...obvIndicator.defaultInputs },
     calculate: obvIndicator.calculate,
-  },
-  {
-    id: 'rma',
-    group: 'standard',
-    name: 'Smoothed Moving Average (RMA)',
-    shortName: 'RMA',
-    description: 'Wilder smoothing with alpha = 1/length.',
-    category: 'Moving Averages',
-    overlay: true,
-    metadata: rmaIndicator.metadata,
-    inputConfig: rmaIndicator.inputConfig as InputConfig[],
-    plotConfig: rmaIndicator.plotConfig as PlotConfig[],
-    defaultInputs: { ...rmaIndicator.defaultInputs },
-    calculate: rmaIndicator.calculate,
   },
   {
     id: 'roc',
@@ -28698,7 +28795,349 @@ const registryPart10: IndicatorRegistryEntry[] = [
   },
 ];
 
-export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10];
+// Standard indicators added for the built-in list (issue 6)
+const registryPart11: IndicatorRegistryEntry[] = [
+  {
+    id: '24-hour-volume',
+    group: 'standard',
+    name: '24-hour Volume',
+    shortName: '24H Vol',
+    description: 'Sum of the traded value of the last 24 hours, from lower-timeframe bars.',
+    category: 'Volume',
+    overlay: false,
+    metadata: n24HourVolumeStd.metadata,
+    inputConfig: n24HourVolumeStd.inputConfig as InputConfig[],
+    plotConfig: n24HourVolumeStd.plotConfig as PlotConfig[],
+    requiredSymbols: n24HourVolumeStd.requiredSymbols,
+    defaultInputs: { ...n24HourVolumeStd.defaultInputs },
+    calculate: n24HourVolumeStd.calculate,
+  },
+  {
+    id: 'accumulation-distribution',
+    group: 'standard',
+    name: 'Accumulation/Distribution',
+    shortName: 'Accum/Dist',
+    description: 'Cumulative volume weighted by the close location inside the bar range.',
+    category: 'Volume',
+    overlay: false,
+    metadata: accumulationDistributionStd.metadata,
+    inputConfig: accumulationDistributionStd.inputConfig as InputConfig[],
+    plotConfig: accumulationDistributionStd.plotConfig as PlotConfig[],
+    defaultInputs: { ...accumulationDistributionStd.defaultInputs },
+    calculate: accumulationDistributionStd.calculate,
+  },
+  {
+    id: 'adr-bars',
+    group: 'standard',
+    name: 'Advance/Decline Ratio (Bars)',
+    shortName: 'ADR_B',
+    description: 'Ratio of up bars to down bars over a lookback period.',
+    category: 'Momentum',
+    overlay: false,
+    metadata: adrBarsStd.metadata,
+    inputConfig: adrBarsStd.inputConfig as InputConfig[],
+    plotConfig: adrBarsStd.plotConfig as PlotConfig[],
+    hlineConfig: adrBarsStd.hlineConfig as HLineConfig[],
+    defaultInputs: { ...adrBarsStd.defaultInputs },
+    calculate: adrBarsStd.calculate,
+  },
+  {
+    id: 'auto-fib-extension',
+    group: 'standard',
+    name: 'Auto Fib Extension',
+    shortName: 'Auto Fib Extension',
+    description: 'Fibonacci extension levels drawn from the last three pivots.',
+    category: 'Trend',
+    overlay: true,
+    metadata: autoFibExtensionStd.metadata,
+    inputConfig: autoFibExtensionStd.inputConfig as InputConfig[],
+    plotConfig: autoFibExtensionStd.plotConfig as PlotConfig[],
+    defaultInputs: { ...autoFibExtensionStd.defaultInputs },
+    calculate: autoFibExtensionStd.calculate,
+  },
+  {
+    id: 'auto-fib-retracement',
+    group: 'standard',
+    name: 'Auto Fib Retracement',
+    shortName: 'Auto Fib Retracement',
+    description: 'Fibonacci retracement levels drawn on the last zigzag leg.',
+    category: 'Trend',
+    overlay: true,
+    metadata: autoFibRetracementStd.metadata,
+    inputConfig: autoFibRetracementStd.inputConfig as InputConfig[],
+    plotConfig: autoFibRetracementStd.plotConfig as PlotConfig[],
+    defaultInputs: { ...autoFibRetracementStd.defaultInputs },
+    calculate: autoFibRetracementStd.calculate,
+  },
+  {
+    id: 'auto-pitchfork',
+    group: 'standard',
+    name: 'Auto Pitchfork',
+    shortName: 'Auto Pitchfork',
+    description: 'Andrews pitchfork drawn from the last three zigzag pivots.',
+    category: 'Trend',
+    overlay: true,
+    metadata: autoPitchforkStd.metadata,
+    inputConfig: autoPitchforkStd.inputConfig as InputConfig[],
+    plotConfig: autoPitchforkStd.plotConfig as PlotConfig[],
+    defaultInputs: { ...autoPitchforkStd.defaultInputs },
+    calculate: autoPitchforkStd.calculate,
+  },
+  {
+    id: 'chandelier',
+    group: 'standard',
+    name: 'Chandelier Exit',
+    shortName: 'Chandelier',
+    description: 'ATR trailing stops from the highest high and lowest low.',
+    category: 'Trend',
+    overlay: true,
+    metadata: chandelierStd.metadata,
+    inputConfig: chandelierStd.inputConfig as InputConfig[],
+    plotConfig: chandelierStd.plotConfig as PlotConfig[],
+    defaultInputs: { ...chandelierStd.defaultInputs },
+    calculate: chandelierStd.calculate,
+  },
+  {
+    id: 'correlation-coefficient',
+    group: 'standard',
+    name: 'Correlation Coefficient',
+    shortName: 'CC',
+    description: 'Correlation between the chart symbol and another symbol.',
+    category: 'Oscillators',
+    overlay: false,
+    metadata: correlationCoefficientStd.metadata,
+    inputConfig: correlationCoefficientStd.inputConfig as InputConfig[],
+    plotConfig: correlationCoefficientStd.plotConfig as PlotConfig[],
+    hlineConfig: correlationCoefficientStd.hlineConfig as HLineConfig[],
+    requiredSymbols: correlationCoefficientStd.requiredSymbols,
+    defaultInputs: { ...correlationCoefficientStd.defaultInputs },
+    calculate: correlationCoefficientStd.calculate,
+  },
+  {
+    id: 'gaps',
+    group: 'standard',
+    name: 'Gaps',
+    shortName: 'Gaps',
+    description: 'Boxes on price gaps until they are closed.',
+    category: 'Volatility',
+    overlay: true,
+    metadata: gapsStd.metadata,
+    inputConfig: gapsStd.inputConfig as InputConfig[],
+    plotConfig: gapsStd.plotConfig as PlotConfig[],
+    defaultInputs: { ...gapsStd.defaultInputs },
+    calculate: gapsStd.calculate,
+  },
+  {
+    id: 'kama',
+    group: 'standard',
+    name: "Kaufman's Adaptive Moving Average",
+    shortName: 'KAMA',
+    description: 'Moving average whose speed follows the efficiency ratio of the price.',
+    category: 'Moving Averages',
+    overlay: true,
+    metadata: kamaStd.metadata,
+    inputConfig: kamaStd.inputConfig as InputConfig[],
+    plotConfig: kamaStd.plotConfig as PlotConfig[],
+    defaultInputs: { ...kamaStd.defaultInputs },
+    calculate: kamaStd.calculate,
+  },
+  {
+    id: 'linreg-channel',
+    group: 'standard',
+    name: 'Linear Regression Channel',
+    shortName: 'LinReg',
+    description: 'Linear regression line with deviation bands on the last bars.',
+    category: 'Channels & Bands',
+    overlay: true,
+    metadata: linregChannelStd.metadata,
+    inputConfig: linregChannelStd.inputConfig as InputConfig[],
+    plotConfig: linregChannelStd.plotConfig as PlotConfig[],
+    defaultInputs: { ...linregChannelStd.defaultInputs },
+    calculate: linregChannelStd.calculate,
+  },
+  {
+    id: 'multi-time-period-charts',
+    group: 'standard',
+    name: 'Multi-Time Period Charts',
+    shortName: 'MTPC',
+    description: 'Higher-timeframe candles drawn as boxes on the chart.',
+    category: 'Trend',
+    overlay: true,
+    metadata: multiTimePeriodChartsStd.metadata,
+    inputConfig: multiTimePeriodChartsStd.inputConfig as InputConfig[],
+    plotConfig: multiTimePeriodChartsStd.plotConfig as PlotConfig[],
+    defaultInputs: { ...multiTimePeriodChartsStd.defaultInputs },
+    calculate: multiTimePeriodChartsStd.calculate,
+  },
+  {
+    id: 'performance',
+    group: 'standard',
+    name: 'Performance',
+    shortName: 'Performance',
+    description: 'Table of price changes over several periods for a list of symbols.',
+    category: 'Momentum',
+    overlay: false,
+    metadata: performanceStd.metadata,
+    inputConfig: performanceStd.inputConfig as InputConfig[],
+    plotConfig: performanceStd.plotConfig as PlotConfig[],
+    requiredSymbols: performanceStd.requiredSymbols,
+    defaultInputs: { ...performanceStd.defaultInputs },
+    calculate: performanceStd.calculate,
+  },
+  {
+    id: 'pivot-points-high-low',
+    group: 'standard',
+    name: 'Pivot Points High Low',
+    shortName: 'Pivots HL',
+    description: 'Labels on pivot highs and pivot lows.',
+    category: 'Trend',
+    overlay: true,
+    metadata: pivotPointsHighLowStd.metadata,
+    inputConfig: pivotPointsHighLowStd.inputConfig as InputConfig[],
+    plotConfig: pivotPointsHighLowStd.plotConfig as PlotConfig[],
+    defaultInputs: { ...pivotPointsHighLowStd.defaultInputs },
+    calculate: pivotPointsHighLowStd.calculate,
+  },
+  {
+    id: 'pivot-points-standard',
+    group: 'standard',
+    name: 'Pivot Points Standard',
+    shortName: 'Pivots',
+    description: 'Pivot levels of higher-timeframe periods (Traditional, Fibonacci, Woodie, Classic, DM, Camarilla).',
+    category: 'Channels & Bands',
+    overlay: true,
+    metadata: pivotPointsStandardStd.metadata,
+    inputConfig: pivotPointsStandardStd.inputConfig as InputConfig[],
+    plotConfig: pivotPointsStandardStd.plotConfig as PlotConfig[],
+    requiredSymbols: pivotPointsStandardStd.requiredSymbols,
+    defaultInputs: { ...pivotPointsStandardStd.defaultInputs },
+    calculate: pivotPointsStandardStd.calculate,
+  },
+  {
+    id: 'pmo',
+    group: 'standard',
+    name: 'Price Momentum Oscillator',
+    shortName: 'PMO',
+    description: 'Double-smoothed rate of change with a signal line.',
+    category: 'Momentum',
+    overlay: false,
+    metadata: pmoStd.metadata,
+    inputConfig: pmoStd.inputConfig as InputConfig[],
+    plotConfig: pmoStd.plotConfig as PlotConfig[],
+    hlineConfig: pmoStd.hlineConfig as HLineConfig[],
+    defaultInputs: { ...pmoStd.defaultInputs },
+    calculate: pmoStd.calculate,
+  },
+  {
+    id: 'rob-booker-ziv-ghost-pivots',
+    group: 'standard',
+    name: 'Rob Booker - Ziv Ghost Pivots',
+    shortName: 'Ghost Pivots',
+    description: 'Typical prices of the current 4-hour, day, week and month periods.',
+    category: 'Trend',
+    overlay: true,
+    metadata: robBookerZivGhostPivotsStd.metadata,
+    inputConfig: robBookerZivGhostPivotsStd.inputConfig as InputConfig[],
+    plotConfig: robBookerZivGhostPivotsStd.plotConfig as PlotConfig[],
+    requiredSymbols: robBookerZivGhostPivotsStd.requiredSymbols,
+    defaultInputs: { ...robBookerZivGhostPivotsStd.defaultInputs },
+    calculate: robBookerZivGhostPivotsStd.calculate,
+  },
+  {
+    id: 'rsi-divergence-indicator',
+    group: 'standard',
+    name: 'RSI Divergence Indicator',
+    shortName: 'RSI Divergence Indicator',
+    description: 'RSI with regular and hidden divergence lines and labels.',
+    category: 'Oscillators',
+    overlay: false,
+    metadata: rsiDivergenceIndicatorStd.metadata,
+    inputConfig: rsiDivergenceIndicatorStd.inputConfig as InputConfig[],
+    plotConfig: rsiDivergenceIndicatorStd.plotConfig as PlotConfig[],
+    hlineConfig: rsiDivergenceIndicatorStd.hlineConfig as HLineConfig[],
+    fillConfig: rsiDivergenceIndicatorStd.fillConfig as FillConfig[],
+    defaultInputs: { ...rsiDivergenceIndicatorStd.defaultInputs },
+    calculate: rsiDivergenceIndicatorStd.calculate,
+  },
+  {
+    id: 'seasonality',
+    group: 'standard',
+    name: 'Seasonality',
+    shortName: 'Seasonality',
+    description: 'Monthly price changes per year in a heatmap table, with averages.',
+    category: 'Momentum',
+    overlay: false,
+    metadata: seasonalityStd.metadata,
+    inputConfig: seasonalityStd.inputConfig as InputConfig[],
+    plotConfig: seasonalityStd.plotConfig as PlotConfig[],
+    requiredSymbols: seasonalityStd.requiredSymbols,
+    defaultInputs: { ...seasonalityStd.defaultInputs },
+    calculate: seasonalityStd.calculate,
+  },
+  {
+    id: 'smi',
+    group: 'standard',
+    name: 'Stochastic Momentum Index',
+    shortName: 'SMI',
+    description: 'Close relative to the midpoint of the high-low range, double smoothed.',
+    category: 'Oscillators',
+    overlay: false,
+    metadata: smiStd.metadata,
+    inputConfig: smiStd.inputConfig as InputConfig[],
+    plotConfig: smiStd.plotConfig as PlotConfig[],
+    hlineConfig: smiStd.hlineConfig as HLineConfig[],
+    fillConfig: smiStd.fillConfig as FillConfig[],
+    defaultInputs: { ...smiStd.defaultInputs },
+    calculate: smiStd.calculate,
+  },
+  {
+    id: 'technicals',
+    group: 'standard',
+    name: 'Technical Ratings',
+    shortName: 'Technicals',
+    description: 'Buy and sell rating from moving averages and oscillators.',
+    category: 'Oscillators',
+    overlay: false,
+    metadata: technicalsStd.metadata,
+    inputConfig: technicalsStd.inputConfig as InputConfig[],
+    plotConfig: technicalsStd.plotConfig as PlotConfig[],
+    hlineConfig: technicalsStd.hlineConfig as HLineConfig[],
+    requiredSymbols: technicalsStd.requiredSymbols,
+    defaultInputs: { ...technicalsStd.defaultInputs },
+    calculate: technicalsStd.calculate,
+  },
+  {
+    id: 'trading-sessions',
+    group: 'standard',
+    name: 'Trading Sessions',
+    shortName: 'Trading Sessions',
+    description: 'Ranges and averages of the Asian, London and New York sessions.',
+    category: 'Volatility',
+    overlay: true,
+    metadata: tradingSessionsStd.metadata,
+    inputConfig: tradingSessionsStd.inputConfig as InputConfig[],
+    plotConfig: tradingSessionsStd.plotConfig as PlotConfig[],
+    defaultInputs: { ...tradingSessionsStd.defaultInputs },
+    calculate: tradingSessionsStd.calculate,
+  },
+  {
+    id: 'visible-average-price',
+    group: 'standard',
+    name: 'Visible Average Price',
+    shortName: 'Avg Price',
+    description: 'Average price of the bars visible on the chart.',
+    category: 'Moving Averages',
+    overlay: true,
+    metadata: visibleAveragePriceStd.metadata,
+    inputConfig: visibleAveragePriceStd.inputConfig as InputConfig[],
+    plotConfig: visibleAveragePriceStd.plotConfig as PlotConfig[],
+    usesVisibleRange: true,
+    defaultInputs: { ...visibleAveragePriceStd.defaultInputs },
+    calculate: visibleAveragePriceStd.calculate,
+  },
+];
+
+export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart11, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10];
 
 // Chart context (third argument of calculate)
 export type { ChartContext, VisibleRange, SymbolRequest, SymbolInfo } from './chart-context';

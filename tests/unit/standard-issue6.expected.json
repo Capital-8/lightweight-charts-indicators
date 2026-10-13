@@ -1,0 +1,310 @@
+{
+  "24-hour-volume": {
+    "daily": {
+      "plots": {
+        "plot0": 3200
+      }
+    },
+    "m60": {
+      "plots": {
+        "plot0": 4000
+      }
+    }
+  },
+  "accumulation-distribution": {
+    "daily": {
+      "plots": {
+        "plot0": 3200
+      }
+    },
+    "m60": {
+      "plots": {
+        "plot0": 4000
+      }
+    }
+  },
+  "adr-bars": {
+    "daily": {
+      "plots": {
+        "plot0": 3192
+      }
+    },
+    "m60": {
+      "plots": {
+        "plot0": 3992
+      }
+    }
+  },
+  "auto-fib-extension": {
+    "daily": {
+      "plots": {},
+      "lines": 13,
+      "labels": 11,
+      "linefills": 10
+    },
+    "m60": {
+      "plots": {},
+      "lines": 13,
+      "labels": 11,
+      "linefills": 10
+    }
+  },
+  "auto-fib-retracement": {
+    "daily": {
+      "plots": {},
+      "lines": 54,
+      "labels": 11,
+      "linefills": 10
+    },
+    "m60": {
+      "plots": {},
+      "lines": 53,
+      "labels": 11,
+      "linefills": 10
+    }
+  },
+  "auto-pitchfork": {
+    "daily": {
+      "plots": {},
+      "lines": 6,
+      "linefills": 3
+    },
+    "m60": {
+      "plots": {},
+      "lines": 6,
+      "linefills": 3
+    }
+  },
+  "chandelier": {
+    "daily": {
+      "plots": {
+        "plot0": 3179,
+        "plot1": 3179
+      }
+    },
+    "m60": {
+      "plots": {
+        "plot0": 3979,
+        "plot1": 3979
+      }
+    }
+  },
+  "correlation-coefficient": {
+    "daily": {
+      "plots": {
+        "plot0": 3181
+      }
+    },
+    "m60": {
+      "error": "request.security needs the bars of GOOG (60): pass them with ChartContext.bars."
+    }
+  },
+  "gaps": {
+    "daily": {
+      "plots": {},
+      "tables": 1
+    },
+    "m60": {
+      "plots": {},
+      "tables": 1
+    }
+  },
+  "kama": {
+    "daily": {
+      "plots": {
+        "plot0": 3190
+      }
+    },
+    "m60": {
+      "plots": {
+        "plot0": 3990
+      }
+    }
+  },
+  "linreg-channel": {
+    "daily": {
+      "plots": {},
+      "lines": 3,
+      "labels": 1,
+      "linefills": 2
+    },
+    "m60": {
+      "plots": {},
+      "lines": 3,
+      "labels": 1,
+      "linefills": 2
+    }
+  },
+  "multi-time-period-charts": {
+    "daily": {
+      "plots": {},
+      "boxes": 457
+    },
+    "m60": {
+      "plots": {},
+      "boxes": 166
+    }
+  },
+  "performance": {
+    "daily": {
+      "plots": {},
+      "tables": 1
+    },
+    "m60": {
+      "error": "request.security needs the bars of  (1D), AAPL (1D), NASDAQ:AMZN (1D), EURUSD (1D), ES1! (1D), BTCUSD (1D): pass them with ChartContext.bars."
+    }
+  },
+  "pivot-points-high-low": {
+    "daily": {
+      "plots": {},
+      "labels": 209
+    },
+    "m60": {
+      "plots": {},
+      "labels": 264
+    }
+  },
+  "pivot-points-standard": {
+    "daily": {
+      "plots": {},
+      "lines": 165,
+      "labels": 165
+    },
+    "m60": {
+      "plots": {},
+      "lines": 165,
+      "labels": 165
+    }
+  },
+  "pmo": {
+    "daily": {
+      "plots": {
+        "plot0": 3199,
+        "plot1": 3199
+      }
+    },
+    "m60": {
+      "plots": {
+        "plot0": 3999,
+        "plot1": 3999
+      }
+    }
+  },
+  "rob-booker-ziv-ghost-pivots": {
+    "daily": {
+      "plots": {
+        "plot0": 3200
+      },
+      "markers": 12800
+    },
+    "m60": {
+      "plots": {
+        "plot0": 4000
+      },
+      "markers": 16000
+    }
+  },
+  "rsi-divergence-indicator": {
+    "daily": {
+      "plots": {
+        "plot0": 3186,
+        "plot1": 199,
+        "plot2": 199,
+        "plot3": 225,
+        "plot4": 225
+      },
+      "markers": 45
+    },
+    "m60": {
+      "plots": {
+        "plot0": 3986,
+        "plot1": 252,
+        "plot2": 252,
+        "plot3": 285,
+        "plot4": 285
+      },
+      "markers": 57
+    }
+  },
+  "seasonality": {
+    "daily": {
+      "plots": {
+        "plot0": 1009,
+        "plot1": 1009,
+        "plot2": 643,
+        "plot3": 3169
+      },
+      "boxes": 34,
+      "tables": 1
+    },
+    "m60": {
+      "plots": {
+        "plot0": 0,
+        "plot1": 0,
+        "plot2": 0,
+        "plot3": 3769
+      },
+      "tables": 1
+    }
+  },
+  "smi": {
+    "daily": {
+      "plots": {
+        "plot0": 3187,
+        "plot1": 3185,
+        "plot2": 3200
+      },
+      "fills": 2
+    },
+    "m60": {
+      "plots": {
+        "plot0": 3987,
+        "plot1": 3985,
+        "plot2": 4000
+      },
+      "fills": 2
+    }
+  },
+  "technicals": {
+    "daily": {
+      "plots": {
+        "plot0": 3191
+      },
+      "tables": 1,
+      "hlines": 4
+    },
+    "m60": {
+      "plots": {
+        "plot0": 3991
+      },
+      "tables": 1,
+      "hlines": 4
+    }
+  },
+  "trading-sessions": {
+    "daily": {
+      "error": "This indicator can only be used on intraday timeframes."
+    },
+    "m60": {
+      "plots": {},
+      "lines": 501,
+      "boxes": 501,
+      "labels": 501,
+      "linefills": 167
+    }
+  },
+  "visible-average-price": {
+    "daily": {
+      "plots": {
+        "plot0": 0
+      },
+      "lines": 1
+    },
+    "m60": {
+      "plots": {
+        "plot0": 0
+      },
+      "lines": 1
+    }
+  }
+}
