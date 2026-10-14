@@ -14,8 +14,12 @@
  * Based on the standard Auto Fib Retracement indicator.
  *
  * The prices of the texts are rounded to the symbol tick (format.mintick): the port reads it from the chart context
- * (third argument of calculate); without it the tick is 0.01. The crossing alerts are not ported. With fewer than
- * two pivots on the last bar the port throws the error message of the original.
+ * (third argument of calculate); without it the tick is 0.01. With fewer than two pivots on the last bar the port
+ * throws the error message of the original.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result): on each bar with a last leg, each level switched on that the
+ * close crossed since the previous close (the level strictly between the two closes) makes the call
+ * "Autofib: <ticker> crossing level <ratio>", once per bar.
  */
 
 import {
@@ -37,8 +41,8 @@ import {
   type ZigZagPivot,
   type ZigZagPoint,
 } from 'oakscriptjs';
-import type { LabelData, LineDrawingData, LinefillData } from '../types';
-import { mintickOf, type ChartContext } from '../chart-context';
+import type { AlertCall, LabelData, LineDrawingData, LinefillData } from '../types';
+import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
 
 type Line = ReturnType<typeof line.new>;
 type Label = ReturnType<typeof label.new>;
@@ -183,6 +187,8 @@ export interface AutoFibRetracementResult extends IndicatorResult {
   lines: LineDrawingData[];
   labels: LabelData[];
   linefills: LinefillData[];
+  /** The alert() calls: a level crossed by the close */
+  alertCalls: AlertCall[];
 }
 
 /** Pine float comparison: a > b only when a - b > 1e-10 */
@@ -205,7 +211,7 @@ export function calculate(
   const n = bars.length;
   const tick = mintickOf(chart);
   const meta = { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay };
-  if (n === 0) return { metadata: meta, plots: {}, lines: [], labels: [], linefills: [] };
+  if (n === 0) return { metadata: meta, plots: {}, lines: [], labels: [], linefills: [], alertCalls: [] };
 
   // Drawings use xloc.bar_time as the original: times in ms
   const toMs = chart?.timeUnit === 'ms' ? 1 : 1000;
@@ -228,6 +234,8 @@ export function calculate(
   let height = NaN;
   const levelLines = new Map<LevelKey, Line>();
   const levelLabels = new Map<LevelKey, Label>();
+  const alertCalls: AlertCall[] = [];
+  const ticker = tickerOf(chart);
 
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === n - 1);
@@ -280,6 +288,12 @@ export function calculate(
       const m = cfg[`value_${k}`];
       const css = cfg[`color_${k}`];
       const r = startPrice + height * m;
+      // _crossing_level(close, r): the level between this close and the previous one
+      const c0 = bars[i].close;
+      const c1 = i > 0 ? bars[i - 1].close : NaN;
+      if ((gt(r, c0) && gt(c1, r)) || (gt(c0, r) && gt(r, c1))) {
+        alertCalls.push({ time: bars[i].time, message: 'Autofib: ' + ticker + ' crossing level ' + str.tostring(m), freq: 'once_per_bar' });
+      }
       // _draw_line
       let id = levelLines.get(k);
       if (!id) {
@@ -316,7 +330,8 @@ export function calculate(
     lines: out.lines ?? [],
     labels: out.labels ?? [],
     linefills: out.linefills ?? [],
+    alertCalls,
   };
 }
 
-export const AutoFibRetracement = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const AutoFibRetracement = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction: true };

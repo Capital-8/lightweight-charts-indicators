@@ -1818,6 +1818,7 @@ export type {
   TableCellData,
   TableMergeData,
   TablePosition,
+  AlertCall,
 } from './types';
 export { barInterval, barTime } from './bar-time';
 
@@ -7010,6 +7011,11 @@ export interface IndicatorRegistryEntry {
    * result of `calculate` has an `alerts` array with, per condition id, the times of the bars on which it is true.
    */
   alertConditions?: { id: string; title: string; message?: string }[];
+  /**
+   * True when the indicator calls PineScript `alert()`: an alert can watch "Any alert() function call". The result of
+   * `calculate` then has an `alertCalls` array (bar time, message, frequency of each call).
+   */
+  hasAlertFunction?: boolean;
   /** `chart`: what the caller knows about the chart and its symbol (tick, time zone, ...), see ChartContext */
   calculate: (bars: Bar[], inputs?: any, chart?: ChartContext) => any;
 }
@@ -28859,6 +28865,7 @@ const registryPart11: IndicatorRegistryEntry[] = [
     inputConfig: autoFibExtensionStd.inputConfig as InputConfig[],
     plotConfig: autoFibExtensionStd.plotConfig as PlotConfig[],
     defaultInputs: { ...autoFibExtensionStd.defaultInputs },
+    hasAlertFunction: true,
     calculate: autoFibExtensionStd.calculate,
   },
   {
@@ -28873,6 +28880,7 @@ const registryPart11: IndicatorRegistryEntry[] = [
     inputConfig: autoFibRetracementStd.inputConfig as InputConfig[],
     plotConfig: autoFibRetracementStd.plotConfig as PlotConfig[],
     defaultInputs: { ...autoFibRetracementStd.defaultInputs },
+    hasAlertFunction: true,
     calculate: autoFibRetracementStd.calculate,
   },
   {
@@ -29159,4 +29167,4 @@ export {
 } from './other-symbol';
 
 // Package version
-export const version = '0.13.2';
+export const version = '0.13.3';

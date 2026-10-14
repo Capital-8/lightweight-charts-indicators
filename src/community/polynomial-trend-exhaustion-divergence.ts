@@ -292,7 +292,7 @@ export function calculate(
     const ohlc4 = (b.open + b.high + b.low + b.close) / 4;
     const hlcc4 = (b.high + b.low + b.close + b.close) / 4;
     const srcVals: Record<SourceType, number> = {
-      open: b.open, high: b.high, low: b.low, close: b.close, hl2, hlc3, ohlc4, hlcc4,
+      open: b.open, high: b.high, low: b.low, close: b.close, hl2, hlc3, ohlc4, hlcc4, volume: b.volume ?? NaN,
     };
     const src = srcVals[cfg.trendSource] ?? b.close;
     let rs: number;

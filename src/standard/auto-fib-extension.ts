@@ -13,13 +13,18 @@
  * Based on the standard Auto Fib Extension indicator.
  *
  * The prices of the texts are rounded to the symbol tick (format.mintick): the port reads it from the chart context
- * (third argument of calculate); without it the tick is 0.01. The crossing alerts are not ported. Without a valid
- * swing on the last bar the port throws the error message of the original.
+ * (third argument of calculate); without it the tick is 0.01. Without a valid swing on the last bar the port throws
+ * the error message of the original.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result): the levels exist on the last bar only (the swing is found
+ * there, as in the original), so the calls are on the last bar: each level switched on that the close crossed since
+ * the previous close (the level strictly between the two closes) makes the call
+ * "Autofib: <ticker> crossing level <ratio>", once per bar.
  */
 
 import { color, str, type Bar, type IndicatorResult, type InputConfig, type PlotConfig } from 'oakscriptjs';
-import type { LabelData, LineDrawingData, LinefillData } from '../types';
-import { mintickOf, type ChartContext } from '../chart-context';
+import type { AlertCall, LabelData, LineDrawingData, LinefillData } from '../types';
+import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
 
 /** Keys of the 22 levels, in the order of their inputs */
 const LEVEL_KEYS = [
@@ -155,6 +160,8 @@ export interface AutoFibExtensionResult extends IndicatorResult {
   lines: LineDrawingData[];
   labels: LabelData[];
   linefills: LinefillData[];
+  /** The alert() calls: a level crossed by the close on the last bar */
+  alertCalls: AlertCall[];
 }
 
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
@@ -190,6 +197,7 @@ export function calculate(
     lines: [],
     labels: [],
     linefills: [],
+    alertCalls: [],
   };
   if (n === 0) return empty;
 
@@ -307,6 +315,10 @@ export function calculate(
   const lastTime = bars[n - 1].time;
   const labelTime = left ? lineLast.time1 : !cfg.extendRight ? lineLast.time2 : lastTime;
   const fmt = (v: number) => str.tostring(v, 'mintick', tick);
+  const alertCalls: AlertCall[] = [];
+  const ticker = tickerOf(chart);
+  const c0 = bars[n - 1].close;
+  const c1 = n > 1 ? bars[n - 2].close : NaN;
 
   let other: LineDrawingData | null = null;
   for (const k of PROCESS_ORDER) {
@@ -314,6 +326,10 @@ export function calculate(
     const m = cfg[`value_${k}`];
     const css = cfg[`color_${k}`];
     const r = base + (cfg.reverse ? -1 : 1) * diff * m;
+    // _crossing_level(close, r): the level between the last close and the one before
+    if ((gt(r, c0) && gt(c1, r)) || (gt(c0, r) && gt(r, c1))) {
+      alertCalls.push({ time: bars[n - 1].time, message: 'Autofib: ' + ticker + ' crossing level ' + str.tostring(m), freq: 'once_per_bar' });
+    }
     // _draw_line: the line spans the last leg at the level price
     const id: LineDrawingData = {
       time1: lineLast.time1, price1: r, time2: lineLast.time2, price2: r, color: css, width: 1, extend: extending,
@@ -336,7 +352,7 @@ export function calculate(
     other = id;
   }
 
-  return { ...empty, lines, labels, linefills };
+  return { ...empty, lines, labels, linefills, alertCalls };
 }
 
-export const AutoFibExtension = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const AutoFibExtension = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction: true };
