@@ -1745,6 +1745,8 @@ export type { VolumeFootprintInputs } from './community/volume-footprint';
 
 // Candlestick Patterns
 import { candlestickPortIndicators, candlestickPortEntries, candlestickPortAllPatterns } from './candlestick-port/adapter';
+import { withReferenceNames } from './reference-names';
+export { REFERENCE_NAMES } from './reference-names';
 export { candlestickPortIndicators, candlestickPortEntries, candlestickPortAllPatterns } from './candlestick-port/adapter';
 
 // Individual candlestick pattern indicators (backed by the oakscriptjs 0.5.0 port)
@@ -29151,7 +29153,8 @@ const registryPart11: IndicatorRegistryEntry[] = [
   },
 ];
 
-export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart11, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10];
+// Built-in studies carry the reference app's names (reference-names.ts).
+export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart11, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10].map(withReferenceNames);
 
 // Chart context (third argument of calculate)
 export type { ChartContext, VisibleRange, SymbolRequest, SymbolInfo } from './chart-context';
