@@ -144,6 +144,20 @@ before, and the indicator pane keeps its height across a redraw.
 
 The demo page (`example/`) uses the same renderer.
 
+## Source Code of the Built-in Indicators
+
+`lightweight-charts-indicators/sources` gives the source code of every standard (built-in) indicator by registry id:
+a plain JavaScript module in the library's indicator shape (`metadata`, `inputConfig`, `plotConfig`, `defaultInputs`,
+`calculate`), with the registry's names in `metadata`. It imports only `oakscriptjs` and
+`lightweight-charts-indicators/helpers` (chart context accessors, higher-timeframe periods, other-symbol requests,
+lower-timeframe volume, bar times), so a host can show it, or run a copy of it as a user script by providing those two
+modules. The table is about 500 kB: load it on demand.
+
+```typescript
+const { builtinSource } = await import('lightweight-charts-indicators/sources');
+const rsiSource = builtinSource('rsi'); // string | undefined
+```
+
 ## Lightweight-Charts Integration Example
 
 Here's a complete example showing how to integrate indicators with lightweight-charts without the renderer:
