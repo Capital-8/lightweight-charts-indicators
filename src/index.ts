@@ -1821,6 +1821,8 @@ export type {
   TableMergeData,
   TablePosition,
   AlertCall,
+  OutputDecl,
+  OutputValues,
 } from './types';
 export { barInterval, barTime } from './bar-time';
 
@@ -6996,6 +6998,12 @@ export interface IndicatorRegistryEntry {
   plotCandleConfig?: { id: string; title: string }[];
   /** plotarrow settings by arrow id (minheight / maxheight / forceOverlay) of the `arrows` of the result */
   arrowConfig?: ArrowConfig[];
+  /**
+   * Its outputs in the order PineScript numbers them for alert messages ({{plot_<n>}}): line plots, shapes,
+   * characters and arrows as the reference script declares them; the values of the shapes / characters / arrows are in
+   * the result's `outputValues`. Unset: its line plots in plotConfig order.
+   */
+  outputs?: import('./types').OutputDecl[];
   defaultInputs: Record<string, unknown>;
   /**
    * True when the output depends on the bars visible on the chart (`leftVisibleBarTime` / `rightVisibleBarTime` of
@@ -7336,6 +7344,7 @@ const registryPart1: IndicatorRegistryEntry[] = [
     fillConfig: rsiIndicator.fillConfig as FillConfig[],
     defaultInputs: { ...rsiIndicator.defaultInputs },
     calculate: rsiIndicator.calculate,
+    outputs: rsiIndicator.outputs,
   },
   {
     id: 'stoch',
@@ -8230,6 +8239,7 @@ const registryPart1: IndicatorRegistryEntry[] = [
     plotConfig: williamsFractalsIndicator.plotConfig as PlotConfig[],
     defaultInputs: { ...williamsFractalsIndicator.defaultInputs },
     calculate: williamsFractalsIndicator.calculate,
+    outputs: williamsFractalsIndicator.outputs,
   },
   {
     id: 'twap',
@@ -8273,6 +8283,7 @@ const registryPart1: IndicatorRegistryEntry[] = [
     plotConfig: moonPhasesIndicator.plotConfig as PlotConfig[],
     defaultInputs: { ...moonPhasesIndicator.defaultInputs },
     calculate: moonPhasesIndicator.calculate,
+    outputs: moonPhasesIndicator.outputs,
   },
   // --- Wave 1 Community Indicators ---
   {
@@ -23485,6 +23496,7 @@ const registryPart5: IndicatorRegistryEntry[] = [
     plotConfig: upDownVolumeIndicator.plotConfig as PlotConfig[],
     defaultInputs: { ...upDownVolumeIndicator.defaultInputs },
     calculate: upDownVolumeIndicator.calculate,
+    outputs: upDownVolumeIndicator.outputs,
   },
   {
     id: 'auto-key-levels',
@@ -29058,6 +29070,7 @@ const registryPart11: IndicatorRegistryEntry[] = [
     requiredSymbols: robBookerZivGhostPivotsStd.requiredSymbols,
     defaultInputs: { ...robBookerZivGhostPivotsStd.defaultInputs },
     calculate: robBookerZivGhostPivotsStd.calculate,
+    outputs: robBookerZivGhostPivotsStd.outputs,
   },
   {
     id: 'rsi-divergence-indicator',
@@ -29074,6 +29087,7 @@ const registryPart11: IndicatorRegistryEntry[] = [
     fillConfig: rsiDivergenceIndicatorStd.fillConfig as FillConfig[],
     defaultInputs: { ...rsiDivergenceIndicatorStd.defaultInputs },
     calculate: rsiDivergenceIndicatorStd.calculate,
+    outputs: rsiDivergenceIndicatorStd.outputs,
   },
   {
     id: 'seasonality',
@@ -29170,4 +29184,4 @@ export {
 } from './other-symbol';
 
 // Package version
-export const version = '0.15.0';
+export const version = '0.15.1';

@@ -16,7 +16,7 @@
  */
 
 import { array, time as pineTime, periodClose, type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BgColorData } from '../types';
+import type { MarkerData, BgColorData, OutputDecl, OutputValues } from '../types';
 import type { ChartContext } from '../chart-context';
 import { chartTimeframe, hasCalendar } from '../anchor-period';
 
@@ -37,6 +37,13 @@ export const inputConfig: InputConfig[] = [
 
 // No line plots — rendered via markers and bgcolor
 export const plotConfig: PlotConfig[] = [];
+
+/** Reference outputs: plotshape(new moon) above the bar, plotshape(full moon) below it (the background colour is not
+ *  numbered). */
+export const outputs: OutputDecl[] = [
+  { kind: 'shape', id: 'newMoon', title: 'New Moon' },
+  { kind: 'shape', id: 'fullMoon', title: 'Full Moon' },
+];
 
 export const metadata = {
   title: 'Moon Phases',
@@ -137,9 +144,11 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<MoonPhasesInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<MoonPhasesInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; outputValues: OutputValues } {
   const { waxingMoonColor, waningMoonColor } = { ...defaultInputs, ...inputs };
   const markers: MarkerData[] = [];
+  const newMoon: { time: number; value: number }[] = [];
+  const fullMoon: { time: number; value: number }[] = [];
   const bgColors: BgColorData[] = [];
   // getLastNewMoon(time_close) in the exchange time zone with the chart context; else the open time in UTC
   const closes = closeTimes(bars, chart);
@@ -212,6 +221,10 @@ export function calculate(bars: Bar[], inputs: Partial<MoonPhasesInputs> = {}, c
       moonType = NaN;
     }
 
+    // The two shape conditions: 1 or 0 on every bar
+    newMoon.push({ time: bar.time as number, value: moonType === 1 ? 1 : 0 });
+    fullMoon.push({ time: bar.time as number, value: moonType === -1 ? 1 : 0 });
+
     // plotshape markers for new/full moons
     if (moonType === 1) {
       markers.push({
@@ -244,7 +257,8 @@ export function calculate(bars: Bar[], inputs: Partial<MoonPhasesInputs> = {}, c
     plots: {},
     markers,
     bgColors,
+    outputValues: { newMoon, fullMoon },
   };
 }
 
-export const MoonPhases = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const MoonPhases = { calculate, metadata, defaultInputs, inputConfig, plotConfig, outputs };

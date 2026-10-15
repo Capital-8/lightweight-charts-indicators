@@ -26,7 +26,7 @@
  */
 
 import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { MarkerData, OutputDecl, OutputValues } from '../types';
 import { lowerTimeframe, upDownVolumeOfChartBars } from '../lower-tf-volume';
 import type { ChartContext } from '../chart-context';
 
@@ -69,13 +69,14 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<UpDownVolumeInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; outputValues: OutputValues } {
   const { useCustomTimeframe, lowerTimeframe: customTimeframe } = { ...defaultInputs, ...inputs };
   const { exact } = lowerTimeframe(bars, useCustomTimeframe, customTimeframe, chart);
   const exactVolume = exact ? upDownVolumeOfChartBars(bars) : null;
   const up: { time: number; value: number }[] = [];
   const down: { time: number; value: number }[] = [];
   const markers: MarkerData[] = [];
+  const deltaValues: { time: number; value: number }[] = [];
 
   for (let i = 0; i < bars.length; i++) {
     let upVol: number;
@@ -97,6 +98,7 @@ export function calculate(
     up.push({ time: bars[i].time, value: upVol });
     down.push({ time: bars[i].time, value: -downVol }); // plotted below zero
     // plotchar(delta, "delta", "—", location.absolute, color = delta > 0 ? color.green : color.red, size = size.tiny)
+    deltaValues.push({ time: bars[i].time as number, value: delta });
     markers.push({
       time: bars[i].time,
       position: 'atPriceMiddle',
@@ -120,8 +122,16 @@ export function calculate(
       'plot1': down,
     },
     markers,
+    outputValues: { delta: deltaValues },
   };
 }
+
+/** Reference outputs: the two column plots, then the delta character. */
+export const outputs: OutputDecl[] = [
+  { kind: 'plot', id: 'plot0' },
+  { kind: 'plot', id: 'plot1' },
+  { kind: 'char', id: 'delta', title: 'Chars' },
+];
 
 export const UpDownVolume = {
   calculate,
@@ -129,4 +139,5 @@ export const UpDownVolume = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  outputs,
 };

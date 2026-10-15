@@ -20,7 +20,7 @@ import {
   ta, taCore, compare, getSourceSeries,
   type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { MarkerData, OutputDecl, OutputValues } from '../types';
 
 export interface RsiDivergenceIndicatorInputs {
   /** RSI Period */
@@ -112,7 +112,7 @@ type PlotPoint = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<RsiDivergenceIndicatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; outputValues: OutputValues } {
   const cfg = { ...defaultInputs, ...inputs };
   const { lbR, lbL, rangeUpper, rangeLower } = cfg;
   const n = bars.length;
@@ -153,6 +153,8 @@ export function calculate(
   const bearPlot = na();
   const hiddenBearPlot = na();
   const markers: MarkerData[] = [];
+  // The label shapes' series (cond ? osc[lbR] : na) on the bar they are computed on.
+  const labels: OutputValues = { bullLabel: [], hiddenBullLabel: [], bearLabel: [], hiddenBearLabel: [] };
 
   for (let i = 0; i < n; i++) {
     // Regular Bullish: oscHL = osc[lbR] > valuewhen(...) and inRangePl; priceLL = low[lbR] < valuewhen(...)
@@ -171,6 +173,15 @@ export function calculate(
     const oscHH = compare.gt(oscR[i], prevOscPh[i]) && inRangePh[i];
     const priceLH = compare.lt(highR[i], prevHighPh[i]);
     const hiddenBearCond = cfg.plotHiddenBear && priceLH && oscHH && phFound[i];
+
+    const at = bars[i].time as number;
+    const lv = oscR[i];
+    if (Number.isFinite(lv)) {
+      if (bullCond) labels.bullLabel.push({ time: at, value: lv });
+      if (hiddenBullCond) labels.hiddenBullLabel.push({ time: at, value: lv });
+      if (bearCond) labels.bearLabel.push({ time: at, value: lv });
+      if (hiddenBearCond) labels.hiddenBearLabel.push({ time: at, value: lv });
+    }
 
     // offset = -lbR: the value of bar i is drawn on bar i - lbR
     const j = i - lbR;
@@ -211,7 +222,21 @@ export function calculate(
       plot4: hiddenBearPlot,
     },
     markers,
+    outputValues: labels,
   };
 }
 
-export const RsiDivergenceIndicator = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig };
+/** Reference outputs: the RSI, then each divergence line followed by its label. */
+export const outputs: OutputDecl[] = [
+  { kind: 'plot', id: 'plot0' },
+  { kind: 'plot', id: 'plot1' },
+  { kind: 'shape', id: 'bullLabel', title: 'Regular Bullish Label' },
+  { kind: 'plot', id: 'plot2' },
+  { kind: 'shape', id: 'hiddenBullLabel', title: 'Hidden Bullish Label' },
+  { kind: 'plot', id: 'plot3' },
+  { kind: 'shape', id: 'bearLabel', title: 'Regular Bearish Label' },
+  { kind: 'plot', id: 'plot4' },
+  { kind: 'shape', id: 'hiddenBearLabel', title: 'Hidden Bearish Label' },
+];
+
+export const RsiDivergenceIndicator = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig, outputs };

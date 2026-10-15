@@ -22,7 +22,7 @@
  */
 
 import { mapToChart, timeframe, type Bar, type IndicatorResult, type InputConfig, type PlotConfig } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { MarkerData, OutputDecl, OutputValues } from '../types';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import { symbolBarsOf, tickeridOf, type ChartContext, type SymbolRequest } from '../chart-context';
 import { otherSymbolChart, securityOtherValues } from '../other-symbol';
@@ -100,7 +100,7 @@ export function requiredSymbols(inputs: Partial<RobBookerZivGhostPivotsInputs> =
 
 const hlc3 = (b: Bar) => (b.high + b.low + b.close) / 3;
 
-export function calculate(bars: Bar[], inputs: Partial<RobBookerZivGhostPivotsInputs> = {}, chart?: ChartContext): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<RobBookerZivGhostPivotsInputs> = {}, chart?: ChartContext): IndicatorResult & { outputValues: OutputValues } {
   const cfg = { ...defaultInputs, ...inputs };
   const chartTf = chartTimeframe(bars, chart);
   const chartSeconds = chartTf === '' ? NaN : timeframe.in_seconds(chartTf);
@@ -129,10 +129,12 @@ export function calculate(bars: Bar[], inputs: Partial<RobBookerZivGhostPivotsIn
   };
 
   const markers: MarkerData[] = [];
+  const outputValues: OutputValues = {};
   for (const p of PIVOTS) {
     // x = show == true ? request.security(...) : na
     if (!cfg[p.show]) continue;
     const values = security(p.tf);
+    outputValues[`pivot${p.tf}`] = bars.flatMap((b, i) => (Number.isFinite(values[i]) ? [{ time: b.time as number, value: values[i] }] : []));
     // plotchar(x, color = c, char = ch, text = "", location = location.absolute)
     bars.forEach((b, i) => {
       const v = values[i];
@@ -148,10 +150,18 @@ export function calculate(bars: Bar[], inputs: Partial<RobBookerZivGhostPivotsIn
       plot0: bars.map((b) => ({ time: b.time, value: b.close })),
     },
     markers,
+    outputValues,
   };
 }
 
+/** Reference outputs: the close line, then one character per period (4 hours, day, week, month). */
+export const outputs: OutputDecl[] = [
+  { kind: 'plot', id: 'plot0' },
+  ...PIVOTS.map((p): OutputDecl => ({ kind: 'char', id: `pivot${p.tf}`, title: 'Chars' })),
+];
+
 export const RobBookerZivGhostPivots = {
+  outputs,
   calculate,
   metadata,
   defaultInputs,

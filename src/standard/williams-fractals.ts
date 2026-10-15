@@ -6,7 +6,7 @@
  */
 
 import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { MarkerData, OutputDecl, OutputValues } from '../types';
 
 export interface WilliamsFractalsInputs {
   n: number;
@@ -23,13 +23,19 @@ export const inputConfig: InputConfig[] = [
 // No line plots — rendered via extended markers (triangleUp/triangleDown)
 export const plotConfig: PlotConfig[] = [];
 
+/** Reference outputs: plotshape(downFractal) (triangle down, below bar), then plotshape(upFractal) (above bar). */
+export const outputs: OutputDecl[] = [
+  { kind: 'shape', id: 'downFractal', title: 'Shapes' },
+  { kind: 'shape', id: 'upFractal', title: 'Shapes' },
+];
+
 export const metadata = {
   title: 'Williams Fractals',
   shortTitle: 'Fractals',
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<WilliamsFractalsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<WilliamsFractalsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; outputValues: OutputValues } {
   const { n } = { ...defaultInputs, ...inputs };
 
   const upFractalValues: number[] = new Array(bars.length).fill(NaN);
@@ -193,11 +199,15 @@ export function calculate(bars: Bar[], inputs: Partial<WilliamsFractalsInputs> =
     }
   }
 
+  // The conditions on the bar they are found on (n bars after the fractal, offset = -n): 1 or 0.
+  const condition = (values: number[]) => bars.map((b, t) => ({ time: b.time as number, value: t >= n && !isNaN(values[t - n]) ? 1 : 0 }));
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    outputValues: { downFractal: condition(downFractalValues), upFractal: condition(upFractalValues) },
   };
 }
 
-export const WilliamsFractals = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const WilliamsFractals = { calculate, metadata, defaultInputs, inputConfig, plotConfig, outputs };

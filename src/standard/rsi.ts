@@ -6,7 +6,7 @@
  */
 
 import { Series, ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type FillData, type Bar, type SourceType } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { MarkerData, OutputDecl, OutputValues } from '../types';
 
 export interface RSIInputs {
   length: number;
@@ -40,7 +40,23 @@ export const plotConfig: PlotConfig[] = [
   { id: 'plot1', title: 'RSI-based MA', color: '#E2CC00', lineWidth: 1 },
   { id: 'plot2', title: 'Upper Bollinger Band', color: '#089981', lineWidth: 1 },
   { id: 'plot3', title: 'Lower Bollinger Band', color: '#089981', lineWidth: 1 },
-  { id: 'plot6', title: 'Middle Line', color: 'transparent', lineWidth: 0, display: 'none' },
+  { id: 'plot6', title: 'Plot', color: 'transparent', lineWidth: 0, display: 'none' },
+  { id: 'plot4', title: 'Regular Bullish', color: '#4CAF50', lineWidth: 2, display: 'pane' },
+  { id: 'plot5', title: 'Regular Bearish', color: '#FF5252', lineWidth: 2, display: 'pane' },
+];
+
+/** Reference outputs: RSI, the mid line (plot(50), "Plot"), the MA, the bands, then each divergence line followed by
+ *  its label. */
+export const outputs: OutputDecl[] = [
+  { kind: 'plot', id: 'plot0' },
+  { kind: 'plot', id: 'plot6' },
+  { kind: 'plot', id: 'plot1' },
+  { kind: 'plot', id: 'plot2' },
+  { kind: 'plot', id: 'plot3' },
+  { kind: 'plot', id: 'plot4' },
+  { kind: 'shape', id: 'bullLabel', title: 'Regular Bullish Label' },
+  { kind: 'plot', id: 'plot5' },
+  { kind: 'shape', id: 'bearLabel', title: 'Regular Bearish Label' },
 ];
 
 export const hlineConfig: HLineConfig[] = [
@@ -59,7 +75,7 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers?: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers?: MarkerData[]; outputValues: OutputValues } {
   const { length, src, calculateDivergence, maType, maLength, bbMult } = { ...defaultInputs, ...inputs };
   const source = getSourceSeries(bars, src);
   const rsi = ta.rsi(source, length);
@@ -117,6 +133,11 @@ export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<In
 
   // Divergence detection
   const markers: MarkerData[] = [];
+  // Pine: plot(plFound ? rsiLBR : na, offset = -lookbackRight, color = bullCond ? bullColor : noneColor) and the
+  // bearish one; the labels' series (cond ? rsiLBR : na) on the bar they are computed on.
+  const bullLine: { time: number; value: number; color?: string }[] = bars.map((b) => ({ time: b.time, value: NaN }));
+  const bearLine: { time: number; value: number; color?: string }[] = bars.map((b) => ({ time: b.time, value: NaN }));
+  const labels: OutputValues = { bullLabel: [], bearLabel: [] };
 
   if (calculateDivergence) {
     const lookbackLeft = 5;
@@ -178,6 +199,12 @@ export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<In
         else if (!isNaN(plCalls)) plCalls++;
         rsiHL = plCalls >= rangeLower && plCalls <= rangeUpper;
       }
+      {
+        const prevLow = plLowVW[i];
+        const bull = plFound[i] && rsiHL && prevLow != null && lowLBR[i] < prevLow;
+        if (plFound[i] && rsiVal != null) bullLine[i - lookbackRight] = { time: bars[i - lookbackRight].time, value: rsiVal, color: bull ? '#4CAF50' : 'transparent' };
+        if (bull && rsiVal != null) labels.bullLabel.push({ time: bars[i].time as number, value: rsiVal });
+      }
       if (plFound[i] && rsiHL) {
         const prevLow = plLowVW[i];
         const priceLL = prevLow != null && lowLBR[i] < prevLow;
@@ -204,6 +231,12 @@ export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<In
         if (phFound[i - 1]) phCalls = 0;
         else if (!isNaN(phCalls)) phCalls++;
         rsiLH = phCalls >= rangeLower && phCalls <= rangeUpper;
+      }
+      {
+        const prevHigh = phHighVW[i];
+        const bear = phFound[i] && rsiLH && prevHigh != null && highLBR[i] > prevHigh;
+        if (phFound[i] && rsiVal != null) bearLine[i - lookbackRight] = { time: bars[i - lookbackRight].time, value: rsiVal, color: bear ? '#FF5252' : 'transparent' };
+        if (bear && rsiVal != null) labels.bearLabel.push({ time: bars[i].time as number, value: rsiVal });
       }
       if (phFound[i] && rsiLH) {
         const prevHigh = phHighVW[i];
@@ -233,10 +266,13 @@ export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<In
       'plot2': bbUpperData,
       'plot3': bbLowerData,
       'plot6': midlineData,
+      'plot4': bullLine,
+      'plot5': bearLine,
     },
     fills,
     markers: markers.length > 0 ? markers : undefined,
+    outputValues: labels,
   };
 }
 
-export const RSI = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig };
+export const RSI = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig, outputs };
