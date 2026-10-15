@@ -1746,6 +1746,8 @@ export type { VolumeFootprintInputs } from './community/volume-footprint';
 // Candlestick Patterns
 import { candlestickPortIndicators, candlestickPortEntries, candlestickPortAllPatterns } from './candlestick-port/adapter';
 import { withReferenceNames } from './reference-names';
+import { withValueFormat } from './value-formats';
+export { VALUE_FORMATS, type StudyFormat } from './value-formats';
 export { REFERENCE_NAMES } from './reference-names';
 export { candlestickPortIndicators, candlestickPortEntries, candlestickPortAllPatterns } from './candlestick-port/adapter';
 
@@ -7004,6 +7006,8 @@ export interface IndicatorRegistryEntry {
    * the result's `outputValues`. Unset: its line plots in plotConfig order.
    */
   outputs?: import('./types').OutputDecl[];
+  /** Format of its values (reference metaInfo format); unset: the symbol's price format. */
+  format?: import('./value-formats').StudyFormat;
   defaultInputs: Record<string, unknown>;
   /**
    * True when the output depends on the bars visible on the chart (`leftVisibleBarTime` / `rightVisibleBarTime` of
@@ -29168,7 +29172,7 @@ const registryPart11: IndicatorRegistryEntry[] = [
 ];
 
 // Built-in studies carry the reference app's names (reference-names.ts).
-export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart11, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10].map(withReferenceNames);
+export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart11, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10].map(withReferenceNames).map(withValueFormat);
 
 // Chart context (third argument of calculate)
 export type { ChartContext, VisibleRange, SymbolRequest, SymbolInfo } from './chart-context';
@@ -29184,4 +29188,4 @@ export {
 } from './other-symbol';
 
 // Package version
-export const version = '0.15.2';
+export const version = '0.15.3';
