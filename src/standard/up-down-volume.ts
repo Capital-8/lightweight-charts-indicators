@@ -130,7 +130,7 @@ export function calculate(
 export const outputs: OutputDecl[] = [
   { kind: 'plot', id: 'plot0' },
   { kind: 'plot', id: 'plot1' },
-  { kind: 'char', id: 'delta', title: 'Chars' },
+  { kind: 'char', id: 'delta', title: 'delta' },
 ];
 
 export const UpDownVolume = {

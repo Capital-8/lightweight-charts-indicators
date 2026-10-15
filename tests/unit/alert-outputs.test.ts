@@ -58,6 +58,7 @@ describe('alert outputs of the built-ins', () => {
 
   it('Up/Down Volume: the delta character after the two plots', () => {
     expect(UpDownVolume.outputs.map((o) => o.kind)).toEqual(['plot', 'plot', 'char']);
+    expect(UpDownVolume.outputs[2].title).toBe('delta');
     const r = UpDownVolume.calculate(bars);
     expect(r.outputValues.delta.length).toBeGreaterThan(0);
   });
