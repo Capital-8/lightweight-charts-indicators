@@ -3,7 +3,8 @@
  * only oakscriptjs and the helpers entry, carrying the registry's names, and computing what the registry computes.
  */
 import { describe, expect, it } from 'vitest';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
+import ts from 'typescript';
 import * as oak from 'oakscriptjs';
 import * as helpers from '../src/helpers';
 import { indicatorRegistry } from '../src/index';
@@ -66,6 +67,31 @@ describe('built-in sources', () => {
       expect(src, id).not.toMatch(/^\s*(export\s+)?(interface|type)\s+\w+/m);
     }
   });
+
+  it('type-checks as JavaScript (checkJs) with the types kept as JSDoc', () => {
+    const root = join(__dirname, '..');
+    const files = new Map(Object.entries(sources).map(([id, src]) => [join(root, '.sources-check', `${id}.js`), src]));
+    const options: ts.CompilerOptions = {
+      allowJs: true, checkJs: true, noEmit: true, skipLibCheck: true,
+      target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
+      lib: ['lib.esnext.d.ts'], baseUrl: root,
+      paths: { 'lightweight-charts-indicators/helpers': ['src/helpers.ts'] },
+    };
+    const host = ts.createCompilerHost(options);
+    const read = host.readFile.bind(host);
+    host.readFile = (f) => files.get(f.replace(/\//g, sep)) ?? files.get(f) ?? read(f);
+    const exists = host.fileExists.bind(host);
+    host.fileExists = (f) => files.has(f.replace(/\//g, sep)) || files.has(f) || exists(f);
+    const program = ts.createProgram([...files.keys()], options, host);
+    const checked = program.getSourceFiles().filter((f) => files.has(f.fileName.replace(/\//g, sep)));
+    expect(checked.length).toBe(files.size);
+    // The oakscriptjs types are read (a call with a wrong argument type is an error).
+    expect(program.getSourceFiles().some((f) => /oakscriptjs[\\/]dist/.test(f.fileName))).toBe(true);
+    const errors = ts.getPreEmitDiagnostics(program)
+      .filter((d) => d.category === ts.DiagnosticCategory.Error && d.file && files.has(d.file.fileName.replace(/\//g, sep)))
+      .map((d) => `${d.file!.fileName.split(/[\\/]/).pop()}: ${ts.flattenDiagnosticMessageText(d.messageText, ' ').slice(0, 160)}`);
+    expect(errors).toEqual([]);
+  }, 120_000);
 
   it('declares the names and shape of its registry entry, and computes the same plots', async () => {
     const data = bars(400);

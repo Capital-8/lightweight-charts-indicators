@@ -40,9 +40,98 @@ export function referenceNames(namesSource) {
 
 const quote = (s) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
+/**
+ * The TypeScript source with its types kept as JSDoc, so the JavaScript type-checks as the TypeScript did (an
+ * editor checking JS sees no error where the literal types were erased, e.g. `src: 'close'` read as a string):
+ * interfaces and type aliases -> `@typedef` (one block before the first statement after the imports), typed
+ * variables -> `@type`. Imported types become `import('<module>').Name` (library-internal ones `any`).
+ */
+export function withJsDocTypes(tsSource) {
+  const sf = ts.createSourceFile('source.ts', tsSource, ts.ScriptTarget.ES2022, true);
+  const imported = new Map();
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st)) continue;
+    const spec = st.moduleSpecifier.text;
+    const named = st.importClause?.namedBindings;
+    if (named && ts.isNamedImports(named)) {
+      for (const el of named.elements) imported.set(el.name.text, { spec, name: (el.propertyName ?? el.name).text });
+    }
+  }
+  const moduleOf = (spec) => {
+    if (spec.startsWith('oakscriptjs')) return spec;
+    const m = spec.match(/^\.\.\/([\w-]+)$/);
+    return m && HELPER_MODULES.has(m[1]) ? HELPERS_SPEC : null;
+  };
+  const typeText = (node) => {
+    // Identifiers of the type (not property names, not inside string literals) that were imported.
+    const edits = [];
+    const visit = (n) => {
+      const id = ts.isTypeReferenceNode(n) && ts.isIdentifier(n.typeName) ? n.typeName
+        : ts.isExpressionWithTypeArguments(n) && ts.isIdentifier(n.expression) ? n.expression : null;
+      if (id) {
+        const im = imported.get(id.text);
+        if (im) {
+          const mod = moduleOf(im.spec);
+          edits.push([id.getStart(sf), id.getEnd(), mod ? `import('${mod}').${im.name}` : 'any']);
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(node);
+    let text = tsSource.slice(node.getStart(sf), node.getEnd());
+    const base = node.getStart(sf);
+    for (const [s, e, r] of edits.sort((a, b) => b[0] - a[0])) text = text.slice(0, s - base) + r + text.slice(e - base);
+    // A type that reads another library file cannot be written for the script: none.
+    if (/import\(\s*['"]\./.test(text)) return null;
+    // One line, comments dropped (a JSDoc type cannot hold them).
+    return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+  };
+  const typedefs = [];
+  const inserts = [];
+  const visit = (n) => {
+    if (ts.isInterfaceDeclaration(n)) {
+      const members = n.members.map((m) => (typeText(m) ?? `${m.name?.getText(sf) ?? ''}: any`).replace(/[;,]$/, '')).join('; ');
+      const bases = (n.heritageClauses ?? []).flatMap((h) => h.types.map((t) => typeText(t) ?? 'any'));
+      typedefs.push(`@typedef {${[...bases, `{ ${members} }`].join(' & ')}} ${n.name.text}`);
+    } else if (ts.isTypeAliasDeclaration(n) && !n.typeParameters) {
+      typedefs.push(`@typedef {${typeText(n.type) ?? 'any'}} ${n.name.text}`);
+    } else if (ts.isVariableStatement(n) && n.declarationList.declarations.length === 1) {
+      const d = n.declarationList.declarations[0];
+      let t = d.type && typeText(d.type);
+      // `const x = f<T>(...)`: the type argument is erased with the types, keep it as the call's return type.
+      const init = d.initializer;
+      if (!t && init && ts.isCallExpression(init) && init.typeArguments?.length && ts.isIdentifier(init.expression)) {
+        const args = init.typeArguments.map((a) => typeText(a));
+        if (args.every(Boolean)) t = `ReturnType<typeof ${init.expression.text}<${args.join(', ')}>>`;
+      }
+      if (t) inserts.push([n.getStart(sf), `/** @type {${t}} */ `]);
+    } else if ((ts.isFunctionDeclaration(n) && n.name) || ts.isArrowFunction(n)) {
+      if (!n.typeParameters) {
+        const tags = [];
+        for (const p of n.parameters) {
+          const t = p.type && ts.isIdentifier(p.name) && typeText(p.type);
+          if (t) tags.push(`@param {${t}${p.questionToken || p.initializer ? '=' : ''}} ${p.name.text}`);
+        }
+        const r = n.type && typeText(n.type);
+        if (r) tags.push(`@returns {${r}}`);
+        if (tags.length) inserts.push([n.getStart(sf), `/** ${tags.join(' ')} */ `]);
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  if (typedefs.length) {
+    const first = sf.statements.find((s) => !ts.isImportDeclaration(s) && !ts.isInterfaceDeclaration(s) && !ts.isTypeAliasDeclaration(s));
+    if (first) inserts.push([first.getStart(sf), `/**\n${typedefs.map((t) => ` * ${t}`).join('\n')}\n */\n`]);
+  }
+  let out = tsSource;
+  for (const [pos, text] of inserts.sort((a, b) => b[0] - a[0])) out = out.slice(0, pos) + text + out.slice(pos);
+  return out;
+}
+
 /** JavaScript source of one standard indicator file. `names`: [title, shortTitle] the registry shows, if any. */
 export function scriptSource(tsSource, names) {
-  const js = ts.transpileModule(tsSource, {
+  const js = ts.transpileModule(withJsDocTypes(tsSource), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, removeComments: false },
   }).outputText;
   let out = js
