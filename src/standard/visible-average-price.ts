@@ -14,7 +14,7 @@
  * scrolls or zooms. Without these values the range is all the bars. When no bar is in the range there is no line.
  */
 
-import { array, type Bar, type IndicatorResult, type InputConfig, type PlotConfig, type SourceType } from 'oakscriptjs';
+import { array, type Bar, type IndicatorResult, type InputConfig, type PlotConfig, type SourceType, getSource } from 'oakscriptjs';
 import type { LineDrawingData } from '../types';
 import { visibleRangeOf, type ChartContext } from '../chart-context';
 
@@ -47,21 +47,6 @@ export const usesVisibleRange = true;
 /** plot(..., offset = -100000) */
 const PLOT_OFFSET = -100000;
 
-/** Source value of a bar (input.source: the price sources and volume) */
-function sourceOf(b: Bar, source: SourceType | 'volume'): number {
-  switch (source) {
-    case 'open': return b.open;
-    case 'high': return b.high;
-    case 'low': return b.low;
-    case 'hl2': return (b.high + b.low) / 2;
-    case 'hlc3': return (b.high + b.low + b.close) / 3;
-    case 'ohlc4': return (b.open + b.high + b.low + b.close) / 4;
-    case 'hlcc4': return (b.high + b.low + b.close + b.close) / 4;
-    case 'volume': return b.volume ?? NaN;
-    default: return b.close;
-  }
-}
-
 export function calculate(
   bars: Bar[],
   inputs: Partial<VisibleAveragePriceInputs> = {},
@@ -76,10 +61,11 @@ export function calculate(
   // var float[] src_vals = array.new<float>()
   // if time >= timeLeft and time <= timeRight: array.unshift(src_vals, src)
   const srcVals = array.new_float();
-  for (const b of bars) {
+  const values = getSource(bars, src as SourceType);
+  bars.forEach((b, i) => {
     const t = (b.time as number) * toMs;
-    if (t >= leftTime && t <= rightTime) array.unshift(srcVals, sourceOf(b, src));
-  }
+    if (t >= leftTime && t <= rightTime) array.unshift(srcVals, values[i]);
+  });
   // avgSRC = array.avg(src_vals) on the last bar (na values skipped; na while the list is empty)
   const last = n > 0 ? array.avg(srcVals) : NaN;
 

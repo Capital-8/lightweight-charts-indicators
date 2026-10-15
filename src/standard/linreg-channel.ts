@@ -18,7 +18,7 @@
  * Based on the standard Linear Regression Channel indicator.
  */
 
-import { str, color, type Bar, type IndicatorResult, type InputConfig, type PlotConfig } from 'oakscriptjs';
+import { str, color, type Bar, type IndicatorResult, type InputConfig, type PlotConfig, getSource } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, LinefillData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 
@@ -85,20 +85,6 @@ const gt = (a: number, b: number) => a - b > 1e-10;
 /** Pine float equality: within 1e-10 */
 const eq = (a: number, b: number) => Math.abs(a - b) <= 1e-10;
 
-function sourceOf(bar: Bar, src: LinRegChannelSource): number {
-  switch (src) {
-    case 'open': return bar.open;
-    case 'high': return bar.high;
-    case 'low': return bar.low;
-    case 'hl2': return (bar.high + bar.low) / 2;
-    case 'hlc3': return (bar.high + bar.low + bar.close) / 3;
-    case 'hlcc4': return (bar.high + bar.low + bar.close + bar.close) / 4;
-    case 'ohlc4': return (bar.open + bar.high + bar.low + bar.close) / 4;
-    case 'volume': return bar.volume ?? NaN;
-    default: return bar.close;
-  }
-}
-
 export function calculate(
   bars: Bar[],
   inputs: Partial<LinRegChannelInputs> = {},
@@ -118,7 +104,9 @@ export function calculate(
   if (n === 0 || length <= 1) return result;
 
   // source[i]: na before the first bar
-  const src = (i: number) => (last - i >= 0 ? sourceOf(bars[last - i], cfg.source) : NaN);
+  // (another source of the chart for a study on study: the host's values)
+  const srcValues = getSource(bars, cfg.source as never);
+  const src = (i: number) => (last - i >= 0 ? srcValues[last - i] : NaN);
   const high = (i: number) => (last - i >= 0 ? bars[last - i].high : NaN);
   const low = (i: number) => (last - i >= 0 ? bars[last - i].low : NaN);
 

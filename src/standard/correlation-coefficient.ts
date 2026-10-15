@@ -14,7 +14,7 @@
  * UTC rule of the library is used.
  */
 
-import { ta, Series, type Bar, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type SourceType } from 'oakscriptjs';
+import { ta, Series, type Bar, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type SourceType, getSource } from 'oakscriptjs';
 import { symbolBarsOf, type ChartContext, type SymbolRequest } from '../chart-context';
 import { chartTimeframe } from '../anchor-period';
 import { otherSymbolChart, securityOtherValues } from '../other-symbol';
@@ -88,7 +88,7 @@ export function calculate(bars: Bar[], inputs: Partial<CorrelationCoefficientInp
   const requested = securityOtherValues(bars, other, '', sourceOf(other, source), otherSymbolChart(bars, chart),
     { other: chart?.symbolInfo?.(symbol) });
   // correlation = ta.correlation(sourceInput, requestedData, lengthInput)
-  const correlation = ta.correlation(Series.fromArray(bars, sourceOf(bars, source)), Series.fromArray(bars, requested), length)
+  const correlation = ta.correlation(Series.fromArray(bars, getSource(bars, source as SourceType)), Series.fromArray(bars, requested), length)
     .toArray();
 
   return {
