@@ -56,11 +56,11 @@ export function calculate(
     }
     if (isHigh) {
       highPivots.push({ barIndex: i, price: bars[i].high });
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: RESISTANCE });
+      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: RESISTANCE, id: 'pivotHigh' });
     }
     if (isLow) {
       lowPivots.push({ barIndex: i, price: bars[i].low });
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: SUPPORT });
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: SUPPORT, id: 'pivotLow' });
     }
   }
 

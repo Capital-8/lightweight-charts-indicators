@@ -7,9 +7,11 @@
  * library for better performance and more idiomatic TypeScript code.
  */
 
-import type { Bar, InputConfig, PlotConfig, HLineConfig, FillConfig, ArrowConfig } from 'oakscriptjs';
+import type { Bar, InputConfig, PlotConfig, HLineConfig, FillConfig, ArrowConfig, ShapeConfig, BarColorConfig } from 'oakscriptjs';
+import type { PlotCandleDecl } from './style-apply';
+import type { StudyDrawingKind } from './style-outputs';
 import type { ChartContext, SymbolRequest } from './chart-context';
-export type { InputConfig, PlotConfig, HLineConfig, FillConfig } from 'oakscriptjs';
+export type { InputConfig, PlotConfig, HLineConfig, FillConfig, ShapeConfig, BarColorConfig, CandleConfig } from 'oakscriptjs';
 
 // SMA - Simple Moving Average
 import * as smaIndicator from './standard/sma';
@@ -1747,8 +1749,11 @@ export type { VolumeFootprintInputs } from './community/volume-footprint';
 import { candlestickPortIndicators, candlestickPortEntries, candlestickPortAllPatterns } from './candlestick-port/adapter';
 import { withReferenceNames } from './reference-names';
 import { withValueFormat } from './value-formats';
+import { withStyleOutputs } from './style-apply';
 export { VALUE_FORMATS, type StudyFormat } from './value-formats';
 export { REFERENCE_NAMES } from './reference-names';
+export { STYLE_OUTPUTS, type StyleOutputs, type StudyDrawingKind } from './style-outputs';
+export type { PlotCandleDecl } from './style-apply';
 export { candlestickPortIndicators, candlestickPortEntries, candlestickPortAllPatterns } from './candlestick-port/adapter';
 
 // Individual candlestick pattern indicators (backed by the oakscriptjs 0.5.0 port)
@@ -6997,9 +7002,18 @@ export interface IndicatorRegistryEntry {
   plotConfig: PlotConfig[];
   hlineConfig?: HLineConfig[];
   fillConfig?: FillConfig[];
-  plotCandleConfig?: { id: string; title: string }[];
+  /** Its candles (plotcandle) by id of the result's `plotCandles`: title, colours (a single colour or a palette) */
+  plotCandleConfig?: PlotCandleDecl[];
   /** plotarrow settings by arrow id (minheight / maxheight / forceOverlay) of the `arrows` of the result */
   arrowConfig?: ArrowConfig[];
+  /** Its shape / character outputs (plotshape / plotchar): the `id` of their markers in the result, title, defaults */
+  shapeConfig?: ShapeConfig[];
+  /** Markers that are not in `shapeConfig` are drawings of this kind (the reference draws them as labels) */
+  markerDrawing?: StudyDrawingKind;
+  /** Its background / bar colour outputs (bgcolor / barcolor): the `id` of their entries in the result */
+  barColorConfig?: BarColorConfig[];
+  /** The kinds of drawing objects it creates (labels, lines, boxes, ...): one show / hide row per kind */
+  drawingKinds?: StudyDrawingKind[];
   /**
    * Its outputs in the order PineScript numbers them for alert messages ({{plot_<n>}}): line plots, shapes,
    * characters and arrows as the reference script declares them; the values of the shapes / characters / arrows are in
@@ -29172,7 +29186,7 @@ const registryPart11: IndicatorRegistryEntry[] = [
 ];
 
 // Built-in studies carry the reference app's names (reference-names.ts).
-export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart11, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10].map(withReferenceNames).map(withValueFormat);
+export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart11, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10].map(withReferenceNames).map(withValueFormat).map(withStyleOutputs);
 
 // Chart context (third argument of calculate)
 export type { ChartContext, VisibleRange, SymbolRequest, SymbolInfo } from './chart-context';
@@ -29188,4 +29202,4 @@ export {
 } from './other-symbol';
 
 // Package version
-export const version = '0.15.4';
+export const version = '0.16.0';

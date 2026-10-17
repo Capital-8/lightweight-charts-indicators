@@ -185,6 +185,7 @@ export function calculate(bars: Bar[], inputs: Partial<WilliamsFractalsInputs> =
         position: 'aboveBar',
         shape: 'triangleUp',
         color: '#009688',
+        id: 'upFractal',
         size: 1,
       });
     }
@@ -194,6 +195,7 @@ export function calculate(bars: Bar[], inputs: Partial<WilliamsFractalsInputs> =
         position: 'belowBar',
         shape: 'triangleDown',
         color: '#F44336',
+        id: 'downFractal',
         size: 1,
       });
     }

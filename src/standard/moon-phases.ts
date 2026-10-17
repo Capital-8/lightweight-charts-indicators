@@ -232,6 +232,7 @@ export function calculate(bars: Bar[], inputs: Partial<MoonPhasesInputs> = {}, c
         position: 'aboveBar',
         shape: 'circle',
         color: hexToRgba(waxingMoonColor, 0.5),
+        id: 'newMoon',
       });
     } else if (moonType === -1) {
       markers.push({
@@ -239,6 +240,7 @@ export function calculate(bars: Bar[], inputs: Partial<MoonPhasesInputs> = {}, c
         position: 'belowBar',
         shape: 'circle',
         color: hexToRgba(waningMoonColor, 0.5),
+        id: 'fullMoon',
       });
     }
 

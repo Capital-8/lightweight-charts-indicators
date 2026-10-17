@@ -2,7 +2,8 @@
  * Builds `dist/sources.mjs` (+ `.d.ts`): the source code of every standard (built-in) indicator as a plain
  * JavaScript module that a host can show, copy and run as a user script. Each source is its `src/standard/*.ts` file
  * with the types removed, the library's relative helper imports pointed at `lightweight-charts-indicators/helpers`,
- * and the titles the registry gives the study (reference-names.ts) in its metadata.
+ * the titles the registry gives the study (reference-names.ts) in its metadata, and its Style-settings declarations
+ * (style-outputs.ts) after the module's own.
  *
  *   node scripts/build-sources.mjs            -> writes dist/sources.mjs + dist/sources.d.ts
  */
@@ -36,6 +37,37 @@ export function referenceNames(namesSource) {
     out.set(m[1], [JSON.parse(`"${m[2]}"`), JSON.parse(`"${m[3]}"`)]);
   }
   return out;
+}
+
+/** The Style-settings table of style-outputs.ts (id -> declarations). */
+export function styleOutputs(stylesSource) {
+  const out = new Map();
+  for (const m of stylesSource.matchAll(/^  "([^"]+)": (\{.*\}),$/gm)) out.set(m[1], JSON.parse(m[2]));
+  return out;
+}
+
+/**
+ * Statements that give a source the Style declarations of its registry entry (what style-apply.ts does to the
+ * entry): plots not listed, hline titles, fills, shapes, background / bar colours, candles, drawing kinds.
+ */
+export function styleStatements(js, decl) {
+  // (a JSDoc type may precede the declaration on its line)
+  const has = (name) => new RegExp(`\\bconst ${name}\\b`).test(js);
+  const json = (v) => JSON.stringify(v);
+  const lines = [];
+  if (decl.hiddenPlots?.length) lines.push(`for (const p of plotConfig) if (${json(decl.hiddenPlots)}.includes(p.id)) p.editable = false;`);
+  if (decl.hlines && has('hlineConfig')) lines.push(`for (const h of hlineConfig) Object.assign(h, ${json(decl.hlines)}[h.id] ?? {});`);
+  if (decl.fills?.length) {
+    if (has('fillConfig')) {
+      lines.push(`for (const d of ${json(decl.fills)}) {`, '  const f = fillConfig.find((x) => x.id === d.id);', '  if (f) Object.assign(f, d);', '  else fillConfig.push(d);', '}');
+    } else lines.push(`export const fillConfig = ${json(decl.fills)};`);
+  }
+  if (decl.shapes?.length && !has('shapeConfig')) lines.push(`export const shapeConfig = ${json(decl.shapes)};`);
+  if (decl.markerDrawing && !has('markerDrawing')) lines.push(`export const markerDrawing = ${json(decl.markerDrawing)};`);
+  if (decl.barColors?.length && !has('barColorConfig')) lines.push(`export const barColorConfig = ${json(decl.barColors)};`);
+  if (decl.candles && has('plotCandleConfig')) lines.push(`for (const c of plotCandleConfig) Object.assign(c, ${json(decl.candles)}[c.id] ?? {});`);
+  if (decl.drawings?.length && !has('drawingKinds')) lines.push(`export const drawingKinds = ${json(decl.drawings)};`);
+  return lines.length ? `\n// Style settings of the study: the outputs a user can style and their defaults.\n${lines.join('\n')}\n` : '';
 }
 
 const quote = (s) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
@@ -129,8 +161,9 @@ export function withJsDocTypes(tsSource) {
   return out;
 }
 
-/** JavaScript source of one standard indicator file. `names`: [title, shortTitle] the registry shows, if any. */
-export function scriptSource(tsSource, names) {
+/** JavaScript source of one standard indicator file. `names`: [title, shortTitle] the registry shows, if any;
+ *  `styles`: its Style-settings declarations, if any. */
+export function scriptSource(tsSource, names, styles) {
   const js = ts.transpileModule(withJsDocTypes(tsSource), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, removeComments: false },
   }).outputText;
@@ -149,6 +182,7 @@ export function scriptSource(tsSource, names) {
         .replace(/(\n\s*shortTitle: )(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/, `$1${quote(names[1])}`),
     );
   }
+  if (styles) out += styleStatements(out, styles);
   return out;
 }
 
@@ -156,9 +190,10 @@ export function scriptSource(tsSource, names) {
 export function buildSources(root = ROOT) {
   const index = readFileSync(join(root, 'src/index.ts'), 'utf8');
   const names = referenceNames(readFileSync(join(root, 'src/reference-names.ts'), 'utf8'));
+  const styles = styleOutputs(readFileSync(join(root, 'src/style-outputs.ts'), 'utf8'));
   const sources = {};
   for (const [id, file] of standardFiles(index)) {
-    sources[id] = scriptSource(readFileSync(join(root, 'src/standard', `${file}.ts`), 'utf8'), names.get(id));
+    sources[id] = scriptSource(readFileSync(join(root, 'src/standard', `${file}.ts`), 'utf8'), names.get(id), styles.get(id));
   }
   return sources;
 }

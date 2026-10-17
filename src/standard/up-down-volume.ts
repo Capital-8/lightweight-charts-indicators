@@ -104,10 +104,10 @@ export function calculate(
       position: 'atPriceMiddle',
       price: delta,
       shape: 'circle',
-      color: 'transparent',
-      text: '—',
-      textColor: gt(delta, 0) ? '#4CAF50' : '#F23645',
+      char: '—',
+      color: gt(delta, 0) ? '#4CAF50' : '#F23645',
       size: 'tiny',
+      id: 'delta',
     });
   }
 

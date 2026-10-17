@@ -139,7 +139,7 @@ export function calculate(bars: Bar[], inputs: Partial<RobBookerZivGhostPivotsIn
     bars.forEach((b, i) => {
       const v = values[i];
       if (!Number.isFinite(v)) return;
-      markers.push({ time: b.time as number, position: 'atPriceMiddle', price: v, shape: 'circle', char: p.char, color: p.color });
+      markers.push({ time: b.time as number, position: 'atPriceMiddle', price: v, shape: 'circle', char: p.char, color: p.color, id: `pivot${p.tf}` });
     });
   }
 

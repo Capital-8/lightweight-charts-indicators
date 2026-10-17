@@ -199,16 +199,16 @@ export function calculate(
     // plotshape(cond ? osc[lbR] : na, style = shape.labelup / labeldown, location = location.absolute)
     if (!Number.isFinite(v)) continue;
     if (bullCond) {
-      markers.push({ time, position: 'atPriceBottom', price: v, shape: 'labelUp', color: BULL_COLOR, text: ' Bull ', textColor: TEXT_COLOR });
+      markers.push({ time, position: 'atPriceBottom', price: v, shape: 'labelUp', color: BULL_COLOR, text: ' Bull ', textColor: TEXT_COLOR, id: 'bullLabel' });
     }
     if (hiddenBullCond) {
-      markers.push({ time, position: 'atPriceBottom', price: v, shape: 'labelUp', color: BULL_COLOR, text: ' H Bull ', textColor: TEXT_COLOR });
+      markers.push({ time, position: 'atPriceBottom', price: v, shape: 'labelUp', color: BULL_COLOR, text: ' H Bull ', textColor: TEXT_COLOR, id: 'hiddenBullLabel' });
     }
     if (bearCond) {
-      markers.push({ time, position: 'atPriceTop', price: v, shape: 'labelDown', color: BEAR_COLOR, text: ' Bear ', textColor: TEXT_COLOR });
+      markers.push({ time, position: 'atPriceTop', price: v, shape: 'labelDown', color: BEAR_COLOR, text: ' Bear ', textColor: TEXT_COLOR, id: 'bearLabel' });
     }
     if (hiddenBearCond) {
-      markers.push({ time, position: 'atPriceTop', price: v, shape: 'labelDown', color: BEAR_COLOR, text: ' H Bear ', textColor: TEXT_COLOR });
+      markers.push({ time, position: 'atPriceTop', price: v, shape: 'labelDown', color: BEAR_COLOR, text: ' H Bear ', textColor: TEXT_COLOR, id: 'hiddenBearLabel' });
     }
   }
 

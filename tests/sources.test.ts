@@ -101,6 +101,10 @@ describe('built-in sources', () => {
       expect(mod.metadata.shortTitle, entry.id).toBe(entry.metadata.shortTitle);
       expect(mod.inputConfig, entry.id).toEqual(entry.inputConfig);
       expect(mod.plotConfig, entry.id).toEqual(entry.plotConfig);
+      // The Style-settings declarations of the entry (style-outputs.ts).
+      for (const key of ['hlineConfig', 'fillConfig', 'shapeConfig', 'barColorConfig', 'markerDrawing', 'drawingKinds'] as const) {
+        if (entry[key] !== undefined) expect(mod[key], `${entry.id} ${key}`).toEqual(entry[key]);
+      }
       expect(typeof mod.calculate, entry.id).toBe('function');
       if (entry.requiredSymbols) continue; // reads other symbols' bars
       let expected: any;
