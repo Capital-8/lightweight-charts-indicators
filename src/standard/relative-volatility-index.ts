@@ -41,13 +41,13 @@ export const plotConfig: PlotConfig[] = [
 ];
 
 export const hlineConfig: HLineConfig[] = [
-  { id: 'hline_upper', price: 80, color: '#787B86', linestyle: 'solid', title: 'Upper Band' },
-  { id: 'hline_mid',   price: 50, color: '#787B8680', linestyle: 'solid', title: 'Middle Band' },
-  { id: 'hline_lower', price: 20, color: '#787B86', linestyle: 'solid', title: 'Lower Band' },
+  { id: 'hline_upper', price: 80, color: '#787B86', linestyle: 'dashed', title: 'Upper Band' },
+  { id: 'hline_mid',   price: 50, color: '#787B8680', linestyle: 'dashed', title: 'Middle Band' },
+  { id: 'hline_lower', price: 20, color: '#787B86', linestyle: 'dashed', title: 'Lower Band' },
 ];
 
 export const fillConfig: FillConfig[] = [
-  { id: 'fill_band', plot1: 'hline_upper', plot2: 'hline_lower', color: '#7E57C219' },
+  { id: 'fill_band', plot1: 'hline_upper', plot2: 'hline_lower', color: '#7E57C219', title: 'Background' },
 ];
 
 export const metadata = {

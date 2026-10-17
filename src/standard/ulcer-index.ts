@@ -11,7 +11,7 @@
  * Based on the standard "Ulcer Index" indicator.
  */
 
-import { Series, ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { Series, ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar, type SourceType } from 'oakscriptjs';
 
 export interface UlcerIndexInputs {
   /** Source */
@@ -31,7 +31,14 @@ export const inputConfig: InputConfig[] = [
 ];
 
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Ulcer Index', color: '#E91E63', lineWidth: 1 },
+  { id: 'plot0', title: 'Ulcer Index', color: '#2962FF', lineWidth: 1 },
+  // Reference: a hidden zero plot, the other side of the "Plots Background" fill
+  { id: 'plot1', title: '', color: '#2962FF', lineWidth: 1, display: 'none', editable: false },
+];
+
+/** Reference: the "Zero" level (grey, dashed) */
+export const hlineConfig: HLineConfig[] = [
+  { id: 'hline_zero', price: 0, title: 'Zero', color: '#808080', linestyle: 'dashed', linewidth: 1 },
 ];
 
 export const metadata = {
@@ -71,7 +78,10 @@ export function calculate(bars: Bar[], inputs: Partial<UlcerIndexInputs> = {}): 
     },
     plots: {
       'plot0': plotData,
+      'plot1': bars.map((b) => ({ time: b.time, value: 0 })),
     },
+    // Reference: fill between the index and the zero plot
+    fills: [{ id: 'fill_0', plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(33,150,243,0.1)', title: 'Plots Background' } }],
   };
 }
 
@@ -81,4 +91,5 @@ export const UlcerIndex = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hlineConfig,
 };

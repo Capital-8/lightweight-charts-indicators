@@ -95,3 +95,24 @@ describe('style declarations', () => {
     });
   });
 });
+
+describe('levels and fills of the reference (#11)', () => {
+  it('Relative volatility index: dashed levels 80 / 50 / 20 and the Background fill', () => {
+    const e = entry('rvol');
+    expect(e.hlineConfig!.map((h) => [h.price, h.title, h.linestyle])).toEqual([
+      [80, 'Upper Band', 'dashed'],
+      [50, 'Middle Band', 'dashed'],
+      [20, 'Lower Band', 'dashed'],
+    ]);
+    expect(e.fillConfig!.find((f) => f.id === 'fill_band')).toMatchObject({ plot1: 'hline_upper', plot2: 'hline_lower', title: 'Background' });
+  });
+
+  it('Ulcer index: Zero level, hidden zero plot and the Plots Background fill', () => {
+    const e = entry('ulcer-index');
+    expect(e.hlineConfig).toEqual([{ id: 'hline_zero', price: 0, title: 'Zero', color: '#808080', linestyle: 'dashed', linewidth: 1 }]);
+    expect(e.plotConfig.map((p) => [p.id, p.color, p.editable])).toEqual([['plot0', '#2962FF', undefined], ['plot1', '#2962FF', false]]);
+    const r = run('ulcer-index');
+    expect(r.plots.plot1.every((p: { value: number }) => p.value === 0)).toBe(true);
+    expect(r.fills).toEqual([{ id: 'fill_0', plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(33,150,243,0.1)', title: 'Plots Background' } }]);
+  });
+});
