@@ -5,7 +5,8 @@
  * colours are the ones the built-in draws (a colour override replaces them). Generated from the reference metadata
  * and one run of each built-in; edit by hand only with that source.
  */
-import type { BarColorConfig, CandleConfig, FillConfig, ShapeConfig } from 'oakscriptjs';
+import type { BarColorConfig, CandleConfig, FillConfig, HLineConfig, ShapeConfig } from 'oakscriptjs';
+import { COMMUNITY_STYLE_OUTPUTS } from './style-outputs-community';
 
 /** Kind of drawing object of a study (`label.new`, `line.new`, ...): one show / hide row per kind */
 export type StudyDrawingKind = 'label' | 'line' | 'box' | 'linefill' | 'polyline' | 'table';
@@ -23,6 +24,13 @@ export interface StyleOutputs {
   /** The fills: between hlines (the fillConfig ids) and between plots (the id the result's fills get) */
   fills?: FillConfig[];
   shapes?: StyleShapeConfig[];
+  /**
+   * Markers the built-in emits without an id: the shape output each belongs to, by its marker shape, position, text,
+   * character and colour (one of `colors`); the first rule that fits gives the id
+   */
+  markerMatch?: { id: string; shape?: string; position?: string; text?: string; char?: string; colors?: string[] }[];
+  /** The hlines a built-in gives in its result (no hlineConfig), by index: their Style declarations (id `hline<k>`) */
+  resultHlines?: HLineConfig[];
   /** Markers not in `shapes` are drawings of this kind (the reference draws them as labels): shown and hidden with them */
   markerDrawing?: StudyDrawingKind;
   barColors?: BarColorConfig[];
@@ -146,3 +154,6 @@ export const STYLE_OUTPUTS: Record<string, StyleOutputs> = {
   "auto-key-levels": {"drawings":["label","line"]},
   "auto-trend-detector": {"markerDrawing":"label","drawings":["label","line","table"]},
 };
+
+// the community built-ins (style-outputs-community.ts)
+for (const [id, decl] of Object.entries(COMMUNITY_STYLE_OUTPUTS)) STYLE_OUTPUTS[id] ??= decl;

@@ -20,20 +20,66 @@ interface StyleTarget {
   barColorConfig?: BarColorConfig[];
   markerDrawing?: StudyDrawingKind;
   drawingKinds?: StudyDrawingKind[];
+  /** Style declarations of the hlines of the result (built-ins without hlineConfig): `hline<k>` for the k-th */
+  resultHlineConfig?: HLineConfig[];
   calculate: (...args: any[]) => any;
+}
+
+/** Colour as [r, g, b, a]; null when not parsed */
+function rgba(c: unknown): number[] | null {
+  if (typeof c !== 'string') return null;
+  const s = c.trim();
+  if (s === 'transparent') return [0, 0, 0, 0];
+  let m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(s);
+  if (m) return [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16), m[2] ? parseInt(m[2], 16) / 255 : 1];
+  m = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(s);
+  if (m) return [parseInt(m[1] + m[1], 16), parseInt(m[2] + m[2], 16), parseInt(m[3] + m[3], 16), 1];
+  m = /^rgba?\(([^)]+)\)$/i.exec(s);
+  if (m) { const v = m[1].split(/[\s,/]+/).filter(Boolean).map(Number); return [v[0], v[1], v[2], v[3] ?? 1]; }
+  return null;
+}
+
+/** Same colour (by value) */
+export function sameColor(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  const x = rgba(a), y = rgba(b);
+  return !!x && !!y && x.every((v, i) => Math.abs(v - y[i]) < (i === 3 ? 0.01 : 0.6));
 }
 
 /** The result with the declaration ids on its background / bar colours and its fills between plots. */
 function stampIds(result: any, decl: StyleOutputs): any {
   if (!result || typeof result !== 'object') return result;
+  if (typeof result.then === 'function') return result.then((r: any) => stampIds(r, decl));
   let out = result;
   const copy = () => (out === result ? (out = { ...result }) : out);
   for (const [key, kind] of [['bgColors', 'bgcolor'], ['barColors', 'barcolor']] as const) {
     const list = result[key];
     const own = (decl.barColors ?? []).filter((b) => b.kind === kind);
-    // one declaration of the kind: every entry is its
-    if (!Array.isArray(list) || own.length !== 1 || list.every((x: any) => x.id)) continue;
-    copy()[key] = list.map((x: any) => (x.id ? x : { ...x, id: own[0].id }));
+    if (!Array.isArray(list) || !own.length || list.every((x: any) => x.id)) continue;
+    // one declaration of the kind: every entry is its; several: the one whose palette has the colour
+    const of = (x: any) => (own.length === 1 ? own[0] : own.find((d) => d.palette?.some((c) => sameColor(c, x.color))));
+    copy()[key] = list.map((x: any) => {
+      if (x.id) return x;
+      const d = of(x);
+      return d ? { ...x, id: d.id } : x;
+    });
+  }
+  // markers without an id: the shape output whose rule fits
+  if (decl.markerMatch?.length && Array.isArray(result.markers) && result.markers.some((m: any) => !m.id)) {
+    copy().markers = result.markers.map((m: any) => {
+      if (m.id) return m;
+      const rule = decl.markerMatch!.find((r) =>
+        (r.shape === undefined || r.shape === m.shape) &&
+        (r.position === undefined || r.position === m.position) &&
+        (r.text === undefined || r.text === (m.text ?? '')) &&
+        (r.char === undefined || r.char === m.char) &&
+        (r.colors === undefined || r.colors.some((c) => sameColor(c, m.color))));
+      return rule ? { ...m, id: rule.id } : m;
+    });
+  }
+  // hlines of the result: the id of their declaration (k-th = hline<k>)
+  if (decl.resultHlines?.length && Array.isArray(result.hlines) && result.hlines.some((x: any) => !x.id)) {
+    copy().hlines = result.hlines.map((x: any, k: number) => (x.id ? x : { ...x, id: `hline${k}` }));
   }
   const plotFills = (decl.fills ?? []).filter((f) => !String(f.plot1).startsWith('hline'));
   if (Array.isArray(result.fills) && plotFills.length && result.fills.some((f: any) => !f.id)) {
@@ -80,9 +126,13 @@ export function withStyleOutputs<T extends StyleTarget>(entry: T): T {
   if (decl.barColors) e.barColorConfig = decl.barColors;
   if (decl.candles && entry.plotCandleConfig) {
     e.plotCandleConfig = entry.plotCandleConfig.map((c) => (decl.candles![c.id] ? { ...c, ...decl.candles![c.id], id: c.id } as PlotCandleDecl : c));
+  } else if (decl.candles) {
+    // a built-in without candle declarations: the ones of its result's plotCandles / plotBars
+    e.plotCandleConfig = Object.entries(decl.candles).map(([id, c]) => ({ title: '', ...c, id }) as PlotCandleDecl);
   }
   if (decl.drawings) e.drawingKinds = decl.drawings;
-  if (decl.barColors || decl.fills) {
+  if (decl.resultHlines) e.resultHlineConfig = decl.resultHlines;
+  if (decl.barColors || decl.fills || decl.markerMatch || decl.resultHlines) {
     const calculate = entry.calculate;
     e.calculate = (...args: any[]) => stampIds(calculate(...args), decl);
   }

@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { indicatorRegistry, STYLE_OUTPUTS } from '../../src/index';
+import { COMMUNITY_STYLE_OUTPUTS } from '../../src/style-outputs-community';
 import type { Bar } from 'oakscriptjs';
 
 const bars: Bar[] = [];
@@ -140,5 +141,43 @@ describe('palettes of plots coloured per bar (#10)', () => {
     for (const id of ['technicals', 'relative-volume-at-time']) {
       expect(entry(id).plotConfig.every((p) => !(p as { palette?: string[] }).palette), id).toBe(true);
     }
+  });
+});
+
+describe('community built-ins (#9)', () => {
+  const ids = Object.keys(COMMUNITY_STYLE_OUTPUTS);
+  it('declares most of them; each declared entry exists', () => {
+    expect(ids.length).toBeGreaterThan(1200);
+    for (const id of ids) expect(entry(id), id).toBeDefined();
+  });
+
+  it('the ids stamped on the result are declared ones', () => {
+    for (const id of ids) {
+      const e = entry(id);
+      const decl = COMMUNITY_STYLE_OUTPUTS[id];
+      let r: any;
+      try {
+        r = e.calculate(bars, { ...e.defaultInputs }, { timeframe: '1D', tickerid: 'NASDAQ:AAPL', lastBarConfirmed: true });
+      } catch {
+        continue;
+      }
+      if (!r || typeof r.then === 'function') continue;
+      const shapes = new Set((decl.shapes ?? []).map((s) => s.id));
+      for (const m of r.markers ?? []) if (m.id && decl.markerMatch) expect(shapes.has(m.id), `${id} ${m.id}`).toBe(true);
+      const colors = new Set((decl.barColors ?? []).map((b) => b.id));
+      for (const b of [...(r.bgColors ?? []), ...(r.barColors ?? [])]) if (b.id && decl.barColors) expect(colors.has(b.id), `${id} ${b.id}`).toBe(true);
+      const hl = new Set((decl.resultHlines ?? []).map((h) => h.id));
+      if (decl.resultHlines) for (const h of r.hlines ?? []) expect(h.id === undefined || hl.has(h.id) || /^hline\d+$/.test(h.id), `${id} ${h.id}`).toBe(true);
+      const fills = new Set((e.fillConfig ?? []).map((f) => f.id));
+      for (const f of r.fills ?? []) if (f.id && decl.fills) expect(fills.has(f.id), `${id} ${f.id}`).toBe(true);
+    }
+  }, 120_000);
+
+  it('a shape output of a community port: its markers carry its id (UT Bot buy / sell labels)', () => {
+    const e = entry('ut-bot');
+    expect(e.shapeConfig?.map((s) => s.title)).toEqual(['Buy', 'Sell']);
+    const r: any = run('ut-bot');
+    const ids = new Set(r.markers.map((m: any) => m.id));
+    expect([...ids].sort()).toEqual(e.shapeConfig!.map((s) => s.id).sort());
   });
 });
