@@ -55,7 +55,14 @@ export function withStyleOutputs<T extends StyleTarget>(entry: T): T {
   if (!decl) return entry;
   const hidden = new Set(decl.hiddenPlots ?? []);
   const e: T = { ...entry };
-  if (hidden.size) e.plotConfig = entry.plotConfig.map((p) => (hidden.has(p.id) ? { ...p, editable: false } : p));
+  const palettes = decl.plotPalettes ?? {};
+  if (hidden.size || Object.keys(palettes).length) {
+    e.plotConfig = entry.plotConfig.map((p) => ({
+      ...p,
+      ...(hidden.has(p.id) ? { editable: false } : {}),
+      ...(palettes[p.id] ? { palette: palettes[p.id] } : {}),
+    }));
+  }
   if (decl.hlines && entry.hlineConfig) {
     e.hlineConfig = entry.hlineConfig.map((h) => (decl.hlines![h.id] ? { ...h, ...decl.hlines![h.id] } : h));
   }

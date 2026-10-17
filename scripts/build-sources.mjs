@@ -56,6 +56,7 @@ export function styleStatements(js, decl) {
   const json = (v) => JSON.stringify(v);
   const lines = [];
   if (decl.hiddenPlots?.length) lines.push(`for (const p of plotConfig) if (${json(decl.hiddenPlots)}.includes(p.id)) p.editable = false;`);
+  if (decl.plotPalettes) lines.push(`for (const p of plotConfig) if (${json(decl.plotPalettes)}[p.id]) p.palette = ${json(decl.plotPalettes)}[p.id];`);
   if (decl.hlines && has('hlineConfig')) lines.push(`for (const h of hlineConfig) Object.assign(h, ${json(decl.hlines)}[h.id] ?? {});`);
   if (decl.fills?.length) {
     if (has('fillConfig')) {

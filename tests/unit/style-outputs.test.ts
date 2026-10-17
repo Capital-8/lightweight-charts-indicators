@@ -116,3 +116,29 @@ describe('levels and fills of the reference (#11)', () => {
     expect(r.fills).toEqual([{ id: 'fill_0', plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(33,150,243,0.1)', title: 'Plots Background' } }]);
   });
 });
+
+describe('palettes of plots coloured per bar (#10)', () => {
+  it('declares the reference palettes; every drawn colour is one of them', () => {
+    const want: Record<string, Record<string, number>> = {
+      macd: { plot0: 4 }, 'awesome-oscillator': { plot0: 2 }, bbtrend: { plot0: 4 }, 'bull-bear-power': { plot0: 2 },
+      'ma-ribbon': { plot0: 1, plot1: 1, plot2: 1, plot3: 1 }, 'volume-osc': { histogram: 4 }, 'woodies-cci': { plot0: 2 },
+      'price-oscillator': { plot0: 4 }, 'chop-zone': { plot0: 9 }, 'aroon-oscillator': { plot0: 2 }, 'volatility-stop': { plot0: 2 },
+    };
+    for (const [id, plots] of Object.entries(want)) {
+      const e = entry(id);
+      const r = run(id);
+      for (const [plotId, n] of Object.entries(plots)) {
+        const pal = (e.plotConfig.find((p) => p.id === plotId) as { palette?: string[] }).palette;
+        expect(pal?.length, `${id} ${plotId}`).toBe(n);
+        for (const pt of r.plots[plotId] as { color?: string }[]) if (pt.color) expect(pal, `${id} ${plotId} ${pt.color}`).toContain(pt.color);
+      }
+    }
+    expect((entry('macd').plotConfig[0] as { palette?: string[] }).palette).toEqual(['#26A69A', '#B2DFDB', '#FFCDD2', '#FF5252']);
+  });
+
+  it('plots whose colours are computed per bar have no palette', () => {
+    for (const id of ['technicals', 'relative-volume-at-time']) {
+      expect(entry(id).plotConfig.every((p) => !(p as { palette?: string[] }).palette), id).toBe(true);
+    }
+  });
+});

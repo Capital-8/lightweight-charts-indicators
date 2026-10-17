@@ -29205,4 +29205,4 @@ export {
 } from './other-symbol';
 
 // Package version
-export const version = '0.16.1';
+export const version = '0.16.2';
