@@ -7,17 +7,22 @@
  * close of a previous bearish candle, or the close is below the open of a previous bullish candle (red label above
  * the bar).
  *
+ * Alerts: the alert conditions "Bullish Engulfing" / "Bearish Engulfing" (`alerts` of the result) are the shown
+ * signals; with "Aktifkan Notifikasi" on, every bullish / bearish engulfing bar (shown or not) makes the alert() call
+ * "Bullish Engulfing Terbentuk!" / "Bearish Engulfing Terbentuk!" (`alertCalls`, once per bar close).
+ *
  * Reference: "Sweep Engulf 2 Candle" by gastrophollic
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { AlertCall, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SweepEngulf2CandleInputs {
   showBullish: boolean;
   showBearish: boolean;
-  /** Alert switch of the Pine script (alert() calls, not ported): no effect on the outputs */
+  /** Alert switch of the alert() calls */
   enableAlert: boolean;
 }
 
@@ -50,11 +55,16 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<SweepEngulf2CandleInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const green = String(color.green);
   const red = String(color.red);
   const markers: MarkerData[] = [];
+  const n = bars.length;
+  // first bar: low < low[1] / high > high[1] with na is false
+  const bullFlags: boolean[] = new Array(n).fill(false);
+  const bearFlags: boolean[] = new Array(n).fill(false);
+  const alertCalls: AlertCall[] = [];
   for (let i = 1; i < bars.length; i++) {
     const b = bars[i];
     const p = bars[i - 1];
@@ -68,12 +78,30 @@ export function calculate(
     if (cfg.showBearish && bearishEngulfing) {
       markers.push({ time: b.time, position: 'aboveBar', shape: 'labelDown', color: red, size: 'tiny' });
     }
+    // alertcondition(showBullish and bullishEngulfing, ...) / alertcondition(showBearish and bearishEngulfing, ...)
+    bullFlags[i] = cfg.showBullish && bullishEngulfing;
+    bearFlags[i] = cfg.showBearish && bearishEngulfing;
+    // if enableAlert: if bullishEngulfing alert(...); if bearishEngulfing alert(...) (alert.freq_once_per_bar_close)
+    if (cfg.enableAlert) {
+      if (bullishEngulfing) alertCalls.push({ time: b.time, message: 'Bullish Engulfing Terbentuk!', freq: 'once_per_bar_close' });
+      if (bearishEngulfing) alertCalls.push({ time: b.time, message: 'Bearish Engulfing Terbentuk!', freq: 'once_per_bar_close' });
+    }
   }
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
+    alertCalls,
   };
 }
 
-export const SweepEngulf2Candle = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Engulfing', message: 'Bullish Engulfing Terbentuk!' },
+  { id: 'alert1', title: 'Bearish Engulfing', message: 'Bearish Engulfing Terbentuk!' },
+];
+
+export const hasAlertFunction = true;
+
+export const SweepEngulf2Candle = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction };

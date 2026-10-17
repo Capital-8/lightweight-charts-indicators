@@ -7015,6 +7015,11 @@ export interface IndicatorRegistryEntry {
   /** The kinds of drawing objects it creates (labels, lines, boxes, ...): one show / hide row per kind */
   drawingKinds?: StudyDrawingKind[];
   /**
+   * Style declarations of the hlines the indicator gives in its result (`hlines`) rather than in `hlineConfig` (their
+   * levels can follow the inputs): the k-th has the id `hline<k>`, stamped on the result's hlines
+   */
+  resultHlineConfig?: HLineConfig[];
+  /**
    * Its outputs in the order PineScript numbers them for alert messages ({{plot_<n>}}): line plots, shapes,
    * characters and arrows as the reference script declares them; the values of the shapes / characters / arrows are in
    * the result's `outputValues`. Unset: its line plots in plotConfig order.
@@ -29189,7 +29194,7 @@ const registryPart11: IndicatorRegistryEntry[] = [
 ];
 
 /** Standard built-ins with the alert conditions of the reference script (their module's `alertConditions`). */
-const ALERT_MODULES: Record<string, { alertConditions: { id: string; title: string; message?: string }[] }> = {
+const ALERT_MODULES: Record<string, { alertConditions?: { id: string; title: string; message?: string }[]; hasAlertFunction?: boolean }> = {
   'awesome-oscillator': awesomeOscIndicator,
   macd: macdIndicator,
   supertrend: supertrendIndicator,
@@ -29198,9 +29203,51 @@ const ALERT_MODULES: Record<string, { alertConditions: { id: string; title: stri
   gaps: gapsStd,
   'linreg-channel': linregChannelStd,
   technicals: technicalsStd,
+  // community ports: the alertcondition() declarations and alert() calls of their originals
+  'actually-engulfing-candlesticks': actuallyEngulfingCandlesticksIndicator,
+  'al-brooks-ii-ioi-oo': alBrooksIiIoiOoIndicator,
+  'auto-avwap-with-breakout-screener': autoAvwapWithBreakoutScreenerIndicator,
+  'auto-fib-channels-by-dgt': autoFibChannelsByDgtIndicator,
+  'auto-fib-speed-resistance-fans-by-dgt': autoFibSpeedResistanceFansByDgtIndicator,
+  'auto-pitchfan-fib-extension-retracement-and': autoPitchfanFibExtensionRetracementAndIndicator,
+  'auto-pitchfork-fib-retracement-zig-zag': autoPitchforkFibRetracementZigZagIndicator,
+  'bjorgum-key-levels': bjorgumKeyLevelsIndicator,
+  'buy-sell-accurate-signals': buySellAccurateSignalsIndicator,
+  'dead-simple-reversal': deadSimpleReversalIndicator,
+  'dynamic-fractal-flow': dynamicFractalFlowIndicator,
+  'erema-signals': eremaSignalsIndicator,
+  'fibonacci-extension-retracement-pivot-points': fibonacciExtensionRetracementPivotPointsIndicator,
+  'heikin-ashi-doji-with-high-volume': heikinAshiDojiWithHighVolumeIndicator,
+  'inside-bar-coloring-w-alerts': insideBarColoringWAlertsIndicator,
+  'inside-bar-ind-alert': insideBarIndAlertIndicator,
+  'john-wick-doji-indicator': johnWickDojiIndicatorIndicator,
+  'jopa-channel-v1': jopaChannelV1Indicator,
+  'linear-regression-channel-curve-slope-by-dgt': linearRegressionChannelCurveSlopeByDgtIndicator,
+  'order-blocks-w-realtime-fibs': orderBlocksWRealtimeFibsIndicator,
+  'perfect-hammer-pattern-indicators-and-alerts': perfectHammerPatternIndicatorsAndAlertsIndicator,
+  'price-flow-buy-sell': priceFlowBuySellIndicator,
+  'pulse-range': pulseRangeIndicator,
+  'renko-moving-average-rmi-alert-r3-by': renkoMovingAverageRmiAlertR3ByIndicator,
+  'rsi-ma-cross-divergence-signal': rsiMaCrossDivergenceSignalIndicator,
+  'scalping-pullback-tool': scalpingPullbackToolIndicator,
+  'scalping-swing-trading-tool-r1-4-by-justunclel': scalpingSwingTradingToolR14ByJustunclelIndicator,
+  'strong-engulfing-candlestick': strongEngulfingCandlestickIndicator,
+  'sweep-engulf-2-candle': sweepEngulf2CandleIndicator,
+  'three-bar-reversal-continuation': threeBarReversalContinuationIndicator,
+  'trend-scalper': trendScalperIndicator,
+  'triple-doji-sequence': tripleDojiSequenceIndicator,
+  'volume-alert': volumeAlertIndicator,
+  'zigzag-trend-divergence-detector': zigzagTrendDivergenceDetectorIndicator,
 };
-const withAlertConditions = (e: IndicatorRegistryEntry): IndicatorRegistryEntry =>
-  ALERT_MODULES[e.id] && !e.alertConditions ? { ...e, alertConditions: ALERT_MODULES[e.id].alertConditions } : e;
+const withAlertConditions = (e: IndicatorRegistryEntry): IndicatorRegistryEntry => {
+  const m = ALERT_MODULES[e.id];
+  if (!m) return e;
+  return {
+    ...e,
+    ...(m.alertConditions && !e.alertConditions ? { alertConditions: m.alertConditions } : {}),
+    ...(m.hasAlertFunction ? { hasAlertFunction: true } : {}),
+  };
+};
 
 // Built-in studies carry the reference app's names (reference-names.ts).
 export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart11, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10].map(withReferenceNames).map(withValueFormat).map(withStyleOutputs).map(withAlertConditions);

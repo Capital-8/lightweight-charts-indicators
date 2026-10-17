@@ -10,12 +10,16 @@
  * Last bar: with 'Confirm Signal On Bar Close' a signal needs a closed bar. The port reads the state of the last bar
  * from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
  *
+ * Alerts (alertcondition, `alerts` of the result), with "Enable Alert Conditions": "Pulse Range — Green Signal" and
+ * "Pulse Range — Red Signal" on the turns of the center line, "Pulse Range — Direction Change" on both.
+ *
  * Reference: "Pulse Range" by MarketStructureLab
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface PulseRangeInputs {
@@ -37,7 +41,7 @@ export interface PulseRangeInputs {
   displaySignals: boolean;
   /** Triangle distance from the center, in ranges */
   signalOffset: number;
-  /** Enable the alert conditions (alerts are not ported) */
+  /** Enable the alert conditions */
   alertsEnabled: boolean;
 }
 
@@ -97,7 +101,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<PulseRangeInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -144,6 +148,8 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const greenAlert: boolean[] = new Array(n);
+  const redAlert: boolean[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const time = bars[i].time;
     const prior = i > 0 ? dir[i - 1] : 0; // nz(trackDirection[1], 0)
@@ -151,6 +157,8 @@ export function calculate(
     const barConfirmed = !cfg.confirmAtClose || barIsConfirmed(i);
     const greenSignal = dir[i] === 1 && prior === -1 && barConfirmed;
     const redSignal = dir[i] === -1 && prior === 1 && barConfirmed;
+    greenAlert[i] = cfg.alertsEnabled && greenSignal;
+    redAlert[i] = cfg.alertsEnabled && redSignal;
     if (cfg.displaySignals && greenSignal) {
       // plotshape(greenMarkerPrice, "Green Signal", shape.triangleup, location.absolute, risingColor, size = size.small)
       const price0 = center[i] - range[i] * cfg.signalOffset;
@@ -187,8 +195,17 @@ export function calculate(
     ],
     markers,
     barColors,
+    // alertcondition(alertsEnabled and greenSignal) / (alertsEnabled and redSignal) / (alertsEnabled and (greenSignal or redSignal))
+    alerts: alertStates(alertConditions, bars, [greenAlert, redAlert, greenAlert.map((g, i) => g || redAlert[i])]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Pulse Range — Green Signal', message: 'Pulse Range: center line changed from red to green' },
+  { id: 'alert1', title: 'Pulse Range — Red Signal', message: 'Pulse Range: center line changed from green to red' },
+  { id: 'alert2', title: 'Pulse Range — Direction Change', message: 'Pulse Range: center line changed direction' },
+];
 
 export const PulseRange = {
   calculate,
@@ -196,4 +213,5 @@ export const PulseRange = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

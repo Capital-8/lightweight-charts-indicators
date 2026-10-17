@@ -5,12 +5,16 @@
  * previous low and a body larger than the previous body. Bearish engulfing: the same with a red bar after a green
  * bar. A green label below the bar marks a bullish engulfing, a red label above the bar a bearish engulfing.
  *
+ * Alerts: the two alertcondition() calls of the original, "Bullish Engulfing Alert" and "Bearish Engulfing Alert",
+ * true on the bars of the bullish / bearish engulfing labels.
+ *
  * Reference: "Strong Engulfing Candlestick (With Alerts)" by kyjefive
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type StrongEngulfingCandlestickInputs = Record<string, never>;
 
@@ -37,8 +41,10 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   _inputs: Partial<StrongEngulfingCandlestickInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const markers: MarkerData[] = [];
+  const bullFlags: boolean[] = new Array(bars.length).fill(false);
+  const bearFlags: boolean[] = new Array(bars.length).fill(false);
   for (let i = 1; i < bars.length; i++) {
     const b = bars[i];
     const p = bars[i - 1];
@@ -50,14 +56,23 @@ export function calculate(
     if (bullish) markers.push({ time: b.time, position: 'belowBar', shape: 'labelUp', color: color.green, size: 'small' });
     // plotshape(bearish_engulfing, location.abovebar, shape.labeldown, color.red, size = size.small)
     if (bearish) markers.push({ time: b.time, position: 'aboveBar', shape: 'labelDown', color: color.red, size: 'small' });
+    bullFlags[i] = bullish;
+    bearFlags[i] = bearish;
   }
-  // alertcondition(bullish_engulfing / bearish_engulfing): alerts only, not ported
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    // alertcondition(bullish_engulfing) / alertcondition(bearish_engulfing)
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
 
-export const StrongEngulfingCandlestick = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Engulfing Alert', message: 'Strong Bullish Engulfing detected!' },
+  { id: 'alert1', title: 'Bearish Engulfing Alert', message: 'Strong Bearish Engulfing detected!' },
+];
+
+export const StrongEngulfingCandlestick = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

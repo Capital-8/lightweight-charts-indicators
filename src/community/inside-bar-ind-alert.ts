@@ -7,12 +7,16 @@
  * bar. An orange circle above the bar marks two bars in a row (the current and the previous bar) inside the body of
  * the bar two bars back (the mother bar).
  *
+ * Alerts: the two alertcondition() calls of the original, "Inside Bar (Body)" (an inside bar of either colour) and
+ * "Next Candle Also Inside Bar (Body)" (the orange circle).
+ *
  * Reference: "Inside Bar (Body-based) Ind/Alert" by s_b_j
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type InsideBarIndAlertInputs = Record<string, never>;
 
@@ -38,7 +42,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   _inputs: Partial<InsideBarIndAlertInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const n = bars.length;
   // getBodyHighLow(open[k], close[k]): math.max / math.min (na before bar 0)
   const bodyHigh = (i: number) => (i >= 0 ? Math.max(bars[i].open, bars[i].close) : NaN);
@@ -46,6 +50,8 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const insideFlags: boolean[] = new Array(n).fill(false);
+  const doubleFlags: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const curBodyHigh = bodyHigh(i);
@@ -75,15 +81,25 @@ export function calculate(
     if (doubleInside) {
       markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: color.orange, size: 'tiny' });
     }
+    // isInsideBarMade = insideSignal != 0
+    insideFlags[i] = insideSignal !== 0;
+    doubleFlags[i] = doubleInside;
   }
-  // alertcondition 'Inside Bar (Body)' and 'Next Candle Also Inside Bar (Body)': alerts only, not ported
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
     barColors,
+    // alertcondition(isInsideBarMade) / alertcondition(doubleInside)
+    alerts: alertStates(alertConditions, bars, [insideFlags, doubleFlags]),
   };
 }
 
-export const InsideBarIndAlert = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Inside Bar (Body)', message: 'Inside Bar (body) came up!' },
+  { id: 'alert1', title: 'Next Candle Also Inside Bar (Body)', message: 'Two-in-a-row: current and previous bar inside mother body' },
+];
+
+export const InsideBarIndAlert = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

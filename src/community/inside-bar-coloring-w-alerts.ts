@@ -10,13 +10,16 @@
  * optional third argument (see src/chart-context.ts); without it every bar is a historical (closed) bar, so the
  * bars get the historical colours and "Highlight Current Bar Only" colours no bar.
  *
+ * Alerts (alert() call, `alertCalls` of the result): with "Enable Inside Bar Alerts", every confirmed inside bar
+ * ("Inside Bar Detected: Bullish | High: <high> | Low: <low>", once per bar).
+ *
  * Reference: "Inside Bar Coloring (Real-time + Historical) w/ Alerts" by SpinTrades
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: Copyright (c) 2025 @SpinTrades
  */
 
-import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BarColorData } from '../types';
+import { str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import type { AlertCall, MarkerData, BarColorData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface InsideBarColoringWAlertsInputs {
@@ -30,7 +33,7 @@ export interface InsideBarColoringWAlertsInputs {
   bearishHistoricalColor: string;
   showHistorical: boolean;
   showCurrentOnly: boolean;
-  /** Enable Inside Bar Alerts (alert() only: no output) */
+  /** Enable Inside Bar Alerts (the alert() calls, `alertCalls` of the result) */
   alertOnInsideBar: boolean;
   showMarkers: boolean;
   markerPosition: 'Above' | 'Below';
@@ -78,7 +81,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<InsideBarColoringWAlertsInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; alertCalls: AlertCall[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -92,6 +95,7 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const alertCalls: AlertCall[] = [];
   for (let i = 0; i < n; i++) {
     const { time, open, high, low, close } = bars[i];
     // high[1] / low[1]: na on bar 0
@@ -117,15 +121,24 @@ export function calculate(
       const markerColor = isBullish ? bullishInsideColor : bearishInsideColor;
       markers.push({ time, position: markerLocation, shape: markerStyle, color: markerColor, size: 'tiny' });
     }
+
+    // if alertOnInsideBar and isInsideBar and barstate.isconfirmed: alert(alertMessage, alert.freq_once_per_bar)
+    if (cfg.alertOnInsideBar && isInsideBar && barIsConfirmed(i)) {
+      const message = 'Inside Bar Detected: ' + (isBullish ? 'Bullish' : 'Bearish') + ' | High: ' + str.tostring(high) + ' | Low: ' + str.tostring(low);
+      alertCalls.push({ time, message, freq: 'once_per_bar' });
+    }
   }
-  // alert(...) when alertOnInsideBar and isInsideBar and barstate.isconfirmed: alert only, not ported
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
     barColors,
+    alertCalls,
   };
 }
 
-export const InsideBarColoringWAlerts = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original calls alert() (confirmed inside bars) */
+export const hasAlertFunction = true;
+
+export const InsideBarColoringWAlerts = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

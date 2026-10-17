@@ -4,6 +4,7 @@
  * Buy: the prior bar is bearish, the current bar is bullish and closes above the prior open, and one of the last 4
  * long-term lows (lowest low of the long period, 1 to 4 bars back) is above the near-term low (lowest low of the near
  * period). Sell: the mirror rule with highs. A buy draws a triangle below the bar, a sell a triangle above the bar.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' and 'Sell Signal', true on the bars of each signal.
  *
  * Reference: "Dead Simple Reversal" by B3AR_Trades (converted from "p2f - Dead Simple Reversal" by paidtofade;
  * original concept "Dead Simple Reversal Points" by BenTen)
@@ -12,6 +13,7 @@
 
 import { ta, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DeadSimpleReversalInputs {
   /** Near Term Period */
@@ -59,7 +61,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<DeadSimpleReversalInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const high = new Series(bars, (b) => b.high);
   const low = new Series(bars, (b) => b.low);
@@ -76,6 +78,7 @@ export function calculate(
   const buyColor = String(color.new(cfg.upColor, 100 - cfg.opacity));
   const sellColor = String(color.new(cfg.downColor, 100 - cfg.opacity));
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   bars.forEach((b, i) => {
     const p = i > 0 ? bars[i - 1] : undefined;
     const close1 = p ? p.close : NaN;
@@ -94,6 +97,8 @@ export function calculate(
     const c6 = lt(at(longHigh, i - 1), nearHigh[i]) || lt(at(longHigh, i - 2), nearHigh[i])
       || lt(at(longHigh, i - 3), nearHigh[i]) || lt(at(longHigh, i - 4), nearHigh[i]);
     const sell = c4 && c5 && c6;
+    buyFlags.push(buy);
+    sellFlags.push(sell);
 
     // plotshape(buy ? low : na, "Buy Signal", location.belowbar, shape.triangleup, size.small): a value draws it
     if (buy) {
@@ -105,12 +110,19 @@ export function calculate(
     }
   });
 
-  // alertcondition(buy, "Buy Signal") and alertcondition(sell, "Sell Signal"): no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    // alertcondition(buy, "Buy Signal") / alertcondition(sell, "Sell Signal")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
 
-export const DeadSimpleReversal = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Dead Simple Reversal — Buy' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Dead Simple Reversal — Sell' },
+];
+
+export const DeadSimpleReversal = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

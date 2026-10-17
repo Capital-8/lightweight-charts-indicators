@@ -16,10 +16,20 @@
  * multiple of the ATR, and bar colours by volume against its average. At most 500 lines and 500 labels are kept.
  *
  * Limits of the port: the periods of the higher timeframe come from the UTC calendar and the bars (see
- * src/anchor-period.ts); the alerts of the original are not ported.
+ * src/anchor-period.ts).
+ *
+ * Alerts:
+ * - alert conditions (`alerts` of the result): "Volume Spikes" (the volume crosses over its average times the spike
+ *   threshold) and "High Volatility" (the bar range crosses over ATR times the multiplier);
+ * - alert() calls (`alertCalls`, once per bar), on every bar, for each level switched on in the order of the levels:
+ *   the extension / retracement level ("AutoFib Extension : <ticker> crossing level <level>",
+ *   "AutoFib Retracment : ...") and the pivot point support / resistance levels of the levels >= 0
+ *   ("AutoFib PivotPoints : <ticker> crossing support level <level>", "... resistance level ...") that are strictly
+ *   between the close and the previous close.
  *
  * Chart context (optional third argument):
  * - `chart.mintick`: the symbol tick of the prices in the label texts. Without it 0.01.
+ * - `chart.tickerid`: the ticker of the alert messages.
  * - `chart.timeframe`: the chart timeframe, for the "Auto" higher timeframe. Without it, it is taken from the bars.
  * - `chart.now`: the current time, for the "Last Bar" position of the pivot labels (as the original). Without it the
  *   clock of the computer.
@@ -36,10 +46,11 @@
  */
 
 import { ta, str, math, Series, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BarColorData, LabelData, LineDrawingData, MarkerData, TableData } from '../types';
+import type { AlertCall, BarColorData, LabelData, LineDrawingData, MarkerData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { periodStarts, chartTimeframe } from '../anchor-period';
-import { mintickOf, nowOf, type ChartContext } from '../chart-context';
+import { mintickOf, nowOf, tickerOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type LevelLabels = 'Levels' | 'Prices' | 'Levels + Prices' | 'None';
 type LineStyleName = 'Dashed' | 'Dotted' | 'Solid';
@@ -416,6 +427,7 @@ export function calculate(
   chart?: ChartContext,
 ): IndicatorResult & {
   markers: MarkerData[]; barColors: BarColorData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[];
+  alerts: AlertConditionState[]; alertCalls: AlertCall[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -565,11 +577,17 @@ export function calculate(
   // timenow
   const nowMs = nowOf(chart);
   const nowTime = ms ? nowMs : Math.floor(nowMs / 1000);
+  const ticker = tickerOf(chart);
+  const alertCalls: AlertCall[] = [];
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const t = b.time;
     const isLast = i === last;
+    // f_crossingLevel(close, level): level > close and level < close[1] or level < close and level > close[1]
+    const prevClose = i > 0 ? bars[i - 1].close : NaN;
+    const crossing = (lvl: number) => (gt(lvl, b.close) && lt(lvl, prevClose)) || (lt(lvl, b.close) && gt(lvl, prevClose));
+    const call = (message: string) => alertCalls.push({ time: t, message, freq: 'once_per_bar' });
 
     // Zigzag
     const [iH, pH] = pivotAt(i, true);
@@ -709,6 +727,7 @@ export function calculate(
           if (show) {
             toolLine(iMidPivot, price, i, price, cfg.extendER ? 'both' : 'right', css, 'solid');
             if (cfg.levels !== 'None') toolLabel(price, 'EXT', level, css);
+            if (crossing(price)) call('AutoFib Extension : ' + ticker + ' crossing level ' + str.tostring(level));
           }
         }
         if (withRet) {
@@ -718,6 +737,7 @@ export function calculate(
           if (show) {
             toolLine(iMidPivot, price, i, price, cfg.extendER ? 'both' : 'right', css, 'solid');
             if (cfg.levels !== 'None') toolLabel(price, 'RET', level, css);
+            if (crossing(price)) call('AutoFib Retracment : ' + ticker + ' crossing level ' + str.tostring(level));
           }
         }
         if (withPvt) {
@@ -743,6 +763,8 @@ export function calculate(
                 pvtLabel(hi, main ? `R${rank} PP ${lvl}` : `   PP ${lvl}`, hiCss);
               }
             }
+            if (crossing(lo)) call('AutoFib PivotPoints : ' + ticker + ' crossing support level ' + str.tostring(level));
+            if (crossing(hi)) call('AutoFib PivotPoints : ' + ticker + ' crossing resistance level ' + str.tostring(level));
           }
         }
       }
@@ -774,6 +796,14 @@ export function calculate(
       }
     }
   }
+
+  // alertcondition(ta.crossover(nzVolume, i_vSMA * i_vSpikeThresh), 'Volume Spikes', ...)
+  // alertcondition(ta.crossover(range_1, i_weightedATR), 'High Volatility', ...)
+  const nzVolume = bars.map((b) => (b.volume === undefined || isNaN(b.volume) ? 0 : b.volume));
+  const spikeLevel = vSma.map((v) => (v ?? NaN) * cfg.volumeSpikeThreshold);
+  const range1 = bars.map((b) => Math.abs(b.high - b.low));
+  const weightedAtr = atr.map((v) => (v ?? NaN) * cfg.atrMultiplier);
+  const alerts = alertStates(alertConditions, bars, [crossedOver(nzVolume, spikeLevel), crossedOver(range1, weightedAtr)]);
 
   const interval = barInterval(bars);
   const toLine = (l: Ln): LineDrawingData => ({
@@ -809,8 +839,24 @@ export function calculate(
     tables: n > 0
       ? [{ position: 'bottom_right', columns: 1, rows: 1, cells: [{ column: 0, row: 0, text: '☼☾  ', textSize: 'normal', textColor: TEAL }] }]
       : [],
+    alerts,
+    alertCalls,
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0', title: 'Volume Spikes',
+    message: 'sign of exhaustion, huge volume increase detected\n{{exchange}}:{{ticker}}->\nOpen = {{open}}, Current = {{close}},\nTime = {{time}}',
+  },
+  {
+    id: 'alert1', title: 'High Volatility',
+    message: 'high volatility detected\n{{exchange}}:{{ticker}}->\nOpen = {{open}}, Current = {{close}},\nTime = {{time}}',
+  },
+];
+
+export const hasAlertFunction = true;
 
 export const FibonacciExtensionRetracementPivotPoints = {
   calculate,
@@ -818,4 +864,6 @@ export const FibonacciExtensionRetracementPivotPoints = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

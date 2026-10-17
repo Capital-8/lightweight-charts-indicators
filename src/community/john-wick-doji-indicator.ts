@@ -6,13 +6,18 @@
  * wick and above `maxWick` % of the body. The reverse option also accepts a red candle with a long lower wick and
  * a green candle with a long upper wick. These candles are coloured black.
  *
+ * Alerts: the alert condition "John Wick Candle" (`alerts` of the result) is true on every John Wick candle; the
+ * alert() call "John Wick Candle" (`alertCalls`, once per bar close) is made on them when "Show John Wick Candles?"
+ * is on.
+ *
  * Reference: "John Wick" by Nossgrr
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Nossgrr
  */
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BarColorData } from '../types';
+import type { AlertCall, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface JohnWickDojiInputs {
   /** Minimum wick size in % of the body */
@@ -53,10 +58,12 @@ const ne = (a: number, b: number) => Math.abs(a - b) > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<JohnWickDojiInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const { maxWick, showJWic, showReverseJWic } = { ...defaultInputs, ...inputs };
   const black = String(color.rgb(0, 0, 0));
   const barColors: BarColorData[] = [];
+  const flags: boolean[] = [];
+  const alertCalls: AlertCall[] = [];
 
   for (const b of bars) {
     let bullishJC = false;
@@ -83,14 +90,26 @@ export function calculate(
 
     // barcolor((bullishJC or bearishJC) and (showJWic or showReverseJWic) ? color.rgb(0, 0, 0) : na)
     if ((bullishJC || bearishJC) && (showJWic || showReverseJWic)) barColors.push({ time: b.time, color: black });
+    // alertcondition((bullishJC or bearishJC), 'John Wick Candle')
+    flags.push(bullishJC || bearishJC);
+    // if (bullishJC or bearishJC) and showJWic: alert("John Wick Candle", alert.freq_once_per_bar_close)
+    if ((bullishJC || bearishJC) && showJWic) alertCalls.push({ time: b.time, message: 'John Wick Candle', freq: 'once_per_bar_close' });
   }
-  // alertcondition 'John Wick Candle' and one alert() call: alerts only, not ported
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     barColors,
+    alerts: alertStates(alertConditions, bars, [flags]),
+    alertCalls,
   };
 }
 
-export const JohnWickDoji = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertcondition */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'John Wick Candle', message: '[CurrencyPair] [TimeFrame], John Wick candle' },
+];
+
+export const hasAlertFunction = true;
+
+export const JohnWickDoji = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction };

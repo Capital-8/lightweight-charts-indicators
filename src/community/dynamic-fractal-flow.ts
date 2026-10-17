@@ -9,6 +9,10 @@
  * max(0.2, efficiency ratio / noise threshold). Bollinger bands of the signal, a gradient line and fill to zero,
  * and a background coloured by the trend state (signal against the threshold and the EMA of its change).
  *
+ * Alerts (alertcondition, `alerts` of the result): "DFF Bullish Signal" / "DFF Bearish Signal" (acceleration, band
+ * entry or threshold cross of the signal) and "DFF Bullish Acceleration" / "DFF Bearish Acceleration" (EMA of the
+ * change of the momentum and of its change both of one sign against the signal), outside band squeezes.
+ *
  * Reference: "Dynamic Fractal Flow [Alpha Extract]" by AlphaExtract
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © YourName - Dynamic Fractal Flow
@@ -18,6 +22,7 @@ import {
   ta, taCore, math, callsite, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DynamicFractalFlowInputs {
   /** Fractal length: the fractal window is 2 * floor(fractalLength / 2) + 1 bars */
@@ -40,7 +45,7 @@ export interface DynamicFractalFlowInputs {
   signalThreshold: number;
   useNoiseFilter: boolean;
   noiseThreshold: number;
-  /** Only used by the alert conditions (not ported): no effect on the outputs */
+  /** Acceleration signals of the alert conditions: no effect on the plots */
   useAcceleration: boolean;
 }
 
@@ -108,7 +113,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<DynamicFractalFlowInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[]; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -177,19 +182,52 @@ export function calculate(
   });
 
   const rsn: number[] = new Array(n); // robustSignalNorm
+  const trending: boolean[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const isTrending = cfg.useNoiseFilter
       ? lt(choppiness[i], 50) && gt(efficiencyRatio[i], cfg.noiseThreshold)
       : true;
+    trending[i] = isTrending;
     const damping = cfg.useNoiseFilter
       ? (isTrending ? 1.0 : Math.max(0.2, efficiencyRatio[i] / cfg.noiseThreshold))
       : 1.0;
     rsn[i] = base[i] * damping;
   }
-  // Acceleration, entry, squeeze and strong signals only feed the alert conditions: not ported.
 
   // [midBand, upperBand, lowerBand] = ta.bb(robustSignalNorm, bandLength, sdMultiplier)
   const [midBand, upperBand, lowerBand] = taCore.bb(rsn, cfg.bandLength, cfg.sdMultiplier);
+
+  // Signals of the alert conditions
+  // accelerationSmooth = ta.ema(ta.change(momentumSmooth), 3); jerkSmooth = ta.ema(ta.change(accelerationSmooth), 3)
+  const diff = (a: number[]) => a.map((v, i) => (i > 0 ? v - a[i - 1] : NaN));
+  const acceleration = A(ta.ema(S(diff(momentumSmooth)), 3));
+  const jerk = A(ta.ema(S(diff(acceleration)), 3));
+  // isSqueeze = (upperBand - lowerBand) < ta.sma(upperBand - lowerBand, 50) * 0.8
+  const width = upperBand.map((u, i) => u - lowerBand[i]);
+  const widthSma = A(ta.sma(S(width), 50));
+  const squeeze = width.map((w, i) => lt(w, widthSma[i] * 0.8));
+  const thrUp = crossedOver(rsn, cfg.signalThreshold);
+  const thrDown = crossedUnder(rsn, -cfg.signalThreshold);
+  const bandUp = crossedOver(rsn, lowerBand);
+  const bandDown = crossedUnder(rsn, upperBand);
+  const accelBull: boolean[] = new Array(n);
+  const accelBear: boolean[] = new Array(n);
+  const anyBull: boolean[] = new Array(n);
+  const anyBear: boolean[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = rsn[i];
+    const m = momentumSmooth[i];
+    const bullishAcceleration = cfg.useAcceleration && gt(acceleration[i], 0) && gt(jerk[i], 0) && lt(v, 0) && gt(m, 0);
+    const bearishAcceleration = cfg.useAcceleration && lt(acceleration[i], 0) && lt(jerk[i], 0) && gt(v, 0) && lt(m, 0);
+    const bullishEntry = bandUp[i] && lt(v, 0) && gt(m, 0) && trending[i];
+    const bearishEntry = bandDown[i] && gt(v, 0) && lt(m, 0) && trending[i];
+    const strongBull = thrUp[i] && !squeeze[i] && trending[i];
+    const strongBear = thrDown[i] && !squeeze[i] && trending[i];
+    accelBull[i] = bullishAcceleration && !squeeze[i];
+    accelBear[i] = bearishAcceleration && !squeeze[i];
+    anyBull[i] = accelBull[i] || bullishEntry || strongBull;
+    anyBear[i] = accelBear[i] || bearishEntry || strongBear;
+  }
 
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
   const t = (i: number) => bars[i].time;
@@ -240,8 +278,18 @@ export function calculate(
     plots,
     fills: [{ plot1: 'plot0', plot2: 'plot2', colors: fillColors }],
     bgColors,
+    // alertcondition(anyBullSignal) / (anyBearSignal) / (accelBullSignal) / (accelBearSignal)
+    alerts: alertStates(alertConditions, bars, [anyBull, anyBear, accelBull, accelBear]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'DFF Bullish Signal', message: 'Dynamic Fractal Flow: Bullish signal detected!' },
+  { id: 'alert1', title: 'DFF Bearish Signal', message: 'Dynamic Fractal Flow: Bearish signal detected!' },
+  { id: 'alert2', title: 'DFF Bullish Acceleration', message: 'Dynamic Fractal Flow: Bullish acceleration detected!' },
+  { id: 'alert3', title: 'DFF Bearish Acceleration', message: 'Dynamic Fractal Flow: Bearish acceleration detected!' },
+];
 
 export const DynamicFractalFlow = {
   calculate,
@@ -249,4 +297,5 @@ export const DynamicFractalFlow = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

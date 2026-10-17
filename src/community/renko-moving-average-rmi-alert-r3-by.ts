@@ -14,7 +14,10 @@
  * its zone (RMI mode), or on the first down bar after an up bar with "Exit Trade on 1st Opposite Renko Brick".
  * Shorts are the mirror; the short exit on the moving average never happens (the original tests a direction above 1).
  * Markers: an up arrow (BUY) and a down arrow (SELL) on the first bar of a trade, and an "Exit" cross when it ends.
- * The arrow height of the original (50 to 60 pixels) is not ported. The four alerts of the script have no output.
+ * The arrow height of the original (50 to 60 pixels) is not ported.
+ *
+ * Alerts: the four alertcondition() calls of the original, "Swing BUY Alert" / "Swing SELL Alert" (the arrows) and
+ * "Swing BUY Exit Alert" / "Swing SELL Exit Alert" (the exit crosses).
  *
  * Chart values (third argument): the time zone and the session of the symbol give the periods of the open line on
  * the exchange calendar (without them: the UTC calendar and the bars, see src/anchor-period.ts).
@@ -27,6 +30,7 @@ import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotCon
 import type { MarkerData } from '../types';
 import { securityStarts } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type MaType = 'SMA' | 'EMA' | 'WMA' | 'VWMA' | 'SMMA' | 'DEMA' | 'TEMA' | 'HullMA' | 'ZEMA' | 'TMA' | 'SSMA';
 type Source = 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4' | 'volume';
@@ -123,7 +127,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<RenkoMovingAverageRmiAlertR3ByInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = Math.trunc(cfg.maLen);
@@ -214,6 +218,8 @@ export function calculate(
   const purple = String(color.new(PURPLE, 40));
   const arrowUp = String(color.new(LIME, 20));
   const arrowDown = String(color.new(RED, 20));
+  // alertcondition flags: olong==1, oshort==1, olong[1]>0 and olong==0, oshort[1]>0 and oshort==0
+  const flags: boolean[][] = [0, 1, 2, 3].map(() => new Array<boolean>(n).fill(false));
 
   let direction = 0;
   let dopen = NaN;
@@ -261,13 +267,26 @@ export function calculate(
     if (gt(ps, 0) && oshort === 0) {
       markers.push({ time: t, position: 'aboveBar', shape: 'xcross', color: GRAY, text: 'Exit\nSell', textColor: '#2962FF' });
     }
+    flags[0][i] = eq(olong, 1);
+    flags[1][i] = eq(oshort, 1);
+    flags[2][i] = gt(pl, 0) && olong === 0;
+    flags[3][i] = gt(ps, 0) && oshort === 0;
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0: maPlot, plot1: openPlot },
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const RenkoMovingAverageRmiAlertR3By = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Swing BUY Alert', message: 'BUY' },
+  { id: 'alert1', title: 'Swing SELL Alert', message: 'SELL' },
+  { id: 'alert2', title: 'Swing BUY Exit Alert', message: 'BUY Exit' },
+  { id: 'alert3', title: 'Swing SELL Exit Alert', message: 'SELL Exit' },
+];
+
+export const RenkoMovingAverageRmiAlertR3By = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

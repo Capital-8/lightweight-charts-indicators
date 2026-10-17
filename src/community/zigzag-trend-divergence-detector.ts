@@ -14,7 +14,12 @@
  * hidden divergence, "I" indeterminate, from the price direction, the oscillator direction and the supertrend
  * direction at that point (at most 500 lines and 500 labels). On the last bar a table lists the zigzag points (bar
  * time, price, oscillator and trend directions, sentiment). The bar times of the table are in the exchange time zone
- * of the chart context (UTC without it). The alerts of the script are not ported (no output).
+ * of the chart context (UTC without it).
+ *
+ * Alerts (alert() call, `alertCalls` of the result, once per bar): on the bar of a new last zigzag point (without
+ * "Confirmed Pivots"; with it, on the bar on which the confirmed point changes) whose sentiment is switched on in the
+ * Alert inputs, "Sentiment alert on <tickerid> :: <sentiment>" (e.g. "Bullish Divergence", "Bearish Hidden
+ * Divergence", "Indeterminate"). The ticker id is read from the chart context (empty without it).
  *
  * Reference: "Zigzag Trend/Divergence Detector" by Trendoscope
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -25,8 +30,8 @@ import {
   taCore, str, time, timeframe, line, label, table, resetDrawings, setDrawingBar, drawingOutputs, getSourceSeries,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line, type Label, type SourceType,
 } from 'oakscriptjs';
-import type { BarColorData } from '../types';
-import { timezoneOf, type ChartContext } from '../chart-context';
+import type { BarColorData, AlertCall } from '../types';
+import { tickeridOf, timezoneOf, type ChartContext } from '../chart-context';
 import { chartTimeframe } from '../anchor-period';
 
 type OscillatorSource = 'CCI' | 'CMO' | 'COG' | 'DMI' | 'HIST' | 'MACD' | 'MFI' | 'MOM' | 'ROC' | 'RSI' | 'TSI' | 'WPR'
@@ -285,7 +290,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ZigzagTrendDivergenceDetectorInputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const startIndex = cfg.waitForConfirmation ? 1 : 0;
@@ -377,6 +382,11 @@ export function calculate(
     }
   };
 
+  // alert(): 'Sentiment alert on ' + syminfo.tickerid + ' :: ' + sentimentText
+  const tickerid = tickeridOf(chart);
+  const alertCalls: AlertCall[] = [];
+  let prevLastPivotBar = NaN; // lastPivotBar[1] of the `if` block
+
   const plotValues: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === n - 1);
@@ -433,6 +443,27 @@ export function calculate(
     if (newZG) {
       if (doubleZG) drawLine(i, drawSites[0], startIndex + 1, startIndex + 2);
       if (pivots.length >= startIndex + 2) drawLine(i, drawSites[1], startIndex, startIndex + 1);
+    }
+
+    // if array.size(pZigzagPivotBars) > startIndex: the alert of the last point
+    if (pivotBars.length > startIndex) {
+      const lastPivotBar = pivotBars[startIndex];
+      const lPivotDir = pivotDirs[startIndex];
+      const lOscillatorDir = oPivotDirs[startIndex];
+      const sDir = supertrendDir[lastPivotBar];
+      const [divergence] = getDivergence(lPivotDir, lOscillatorDir, sDir);
+      const bias = getBias(lPivotDir, lOscillatorDir);
+      // lastPivotBar != lastPivotBar[1] (na compares false)
+      const isAlertBar = (i === lastPivotBar && startIndex === 0)
+        || (startIndex === 1 && !isNaN(prevLastPivotBar) && lastPivotBar !== prevLastPivotBar);
+      prevLastPivotBar = lastPivotBar;
+      if (isAlertBar && ((cfg.alertIndeterminate && divergence === 0) || (cfg.alertContinuation && divergence === 1)
+        || (cfg.alertDivergence && divergence === -1) || (cfg.alertHiddenDivergence && divergence === -2))) {
+        const sentimentText = divergence === 1 ? (bias === 1 ? 'Bullish Continuation' : 'Bearish Continuation')
+          : divergence === -1 ? (bias === 1 ? 'Bullish Divergence' : 'Bearish Divergence')
+            : divergence === -2 ? (bias === 1 ? 'Bullish Hidden Divergence' : 'Bearish Hidden Divergence') : 'Indeterminate';
+        alertCalls.push({ time: bars[i].time, message: 'Sentiment alert on ' + tickerid + ' :: ' + sentimentText, freq: 'once_per_bar' });
+      }
     }
   }
 
@@ -493,7 +524,10 @@ export function calculate(
     lines: out.lines ?? [],
     labels: out.labels ?? [],
     tables: out.tables ?? [],
+    alertCalls,
   };
 }
 
-export const ZigzagTrendDivergenceDetector = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const hasAlertFunction = true;
+
+export const ZigzagTrendDivergenceDetector = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

@@ -15,8 +15,12 @@
  * "Zig Zag" draws the legs of the zigzag.
  *
  * Chart context (optional third argument of calculate): the symbol tick of the prices in the labels
- * (`format.mintick`); without a context the tick is 0.01. The alert() calls of the original (level crossings, new
- * zigzag leg) are not ported.
+ * (`format.mintick`) and the ticker of the alert messages; without a context the tick is 0.01.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar), on every bar in the original's order:
+ * "AutoFibFan: new zigzag" when the end of the last completed leg changed, then for each fan / grid line drawn on
+ * the bar (price levels, then time levels) "AutoFibFan: <ticker> crossing <price|time|grid> level <level>" when the
+ * line's price at the bar (the line read as extended both ways) is strictly between the close and the previous close.
  *
  * Reference: "Auto Fib Speed Resistance Fans by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -27,8 +31,8 @@ import {
   ta, math, str, color, line, label, linefill, table, resetDrawings, setDrawingBar, varDrawing, drawingOutputs,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line, type Label, type Linefill,
 } from 'oakscriptjs';
-import type { LabelData, LineDrawingData, LinefillData, TableData } from '../types';
-import { mintickOf, type ChartContext } from '../chart-context';
+import type { AlertCall, LabelData, LineDrawingData, LinefillData, TableData } from '../types';
+import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
 
 type LineStyleInput = 'Dashed' | 'Dotted' | 'Solid';
 type LabelContent = 'Levels' | 'Prices' | 'Levels (Prices)' | 'None';
@@ -212,7 +216,7 @@ export function calculate(
   inputs: Partial<AutoFibSpeedResistanceFansByDgtInputs> = {},
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'lines' | 'labels' | 'linefills' | 'tables'> & {
-    lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[];
+    lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[]; alertCalls: AlertCall[];
   } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -221,6 +225,10 @@ export function calculate(
   const atr10 = ta.atr(bars, 10).toArray().map((v) => v ?? NaN);
   const lsize = cfg.lSize === 'Normal' ? 'normal' : cfg.lSize === 'Small' ? 'small' : 'large';
   const hist = Math.trunc(cfg.histPivot);
+  const ticker = tickerOf(chart);
+  const alertCalls: AlertCall[] = [];
+  /** Bar being calculated (bar_index) and the previous close (close[1] of f_crossingLevelX) */
+  let barIdx = 0;
 
   // pivots(src, depth / 2, isHigh): the division keeps its fraction (5.5 for a depth of 11); the history index is
   // truncated and the loop runs from 0 to twice the length
@@ -311,7 +319,7 @@ export function calculate(
 
   // f_drawLineX(): the `var` line of the call site, moved on every bar, and a new copy for the fills
   const drawLineX = (site: string, x1: number, y1: number, x2: number, y2: number, c: string, w: number, style: string,
-    extend: boolean, ptl: 'price' | 'time' | 'grid', was: 'first' | 'second' | 'grid') => {
+    extend: boolean, level: number, ptl: 'price' | 'time' | 'grid', was: 'first' | 'second' | 'grid') => {
     const st = styleOf(style);
     const ext = extend ? 'right' : 'none';
     let v = varLines.get(site);
@@ -322,6 +330,16 @@ export function calculate(
     }
     line.set_xy1(v.value!, x1, y1);
     line.set_xy2(v.value!, x2, y2);
+    // if f_crossingLevelX(close, line.get_price(fibfan, bar_index)): r > close and r < close[1] or r < close and r > close[1]
+    const r = line.get_price(v.value!, barIdx);
+    const c0 = bars[barIdx].close;
+    const c1 = barIdx > 0 ? bars[barIdx - 1].close : NaN;
+    if ((gt(r, c0) && lt(r, c1)) || (lt(r, c0) && gt(r, c1))) {
+      alertCalls.push({
+        time: bars[barIdx].time, message: 'AutoFibFan: ' + ticker + ' crossing ' + ptl + ' level ' + str.tostring(level),
+        freq: 'once_per_bar',
+      });
+    }
     if (ptl === 'grid') return;
     const copy = line.new(x1, y1, x2, y2, 'bar_index', ext, c, st, w);
     if (ptl === 'price') (was === 'first' ? aLnp1 : aLnp2).push(copy);
@@ -359,6 +377,8 @@ export function calculate(
   try {
     for (let i = 0; i < n; i++) {
       setDrawingBar(i, i === n - 1);
+      barIdx = i;
+      const iLastPivotBefore = iLastPivot;
       // iStartM / pStartM / iEndM / pEndM: read before the pivots of this bar
       iPrevChanges.update(iPrevPivot);
       pPrevChanges.update(pPrevPivot);
@@ -386,6 +406,10 @@ export function calculate(
         const [iL, pL] = pivotAt(i, false);
         if (!isNaN(iL)) swing(i, false, iL, pL);
       }
+      // if ta.change(iLastPivot): alert("AutoFibFan: new zigzag") (na on the first bar or next to an na value)
+      if (i > 0 && !isNaN(iLastPivot) && !isNaN(iLastPivotBefore) && iLastPivot !== iLastPivotBefore) {
+        alertCalls.push({ time: bars[i].time, message: 'AutoFibFan: new zigzag', freq: 'once_per_bar' });
+      }
 
       const xEnd = math.round(iEndM);
       // processPriceLevels(show, level, colorL, widthL, styleL)
@@ -395,16 +419,16 @@ export function calculate(
         const pEndY2 = gt(pStartM, pEndM) ? pStartM - pPvtDiff * lv : pStartM + pPvtDiff * lv;
         if (!show) continue;
         const c1 = cfg.uniColor ? cfg.uniColor1 : css;
-        drawLineX(`${key}:first`, iStartM, pStartM, xEnd, pEndY, c1, width, style, true, 'price', 'first');
+        drawLineX(`${key}:first`, iStartM, pStartM, xEnd, pEndY, c1, width, style, true, level, 'price', 'first');
         fill(aLnp1, cfg.priceBg, css);
         if (cfg.secondFans) {
           drawLineX(`${key}:second`, iStartM, pEndM, xEnd, pEndY2, cfg.uniColor ? cfg.uniColor2 : css, width, style, true,
-            'price', 'second');
+            level, 'price', 'second');
           fill(aLnp2, cfg.priceBg, css);
         }
         if (cfg.showGrid || cfg.extendPGrid) {
           drawLineX(`${key}:grid`, iStartM, pEndY, xEnd, pEndY, cfg.uniColor ? cfg.uniColor1 : cfg.pGridColor ? css : cfg.colorGrid,
-            cfg.widthGrid, cfg.styleGrid, cfg.extendPGrid, 'grid', 'grid');
+            cfg.widthGrid, cfg.styleGrid, cfg.extendPGrid, level, 'grid', 'grid');
         }
         drawLabelX(iStartM, pStartM, xEnd, pEndY, c1, level, true);
       }
@@ -414,16 +438,16 @@ export function calculate(
         const xEndX = math.round(iEndM - iPvtDiff * lv);
         if (!show) continue;
         const c1 = cfg.uniColor ? cfg.uniColor1 : css;
-        drawLineX(`${key}:first`, iStartM, pStartM, xEndX, pEndM, c1, width, style, true, 'time', 'first');
+        drawLineX(`${key}:first`, iStartM, pStartM, xEndX, pEndM, c1, width, style, true, level, 'time', 'first');
         fill(aLnt1, cfg.timeBg, css);
         if (cfg.secondFans) {
           drawLineX(`${key}:second`, iStartM, pEndM, xEndX, pStartM, cfg.uniColor ? cfg.uniColor2 : css, width, style, true,
-            'time', 'second');
+            level, 'time', 'second');
           fill(aLnt2, cfg.timeBg, css);
         }
         if (cfg.showGrid) {
           drawLineX(`${key}:grid`, xEndX, pStartM, xEndX, pEndM, cfg.uniColor ? cfg.uniColor1 : cfg.colorGrid, cfg.widthGrid,
-            cfg.styleGrid, false, 'grid', 'grid');
+            cfg.styleGrid, false, level, 'grid', 'grid');
         }
         drawLabelX(xEndX, pStartM, xEndX, pEndM, c1, level, false);
       }
@@ -446,8 +470,11 @@ export function calculate(
     labels: drawn.labels ?? [],
     linefills: drawn.linefills ?? [],
     tables: drawn.tables ?? [],
+    alertCalls,
   };
 }
+
+export const hasAlertFunction = true;
 
 export const AutoFibSpeedResistanceFansByDgt = {
   calculate,
@@ -455,4 +482,5 @@ export const AutoFibSpeedResistanceFansByDgt = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

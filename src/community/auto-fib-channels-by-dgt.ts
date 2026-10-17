@@ -12,8 +12,13 @@
  * Two dashed grey lines join Start, Mid and End. "Zig Zag" draws the legs of the zigzag (at most 144 lines are kept).
  *
  * Chart context (optional third argument of calculate): the symbol tick of the prices in the labels
- * (`format.mintick`); without a context the tick is 0.01. The alert() calls of the original (crossings of the
- * levels) are not ported.
+ * (`format.mintick`) and the ticker of the alert messages (`syminfo.ticker`); without a context the tick is 0.01 and
+ * the ticker empty.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): on every bar where the close crosses a shown
+ * level (above it now and below it on the bar before, or the reverse), "AutoFibChannel: <ticker> crossing level
+ * <level>" for a channel line (its price at the bar) and "Autofib: <ticker> crossing level <level>" for a
+ * retracement / extension level, in the order of the levels.
  *
  * Reference: "Auto Fib Channels by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -24,9 +29,12 @@ import {
   ta, math, str, color, line, label, linefill, resetDrawings, setDrawingBar, varDrawing,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line, type Label, type Linefill,
 } from 'oakscriptjs';
-import type { LabelData, LineDrawingData, LinefillData, TableData } from '../types';
+import type { AlertCall, LabelData, LineDrawingData, LinefillData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
-import { mintickOf, type ChartContext } from '../chart-context';
+import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 /** The 22 levels in the order of the inputs: key, shown, value, colour, inline */
 const LEVELS = [
@@ -193,7 +201,7 @@ export function calculate(
   inputs: Partial<AutoFibChannelsByDgtInputs> = {},
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'lines' | 'labels' | 'linefills' | 'tables'> & {
-    lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[];
+    lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[]; alertCalls: AlertCall[];
   } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -201,6 +209,8 @@ export function calculate(
   const priceText = (v: number) => str.tostring(v, 'mintick', tick);
   const atr10 = ta.atr(bars, 10).toArray().map((v) => v ?? NaN);
   const ext = cfg.extendL ? 'both' : 'right';
+  const alertCalls: AlertCall[] = [];
+  const ticker = tickerOf(chart);
 
   // pivots(src, depth / 2, isHigh): the division keeps its fraction (5.5 for a depth of 11); the history index is
   // truncated and the loop runs from 0 to twice the length
@@ -303,6 +313,10 @@ export function calculate(
 
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === n - 1);
+    // f_crossingLevel(close, r): r > close and r < close[1] or r < close and r > close[1] (the calls run on every bar)
+    const close = bars[i].close;
+    const closePrev = i > 0 ? bars[i - 1].close : NaN;
+    const crossing = (r: number) => (gt(r, close) && lt(r, closePrev)) || (lt(r, close) && gt(r, closePrev));
     const [iH, pH] = pivotAt(i, true);
     if (!isNaN(iH)) {
       swing(i, true, iH, pH);
@@ -360,6 +374,9 @@ export function calculate(
             tooltipText(value, pLastBar, 'Fib Channel'));
           drawLabel(`${key}:dot`, i, pLastBar, '', col, '#00000000', 'circle', 'auto', 'left', '');
         }
+        if (crossing(pLastBar)) {
+          alertCalls.push({ time: bars[i].time, message: 'AutoFibChannel: ' + ticker + ' crossing level ' + str.tostring(value), freq: 'once_per_bar' });
+        }
         if (cfg.bgChannel) {
           const cLines = aLn.length;
           if (cLines === 3) aCl.push(css);
@@ -401,6 +418,9 @@ export function calculate(
             drawLabel(`${key}:ret`, isExt ? iMidPivot : iStartBase, r, labelText(value, r, isExt ? 'EXT ' : 'RET '), '#00000000', col,
               'label_right', 'normal', 'right', tooltipText(value, r, isExt ? 'Fib Extention' : 'Fib Retracement'));
           }
+          if (crossing(r)) {
+            alertCalls.push({ time: bars[i].time, message: 'Autofib: ' + ticker + ' crossing level ' + str.tostring(value), freq: 'once_per_bar' });
+          }
         }
       }
     }
@@ -433,6 +453,7 @@ export function calculate(
       position: 'bottom_right', columns: 1, rows: 1,
       cells: [{ column: 0, row: 0, text: '☼☾  ', textSize: 'normal', textColor: TEAL }],
     }] : [],
+    alertCalls,
   };
 }
 
@@ -442,4 +463,5 @@ export const AutoFibChannelsByDgt = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

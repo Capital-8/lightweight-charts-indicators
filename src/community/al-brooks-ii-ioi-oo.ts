@@ -7,6 +7,9 @@
  * pattern has a character above the bar and a light background (90 % transparency) in its colour. Every inside bar
  * gets a blue "I" and every outside bar a red "O" below the bar.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'ii Pattern Alert', 'OO Pattern Alert' and 'ioi Pattern Alert', true
+ * on the bars of each pattern (whatever the show inputs).
+ *
  * The Pine plotchar characters are "ii", "OO" and "ioi"; plotchar draws only the first character ("i", "O", "i").
  *
  * Reference: "Al Brooks II.IOI.OO" (Pine title "Al Brooks 连续模式") by JimmC98
@@ -16,6 +19,7 @@
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AlBrooksIiIoiOoInputs {
   /** 显示 ii 模式 (show the ii pattern) */
@@ -67,7 +71,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AlBrooksIiIoiOoInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const { showIi, showOo, showIoi, colorIi, colorOo, colorIoi } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const high = (i: number) => (i >= 0 ? bars[i].high : NaN);
@@ -79,6 +83,7 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  const iiFlags: boolean[] = [], ooFlags: boolean[] = [], ioiFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const insideBar = lt(high(i), high(i - 1)) && gt(low(i), low(i - 1));
@@ -90,6 +95,9 @@ export function calculate(
     const iiPattern = insideBar && insideBar1;
     const ooPattern = outsideBar && outsideBar1;
     const ioiPattern = insideBar && outsideBar1 && insideBar2;
+    iiFlags.push(iiPattern);
+    ooFlags.push(ooPattern);
+    ioiFlags.push(ioiPattern);
 
     // plotchar(show_ii and ii_pattern, 'ii Pattern', 'ii', location.abovebar, color_ii, size = size.normal)
     if (showIi && iiPattern) {
@@ -123,14 +131,22 @@ export function calculate(
         size: 'tiny' });
     }
   }
-  // alertcondition 'ii Pattern Alert', 'OO Pattern Alert' and 'ioi Pattern Alert': alerts only, not ported
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
     bgColors,
+    // alertcondition(ii_pattern) / (oo_pattern) / (ioi_pattern)
+    alerts: alertStates(alertConditions, bars, [iiFlags, ooFlags, ioiFlags]),
   };
 }
 
-export const AlBrooksIiIoiOo = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'ii Pattern Alert', message: '连续两根Inside Bar出现在 {{ticker}}' },
+  { id: 'alert1', title: 'OO Pattern Alert', message: '连续两根Outside Bar出现在 {{ticker}}' },
+  { id: 'alert2', title: 'ioi Pattern Alert', message: 'ioi模式出现在 {{ticker}}' },
+];
+
+export const AlBrooksIiIoiOo = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -14,7 +14,13 @@
  * are kept.
  *
  * Chart value read from the optional third argument (see src/chart-context.ts): the symbol tick for the prices in
- * label texts and tooltips (0.01 without it). The alerts of the original are not ported.
+ * label texts and tooltips (0.01 without it) and the ticker for the alert messages (empty without it).
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): on every bar on which the close crosses a level
+ * (the level between the close and the previous close), "AutoPitchFan: <ticker> crossing median level", "...
+ * crossing resistance level <level>" / "... crossing support level <level>" for each pitchfan level shown, and
+ * "AutoFib Retracment : <ticker> crossing level <level>" (or "AutoFib Extention : ...") for each Fibonacci level shown,
+ * in the order of the original.
  *
  * Reference: "Auto PitchFan, Fib Extension/Retracement and ZigZag by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -25,8 +31,8 @@ import {
   ta, str, math, color, line, label, linefill, resetDrawings, setDrawingBar, varDrawing, holdDrawing,
   type Label, type Line, type Linefill, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { LabelData, LineDrawingData, LinefillData, TableData } from '../types';
-import { mintickOf, type ChartContext } from '../chart-context';
+import type { LabelData, LineDrawingData, LinefillData, TableData, AlertCall } from '../types';
+import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
 import { barInterval, barTime } from '../bar-time';
 
 type PitchLabels = 'Levels' | 'Prices' | 'Levels (Prices)' | 'None';
@@ -239,7 +245,9 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<AutoPitchfanFibExtensionRetracementAndInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[] } {
+): IndicatorResult & {
+  lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[]; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -247,6 +255,9 @@ export function calculate(
   const mintick = mintickOf(chart);
   const priceText = (v: number) => str.tostring(v, 'mintick', mintick);
   const atr10 = ta.atr(bars, 10).toArray();
+  // syminfo.ticker, for the alert() messages
+  const ticker = tickerOf(chart);
+  const alertCalls: AlertCall[] = [];
 
   // Drawings of the library registry (500 lines, the default 50 labels). As in the script, the pitchfan rays and
   // their fills are deleted and made again on each bar, the lines and labels of f_drawLineX / f_drawLabelX are `var`
@@ -347,6 +358,11 @@ export function calculate(
   let lns: Line[] = [];
   let fills: Linefill[] = [];
   const draw = (i: number, keep: boolean) => {
+    // f_crossingLevel(close, level): level > close and level < close[1] or level < close and level > close[1]
+    const close = bars[i].close;
+    const close1 = i > 0 ? bars[i - 1].close : NaN;
+    const crossing = (level: number) => (gt(level, close) && lt(level, close1)) || (lt(level, close) && gt(level, close1));
+    const alertCall = (message: string) => alertCalls.push({ time: bars[i].time, message, freq: 'once_per_bar' });
     const iStartMedian = iPrevValues.get(hist > 0 ? hist + 1 : 1);
     const pStartMedian = pPrevValues.get(hist > 0 ? hist + 1 : 1);
     const iLastPivot = iLastValues.get(hist > 0 ? hist : 0);
@@ -382,6 +398,7 @@ export function calculate(
         drawLabelX('m', keep, i, mPrice, text, CLEAR, 'label_left', cfg.medianColor, size, tip);
         drawLabelX('m circle', keep, i, mPrice, () => '', cfg.medianColor, 'circle', CLEAR, 'auto', () => '');
       }
+      if (crossing(mPrice)) alertCall('AutoPitchFan: ' + ticker + ' crossing median level');
     }
 
     // processPitchLevel()
@@ -412,6 +429,8 @@ export function calculate(
         drawLabelX(`p${k} r circle`, keep, i, rPrice, () => '', css, 'circle', CLEAR, 'auto', () => '');
         drawLabelX(`p${k} s circle`, keep, i, sPrice, () => '', css, 'circle', CLEAR, 'auto', () => '');
       }
+      if (crossing(rPrice)) alertCall('AutoPitchFan: ' + ticker + ' crossing resistance level ' + str.tostring(level));
+      if (crossing(sPrice)) alertCall('AutoPitchFan: ' + ticker + ' crossing support level ' + str.tostring(level));
       if (cfg.pitchBackground) {
         const paint = String(color.new(css, 89));
         if (lnr.length > 1) fill(lnr[lnr.length - 2], lnr[lnr.length - 1], paint);
@@ -443,6 +462,9 @@ export function calculate(
           const lastBar = cfg.levelsP === 'Last Bar';
           drawLabelX(`f${k}`, keep, lastBar ? i : iPrevPivot, price, () => `${ext ? 'EXT ' : 'RET '}${txt()}`, CLEAR, lastBar ? 'label_left' : 'label_right',
             css, sizeOf(cfg.levelsF), tip);
+        }
+        if (crossing(price)) {
+          alertCall('AutoFib ' + (ext ? 'Extention : ' : 'Retracment : ') + ticker + ' crossing level ' + str.tostring(level));
         }
       });
     }
@@ -495,8 +517,11 @@ export function calculate(
     tables: n > 0
       ? [{ position: 'bottom_right', columns: 1, rows: 1, cells: [{ column: 0, row: 0, text: '☼☾  ', textSize: 'normal', textColor: TEAL }] }]
       : [],
+    alertCalls,
   };
 }
+
+export const hasAlertFunction = true;
 
 export const AutoPitchfanFibExtensionRetracementAnd = {
   calculate,
@@ -504,4 +529,5 @@ export const AutoPitchfanFibExtensionRetracementAnd = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

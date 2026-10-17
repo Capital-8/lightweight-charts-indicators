@@ -7,12 +7,20 @@
  * wick). The signal needs 1, 2 or 3 consecutive dojis (the highest enabled count wins) with the same dominant wick
  * for 2 and 3. A star above the bar marks an upper wick doji (sell), a star below the bar a lower wick doji (buy).
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): "Buy Doji Signal" on a buy star and
+ * "Sell Doji Signal" on a sell star, on confirmed bars only (`barstate.isconfirmed`: the last bar only when the chart
+ * context says it is closed, `lastBarConfirmed`, true without a context).
+ *
  * Reference: "Triple Doji Sequence" by Marc_Thiart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { AlertCall, MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface TripleDojiSequenceInputs {
   /** Signal on a single doji */
@@ -66,7 +74,8 @@ const STAR = '\u{1F31F}';
 export function calculate(
   bars: Bar[],
   inputs: Partial<TripleDojiSequenceInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -88,6 +97,8 @@ export function calculate(
   }
 
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
+  const lastConfirmed = lastBarConfirmedOf(chart);
   // history before bar 0 is na: false
   const up = (k: number) => k >= 0 && upperDom[k];
   const lo = (k: number) => k >= 0 && lowerDom[k];
@@ -111,14 +122,20 @@ export function calculate(
     if (finalSignal && lo(i)) {
       markers.push({ time, position: 'belowBar', shape: 'circle', color: 'transparent', text: STAR, textColor: color.green, size: 'tiny' });
     }
+    // barstate.isconfirmed: every historical bar, the last bar when it is closed
+    const confirmed = i < n - 1 || lastConfirmed;
+    // if final_signal and lower_wick_dominant and barstate.isconfirmed: alert("Buy Doji Signal", once per bar close)
+    if (finalSignal && lo(i) && confirmed) alertCalls.push({ time, message: 'Buy Doji Signal', freq: 'once_per_bar_close' });
+    // if final_signal and upper_wick_dominant and barstate.isconfirmed: alert("Sell Doji Signal", once per bar close)
+    if (finalSignal && up(i) && confirmed) alertCalls.push({ time, message: 'Sell Doji Signal', freq: 'once_per_bar_close' });
   }
-  // alert('Buy Doji Signal' / 'Sell Doji Signal') calls: alerts only, not ported
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alertCalls,
   };
 }
 
-export const TripleDojiSequence = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const TripleDojiSequence = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

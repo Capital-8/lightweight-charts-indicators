@@ -9,12 +9,16 @@
  * red bar with a lower low that closes below hl2. Without continuation, a bullish signal needs a `length`-bar
  * lowest low on one of the last 3 bars and a bearish signal a `length`-bar highest high.
  *
+ * Alerts (alert() calls, `alertCalls` of the result): "Bullish R/C Detected" on a bullish signal, else "Bearish R/C
+ * Detected" on a bearish signal; once per bar when the bar's volume and range are above their averages, once per bar
+ * close otherwise.
+ *
  * Reference: "Three-Bar Reversal/Continuation" by abuzka
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { MarkerData, AlertCall } from '../types';
 
 export interface ThreeBarReversalContinuationInputs {
   /** Period of the averages and of the lowest / highest window */
@@ -75,7 +79,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<ThreeBarReversalContinuationInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { length, coeff, detectLevel, symbolUp, symbolDown, showCont, showStrength, plotColor } = cfg;
   const n = bars.length;
@@ -97,6 +101,7 @@ export function calculate(
   const isLowest: boolean[] = new Array(n);
   const isHighest: boolean[] = new Array(n);
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
   const white = color.white;
   const yellow = color.yellow;
   const lime = color.lime;
@@ -154,14 +159,24 @@ export function calculate(
       markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: 'transparent', text: symbolDown,
         textColor: plotColor, size: 'tiny' });
     }
+
+    // reqConfirm = volume > avgVolume and barRange > avgRange; alert() on bullCond, else on bearCond
+    const reqConfirm = gt(volume[i], avgVolume[i]) && gt(barRange[i], avgRange[i]);
+    const freq = reqConfirm ? 'once_per_bar' : 'once_per_bar_close';
+    if (bullCond) alertCalls.push({ time: t, message: 'Bullish R/C Detected', freq });
+    else if (bearCond) alertCalls.push({ time: t, message: 'Bearish R/C Detected', freq });
   }
-  // alert() calls (Bullish / Bearish R/C Detected): alerts only, not ported
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alertCalls,
   };
 }
 
-export const ThreeBarReversalContinuation = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const hasAlertFunction = true;
+
+export const ThreeBarReversalContinuation = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction,
+};

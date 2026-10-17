@@ -6,12 +6,16 @@
  * high between EMA1 and EMA2. With "First signals only?" a long signal also needs a bearish stack within the
  * lookback bars and no long signal as the last signal (a short signal the same way).
  *
+ * Alerts (alertcondition, `alerts` of the result): "Long Alert" / "Short Alert" on the bars of the long / short
+ * triangles.
+ *
  * Reference: "Trend Scalper" by abedmahmood
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendScalperInputs {
   ema1Length: number;
@@ -85,7 +89,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendScalperInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -102,6 +106,8 @@ export function calculate(
   const sinceBear = A(ta.barssince(S(bearish.map((b) => (b ? 1 : 0)))));
 
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = new Array(n);
+  const shortFlags: boolean[] = new Array(n);
   let lastSignal = 0; // var int lastSignal = 0
   for (let i = 0; i < n; i++) {
     const { low, high } = bars[i];
@@ -117,6 +123,8 @@ export function calculate(
     if (sellSignal) lastSignal = -1;
     const plotLong = cfg.onlyFirstTriangle ? buySignal : longCond;
     const plotShort = cfg.onlyFirstTriangle ? sellSignal : shortCond;
+    longFlags[i] = plotLong;
+    shortFlags[i] = plotShort;
     if (!cfg.onlyFirstTriangle && !(longCond || shortCond)) lastSignal = 0;
 
     // plotshape(plotLongSignal, "Long Signal", shape.triangleup, location.belowbar, longColor, size.small)
@@ -128,7 +136,6 @@ export function calculate(
   const line = (show: boolean, v: number[], col: string) =>
     bars.map((b, i) => ({ time: b.time, value: show ? v[i] : NaN, color: col }));
 
-  // alertcondition: Long Alert, Short Alert (not ported)
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -137,8 +144,16 @@ export function calculate(
       plot2: line(cfg.showEMA3, ema3, cfg.emaColor3),
     },
     markers,
+    // alertcondition(plotLongSignal) / (plotShortSignal)
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Alert', message: 'Trend Scalper Long Signal' },
+  { id: 'alert1', title: 'Short Alert', message: 'Trend Scalper Short Signal' },
+];
 
 export const TrendScalper = {
   calculate,
@@ -146,4 +161,5 @@ export const TrendScalper = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

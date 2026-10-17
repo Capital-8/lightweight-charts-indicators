@@ -14,6 +14,9 @@
  * - swing alerts: the first bar that closes outside the channel in its own direction (optionally only on the side
  *   of the medium EMA), drawn one bar later as BUY / SELL arrows or as big arrows.
  *
+ * Alerts (alertcondition, `alerts` of the result): "SCAPSWING alert Up" / "SCAPSWING alert Down" on the bar of the
+ * swing alert itself (the bar before the arrow).
+ *
  * The chart timeframe (1 minute or not) is read from the chart context; without it, from the spacing of the bars.
  *
  * Reference: "Scalping Swing Trading Tool R1-6 by JustUncleL" by JustUncleL
@@ -25,6 +28,7 @@ import type { BarColorData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ScalpingSwingTradingToolInputs {
   showPac: boolean;
@@ -129,7 +133,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ScalpingSwingTradingToolInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers' | 'barColors'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers' | 'barColors'> & { markers: MarkerData[]; barColors: BarColorData[]; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -191,6 +195,9 @@ export function calculate(
   let botFractals = NaN;
   let upAlert = NaN; // up_alert[1] is na on the first bar
   let dnAlert = NaN;
+  // alertcondition(up_alert == 1) / (dn_alert == 1)
+  const upFlags: boolean[] = new Array(n);
+  const dnFlags: boolean[] = new Array(n);
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -286,6 +293,8 @@ export function calculate(
     const prevDn = dnAlert;
     upAlert = isUp ? (isNaN(prevUp) ? 1 : prevUp + 1) : 0;
     dnAlert = isDown ? (isNaN(prevDn) ? 1 : prevDn + 1) : 0;
+    upFlags[i] = upAlert === 1;
+    dnFlags[i] = dnAlert === 1;
     if (cfg.showPacExit && cfg.useBigArrows) {
       // plotarrow: the arrow height is not ported
       if (prevUp === 1) markers.push({ time: t, position: 'belowBar', shape: 'arrowUp', color: T(AQUA, 20) });
@@ -307,8 +316,15 @@ export function calculate(
     ],
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, [upFlags, dnFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'SCAPSWING alert Up', message: 'SWING_UP' },
+  { id: 'alert1', title: 'SCAPSWING alert Down', message: 'SWING_DN' },
+];
 
 export const ScalpingSwingTradingTool = {
   calculate,
@@ -316,4 +332,5 @@ export const ScalpingSwingTradingTool = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

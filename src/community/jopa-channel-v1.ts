@@ -11,6 +11,10 @@
  * channel, fills between the inner and the outer bands, and squeeze dots when the width is at most sqThresh times
  * its `sqLen`-bar average.
  *
+ * Alerts (alertcondition, `alerts` of the result): breakout long / short (close beyond the upper / lower value band
+ * with a relative volume of at least `rvolMinBr`) and top / bottom zone (close at or beyond the 80 % / 20 % guide, the
+ * guides shown).
+ *
  * Reference: "JOPA Channel (Dual-Volumed) v1 [JopAlgo]" by JopAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: Copyright (c) 2025 JopAlgo. © 2025 JopAlgo [JopAlgo]
@@ -18,6 +22,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type TrackMode = 'Base' | 'Parallel-Lock' | 'Slope-Lock' | 'Forecast-Lock';
 
@@ -51,7 +56,7 @@ export interface JopaChannelV1Inputs {
   marginK: number;
   sqLen: number;
   sqThresh: number;
-  /** Used by the alert conditions only (not ported) */
+  /** Used by the alert conditions only */
   rvolMinBr: number;
   showValueRails: boolean;
   showValueFill: boolean;
@@ -159,7 +164,9 @@ export const metadata = {
 /** Pine float comparisons: a > b only when a - b > 1e-10, a != b beyond 1e-10 (na and +-infinity: false) */
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
 const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
+const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 const ne = (a: number, b: number) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) > EPS;
 /** Pine nz(): na and +-infinity give 0 */
 const nz = (x: number) => (Number.isFinite(x) ? x : 0);
@@ -170,7 +177,7 @@ const fin = (x: number) => (Number.isFinite(x) ? x : NaN);
 export function calculate(
   bars: Bar[],
   inputs: Partial<JopaChannelV1Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -305,6 +312,19 @@ export function calculate(
     }
   }
 
+  // Alerts: breakoutUp_val = close > upperValue and rvol >= rvolMinBr (breakoutDown_val: close < lowerValue);
+  // inTopZone = showGuides and not na(rngGuides) and close >= line80 (inBottomZone: close <= line20)
+  const breakUp: boolean[] = [], breakDown: boolean[] = [], topZone: boolean[] = [], bottomZone: boolean[] = [];
+  for (let i = 0; i < n; i++) {
+    const close = bars[i].close;
+    const rvolOk = ge(fin(rvol[i]), cfg.rvolMinBr);
+    breakUp.push(gt(close, fin(upperValue[i])) && rvolOk);
+    breakDown.push(lt(close, fin(lowerValue[i])) && rvolOk);
+    const valid = cfg.showGuides && !isNaN(fin(top[i] - bottom[i]));
+    topZone.push(valid && ge(close, fin(g80(i))));
+    bottomZone.push(valid && le(close, fin(g20(i))));
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2, plot3, plot4, plot5, plot6 },
@@ -314,8 +334,17 @@ export function calculate(
         colors: new Array<string>(n).fill(containFill) },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, [breakUp, breakDown, topZone, bottomZone]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'DVWAP Breakout Long (Value Bands)', message: 'Breakout above inner value band [JopAlgo]' },
+  { id: 'alert1', title: 'DVWAP Breakout Short (Value Bands)', message: 'Breakout below inner value band [JopAlgo]' },
+  { id: 'alert2', title: 'Top Zone (Containment/Value)', message: 'Price in top 20% of channel [JopAlgo]' },
+  { id: 'alert3', title: 'Bottom Zone (Containment/Value)', message: 'Price in bottom 20% of channel [JopAlgo]' },
+];
 
 export const JopaChannelV1 = {
   calculate,
@@ -323,4 +352,5 @@ export const JopaChannelV1 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

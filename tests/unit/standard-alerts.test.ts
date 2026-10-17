@@ -70,3 +70,17 @@ describe('alert conditions of the standard built-ins', () => {
     expect(r.alerts[1].times).toEqual(r.outputValues.bearLabel.map((x: { time: number }) => x.time));
   });
 });
+
+describe('community ports: alerts of their originals on the registry entries (#8)', () => {
+  const ids = ['actually-engulfing-candlesticks','auto-fib-speed-resistance-fans-by-dgt','buy-sell-accurate-signals','fibonacci-extension-retracement-pivot-points','john-wick-doji-indicator','perfect-hammer-pattern-indicators-and-alerts','rsi-ma-cross-divergence-signal','sweep-engulf-2-candle','volume-alert','al-brooks-ii-ioi-oo','auto-pitchfan-fib-extension-retracement-and','dead-simple-reversal','heikin-ashi-doji-with-high-volume','jopa-channel-v1','price-flow-buy-sell','scalping-pullback-tool','three-bar-reversal-continuation','zigzag-trend-divergence-detector','auto-avwap-with-breakout-screener','auto-pitchfork-fib-retracement-zig-zag','dynamic-fractal-flow','inside-bar-coloring-w-alerts','linear-regression-channel-curve-slope-by-dgt','pulse-range','scalping-swing-trading-tool-r1-4-by-justunclel','trend-scalper','auto-fib-channels-by-dgt','bjorgum-key-levels','erema-signals','inside-bar-ind-alert','order-blocks-w-realtime-fibs','renko-moving-average-rmi-alert-r3-by','strong-engulfing-candlestick','triple-doji-sequence'];
+  it('every port declares its alertcondition()s or its alert() calls, and its result gives them', () => {
+    for (const id of ids) {
+      const e = indicatorRegistry.find((x) => x.id === id)!;
+      expect(e, id).toBeDefined();
+      expect((e.alertConditions?.length ?? 0) > 0 || e.hasAlertFunction === true, id).toBe(true);
+      const r: any = e.calculate(bars, { ...e.defaultInputs }, { timeframe: '1D', tickerid: 'NASDAQ:AAPL', lastBarConfirmed: true });
+      if (e.alertConditions?.length) expect(r.alerts?.map((a: any) => a.id), id).toEqual(e.alertConditions.map((a) => a.id));
+      if (e.hasAlertFunction) expect(Array.isArray(r.alertCalls), id).toBe(true);
+    }
+  });
+});

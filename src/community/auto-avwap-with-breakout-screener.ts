@@ -9,6 +9,9 @@
  * level, the high AVWAP takes the next high anchor; the low AVWAP does the same after a move down. Breakout: the close
  * crosses above the high AVWAP (triangle above the bar and a circle at the bar midpoint).
  *
+ * Alerts (alertcondition, `alerts` of the result): "Resistance Broken" when the open (or the close, see useOpen) is
+ * above the high AVWAP, "Support Broken" when it is below the low AVWAP, and "Breakout" for either of them.
+ *
  * Reference: "Auto AVWAP (Anchored-VWAP) with Breakout Screener" by manoharvs
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Electrified (electrifiedtrading)
@@ -16,13 +19,14 @@
 
 import { taCore, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type AutoAvwapKMode = 'SMA' | 'EMA' | 'WMA' | 'VWMA' | 'VAWMA';
 
 export interface AutoAvwapWithBreakoutScreenerInputs {
   /** Use the high and the low instead of hlc3 for the AVWAPs */
   useHiLow: boolean;
-  /** Use the open instead of the close for the alerts (alerts are not ported) */
+  /** Use the open instead of the close for the alerts */
   useOpen: boolean;
   /** Moving average of the stochastic that gives K */
   kMode: AutoAvwapKMode;
@@ -105,7 +109,7 @@ const nz = (x: number, r: number) => (Number.isFinite(x) ? x : r);
 export function calculate(
   bars: Bar[],
   inputs: Partial<AutoAvwapWithBreakoutScreenerInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const volume = bars.map((b) => b.volume ?? NaN);
@@ -221,6 +225,10 @@ export function calculate(
     }
   }
 
+  // alertValue = useOpen ? open : close; resistance = alertValue - hiAVWAP; support = alertValue - loAVWAP
+  const resistanceBroken = bars.map((b, i) => gt((cfg.useOpen ? b.open : b.close) - hiAVWAP[i], 0));
+  const supportBroken = bars.map((b, i) => lt((cfg.useOpen ? b.open : b.close) - loAVWAP[i], 0));
+
   const fin = (x: number) => (Number.isFinite(x) ? x : NaN);
   const line = (values: number[], c: string) => bars.map((b, i) => ({ time: b.time, value: fin(values[i]), color: c }));
 
@@ -234,8 +242,21 @@ export function calculate(
       plot4: bars.map((b, i) => ({ time: b.time, value: breakout[i] ? (b.high + b.low) / 2 : NaN, color: BREAKOUT })),
     },
     markers,
+    // alertcondition(resistance > 0 or support < 0) / (resistance > 0) / (support < 0)
+    alerts: alertStates(alertConditions, bars, [
+      resistanceBroken.map((r, i) => r || supportBroken[i]),
+      resistanceBroken,
+      supportBroken,
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Breakout (▲▼)', message: 'Breakout ({{ticker}} {{interval}})' },
+  { id: 'alert1', title: 'Resistance Broken ▲', message: 'Resistance Broken ▲ ({{ticker}} {{interval}})' },
+  { id: 'alert2', title: 'Support Broken ▼', message: 'Support Broken ▼ ({{ticker}} {{interval}})' },
+];
 
 export const AutoAvwapWithBreakoutScreener = {
   calculate,
@@ -243,4 +264,5 @@ export const AutoAvwapWithBreakoutScreener = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

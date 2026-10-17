@@ -7,12 +7,16 @@
  * or a doji (|close - open| <= 0.001); a short signal needs perfect bearish candles after a green candle or a doji.
  * A green "H" label below the bar marks a buy signal, a red "H" label above the bar a short signal.
  *
+ * Alert conditions (`alerts` of the result): "Bullish Pattern Alert" on each buy signal and "Bearish Pattern Alert"
+ * on each short signal.
+ *
  * Reference: "Perfect Hammer Pattern" by girishptryambakee
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PerfectHammerPatternInputs {
   /** Number of consecutive perfect candles */
@@ -27,7 +31,7 @@ export const inputConfig: InputConfig[] = [
   { id: 'consecutivePatterns', type: 'int', title: 'Consecutive Perfect Patterns', defval: 2, min: 1, max: 10 },
 ];
 
-// No plot(): the only outputs are two plotshape markers (and 2 alertconditions, not ported)
+// No plot(): the only outputs are two plotshape markers (and 2 alertconditions)
 export const plotConfig: PlotConfig[] = [];
 
 export const metadata = {
@@ -48,7 +52,7 @@ const eq = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) <
 export function calculate(
   bars: Bar[],
   inputs: Partial<PerfectHammerPatternInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alerts: AlertConditionState[] } {
   const { consecutivePatterns } = { ...defaultInputs, ...inputs };
   // x[index] before the first bar is na: every comparison with it is false
   const at = (i: number, k: number): Bar | null => (i - k >= 0 ? bars[i - k] : null);
@@ -66,6 +70,8 @@ export function calculate(
   const green = String(color.green);
   const red = String(color.red);
   const markers: MarkerData[] = [];
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
   for (let i = 0; i < bars.length; i++) {
     let bullishPattern = true;
     let bearishPattern = true;
@@ -78,6 +84,9 @@ export function calculate(
     bullishPattern = bullishPattern && (gt(prior.open, prior.close) || isDoji(prior));
     bearishPattern = bearishPattern && (gt(prior.close, prior.open) || isDoji(prior));
 
+    // alertcondition(bullish_pattern, ...) / alertcondition(bearish_pattern, ...)
+    bullFlags.push(bullishPattern);
+    bearFlags.push(bearishPattern);
     const time = bars[i].time;
     if (bullishPattern) {
       markers.push({ time, position: 'belowBar', shape: 'labelUp', color: green, text: 'H', textColor: white,
@@ -93,7 +102,14 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
 
-export const PerfectHammerPattern = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Pattern Alert', message: 'Perfect Bullish Hammers Found!' },
+  { id: 'alert1', title: 'Bearish Pattern Alert', message: 'Perfect Bearish Hammers Found!' },
+];
+
+export const PerfectHammerPattern = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

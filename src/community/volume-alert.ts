@@ -7,12 +7,15 @@
  * the volume is at least factor times the previous volume. Percentage mode: signal when the volume grew by at least
  * factor percent. The previous volume must be above 0. The signal is an orange "VOL" label above the bar.
  *
+ * Alert condition (`alerts` of the result): "Volume Spike Alert" on each signal bar.
+ *
  * Reference: "Volume Alert" by oDouglasAlex
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolumeAlertInputs {
   /** Volume Type */
@@ -54,7 +57,7 @@ const eq = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) <
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeAlertInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alerts: AlertConditionState[] } {
   const { volumeType, comparisonMode, factor } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -73,6 +76,7 @@ export function calculate(
   }
 
   const markers: MarkerData[] = [];
+  const flags: boolean[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const currentVolume = selectedVolume[i];
     const previousVolume = i > 0 ? selectedVolume[i - 1] : NaN;
@@ -80,19 +84,26 @@ export function calculate(
     const isPercentage = gt(previousVolume, 0) && ge((currentVolume / previousVolume - 1.0) * 100.0, factor);
     const triggerCondition = (comparisonMode === 'Multiplier' && isMultiplier)
       || (comparisonMode === 'Percentage' && isPercentage);
+    // alertcondition(triggerCondition, "Volume Spike Alert", ...)
+    flags[i] = triggerCondition;
     // plotshape(triggerCondition, "Volume Signal", location.abovebar, color.orange, shape.labelup, text = "VOL")
     if (triggerCondition) {
       markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelUp', color: color.orange, text: 'VOL',
         textColor: color.blue });
     }
   }
-  // alertcondition "Volume Spike Alert": alert only, not ported
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alerts: alertStates(alertConditions, bars, [flags]),
   };
 }
 
-export const VolumeAlert = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertcondition */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Volume Spike Alert', message: 'Volume has exceeded the configured factor!' },
+];
+
+export const VolumeAlert = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

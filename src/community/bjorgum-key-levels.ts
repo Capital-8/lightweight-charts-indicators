@@ -20,8 +20,13 @@
  * it; 0.01 without a context) and the state of the last bar. When the context says that the last bar is still open,
  * no pivot zone is made on it and, with "Wait For Confirmed Bar", no candlestick pattern is detected on it, as in
  * the original. Without a context every bar is a closed bar and "Wait For Confirmed Bar" has no effect.
- * The "Alerts Mode" input is kept for the settings only (alerts are not ported). The height of the false break
- * arrows (third "False Break Color" input) is not ported.
+ * The height of the false break arrows (third "False Break Color" input) is not ported.
+ *
+ * Alerts: the eight alertcondition() calls of the original (resistance / support break, found support /
+ * resistance, false break down / up, breakout, breakdown; raw conditions, without the "Detect" inputs), and the
+ * alert() calls (`alertCalls` of the result, frequency "Alerts Mode") of the signals shown and of the 18 candlestick
+ * patterns: "<text><timeframe> chart. Price is <close>", the timeframe as the original's language version gives it
+ * ("D" / "W" / "M" for one day / week / month; chart context `timeframe`, else from the bar spacing).
  *
  * Reference: "Bjorgum Key Levels" by Bjorgum
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,9 +34,14 @@
  */
 
 import { ta, Series, color, compare, math, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BoxData, LabelData, LineDrawingData } from '../types';
+import type { AlertCall, MarkerData, BoxData, LabelData, LineDrawingData } from '../types';
 import { barTime } from '../bar-time';
 import { mintickOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { chartTimeframe } from '../anchor-period';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface BjorgumKeyLevelsInputs {
   left: number;
@@ -75,7 +85,7 @@ export interface BjorgumKeyLevelsInputs {
   detectPiercingCloud: boolean;
   detectHarami: boolean;
   detectLongShadows: boolean;
-  /** Alerts Mode (not used: alerts are not ported) */
+  /** Alerts Mode: frequency of the alert() calls */
   alertMode: 'once_per_bar' | 'once_per_bar_close';
   ecWick: boolean;
   colorMatch: boolean;
@@ -416,7 +426,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<BjorgumKeyLevelsInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { left, right, nPiv, mult, per, fut, lookback, reflect } = cfg;
   /** syminfo.mintick (0.01 without a chart context) */
@@ -663,6 +674,11 @@ export function calculate(
   const bearArr: boolean[] = new Array(n);
   const sigLowsArr: boolean[] = new Array(n);
   const sigHighArr: boolean[] = new Array(n);
+  // alertcondition flags (declaration order) and alert() calls
+  const alertFlags: boolean[][] = alertConditions.map(() => new Array<boolean>(n).fill(false));
+  const alertCalls: AlertCall[] = [];
+  // timeframe.period of this version of the language: "D", "W", "M" for one day / week / month
+  const period = chartTimeframe(bars, chart).replace(/^1([DWM])$/, '$1');
   // var int _track = nPiv of each _color call
   let trackHighVar = nPiv;
   let trackLowsVar = nPiv;
@@ -813,6 +829,40 @@ export function calculate(
     const plotCurlBull = cfg.curl && data && bull;
     const plotCurlBear = cfg.curl && dtat && bear;
 
+    // alertcondition(resBreak, supBreak, bullCheck, bearCheck, falseBreakBull, falseBreakBear, breakOut, breakDwn)
+    [resBreak, supBreak, bullCheck, bearCheck, falseBreakBull, falseBreakBear, breakOut, breakDwn]
+      .forEach((v, k) => { alertFlags[k][i] = v; });
+    // _alert(_x, _y): if _x, alert(_y + timeframe.period + ' chart. Price is ' + str.tostring(close), alertMode)
+    const alertOn = (x: boolean, y: string) => {
+      if (x) alertCalls.push({ time: bars[i].time, message: y + period + ' chart. Price is ' + str.tostring(close[i]), freq: cfg.alertMode });
+    };
+    alertOn(plotResBreak, 'Resistance broke on ');
+    alertOn(plotSupBreak, 'Support break ');
+    alertOn(plotBullCheck, 'Pushing off key level support on ');
+    alertOn(plotBearCheck, 'Pushing off key level resistance on ');
+    alertOn(plotFalseDn, 'False break down on ');
+    alertOn(plotFalseUp, 'False break up on ');
+    alertOn(plotBreakOut, 'Breakout on ');
+    alertOn(plotBreakDn, 'Breakdown on ');
+    alertOn(dw, 'Doji at support on ');
+    alertOn(db, 'Doji at resistance on ');
+    alertOn(bew, 'Bullish Engulfing on ');
+    alertOn(beb, 'Bearish Engulfing on ');
+    alertOn(h, 'Hammer candle on ');
+    alertOn(ss, 'Shooting star on ');
+    alertOn(dd, 'Dragonfly Doji on ');
+    alertOn(gd, 'Gravestone Doji on ');
+    alertOn(tb, 'Tweezer Bottom on ');
+    alertOn(tt, 'Tweezer Top on ');
+    alertOn(stw, 'White Spinning Top on ');
+    alertOn(stb, 'Black Spinning Top on ');
+    alertOn(p, 'Piercing on ');
+    alertOn(dcc, 'Dark Cloud Cover on ');
+    alertOn(bhw, 'Bullish Harami on ');
+    alertOn(bhb, 'Bearish Harami on ');
+    alertOn(ll, 'Long Lower Shadow on ');
+    alertOn(lu, 'Long Upper Shadow on ');
+
     const time = bars[i].time;
     // plotarrow(plotFalseUp ? coDiff : na, colorup = fBull, colordown = fBear, maxheight = arrowMax), and the same
     // with plotFalseDn: an up arrow below the bar for a positive value, a down arrow above the bar for a negative one
@@ -950,7 +1000,21 @@ export function calculate(
     boxes,
     labels,
     lines,
+    alerts: alertStates(alertConditions, bars, alertFlags),
+    alertCalls,
   };
 }
 
-export const BjorgumKeyLevels = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Resistance break', message: 'Resistance broke on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert1', title: 'Support break', message: 'Support broke on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert2', title: 'Found support', message: 'Pushing Off Key Level Support on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert3', title: 'Found resistance', message: 'Pushing Off Key Level Resistance on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert4', title: 'False break down', message: 'False Break Down on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert5', title: 'False break up', message: 'False Break Up on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert6', title: 'Breakout', message: 'Breakout on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert7', title: 'Breakdown', message: 'Breakdown on {{interval}} chart. Price is {{close}}' },
+];
+
+export const BjorgumKeyLevels = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction };

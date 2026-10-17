@@ -16,7 +16,11 @@
  * set ends when the close goes past the block, a new block of the same side appears, or (with the retracement stop)
  * a new extreme after the retracement.
  *
- * Label prices use the symbol tick (chart context, `mintickOf`). The alert() calls of the original are not ported.
+ * Label prices use the symbol tick (chart context, `mintickOf`).
+ *
+ * Alerts (alert() calls, `alertCalls` of the result): "New Bullish Order Block" / "New Bearish Order Block" (once per
+ * bar close) on the bar of a new block when "Show Order Blocks" is on, and "Retracement Level Hit" (once per bar) on
+ * the bar of each "🔺" / "🔻" mark, in the order of the sets (newest first).
  *
  * Reference: "Order Blocks W/ Realtime Fibs [QuantVue]" by QuantVue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -27,8 +31,11 @@ import {
   str, line, label, box, resetDrawings, setDrawingBar, drawingOutputs,
   type Box, type Line, type Label, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { BoxData, LabelData, LineDrawingData } from '../types';
+import type { AlertCall, BoxData, LabelData, LineDrawingData } from '../types';
 import { mintickOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface OrderBlocksWRealtimeFibsInputs {
   /** Consecutive Bars Required */
@@ -194,7 +201,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<OrderBlocksWRealtimeFibsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const barsReq = cfg.barsReq;
@@ -215,6 +222,7 @@ export function calculate(
   let be = false;
   let prevBu = false;
   let prevBe = false;
+  const alertCalls: AlertCall[] = [];
 
   /** Draws the fib lines and labels of a set (newest first in its arrays) */
   const drawFibs = (f: ObFibs, i: number) => {
@@ -280,6 +288,7 @@ export function calculate(
       if (cfg.showOb) {
         obBoxArr.unshift({ a: true, bull: true, bx: box.new(i - barsReq, back!.high, i, back!.low, cfg.bullCol,
           undefined, undefined, undefined, undefined, cfg.bullCol, undefined, undefined, V5_TEXT) });
+        alertCalls.push({ time: b.time, message: 'New Bullish Order Block', freq: 'once_per_bar_close' });
       }
     }
     if (bearish) {
@@ -296,6 +305,7 @@ export function calculate(
       if (cfg.showOb) {
         obBoxArr.unshift({ a: true, bull: false, bx: box.new(i - barsReq, back!.high, i, back!.low, cfg.bearCol,
           undefined, undefined, undefined, undefined, cfg.bearCol, undefined, undefined, V5_TEXT) });
+        alertCalls.push({ time: b.time, message: 'New Bearish Order Block', freq: 'once_per_bar_close' });
       }
     }
 
@@ -309,6 +319,7 @@ export function calculate(
         if (le(b.low, retlev) && cfg.retraceMax && !f.ret) {
           f.ret = true;
           label.new(i, b.low, '🔺', 'bar_index', 'belowbar', V5_BLUE, 'none', V5_TEXT);
+          alertCalls.push({ time: b.time, message: 'Retracement Level Hit', freq: 'once_per_bar' });
         }
         if (gt(b.high, f.chl) && !f.ret) {
           f.chl = b.high;
@@ -326,6 +337,7 @@ export function calculate(
         if (ge(b.high, retlev) && cfg.retraceMax && !f.ret) {
           f.ret = true;
           label.new(i, b.low, '🔻', 'bar_index', 'abovebar', V5_BLUE, 'none', V5_TEXT);
+          alertCalls.push({ time: b.time, message: 'Retracement Level Hit', freq: 'once_per_bar' });
         }
         if (lt(b.low, f.chl) && !f.ret) {
           f.chl = b.low;
@@ -375,7 +387,8 @@ export function calculate(
     lines: drawn.lines ?? [],
     labels: drawn.labels ?? [],
     boxes: drawn.boxes ?? [],
+    alertCalls,
   };
 }
 
-export const OrderBlocksWRealtimeFibs = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const OrderBlocksWRealtimeFibs = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

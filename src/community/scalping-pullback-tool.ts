@@ -15,7 +15,10 @@
  *
  * Arrows are markers (arrowUp below the bar, arrowDown above the bar); the arrow height of the original (20 to 50
  * pixels) is not ported. The original also plots two bar counters with an na colour ("barssince(haClose<pacC)" and
- * "barssince(haClose>pacC)"): they draw nothing and are not in the output. 2 alert conditions are not ported.
+ * "barssince(haClose>pacC)"): they draw nothing and are not in the output.
+ *
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Condition' / 'Sell Condition', true on the bar on which the
+ * trading state goes from 0 to 1 / -1 (the bar of the arrow without the closed-candle delay).
  *
  * Reference: "Scalping PullBack Tool R1.1 by JustUncleL" by JustUncleL
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -23,6 +26,7 @@
 
 import { ta, Series, color, heikinAshi, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ScalpingPullbackToolInputs {
   /** High Low PAC channel Length */
@@ -125,7 +129,10 @@ const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !(b - a > EPS);
 const le = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !(a - b > EPS);
 
-export function calculate(bars: Bar[], inputs: Partial<ScalpingPullbackToolInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<ScalpingPullbackToolInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -231,6 +238,11 @@ export function calculate(bars: Bar[], inputs: Partial<ScalpingPullbackToolInput
     }
   }
 
+  // Long = nz(TradeDirection[1]) == 0 and TradeDirection == 1; Short: TradeDirection == -1
+  const prevDir = (i: number) => (i > 0 ? tradeDirection[i - 1] : 0);
+  const longFlags = tradeDirection.map((d, i) => prevDir(i) === 0 && d === 1);
+  const shortFlags = tradeDirection.map((d, i) => prevDir(i) === 0 && d === -1);
+
   const P = (values: number[], on: boolean) => bars.map((b, i) => ({ time: b.time, value: on ? values[i] : NaN }));
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -246,7 +258,17 @@ export function calculate(bars: Bar[], inputs: Partial<ScalpingPullbackToolInput
     markers,
     barColors,
     bgColors,
+    // alertcondition(Long, "Buy Condition") / alertcondition(Short, "Sell Condition")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
-export const ScalpingPullbackTool = { calculate, metadata, defaultInputs, inputConfig, plotConfig, fillConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Condition', message: 'BUY' },
+  { id: 'alert1', title: 'Sell Condition', message: 'SELL' },
+];
+
+export const ScalpingPullbackTool = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, fillConfig, alertConditions,
+};

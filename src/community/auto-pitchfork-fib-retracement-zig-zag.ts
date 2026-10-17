@@ -20,7 +20,14 @@
  * "Weekly" pivots (UTC without it), and the current time for the "Last Bar" position of the pivot labels (the clock
  * of the computer without it).
  * Limits of the port: the periods of the higher timeframe come from the UTC calendar and the bars (see
- * src/anchor-period.ts); the alerts of the original are not ported.
+ * src/anchor-period.ts).
+ *
+ * Alerts (alert() calls, `alertCalls` of the result), on every bar as the original runs them: the close crossing the
+ * median line or a shown level of a pitchfork ("AutoPitchfork: <ticker> crossing median level", "... crossing
+ * resistance level<level>" / "support level<level>"; "AutoPitchfork2: ..." for the median of the second one) or a
+ * shown Fibonacci level ("AutoFib Extention : <ticker> crossing level <level>"), at the values of that bar; on the
+ * last bar, the close crossing a shown Camarilla level ("Camarilla (PVTvX) : <ticker> crossing Camarilla level R3
+ * level, price <price>"). Crossing: the level is between the close and the close of the bar before.
  *
  * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
  * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
@@ -34,8 +41,8 @@
  */
 
 import { ta, str, math, color, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { LabelData, LineDrawingData, LinefillData, TableData } from '../types';
-import { mintickOf, nowOf, timezoneOf, type ChartContext } from '../chart-context';
+import type { AlertCall, LabelData, LineDrawingData, LinefillData, TableData } from '../types';
+import { mintickOf, nowOf, tickerOf, timezoneOf, type ChartContext } from '../chart-context';
 import { barInterval, barTime } from '../bar-time';
 import { periodStarts, chartTimeframe } from '../anchor-period';
 
@@ -411,7 +418,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<AutoPitchforkFibRetracementZigZagInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -519,6 +526,69 @@ export function calculate(
   const zz1 = zigzag(cfg.depth, cfg.deviation, cfg.zigZag, cfg.zzColor, cfg.zzWidth, cfg.zzStyle);
   const zz2 = zigzag(cfg.depthSecond, cfg.deviationSecond, cfg.zigZagSecond, cfg.zzColorSecond, cfg.zzWidthSecond, cfg.zzStyleSecond);
 
+  /** The pivots of a pitchfork and f_getPitchfork(), from the state of the zigzag on the bar being calculated */
+  const geometry = (zz: ReturnType<typeof zigzag>, type: PitchforkType, hist: number) => {
+    const { state } = zz;
+    const iPrev2 = state.iPrev.get(hist > 0 ? hist + 1 : 1);
+    const pPrev2 = state.pPrev.get(hist > 0 ? hist + 1 : 1);
+    const iLastP = state.iLast.get(hist > 0 ? hist : 0);
+    const pLastP = state.pLast.get(hist > 0 ? hist : 0);
+    const iPrev = state.iPrev.get(hist > 0 ? hist : 0);
+    const pPrev = state.pPrev.get(hist > 0 ? hist : 0);
+    const iEnd = state.line?.x2 ?? NaN;
+    let iStartMedian = iPrev2;
+    let pStartMedian = pPrev2;
+    let iEndMedian = Math.trunc(avg(iPrev, iLastP));
+    let pEndMedian = avg(pPrev, pLastP);
+    if (type === 'Schiff') pStartMedian = avg(pPrev, pPrev2);
+    else if (type === 'Modified Schiff') {
+      iStartMedian = Math.trunc(avg(iPrev, iPrev2));
+      pStartMedian = avg(pPrev, pPrev2);
+    } else if (type === 'Inside') {
+      iStartMedian = Math.trunc(avg(iPrev, iLastP));
+      pStartMedian = avg(pPrev, pLastP);
+      const iDiff = Math.abs(iPrev - iLastP) / 2;
+      const pDiff = Math.abs(pPrev - pLastP) / 2;
+      const slopeInside = (pLastP - avg(pPrev, pPrev2)) / (iLastP - avg(iPrev, iPrev2));
+      const intercept = pLastP + (gt(pPrev, pLastP) ? 1 : -1) * pDiff - slopeInside * (iLastP - iDiff);
+      iEndMedian = iEnd;
+      pEndMedian = slopeInside * iEndMedian + intercept;
+    }
+    const slope = (pEndMedian - pStartMedian) / (iEndMedian - iStartMedian);
+    return { type, iPrev2, pPrev2, iLastP, pLastP, iPrev, pPrev, iEnd, iStartMedian, pStartMedian, iEndMedian, pEndMedian, slope };
+  };
+  type Geometry = ReturnType<typeof geometry>;
+  /** processPitchforkLevel(): start and intercept of the resistance (X) and support (Y) lines of a level */
+  const levelLines = (g: Geometry, lvl: number) => {
+    const iDiff = Math.abs(g.iPrev - g.iLastP) / 2;
+    const pDiff = Math.abs(g.pPrev - g.pLastP) / 2;
+    const baseI = g.type === 'Inside' ? g.iStartMedian : g.iEndMedian;
+    const baseP = g.type === 'Inside' ? g.pStartMedian : g.pEndMedian;
+    const down = gt(g.pPrev, g.pLastP);
+    const iStartX = Math.trunc(round(down ? baseI - iDiff * lvl : baseI + iDiff * lvl));
+    const interceptX = baseP + pDiff * lvl - g.slope * iStartX;
+    const iStartY = Math.trunc(round(down ? baseI + iDiff * lvl : baseI - iDiff * lvl));
+    const interceptY = baseP - pDiff * lvl - g.slope * iStartY;
+    return { iStartX, interceptX, iStartY, interceptY };
+  };
+  /** processFibLevel(): price of a Fibonacci level */
+  const fibPrice = (g: Geometry, level: number) => {
+    const diff = Math.abs(g.pPrev - g.pLastP);
+    const sign = cfg.reverse ? -1 : 1;
+    if (cfg.fibTool === 'Extentions') {
+      const offset = Math.abs(g.pPrev - g.pPrev2);
+      return lt(g.pLastP, g.pPrev) ? g.pPrev - diff + sign * offset * level : g.pPrev + diff - sign * offset * level;
+    }
+    const from = cfg.reverse ? g.pLastP : g.pPrev;
+    return lt(g.pLastP, g.pPrev) ? from - sign * diff * level : from + sign * diff * level;
+  };
+  /** f_crossingLevel(close, level): the level is between the close and the close of the bar before */
+  const crossing = (i: number, level: number) => {
+    const c = bars[i].close;
+    const c1 = i > 0 ? bars[i - 1].close : NaN;
+    return (gt(level, c) && lt(level, c1)) || (lt(level, c) && gt(level, c1));
+  };
+
   // Pitchfork levels in the order of the calls of the original. The second 0.382 level is passed to the function of
   // the first pitchfork there: the port does the same.
   const pitchLevel = (k: PitchKey, s: '' | 'Second') => ({
@@ -580,11 +650,47 @@ export function calculate(
   const plots: Record<string, Array<{ time: number; value: number; color?: string }>> = {};
   for (const p of plotConfig) plots[p.id] = [];
 
+  // alert() calls of every bar: pitchforks (in the order of the calls of the original), then Fibonacci levels
+  const alertCalls: AlertCall[] = [];
+  const ticker = tickerOf(chart);
+  const fire = (i: number, message: string) => alertCalls.push({ time: bars[i].time, message, freq: 'once_per_bar' });
+  const pitchAlerts = (i: number, g: Geometry, c: PitchCall) => {
+    if (!c.show) return;
+    const { interceptX, interceptY } = levelLines(g, c.level);
+    if (crossing(i, g.slope * i + interceptX)) fire(i, 'AutoPitchfork: ' + ticker + ' crossing resistance level' + str.tostring(c.level));
+    if (crossing(i, g.slope * i + interceptY)) fire(i, 'AutoPitchfork: ' + ticker + ' crossing support level' + str.tostring(c.level));
+  };
+  const medianAlert = (i: number, g: Geometry, name: string) => {
+    if (crossing(i, g.slope * i + g.pStartMedian - g.slope * g.iStartMedian)) fire(i, name + ': ' + ticker + ' crossing median level');
+  };
+
   let tempLines = 0;
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     zz1.step(i);
     zz2.step(i);
+
+    const g1 = geometry(zz1, cfg.pitchType, cfg.histPivot);
+    const g2 = geometry(zz2, cfg.pitchTypeSecond, cfg.histPivotSecond);
+    if (cfg.pitch) {
+      medianAlert(i, g1, 'AutoPitchfork');
+      calls1.forEach((c) => pitchAlerts(i, g1, c));
+    }
+    if (cfg.pitchSecond) {
+      medianAlert(i, g2, 'AutoPitchfork2');
+      pitchAlerts(i, g2, calls2[0]);
+      pitchAlerts(i, g2, calls2[1]);
+    }
+    // the second 0.382 level goes through the function of the first pitchfork, as in the original
+    if (cfg.pitch) pitchAlerts(i, g1, stray);
+    if (cfg.pitchSecond) calls2.slice(2).forEach((c) => pitchAlerts(i, g2, c));
+    if (cfg.isFib) {
+      for (const { show, level } of fibLevels) {
+        if (show && crossing(i, fibPrice(g1, level))) {
+          fire(i, 'AutoFib ' + (cfg.fibTool === 'Extentions' ? 'Extention : ' : 'Retracment : ') + ticker + ' crossing level ' + str.tostring(level));
+        }
+      }
+    }
 
     // The pitchfork lines of the bar before are deleted, then made again when the running leg ended before this bar
     otherLines -= tempLines;
@@ -644,36 +750,10 @@ export function calculate(
       zz: ReturnType<typeof zigzag>, on: boolean, type: PitchforkType, hist: number, extendAll: boolean, medianCss: string, medianWidth: number,
       medianStyle: LineStyleName, medianLabels: boolean, labelMode: PitchLabels, labelSize: TextSize, background: number, name: string,
     ) => {
-      const { state } = zz;
-      const iPrev2 = state.iPrev.get(hist > 0 ? hist + 1 : 1);
-      const pPrev2 = state.pPrev.get(hist > 0 ? hist + 1 : 1);
-      const iLastP = state.iLast.get(hist > 0 ? hist : 0);
-      const pLastP = state.pLast.get(hist > 0 ? hist : 0);
-      const iPrev = state.iPrev.get(hist > 0 ? hist : 0);
-      const pPrev = state.pPrev.get(hist > 0 ? hist : 0);
-      const iEnd = state.line?.x2 ?? NaN;
-      const extend = extendAll ? 'both' : 'right';
-
       // f_getPitchfork()
-      let iStartMedian = iPrev2;
-      let pStartMedian = pPrev2;
-      let iEndMedian = Math.trunc(avg(iPrev, iLastP));
-      let pEndMedian = avg(pPrev, pLastP);
-      if (type === 'Schiff') pStartMedian = avg(pPrev, pPrev2);
-      else if (type === 'Modified Schiff') {
-        iStartMedian = Math.trunc(avg(iPrev, iPrev2));
-        pStartMedian = avg(pPrev, pPrev2);
-      } else if (type === 'Inside') {
-        iStartMedian = Math.trunc(avg(iPrev, iLastP));
-        pStartMedian = avg(pPrev, pLastP);
-        const iDiff = Math.abs(iPrev - iLastP) / 2;
-        const pDiff = Math.abs(pPrev - pLastP) / 2;
-        const slopeInside = (pLastP - avg(pPrev, pPrev2)) / (iLastP - avg(iPrev, iPrev2));
-        const intercept = pLastP + (gt(pPrev, pLastP) ? 1 : -1) * pDiff - slopeInside * (iLastP - iDiff);
-        iEndMedian = iEnd;
-        pEndMedian = slopeInside * iEndMedian + intercept;
-      }
-      const slope = (pEndMedian - pStartMedian) / (iEndMedian - iStartMedian);
+      const g = geometry(zz, type, hist);
+      const { iPrev2, pPrev2, iLastP, pLastP, iPrev, pPrev, iEnd, iStartMedian, pStartMedian, iEndMedian, pEndMedian, slope } = g;
+      const extend = extendAll ? 'both' : 'right';
       const lnr: Ln[] = [];
       const lns: Ln[] = [];
 
@@ -695,15 +775,7 @@ export function calculate(
       // processPitchforkLevel()
       const level = ({ show, level: lvl, css, width, style }: PitchCall) => {
         if (!on) return;
-        const iDiff = Math.abs(iPrev - iLastP) / 2;
-        const pDiff = Math.abs(pPrev - pLastP) / 2;
-        const baseI = type === 'Inside' ? iStartMedian : iEndMedian;
-        const baseP = type === 'Inside' ? pStartMedian : pEndMedian;
-        const down = gt(pPrev, pLastP);
-        const iStartX = Math.trunc(round(down ? baseI - iDiff * lvl : baseI + iDiff * lvl));
-        const interceptX = baseP + pDiff * lvl - slope * iStartX;
-        const iStartY = Math.trunc(round(down ? baseI + iDiff * lvl : baseI - iDiff * lvl));
-        const interceptY = baseP - pDiff * lvl - slope * iStartY;
+        const { iStartX, interceptX, iStartY, interceptY } = levelLines(g, lvl);
         if (!show) return;
         if (lt(iEnd, last)) {
           const st = lineStyle(style);
@@ -730,7 +802,7 @@ export function calculate(
           if (lns.length > 1) linefills.push({ a: lns[lns.length - 2], b: lns[lns.length - 1], color: fill });
         }
       };
-      return { median, level, iPrev2, pPrev2, iPrev, pPrev, iLastP, pLastP };
+      return { median, level, g, iPrev2, pPrev2, iPrev, pPrev, iLastP, pLastP };
     };
 
     const pf1 = pitchfork(zz1, cfg.pitch, cfg.pitchType, cfg.histPivot, cfg.pitchExtend, cfg.medianColor, cfg.medianWidth, cfg.medianStyle,
@@ -750,21 +822,15 @@ export function calculate(
     // processFibLevel()
     if (cfg.isFib) {
       const { iPrev2, pPrev2, iPrev, pPrev, iLastP, pLastP } = pf1;
-      const diff = Math.abs(pPrev - pLastP);
-      const sign = cfg.reverse ? -1 : 1;
       const ext = cfg.fibTool === 'Extentions';
       for (const { show, level, css } of fibLevels) {
-        let price: number;
         if (ext) {
           addLine(iPrev2, pPrev2, iPrev, pPrev, 'none', GRAY, 'dashed', 1);
           addLine(iPrev, pPrev, iLastP, pLastP, 'none', GRAY, 'dashed', 1);
-          const offset = Math.abs(pPrev - pPrev2);
-          price = lt(pLastP, pPrev) ? pPrev - diff + sign * offset * level : pPrev + diff - sign * offset * level;
         } else {
           addLine(iPrev, pPrev, iLastP, pLastP, 'none', GRAY, 'dashed', 1);
-          const from = cfg.reverse ? pLastP : pPrev;
-          price = lt(pLastP, pPrev) ? from - sign * diff * level : from + sign * diff * level;
         }
+        const price = fibPrice(pf1.g, level);
         if (!show) continue;
         addLine(iPrev, price, last, price, cfg.extend ? 'both' : 'right', css, 'solid', 1);
         if (cfg.levels !== 'None') {
@@ -788,6 +854,10 @@ export function calculate(
         const y = camarilla[k];
         const css = pivotColors[k];
         const ok = gt(y, 0);
+        // alert of f_processPivotLevelX(), on the last bar
+        if (crossing(last, y)) {
+          fire(last, cfg.pivot + ' (PVTvX) : ' + ticker + ' crossing ' + cfg.pivot + ' level ' + name + ' level, price ' + priceText(y));
+        }
         // these lines are made on the last bar: they count for the limit of 500 lines
         lineCreated();
         lines.push({
@@ -832,8 +902,12 @@ export function calculate(
     tables: n > 0
       ? [{ position: 'bottom_right', columns: 1, rows: 1, cells: [{ column: 0, row: 0, text: '☼☾  ', textSize: 'normal', textColor: TEAL }] }]
       : [],
+    alertCalls,
   };
 }
+
+/** The original calls alert() (crossed pitchfork, Fibonacci and Camarilla levels) */
+export const hasAlertFunction = true;
 
 export const AutoPitchforkFibRetracementZigZag = {
   calculate,
@@ -841,4 +915,5 @@ export const AutoPitchforkFibRetracementZigZag = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

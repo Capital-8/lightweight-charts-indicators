@@ -4,7 +4,8 @@
  * Heikin Ashi candle from the chart bars: haClose = (open + high + low + close) / 4, haOpen = average of the previous
  * haOpen and haClose (first bar: (open + close) / 2), haHigh / haLow include the real high / low. The Heikin Ashi
  * candle is a doji when its body is at most `bodyThresholdPct` % of its range. A grey circle below the bar marks a
- * doji on a bar whose volume is at least `volMultiplier` times its `volLength`-bar simple average.
+ * doji on a bar whose volume is at least `volMultiplier` times its `volLength`-bar simple average. Alert
+ * (alertcondition, `alerts` of the result): 'Doji + High Volume', true on the bars of the circle.
  *
  * Reference: "Heikin Ashi Doji with High Volume" by nwfjf6m8
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HeikinAshiDojiHighVolumeInputs {
   /** Maximum Heikin Ashi body in % of the Heikin Ashi range */
@@ -53,13 +55,14 @@ const ne = (a: number, b: number) => Math.abs(a - b) > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<HeikinAshiDojiHighVolumeInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { bodyThresholdPct, volLength, volMultiplier } = { ...defaultInputs, ...inputs };
   const volume = bars.map((b) => b.volume ?? NaN);
   const volMA = ta.sma(Series.fromArray(bars, volume), volLength).toArray().map((v) => v ?? NaN);
   const gray = color.gray;
 
   const markers: MarkerData[] = [];
+  const signalFlags: boolean[] = [];
   let haOpenPrev = NaN; // var float haOpen = na
   let haClosePrev = NaN;
   for (let i = 0; i < bars.length; i++) {
@@ -76,6 +79,7 @@ export function calculate(
     const bodyPct = ne(haRange, 0) ? (haBodySize / haRange) * 100 : 0;
     const isDoji = le(bodyPct, bodyThresholdPct);
     const highVol = ge(volume[i], volMA[i] * volMultiplier);
+    signalFlags.push(isDoji && highVol);
 
     // plotshape(signal, title = "Signal", style = shape.circle, color = color.gray, size = size.tiny,
     //           location = location.belowbar)
@@ -83,13 +87,19 @@ export function calculate(
       markers.push({ time: b.time, position: 'belowBar', shape: 'circle', color: gray, size: 'tiny' });
     }
   }
-  // alertcondition 'Doji + High Volume': alert only, not ported
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    // alertcondition(signal, title = "Doji + High Volume")
+    alerts: alertStates(alertConditions, bars, [signalFlags]),
   };
 }
 
-export const HeikinAshiDojiHighVolume = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Doji + High Volume', message: 'Heikin Ashi Doji with High Volume detected' },
+];
+
+export const HeikinAshiDojiHighVolume = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

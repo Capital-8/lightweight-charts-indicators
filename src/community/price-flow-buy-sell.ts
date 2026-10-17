@@ -7,7 +7,8 @@
  * times the inner / outer multipliers. The line colour is a gradient of the EMA(5) of the velocity (y - y[1]),
  * saturated at 2 standard deviations (20) of the velocity. BUY / SELL labels on a first rejection of an envelope
  * (outer when trending, inner when ranging) with a weakening move (velocity and acceleration of opposite signs),
- * optionally alternating.
+ * optionally alternating. Alerts (alertcondition, `alerts` of the result): 'BUY Alert' and 'SELL Alert', true on the
+ * bars of a BUY / SELL signal (whatever the label input).
  *
  * Reference: "Price Flow - Buy Sell" by IVTrader1990
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +19,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PriceFlowBuySellInputs {
   /** Base bandwidth (h) of the Gaussian kernel */
@@ -115,7 +117,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<PriceFlowBuySellInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -159,6 +161,8 @@ export function calculate(
 
   const dynCol: string[] = new Array(n);
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
   let prevSellOut = false;
   let prevBuyOut = false;
   let prevSellIn = false;
@@ -203,6 +207,8 @@ export function calculate(
 
     const buySignal = signalLong && (!cfg.strictAlternation || lastSignal !== 1);
     const sellSignal = signalShort && (!cfg.strictAlternation || lastSignal !== -1);
+    buyFlags[i] = buySignal;
+    sellFlags[i] = sellSignal;
     if (buySignal) lastSignal = 1;
     else if (sellSignal) lastSignal = -1;
 
@@ -226,7 +232,6 @@ export function calculate(
   const P = (v: number[], col?: string[]) =>
     bars.map((b, i) => (col ? { time: b.time, value: v[i], color: col[i] } : { time: b.time, value: v[i] }));
 
-  // alertcondition: BUY Alert, SELL Alert (not ported)
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -246,8 +251,16 @@ export function calculate(
       { plot1: 'plot5', plot2: 'plot7', options: { title: 'Bear Extreme' }, colors: c80 },
     ],
     markers,
+    // alertcondition(buy_signal, 'BUY Alert') / alertcondition(sell_signal, 'SELL Alert')
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY Alert', message: 'BUY signal on {{ticker}} at {{close}}' },
+  { id: 'alert1', title: 'SELL Alert', message: 'SELL signal on {{ticker}} at {{close}}' },
+];
 
 export const PriceFlowBuySell = {
   calculate,
@@ -256,4 +269,5 @@ export const PriceFlowBuySell = {
   inputConfig,
   plotConfig,
   fillConfig,
+  alertConditions,
 };

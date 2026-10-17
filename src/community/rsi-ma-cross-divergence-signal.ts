@@ -10,6 +10,9 @@
  * Last bar: with the bar close option a signal needs a closed bar. The port reads the state of the last bar from the
  * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
  *
+ * Alert conditions (`alerts` of the result): "Bullish RSI Cross + Divergence" on each long signal and
+ * "Bearish RSI Cross + Divergence" on each short signal.
+ *
  * Reference: "RSI MA Cross + Divergence Signal (fixed)" by noxum
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -17,6 +20,7 @@
 import { ta, Series, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiMaCrossDivergenceSignalInputs {
   rsiLength: number;
@@ -67,7 +71,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<RsiMaCrossDivergenceSignalInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -95,6 +99,8 @@ export function calculate(
   const lime = String(color.new(color.lime, 0));
   const red = String(color.new(color.red, 0));
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = new Array(n);
+  const shortFlags: boolean[] = new Array(n);
   // ta.valuewhen(cond, x[lookback], 0): x[lookback] on the last bar where cond was true (na before)
   let pLowPrice = NaN;
   let pHighPrice = NaN;
@@ -114,6 +120,9 @@ export function calculate(
     const confirmed = !cfg.confirmClose || barIsConfirmed(i);
     const longSignal = crossUp[i] === 1 && bullDiv && confirmed;
     const shortSignal = crossDown[i] === 1 && bearDiv && confirmed;
+    // alertcondition(longSignal, ...) / alertcondition(shortSignal, ...)
+    longFlags[i] = longSignal;
+    shortFlags[i] = shortSignal;
 
     if (longSignal) {
       // plotshape(longSignal, 'Bullish Signal', color.new(color.lime, 0), shape.triangleup, location.belowbar, size.tiny, text = '▲ Long')
@@ -132,13 +141,19 @@ export function calculate(
       markers.push({ time: b.time, position: 'top', shape: 'circle', color: 'transparent', text: 'S', textColor: color.red, size: 'tiny' });
     }
   }
-  // alertcondition x2: not ported (no output)
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
-export const RsiMaCrossDivergenceSignal = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish RSI Cross + Divergence', message: 'Bullish divergence + RSI crossed above MA' },
+  { id: 'alert1', title: 'Bearish RSI Cross + Divergence', message: 'Bearish divergence + RSI crossed below MA' },
+];
+
+export const RsiMaCrossDivergenceSignal = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

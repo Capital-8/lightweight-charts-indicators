@@ -6,13 +6,19 @@
  * average (SMA / EMA / WMA / VWMA) of it is the signal line. Buy / sell triangles and a light background mark the
  * crosses of the Reverse EMA with zero, with its MA, or both (from bar 82).
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar) when "Enable Alerts" is on:
+ * "Ehlers Reverse EMA: Buy Signal" on a buy triangle and "Ehlers Reverse EMA: Sell Signal" on a sell triangle.
+ *
  * Reference: "EREMA Signals" by AlgoCollective
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © AlgoCollective
  */
 
 import { ta, Series, color, math, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BgColorData } from '../types';
+import type { AlertCall, MarkerData, BgColorData } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface EremaSignalsInputs {
   /** EMA alpha */
@@ -25,7 +31,7 @@ export interface EremaSignalsInputs {
   signalType: 'Zero Cross' | 'MA Cross' | 'Zero & MA Cross';
   /** No effect on the outputs (the Pine plotshape calls use size.normal) */
   signalSize: 'Small' | 'Normal' | 'Large';
-  /** Only used by the alert() calls (not ported): no effect on the outputs */
+  /** The alert() calls are made (`alertCalls`); no effect on the other outputs */
   alertsOn: boolean;
 }
 
@@ -68,7 +74,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<EremaSignalsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const alpha = cfg.alpha;
@@ -112,6 +118,7 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  const alertCalls: AlertCall[] = [];
   for (let i = 0; i < n; i++) {
     let buySignal = false;
     let sellSignal = false;
@@ -132,6 +139,11 @@ export function calculate(
       }
     }
     const t = bars[i].time;
+    // if alertsOn: if buySignal alert("Ehlers Reverse EMA: Buy Signal") / if sellSignal alert("... Sell Signal")
+    if (cfg.alertsOn) {
+      if (buySignal) alertCalls.push({ time: t, message: 'Ehlers Reverse EMA: Buy Signal', freq: 'once_per_bar' });
+      if (sellSignal) alertCalls.push({ time: t, message: 'Ehlers Reverse EMA: Sell Signal', freq: 'once_per_bar' });
+    }
     // plotshape(buySignal, 'Buy Signal', location.belowbar, bullColor, shape.triangleup, size.normal)
     if (buySignal) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: bull, size: 'normal' });
     // plotshape(sellSignal, 'Sell Signal', location.abovebar, bearColor, shape.triangledown, size.normal)
@@ -146,7 +158,8 @@ export function calculate(
     plots: {},
     markers,
     bgColors,
+    alertCalls,
   };
 }
 
-export const EremaSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const EremaSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

@@ -15,7 +15,15 @@
  * Chart values read from the optional third argument (see src/chart-context.ts): the symbol tick for the prices in
  * label texts and tooltips (0.01 without it), and the chart timeframe (read from the bar spacing without it).
  * As the original, the port stops with an error when a channel needs more than 5,000 bars of history (the extended
- * second channel on a low timeframe). The alerts of the original are not ported.
+ * second channel on a low timeframe).
+ *
+ * Alerts. alertcondition (`alerts` of the result): "Volume Spike — Possible Exhaustion" (the volume crosses above
+ * its average x the spike threshold) and "High Volatility — Wide Bar Detected" (the bar range crosses above the ATR x
+ * multiplier). alert() calls (`alertCalls` of the result), on the last bar where the channels exist: the close
+ * crossing a base line or a shown band of a channel, and the base line of the first channel crossing the base line or
+ * a band of the second one. For that last group the value of the base line on the bar before is the channel computed
+ * on that bar as the last one (what the original has after one bar in real time; on a fresh run of the original it is
+ * na and these calls do not run).
  *
  * Reference: "Linear Regression Channel / Curve / Slope by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -23,8 +31,9 @@
  */
 
 import { ta, str, timeframe, Series, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
-import type { BarColorData, LabelData, LineDrawingData, MarkerData, TableData } from '../types';
-import { mintickOf, type ChartContext } from '../chart-context';
+import type { AlertCall, BarColorData, LabelData, LineDrawingData, MarkerData, TableData } from '../types';
+import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
 
@@ -333,6 +342,7 @@ export function calculate(
   chart?: ChartContext,
 ): IndicatorResult & {
     markers: MarkerData[]; barColors: BarColorData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[];
+    alerts: AlertConditionState[]; alertCalls: AlertCall[];
   } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -363,14 +373,14 @@ export function calculate(
     }
   }
 
-  /** f_calcSlope() and f_calcDev() on the last bar: [slope, intercept, standard deviation] */
-  const regression = (src: number[], length: number): [number, number, number] => {
+  /** f_calcSlope() and f_calcDev() on the last bar (or on bar `end` as the last one): [slope, intercept, standard deviation] */
+  const regression = (src: number[], length: number, end = last): [number, number, number] => {
     let sumX = 0;
     let sumY = 0;
     let sumXSqr = 0;
     let sumXY = 0;
     for (let i = 0; i <= length - 1; i++) {
-      const val = i <= last ? src[last - i] : NaN;
+      const val = i <= end ? src[end - i] : NaN;
       const per = i + 1;
       sumX += per;
       sumY += val;
@@ -383,7 +393,7 @@ export function calculate(
     const periods = length - 1;
     let val = intercept;
     for (let i = 0; i <= periods; i++) {
-      const price = (i <= last ? src[last - i] : NaN) - val;
+      const price = (i <= end ? src[end - i] : NaN) - val;
       acc += price * price;
       val += slope;
     }
@@ -412,11 +422,24 @@ export function calculate(
     });
   };
 
+  // alert() calls of the last bar. f_crossingLevel(current, level): the level is between the current value and the
+  // value of the bar before
+  const alertCalls: AlertCall[] = [];
+  const ticker = tickerOf(chart);
+  const lrAlert = (txt: string, price: number) => alertCalls.push({
+    time: bars[last].time, message: 'LɪɴRᴇɢ | ' + ticker + ' — ' + txt + ' @ ' + priceText(price), freq: 'once_per_bar',
+  });
+  const crossing = (current: number, current1: number, level: number) =>
+    (gt(level, current) && lt(level, current1)) || (lt(level, current) && gt(level, current1));
+  const closeCrossing = (level: number) => crossing(bars[last].close, last > 0 ? bars[last - 1].close : NaN, level);
+  const ends: number[] = [];
+
   if (n > 0) {
     const channel = (first: boolean) => {
       const on = first ? cfg.linreg : cfg.linreg2;
       const length = first ? length1 : length2;
       const [slope, intercept, dev] = regression(first ? src1 : src2, length);
+      ends.push(intercept, dev);
       const short = !first && cfg.shorten && cfg.useTF && cfg.showLast < length;
       const pStart = intercept + slope * (short ? cfg.showLast : length - 1);
       const pEnd = intercept;
@@ -437,6 +460,7 @@ export function calculate(
           drawLabel(last + offset, pEnd, `LRL ${first ? '1ST' : '2ND'}${priced(pEnd)}`, css, textSize, extend);
           if (offset > 9) drawLine(last + 3, pEnd, last + offset, pEnd, mainColor, 1, 'Arrow', false);
         }
+        if (closeCrossing(pEnd)) lrAlert(`Price crossed LR${name} Base Line`, pEnd);
       }
       // processLinRegLevel()
       for (const k of [1, 2, 3] as const) {
@@ -458,10 +482,27 @@ export function calculate(
             drawLine(last + 3, down, last + offset, down, css, 1, 'Arrow', false);
           }
         }
+        if (closeCrossing(pEnd + level * dev)) lrAlert(`Price crossed LR${name} Upper Band (SD ${str.tostring(level)})`, pEnd + level * dev);
+        if (closeCrossing(pEnd - level * dev)) lrAlert(`Price crossed LR${name} Lower Band (SD ${str.tostring(level)})`, pEnd - level * dev);
       }
     };
     channel(true);
     channel(false);
+
+    // if i_linreg and i_linreg2: the base line of the first channel crossing the second channel
+    if (cfg.linreg && cfg.linreg2) {
+      const [endPrice, , endPrice2, stdDev2] = ends;
+      const endPrice1 = last > 0 ? regression(src1, length1, last - 1)[1] : NaN;
+      const cross = (level: number) => crossing(endPrice, endPrice1, level);
+      if (cross(endPrice2)) lrAlert('LR1 Base crossed LR2 Base Line', endPrice2);
+      for (const side of [1, -1]) {
+        for (const k of [1, 2, 3] as const) {
+          const value = cfg[`lr2Value${k}`];
+          const price = endPrice2 + side * value * stdDev2;
+          if (cross(price)) lrAlert(`LR1 Base crossed LR2 ${side > 0 ? 'Upper' : 'Lower'} Band (SD ${str.tostring(value)})`, price);
+        }
+      }
+    }
   }
 
   // Linear regression curve, bands, slope arrows, volume and volatility marks: show_last = 3 x Count
@@ -530,8 +571,29 @@ export function calculate(
         cells: [{ column: 0, row: 0, text: '☼☾  ', textSize: 'normal', textColor: TEAL, tooltip: 'SoleMare Analytics' }],
       }]
       : [],
+    // alertcondition(ta.crossover(nzVolume, i_vSMA * i_vSpikeThresh)) / (ta.crossover(range_1, i_weightedATR))
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(volume, vSma.map((v) => v * cfg.vSpikeThresh)),
+      crossedOver(bars.map((b) => Math.abs(b.high - b.low)), weightedAtr),
+    ]),
+    alertCalls,
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0', title: 'Volume Spike — Possible Exhaustion',
+    message: 'LɪɴRᴇɢ | {{exchange}}:{{ticker}} — Unusual volume spike detected, possible exhaustion or climactic move.\nPrice : {{close}}',
+  },
+  {
+    id: 'alert1', title: 'High Volatility — Wide Bar Detected',
+    message: 'LɪɴRᴇɢ | {{exchange}}:{{ticker}} — Unusually wide bar detected, possible breakout or volatility surge.\nPrice : {{close}}',
+  },
+];
+
+/** The original also calls alert() (crossed channel lines) */
+export const hasAlertFunction = true;
 
 export const LinearRegressionChannelCurveSlopeByDgt = {
   calculate,
@@ -539,4 +601,6 @@ export const LinearRegressionChannelCurveSlopeByDgt = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

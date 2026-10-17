@@ -8,6 +8,10 @@
  * direction is drawn, with a circle and a Buy / Sell label on direction changes and a fill between ohlc4 and the
  * stop.
  *
+ * Alert conditions (`alerts` of the result): "CE Direction Change" (the direction differs from the previous bar's),
+ * "CE Buy" and "CE Sell" (the Buy / Sell signals). With "Await Bar Confirmation" they are false on a last bar that
+ * is still open (`barstate.isconfirmed`, from the chart context, third argument of calculate).
+ *
  * Reference: "Chandelier Exit" by Cryptokingworld91 (published as "Buy & Sell - Accurate Signals")
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: Copyright (c) 2019-present, Alex Orekhov (everget). Chandelier Exit script may be freely
@@ -16,6 +20,8 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface BuySellAccurateSignalsInputs {
   /** ATR period (also the highest / lowest window) */
@@ -27,7 +33,7 @@ export interface BuySellAccurateSignalsInputs {
   showLabels: boolean;
   /** Fill between ohlc4 and the stop of the current direction */
   highlightState: boolean;
-  /** Alerts only on confirmed bars (alertconditions are not ported) */
+  /** Alert conditions only on confirmed bars */
   awaitBarConfirmation: boolean;
 }
 
@@ -74,7 +80,8 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<BuySellAccurateSignalsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -111,12 +118,22 @@ export function calculate(
   const plot2: { time: number; value: number }[] = [];
   const longFill: string[] = new Array(n);
   const shortFill: string[] = new Array(n);
+  // await = awaitBarConfirmation ? barstate.isconfirmed : true (only a last bar can be open)
+  const lastOpen = !lastBarConfirmedOf(chart);
+  const flagChange: boolean[] = new Array(n);
+  const flagBuy: boolean[] = new Array(n);
+  const flagSell: boolean[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const b = bars[i];
     const prevDir = i > 0 ? dir[i - 1] : NaN;
     const buySignal = dir[i] === 1 && prevDir === -1;
     const sellSignal = dir[i] === -1 && prevDir === 1;
+    const awaitOk = cfg.awaitBarConfirmation ? !(lastOpen && i === n - 1) : true;
+    // alertcondition(dir != dir[1] and await) / (buySignal and await) / (sellSignal and await); dir[1] na: false
+    flagChange[i] = i > 0 && dir[i] !== prevDir && awaitOk;
+    flagBuy[i] = buySignal && awaitOk;
+    flagSell[i] = sellSignal && awaitOk;
     plot0.push({ time: t, value: dir[i] === 1 ? longStop[i] : NaN, color: LONG });
     plot1.push({ time: t, value: dir[i] === 1 ? NaN : shortStop[i], color: SHORT });
     // midPricePlot = plot(ohlc4, display = display.none)
@@ -151,8 +168,16 @@ export function calculate(
       { plot1: 'plot2', plot2: 'plot1', options: { title: 'Short State Filling' }, colors: shortFill },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, [flagChange, flagBuy, flagSell]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'CE Direction Change', message: 'Chandelier Exit has changed direction, {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'CE Buy', message: 'Chandelier Exit Buy, {{exchange}}:{{ticker}}' },
+  { id: 'alert2', title: 'CE Sell', message: 'Chandelier Exit Sell, {{exchange}}:{{ticker}}' },
+];
 
 export const BuySellAccurateSignals = {
   calculate,
@@ -160,4 +185,5 @@ export const BuySellAccurateSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };
