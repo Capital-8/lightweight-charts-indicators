@@ -42,7 +42,7 @@ export function referenceNames(namesSource) {
 /** The Style-settings table of style-outputs.ts (id -> declarations). */
 export function styleOutputs(stylesSource) {
   const out = new Map();
-  for (const m of stylesSource.matchAll(/^  "([^"]+)": (\{.*\}),?$/gm)) out.set(m[1], JSON.parse(m[2]));
+  for (const m of stylesSource.matchAll(/^  "([^"]+)": (\{.*\}),\r?$/gm)) out.set(m[1], JSON.parse(m[2]));
   return out;
 }
 
