@@ -44,6 +44,8 @@ export function calculate(bars: Bar[], _inputs: Partial<BollingerBarsInputs> = {
     low: b.low,
     close: b.low,
     color: '#0D349E',
+    // reference: wickcolor transparent on both series (the wick candles draw the high-low range as their body)
+    wickColor: 'rgba(0,0,0,0)',
     borderColor: '#0D349E',
   }));
 
@@ -57,6 +59,7 @@ export function calculate(bars: Bar[], _inputs: Partial<BollingerBarsInputs> = {
       low: b.low,
       close: b.close,
       color: col,
+      wickColor: 'rgba(0,0,0,0)',
       borderColor: col,
     };
   });
