@@ -7,6 +7,7 @@
 
 import { Series, ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type FillData, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, OutputDecl, OutputValues } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RSIInputs {
   length: number;
@@ -75,7 +76,13 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers?: MarkerData[]; outputValues: OutputValues } {
+/** Reference alertconditions (bullCond / bearCond: false while "Calculate Divergence" is off) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Regular Bullish Divergence', message: 'Found a new Regular Bullish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.' },
+  { id: 'alert1', title: 'Regular Bearish Divergence', message: 'Found a new Regular Bearish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.' },
+];
+
+export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers?: MarkerData[]; outputValues: OutputValues; alerts: AlertConditionState[] } {
   const { length, src, calculateDivergence, maType, maLength, bbMult } = { ...defaultInputs, ...inputs };
   const source = getSourceSeries(bars, src);
   const rsi = ta.rsi(source, length);
@@ -138,6 +145,9 @@ export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<In
   const bullLine: { time: number; value: number; color?: string }[] = bars.map((b) => ({ time: b.time, value: NaN }));
   const bearLine: { time: number; value: number; color?: string }[] = bars.map((b) => ({ time: b.time, value: NaN }));
   const labels: OutputValues = { bullLabel: [], bearLabel: [] };
+  // the alert conditions on the bar they are computed on
+  const bullAlert: boolean[] = bars.map(() => false);
+  const bearAlert: boolean[] = bars.map(() => false);
 
   if (calculateDivergence) {
     const lookbackLeft = 5;
@@ -204,6 +214,7 @@ export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<In
         const bull = plFound[i] && rsiHL && prevLow != null && lowLBR[i] < prevLow;
         if (plFound[i] && rsiVal != null) bullLine[i - lookbackRight] = { time: bars[i - lookbackRight].time, value: rsiVal, color: bull ? '#4CAF50' : 'transparent' };
         if (bull && rsiVal != null) labels.bullLabel.push({ time: bars[i].time as number, value: rsiVal });
+        bullAlert[i] = bull;
       }
       if (plFound[i] && rsiHL) {
         const prevLow = plLowVW[i];
@@ -220,6 +231,7 @@ export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<In
             color: '#4CAF50',
             text: ' Bull ',
             textColor: '#FFFFFF',
+            id: 'bullLabel',
           });
         }
       }
@@ -237,6 +249,7 @@ export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<In
         const bear = phFound[i] && rsiLH && prevHigh != null && highLBR[i] > prevHigh;
         if (phFound[i] && rsiVal != null) bearLine[i - lookbackRight] = { time: bars[i - lookbackRight].time, value: rsiVal, color: bear ? '#FF5252' : 'transparent' };
         if (bear && rsiVal != null) labels.bearLabel.push({ time: bars[i].time as number, value: rsiVal });
+        bearAlert[i] = bear;
       }
       if (phFound[i] && rsiLH) {
         const prevHigh = phHighVW[i];
@@ -252,6 +265,7 @@ export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<In
             color: '#FF5252',
             text: ' Bear ',
             textColor: '#FFFFFF',
+            id: 'bearLabel',
           });
         }
       }
@@ -272,7 +286,8 @@ export function calculate(bars: Bar[], inputs: Partial<RSIInputs> = {}): Omit<In
     fills,
     markers: markers.length > 0 ? markers : undefined,
     outputValues: labels,
+    alerts: alertStates(alertConditions, bars, [bullAlert, bearAlert]),
   };
 }
 
-export const RSI = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig, outputs };
+export const RSI = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig, outputs, alertConditions };

@@ -10,6 +10,7 @@
  */
 
 import { Series, ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type MACDMaType = 'EMA' | 'SMA';
 
@@ -66,8 +67,10 @@ export const metadata = {
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const lt = (a: number, b: number) => b - a > EPS;
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
-export function calculate(bars: Bar[], inputs: Partial<MACDInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<MACDInputs> = {}): IndicatorResult & { alerts: AlertConditionState[] } {
   const { src, fastLength, slowLength, signalLength, oscMaType, signalMaType } = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const ma = (source: Series, length: number, maType: MACDMaType) =>
@@ -94,7 +97,18 @@ export function calculate(bars: Bar[], inputs: Partial<MACDInputs> = {}): Indica
       'plot1': macd.map((value, i) => ({ time: bars[i].time, value })),
       'plot2': signal.map((value, i) => ({ time: bars[i].time, value })),
     },
+    // alertcondition(hist[1] >= 0 and hist < 0) / (hist[1] <= 0 and hist > 0)
+    alerts: alertStates(alertConditions, bars, [
+      hist.map((h, i) => i > 0 && ge(hist[i - 1], 0) && lt(h, 0)),
+      hist.map((h, i) => i > 0 && le(hist[i - 1], 0) && gt(h, 0)),
+    ]),
   };
 }
 
-export const MACD = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig };
+/** Reference alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Rising to falling', message: 'The MACD histogram switched from a rising to falling state' },
+  { id: 'alert1', title: 'Falling to rising', message: 'The MACD histogram switched from a falling to rising state' },
+];
+
+export const MACD = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, alertConditions };

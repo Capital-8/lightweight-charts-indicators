@@ -6,6 +6,7 @@
  */
 
 import { Series, ta, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type AwesomeOscillatorInputs = Record<string, never>;
 
@@ -23,7 +24,13 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], _inputs: Partial<AwesomeOscillatorInputs> = {}): IndicatorResult {
+/** Reference alertconditions: changeToGreen = ta.crossover(diff, 0), changeToRed = ta.crossunder(diff, 0) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'AO color changed to green', message: "Awesome Oscillator's color has changed to green" },
+  { id: 'alert1', title: 'AO color changed to red', message: "Awesome Oscillator's color has changed to red" },
+];
+
+export function calculate(bars: Bar[], _inputs: Partial<AwesomeOscillatorInputs> = {}): IndicatorResult & { alerts: AlertConditionState[] } {
   // hl2 = (high + low) / 2
   const high = new Series(bars, b => b.high);
   const low = new Series(bars, b => b.low);
@@ -52,11 +59,17 @@ export function calculate(bars: Bar[], _inputs: Partial<AwesomeOscillatorInputs>
     plots: {
       'plot0': aoData,
     },
+    // diff = ao - ao[1]
+    alerts: (() => {
+      const diff = aoArr.map((v: number | null, i: number) => (i > 0 ? (v ?? NaN) - (aoArr[i - 1] ?? NaN) : NaN));
+      return alertStates(alertConditions, bars, [crossedOver(diff, 0), crossedUnder(diff, 0)]);
+    })(),
   };
 }
 
 export const AwesomeOscillator = {
   calculate,
+  alertConditions,
   metadata,
   defaultInputs,
   inputConfig,

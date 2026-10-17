@@ -24,6 +24,7 @@ import {
   type Box, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BoxData, TableData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { backgroundColorOf, foregroundColorOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface GapsInputs {
@@ -100,11 +101,18 @@ interface Gap {
   boxes: Box[];
 }
 
+/** Reference alertconditions: a gap registered on the bar / a gap fully closed on the bar (AlertInfo counts, reset
+ *  on every bar) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New Gap Appeared', message: 'A new gap has appeared.' },
+  { id: 'alert1', title: 'Gap Closed', message: 'A gap was closed.' },
+];
+
 export function calculate(
   bars: Bar[],
   inputs: Partial<GapsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { boxes: BoxData[]; tables: TableData[] } {
+): IndicatorResult & { boxes: BoxData[]; tables: TableData[]; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -124,6 +132,8 @@ export function calculate(
   // barstate.islastconfirmedhistory: the last bar when it is closed, else the bar before it
   const lastConfirmedHistory = lastBarConfirmedOf(chart) ? n - 1 : n - 2;
   let infoTableMade = false;
+  const opened: boolean[] = new Array(n).fill(false);
+  const closed: boolean[] = new Array(n).fill(false);
 
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === n - 1);
@@ -131,6 +141,8 @@ export function calculate(
 
     // method fullClose(Gap this)
     const fullClose = (gap: Gap) => {
+      // alertInfo.countClosedGap += 1
+      closed[i] = true;
       const activeBox = last(gap);
       box.set_extend(activeBox, 'none');
       gap.isActive = false;
@@ -177,6 +189,8 @@ export function calculate(
 
     // registerNewGap(isGapDown)
     if (isGapDown || isGapUp) {
+      // alertInfo.countOpenGap += 1
+      opened[i] = true;
       const newBox = box.new(i - 1, isGapDown ? prevLow : low, i, isGapDown ? high : prevHigh,
         isGapDown ? cfg.colorDownBorder : cfg.colorUpBorder, undefined, undefined, 'right', undefined,
         isGapDown ? cfg.colorDownBackground : cfg.colorUpBackground, undefined, undefined, BOX_TEXT_COLOR);
@@ -206,7 +220,8 @@ export function calculate(
     plots: {},
     boxes,
     tables,
+    alerts: alertStates(alertConditions, bars, [opened, closed]),
   };
 }
 
-export const Gaps = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const Gaps = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

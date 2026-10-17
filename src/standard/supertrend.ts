@@ -13,6 +13,7 @@
  */
 
 import { ta, type IndicatorResult, type InputConfig, type PlotConfig, type FillData, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 /**
  * Supertrend indicator input parameters
@@ -62,7 +63,14 @@ export const metadata = {
 /**
  * Calculate Supertrend indicator
  */
-export function calculate(bars: Bar[], inputs: Partial<SupertrendInputs> = {}): IndicatorResult {
+/** Reference alertconditions on the direction (-1 up, 1 down) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Downtrend to Uptrend', message: 'The Supertrend value switched from Downtrend to Uptrend ' },
+  { id: 'alert1', title: 'Uptrend to Downtrend', message: 'The Supertrend value switched from Uptrend to Downtrend' },
+  { id: 'alert2', title: 'Trend Change', message: 'The Supertrend value switched from Uptrend to Downtrend or vice versa' },
+];
+
+export function calculate(bars: Bar[], inputs: Partial<SupertrendInputs> = {}): IndicatorResult & { alerts: AlertConditionState[] } {
   const { atrPeriod, factor } = { ...defaultInputs, ...inputs };
 
   const [supertrendSeries, directionSeries] = ta.supertrend(bars, factor, atrPeriod);
@@ -102,6 +110,12 @@ export function calculate(bars: Bar[], inputs: Partial<SupertrendInputs> = {}): 
       'plot2': bodyMiddleData,
     },
     fills,
+    // direction[1] > direction, direction[1] < direction, direction[1] != direction (na compares false)
+    alerts: (() => {
+      const d = (i: number) => directions[i] ?? NaN;
+      const at = (f: (a: number, b: number) => boolean) => bars.map((_, i) => i > 0 && f(d(i - 1), d(i)));
+      return alertStates(alertConditions, bars, [at((a, b) => a > b), at((a, b) => a < b), at((a, b) => Number.isFinite(a) && Number.isFinite(b) && a !== b)]);
+    })(),
   };
 }
 
@@ -110,6 +124,7 @@ export function calculate(bars: Bar[], inputs: Partial<SupertrendInputs> = {}): 
  */
 export const Supertrend = {
   calculate,
+  alertConditions,
   metadata,
   defaultInputs,
   inputConfig,

@@ -21,6 +21,7 @@
 import { str, color, type Bar, type IndicatorResult, type InputConfig, type PlotConfig, getSource } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, LinefillData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type LinRegChannelSource = 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'hlcc4' | 'ohlc4' | 'volume';
 
@@ -85,23 +86,36 @@ const gt = (a: number, b: number) => a - b > 1e-10;
 /** Pine float equality: within 1e-10 */
 const eq = (a: number, b: number) => Math.abs(a - b) <= 1e-10;
 
+/**
+ * Reference alertconditions. The channel is computed on the last bar only (calcSlope gives na on the bars before), so
+ * "Regression Channel Exited" can only be true there; `trend[1]` is the trend the bar before had when it was the last
+ * bar (its value on a live chart), computed here from the window ending on it.
+ */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Regression Channel Exited', message: "The price movement has exited Regression Channel's bounds" },
+  { id: 'alert1', title: 'Switched to Uptrend', message: 'The Regression Channel trend switched from Downtrend to Uptrend' },
+  { id: 'alert2', title: 'Switched to Downtrend', message: 'The Regression Channel trend switched from Uptrend to Downtrend' },
+];
+
 export function calculate(
   bars: Bar[],
   inputs: Partial<LinRegChannelInputs> = {},
-): IndicatorResult & { lines: LineDrawingData[]; linefills: LinefillData[]; labels: LabelData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; linefills: LinefillData[]; labels: LabelData[]; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  const noAlerts = () => alertStates(alertConditions, bars, []);
   const result = {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     lines: [] as LineDrawingData[],
     linefills: [] as LinefillData[],
     labels: [] as LabelData[],
+    alerts: [] as AlertConditionState[],
   };
   const n = bars.length;
   const length = Math.trunc(cfg.length);
   const last = n - 1;
   // calcSlope() returns na before the last bar and for a length of 1 or less: nothing is drawn
-  if (n === 0 || length <= 1) return result;
+  if (n === 0 || length <= 1) return { ...result, alerts: noAlerts() };
 
   // source[i]: na before the first bar
   // (another source of the chart for a study on study: the host's values)
@@ -193,7 +207,30 @@ export function calculate(
       style: 'label_up',
     });
   }
+
+  // trend = math.sign(startPrice - endPrice) of the window ending on bar `end` (startPrice - endPrice = slope * (length - 1))
+  const trendAt = (end: number): number => {
+    if (end - length + 1 < 0) return NaN;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (let k = 0; k <= length - 1; k++) {
+      const v = srcValues[end - k];
+      const per = k + 1.0;
+      sx += per; sy += v; sxx += per * per; sxy += v * per;
+    }
+    const sl = (length * sxy - sx * sy) / (length * sxx - sx * sx);
+    return Math.sign(sl * (length - 1));
+  };
+  const flags: boolean[][] = [new Array(n).fill(false), new Array(n).fill(false), new Array(n).fill(false)];
+  // sourceInput > line.get_price(upper, bar_index) or sourceInput < line.get_price(lower, bar_index): the lines end on
+  // the last bar at the end prices
+  const s = srcValues[last];
+  flags[0][last] = (upper !== null && s > upperEndPrice) || (lower !== null && s < lowerEndPrice);
+  const trend = trendAt(last);
+  const prevTrend = trendAt(last - 1);
+  flags[1][last] = prevTrend >= 0 && trend < 0;
+  flags[2][last] = prevTrend <= 0 && trend > 0;
+  result.alerts = alertStates(alertConditions, bars, flags);
   return result;
 }
 
-export const LinearRegressionChannelStandard = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const LinearRegressionChannelStandard = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

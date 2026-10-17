@@ -41,6 +41,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar, type PineSize,
 } from 'oakscriptjs';
 import type { TableData, TableCellData, TablePosition } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import {
   lastBarConfirmedOf, symbolBarsOf, tickeridOf, type ChartContext, type SymbolRequest,
@@ -393,11 +394,19 @@ export function requiredSymbols(inputs: Partial<TechnicalsInputs> = {}, chart?: 
   return [...higher, ...lowerTimeframes(cfg, currentTf, chartTf)].map((tf) => ({ symbol, timeframe: tf }));
 }
 
+/** Reference alertconditions: crosses of the rating the plot shows (`userRating`) over the levels */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Sell', message: 'Ratings changed to "Sell"' },
+  { id: 'alert1', title: 'Buy', message: 'Ratings changed to "Buy"' },
+  { id: 'alert2', title: 'Strong Sell', message: 'Ratings changed to "Strong Sell"' },
+  { id: 'alert3', title: 'Strong Buy', message: 'Ratings changed to "Strong Buy"' },
+];
+
 export function calculate(
   bars: Bar[],
   inputs: Partial<TechnicalsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { tables: TableData[] } {
+): IndicatorResult & { tables: TableData[]; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const live = !lastBarConfirmedOf(chart);
@@ -578,9 +587,15 @@ export function calculate(
     plots: { plot0 },
     hlines,
     tables,
+    alerts: alertStates(alertConditions, bars, [
+      crossedUnder(userRating, -LEVEL_WEAK),
+      crossedOver(userRating, LEVEL_WEAK),
+      crossedUnder(userRating, -LEVEL_STRONG),
+      crossedOver(userRating, LEVEL_STRONG),
+    ]),
   };
 }
 
 export const TechnicalRatingsStandard = {
-  calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, requiredSymbols,
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, requiredSymbols, alertConditions,
 };

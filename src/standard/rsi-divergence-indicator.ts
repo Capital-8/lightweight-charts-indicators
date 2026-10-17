@@ -21,6 +21,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData, OutputDecl, OutputValues } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiDivergenceIndicatorInputs {
   /** RSI Period */
@@ -112,7 +113,7 @@ type PlotPoint = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<RsiDivergenceIndicatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; outputValues: OutputValues } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; outputValues: OutputValues; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { lbR, lbL, rangeUpper, rangeLower } = cfg;
   const n = bars.length;
@@ -155,6 +156,8 @@ export function calculate(
   const markers: MarkerData[] = [];
   // The label shapes' series (cond ? osc[lbR] : na) on the bar they are computed on.
   const labels: OutputValues = { bullLabel: [], hiddenBullLabel: [], bearLabel: [], hiddenBearLabel: [] };
+  // the alert conditions (not gated by the "Plot ..." inputs), on the bar they are computed on
+  const alertFlags: boolean[][] = [[], [], [], []];
 
   for (let i = 0; i < n; i++) {
     // Regular Bullish: oscHL = osc[lbR] > valuewhen(...) and inRangePl; priceLL = low[lbR] < valuewhen(...)
@@ -173,6 +176,11 @@ export function calculate(
     const oscHH = compare.gt(oscR[i], prevOscPh[i]) && inRangePh[i];
     const priceLH = compare.lt(highR[i], prevHighPh[i]);
     const hiddenBearCond = cfg.plotHiddenBear && priceLH && oscHH && phFound[i];
+    // bullCondAlert, hiddenBullCondAlert, bearCondAlert, hiddenBearCondAlert
+    alertFlags[0][i] = priceLL && oscHL && plFound[i];
+    alertFlags[1][i] = priceHL && oscLL && plFound[i];
+    alertFlags[2][i] = priceHH && oscLH && phFound[i];
+    alertFlags[3][i] = priceLH && oscHH && phFound[i];
 
     const at = bars[i].time as number;
     const lv = oscR[i];
@@ -223,8 +231,17 @@ export function calculate(
     },
     markers,
     outputValues: labels,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
+
+/** Reference alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Regular Bullish Divergence', message: 'Found a new Regular Bullish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar' },
+  { id: 'alert1', title: 'Hidden Bullish Divergence', message: 'Found a new Hidden Bullish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar' },
+  { id: 'alert2', title: 'Regular Bearish Divergence', message: 'Found a new Regular Bearish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar' },
+  { id: 'alert3', title: 'Hidden Bearish Divergence', message: 'Found a new Hidden Bearish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar' },
+];
 
 /** Reference outputs: the RSI, then each divergence line followed by its label. */
 export const outputs: OutputDecl[] = [
@@ -239,4 +256,4 @@ export const outputs: OutputDecl[] = [
   { kind: 'shape', id: 'hiddenBearLabel', title: 'Hidden Bearish Label' },
 ];
 
-export const RsiDivergenceIndicator = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig, outputs };
+export const RsiDivergenceIndicator = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig, outputs, alertConditions };

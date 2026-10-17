@@ -29188,8 +29188,22 @@ const registryPart11: IndicatorRegistryEntry[] = [
   },
 ];
 
+/** Standard built-ins with the alert conditions of the reference script (their module's `alertConditions`). */
+const ALERT_MODULES: Record<string, { alertConditions: { id: string; title: string; message?: string }[] }> = {
+  'awesome-oscillator': awesomeOscIndicator,
+  macd: macdIndicator,
+  supertrend: supertrendIndicator,
+  rsi: rsiIndicator,
+  'rsi-divergence-indicator': rsiDivergenceIndicatorStd,
+  gaps: gapsStd,
+  'linreg-channel': linregChannelStd,
+  technicals: technicalsStd,
+};
+const withAlertConditions = (e: IndicatorRegistryEntry): IndicatorRegistryEntry =>
+  ALERT_MODULES[e.id] && !e.alertConditions ? { ...e, alertConditions: ALERT_MODULES[e.id].alertConditions } : e;
+
 // Built-in studies carry the reference app's names (reference-names.ts).
-export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart11, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10].map(withReferenceNames).map(withValueFormat).map(withStyleOutputs);
+export const indicatorRegistry: IndicatorRegistryEntry[] = [...registryPart1, ...registryPart11, ...registryPart2, ...registryPart3, ...registryPart4, ...registryPart5, ...registryPart6, ...registryPart7, ...registryPart8, ...registryPart9, ...registryPart10].map(withReferenceNames).map(withValueFormat).map(withStyleOutputs).map(withAlertConditions);
 
 // Chart context (third argument of calculate)
 export type { ChartContext, VisibleRange, SymbolRequest, SymbolInfo } from './chart-context';
@@ -29205,4 +29219,4 @@ export {
 } from './other-symbol';
 
 // Package version
-export const version = '0.16.2';
+export const version = '0.16.3';
