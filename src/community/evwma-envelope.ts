@@ -1,90 +1,85 @@
 /**
- * Elastic Volume Weighted MA & Envelope
+ * Elastic Volume Weighted Moving Average [LazyBear]
  *
- * EVWMA with envelope bands. Running average weighted by volume relative to
- * average volume over the window. Envelope bands at +/- percentage.
+ * EVWMA of the close: each bar moves the average by its volume share of the "floating shares" (the volume of the
+ * last `length` bars, or the cumulative volume): evwma = evwma[1] * (shares - volume) / shares
+ * + volume * close / shares. With `Draw Envelope` the same average of the high (red) and of the low (green) is drawn
+ * around it.
  *
- * Reference: "Elastic Volume Weighted MA & Envelope" (community)
+ * Reference: "Elastic Volume Weighted Moving Average [LazyBear]" by LazyBear
  */
 
-import { ta, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { ta, math, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 
 export interface EVWMAEnvelopeInputs {
+  /** length */
   length: number;
-  envelopePct: number;
-  src: SourceType;
+  /** Use Cumulative Volume */
+  useCV: boolean;
+  /** Draw Envelope */
+  renderBands: boolean;
 }
 
 export const defaultInputs: EVWMAEnvelopeInputs = {
   length: 20,
-  envelopePct: 2.0,
-  src: 'close',
+  useCV: false,
+  renderBands: false,
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'length', type: 'int', title: 'Length', defval: 20, min: 1 },
-  { id: 'envelopePct', type: 'float', title: 'Envelope %', defval: 2.0, min: 0.01, step: 0.1 },
-  { id: 'src', type: 'source', title: 'Source', defval: 'close' },
+  { id: 'length', type: 'int', title: 'length', defval: 20 },
+  { id: 'useCV', type: 'bool', title: 'Use Cumulative Volume', defval: false },
+  { id: 'renderBands', type: 'bool', title: 'Draw Envelope', defval: false },
 ];
 
+/** Pine version 1 colours: maroon, red, green */
+const MAROON = '#800000';
+const RED = '#FF0000';
+const GREEN = '#008000';
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'EVWMA', color: '#2962FF', lineWidth: 2 },
-  { id: 'plot1', title: 'Upper', color: '#FF6D00', lineWidth: 1 },
-  { id: 'plot2', title: 'Lower', color: '#FF6D00', lineWidth: 1 },
+  { id: 'plot0', title: 'evwma', color: MAROON, lineWidth: 2 },
+  { id: 'plot1', title: 'evwma+', color: RED, lineWidth: 2 },
+  { id: 'plot2', title: 'evwma-', color: GREEN, lineWidth: 2 },
 ];
 
 export const metadata = {
-  title: 'EVWMA Envelope',
-  shortTitle: 'EVWMA',
+  title: 'Elastic Volume Weighted Moving Average [LazyBear]',
+  shortTitle: 'EVWMA_LB',
   overlay: true,
 };
 
+/** nz(): na (also an infinite value of a division by 0) -> 0 */
+const nz = (v: number) => (Number.isFinite(v) ? v : 0);
+
 export function calculate(bars: Bar[], inputs: Partial<EVWMAEnvelopeInputs> = {}): IndicatorResult {
-  const { length, envelopePct, src } = { ...defaultInputs, ...inputs };
-  const n = bars.length;
-  const source = getSourceSeries(bars, src);
-  const srcArr = source.toArray();
+  const { length, useCV, renderBands } = { ...defaultInputs, ...inputs };
+  const volume = bars.map((b) => b.volume ?? NaN);
+  // nbfs = useCV ? cum(volume) : sum(volume, length)
+  const nbfs = (useCV ? ta.cum(Series.fromArray(bars, volume)).toArray() : math.sum(volume, length) as number[])
+    .map((v) => v ?? NaN);
 
-  // Volume SMA for normalization
-  const volSeries = new Series(bars, (b) => b.volume ?? 0);
-  const volSmaArr = ta.sma(volSeries, length).toArray();
+  // calc_evwma(price, length, nb_floating_shares): each call keeps its own `data` history
+  const evwma = (price: (b: Bar) => number): number[] => {
+    const out: number[] = new Array(bars.length);
+    let prev = NaN;
+    for (let i = 0; i < bars.length; i++) {
+      const v = volume[i];
+      const data = (nz(prev) * (nbfs[i] - v)) / nbfs[i] + (v * price(bars[i])) / nbfs[i];
+      out[i] = Number.isFinite(data) ? data : NaN;
+      prev = data;
+    }
+    return out;
+  };
 
-  // EVWMA calculation
-  const evwmaArr: number[] = new Array(n);
-  evwmaArr[0] = srcArr[0] ?? 0;
-
-  for (let i = 1; i < n; i++) {
-    const vol = bars[i].volume ?? 0;
-    const avgVol = volSmaArr[i] ?? 0;
-    const cumVol = avgVol * length;
-    const alpha = cumVol > 0 ? Math.min(vol / cumVol, 1) : 0;
-    evwmaArr[i] = alpha * (srcArr[i] ?? 0) + (1 - alpha) * evwmaArr[i - 1];
-  }
-
-  const warmup = length;
-  const pctMult = envelopePct / 100;
-
-  const plot0 = evwmaArr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : v,
-  }));
-
-  const plot1 = evwmaArr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : v * (1 + pctMult),
-  }));
-
-  const plot2 = evwmaArr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : v * (1 - pctMult),
-  }));
+  const m = evwma((b) => b.close);
+  const upper = renderBands ? evwma((b) => b.high) : null;
+  const lower = renderBands ? evwma((b) => b.low) : null;
+  const line = (v: number[] | null) => bars.map((b, i) => ({ time: b.time, value: v ? v[i] : NaN }));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2 },
-    fills: [
-      { plot1: 'plot1', plot2: 'plot2', options: { color: 'rgba(41,98,255,0.1)' } },
-    ],
+    plots: { plot0: line(m), plot1: line(upper), plot2: line(lower) },
   };
 }
 

@@ -5,6 +5,9 @@
  * When ZLEMA > SMMA(high): impulse = ZLEMA - SMMA(high) (bullish)
  * When ZLEMA < SMMA(low): impulse = ZLEMA - SMMA(low) (bearish)
  * Otherwise: 0 (neutral, filtering whipsaw)
+ * Bar colours (barcolor, as the original): only with "Enable bar colors" (off by default), in the colours of the
+ * ImpulseMACD histogram (lime / green / red / orange; an na value compares false, so orange while the averages
+ * warm up).
  *
  * Reference: "Impulse MACD" by LazyBear
  */
@@ -15,16 +18,20 @@ import type { BarColorData } from '../types';
 export interface ImpulseMACDInputs {
   lengthMA: number;
   lengthSignal: number;
+  /** Enable bar colors (off by default, as the original) */
+  ebc: boolean;
 }
 
 export const defaultInputs: ImpulseMACDInputs = {
   lengthMA: 34,
   lengthSignal: 9,
+  ebc: false,
 };
 
 export const inputConfig: InputConfig[] = [
   { id: 'lengthMA', type: 'int', title: 'Length MA', defval: 34, min: 1 },
   { id: 'lengthSignal', type: 'int', title: 'Length Signal', defval: 9, min: 1 },
+  { id: 'ebc', type: 'bool', title: 'Enable bar colors', defval: false },
 ];
 
 export const plotConfig: PlotConfig[] = [
@@ -40,7 +47,7 @@ export const metadata = {
 };
 
 export function calculate(bars: Bar[], inputs: Partial<ImpulseMACDInputs> = {}): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } {
-  const { lengthMA, lengthSignal } = { ...defaultInputs, ...inputs };
+  const { lengthMA, lengthSignal, ebc } = { ...defaultInputs, ...inputs };
 
   const hlc3 = getSourceSeries(bars, 'hlc3');
   const highSeries = getSourceSeries(bars, 'high');
@@ -114,22 +121,10 @@ export function calculate(bars: Bar[], inputs: Partial<ImpulseMACDInputs> = {}):
     return { time: bars[i].time, value: v, color };
   });
 
-  // barcolor: Pine mdc = src>mi?src>hi?lime:green:src<lo?red:orange
-  const hlc3Arr = hlc3.toArray();
+  // barcolor(ebc ? mdc : na): mdc = src>mi?src>hi?lime:green:src<lo?red:orange (never na: na compares false)
   const barColors: BarColorData[] = [];
-  for (let i = 0; i < bars.length; i++) {
-    const s = hlc3Arr[i] ?? NaN;
-    const m = miArr[i] ?? NaN;
-    const h = hiArr[i] ?? NaN;
-    const l = loArr[i] ?? NaN;
-    if (isNaN(s) || isNaN(m) || isNaN(h) || isNaN(l)) continue;
-    let color: string;
-    if (s > m) {
-      color = s > h ? '#00FF00' : '#008000'; // lime : green
-    } else {
-      color = s < l ? '#EF5350' : '#FF9800'; // red : orange
-    }
-    barColors.push({ time: bars[i].time, color });
+  if (ebc) {
+    for (let i = 0; i < bars.length; i++) barColors.push({ id: 'barcolor0', time: bars[i].time, color: mdPlot[i].color });
   }
 
   return {

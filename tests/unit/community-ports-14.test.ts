@@ -171,14 +171,30 @@ describe('Follow Line: alertconditions', () => {
   for (const useATRFilter of [true, false]) {
     it(`fires on the flips of the original's trend (ATR filter ${useATRFilter})`, () => {
       const close = bars.map((b) => b.close);
-      const m = sma(close, 21), sd = stdev(close, 21), a = atr(bars, 5);
+      const m = sma(close, 21), sd = stdev(close, 21);
+      const sigs = close.map((c, i) => (gt(c, m[i] + sd[i]) ? 1 : lt(c, m[i] - sd[i]) ? -1 : 0));
+      // each atr(5) of the original is called only on its own bars (above / below the bands): an RMA of the true
+      // range of those bars only, na until it has 5 of them
+      const tr = bars.map((b, i) => (i === 0 ? b.high - b.low
+        : Math.max(b.high - b.low, Math.abs(b.high - bars[i - 1].close), Math.abs(b.low - bars[i - 1].close))));
+      const atrWhen = (side: number) => {
+        const out: number[] = new Array(bars.length).fill(NaN);
+        let count = 0, sum = 0, prev = NaN;
+        sigs.forEach((sg, i) => {
+          if (sg !== side) return;
+          if (isNaN(prev)) { count++; sum += tr[i]; if (count === 5) prev = sum / 5; } else prev = (prev * 4 + tr[i]) / 5;
+          out[i] = prev;
+        });
+        return out;
+      };
+      const aUp = atrWhen(1), aDn = atrWhen(-1);
       const tl: number[] = [], it: number[] = [];
       for (let i = 0; i < bars.length; i++) {
-        const sig = gt(close[i], m[i] + sd[i]) ? 1 : lt(close[i], m[i] - sd[i]) ? -1 : 0;
+        const sig = sigs[i];
         const p = i > 0 ? tl[i - 1] : NaN;
         let v = p;
-        if (sig === 1) { v = useATRFilter ? bars[i].low - a[i] : bars[i].low; if (lt(v, p)) v = p; }
-        if (sig === -1) { v = useATRFilter ? bars[i].high + a[i] : bars[i].high; if (gt(v, p)) v = p; }
+        if (sig === 1) { v = useATRFilter ? bars[i].low - aUp[i] : bars[i].low; if (lt(v, p)) v = p; }
+        if (sig === -1) { v = useATRFilter ? bars[i].high + aDn[i] : bars[i].high; if (gt(v, p)) v = p; }
         let d = i > 0 ? it[i - 1] : NaN;
         if (gt(v, p)) d = 1;
         if (lt(v, p)) d = -1;

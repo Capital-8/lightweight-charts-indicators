@@ -530,21 +530,28 @@ describe('alert conditions recomputed from the original expressions', () => {
   it('renko-chart: breakout, main trend and Renko trend turns', () => {
     const r = renko.calculate(bars);
     const warm = 14;
-    // main trend turns: the 'Up' / 'Down' circles after the warm-up
     const after = (ts: number[]) => ts.filter((t) => t >= (bars[warm + 1].time as number));
-    expect(after(times(r, 2))).toEqual(r.markers.filter((m) => m.text === 'Up').map((m) => m.time));
-    expect(after(times(r, 3))).toEqual(r.markers.filter((m) => m.text === 'Down').map((m) => m.time));
-    // Renko trend turns: the bar colour turns blue / red (trend 1 is blue, else red)
+    // main trend turns: the circles plot of the original at the trend line (green up / red down)
+    const tc = r.plots.trendChange as { time: number; value: number; color?: string }[];
+    const turn = (c: string) => tc.filter((p) => Number.isFinite(p.value) && p.color === c).map((p) => p.time);
+    expect(after(times(r, 2))).toEqual(after(turn('#4CAF50')));
+    expect(after(times(r, 3))).toEqual(after(turn('#FF5252')));
+    // Renko trend turns: the bar colour turns to the up / down colour of the theme (default Blue/Red)
     const col = r.barColors.map((b) => b.color);
     const bt = r.barColors.map((b) => b.time);
-    const toBlue = bt.filter((_, i) => i > 0 && col[i] === '#0000FF' && col[i - 1] !== '#0000FF');
-    const toRed = bt.filter((_, i) => i > 0 && col[i] === '#FF0000' && col[i - 1] !== '#FF0000');
-    expect(after(times(r, 4)).filter((t) => t > (bt[0] as number))).toEqual(toBlue.filter((t) => t >= (bars[warm + 1].time as number)));
-    expect(after(times(r, 5)).filter((t) => t > (bt[0] as number))).toEqual(toRed.filter((t) => t >= (bars[warm + 1].time as number)));
+    // the up colour: the colour of the bars where the Renko trend turns up
+    const ups = new Set(col.filter((_, i) => r.alerts[4].times.includes(bt[i] as number)));
+    expect(ups.size).toBe(1);
+    const upCol = [...ups][0];
+    expect(new Set(col).size).toBe(2);
+    const toUp = bt.filter((_, i) => i > 0 && col[i] === upCol && col[i - 1] !== upCol);
+    const toDown = bt.filter((_, i) => i > 0 && col[i] !== upCol && col[i - 1] === upCol);
+    expect(after(times(r, 4)).filter((t) => t > (bt[0] as number))).toEqual(toUp.filter((t) => t >= (bars[warm + 1].time as number)));
+    expect(after(times(r, 5)).filter((t) => t > (bt[0] as number))).toEqual(toDown.filter((t) => t >= (bars[warm + 1].time as number)));
     // breakout starts: the breakout line turns lime / red
     const bo = r.plots.breakoutLine as { time: number; color?: string }[];
-    const lime = bo.filter((p, i) => i > warm && p.color === '#00FF00' && bo[i - 1].color !== '#00FF00').map((p) => p.time);
-    const red = bo.filter((p, i) => i > warm && p.color === '#FF0000' && bo[i - 1].color !== '#FF0000').map((p) => p.time);
+    const lime = bo.filter((p, i) => i > warm && p.color === '#00E676' && bo[i - 1].color !== '#00E676').map((p) => p.time);
+    const red = bo.filter((p, i) => i > warm && p.color === '#FF5252' && bo[i - 1].color !== '#FF5252').map((p) => p.time);
     expect(after(times(r, 0)).filter((t) => t > (bars[warm + 1].time as number))).toEqual(lime);
     expect(after(times(r, 1)).filter((t) => t > (bars[warm + 1].time as number))).toEqual(red);
     for (let k = 0; k < 6; k++) expect(times(r, k).length).toBeGreaterThan(0);

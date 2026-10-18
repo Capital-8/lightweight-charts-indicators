@@ -186,8 +186,10 @@ describe('community built-ins: arrows and the order of the Style rows (#12)', ()
   it('plotarrow outputs are declared as arrows; the result gives them with their ids', () => {
     const e = entry('ehlers-mesa-ma');
     expect(e.arrowConfig?.map((a) => a.id)).toEqual(['arrow0']);
-    const r: any = run('ehlers-mesa-ma');
+    // the arrows are off by default, as in the original: on with the 'Mark crossover points' input
+    const r: any = e.calculate(bars, { ...e.defaultInputs, markCrossovers: true });
     expect(r.arrows.length).toBeGreaterThan(0);
+    expect((run('ehlers-mesa-ma') as any).arrows).toEqual([]);
     expect(r.arrows.every((a: { id: string }) => a.id === 'arrow0')).toBe(true);
   });
 

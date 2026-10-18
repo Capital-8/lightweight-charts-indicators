@@ -720,10 +720,10 @@ describe('SuperTrend Ladder ATR', () => {
     expect(result.metadata).toBeDefined();
     expect(result.plots['plot0']).toBeDefined();
     expect(result.plots['plot0'].length).toBe(bars.length);
+    // plot1 = Direction (data window only)
     expect(result.plots['plot1']).toBeDefined();
     expect(result.plots['plot1'].length).toBe(bars.length);
-    expect(result.plots['plot2']).toBeDefined();
-    expect(result.plots['plot2'].length).toBe(bars.length);
+    expect(Object.keys(result.plots)).toEqual(['plot0', 'plot1']);
   });
 
   it('should produce non-NaN values after warmup', () => {
@@ -740,7 +740,7 @@ describe('SuperTrend Ladder ATR', () => {
   });
 
   it('should have correct metadata', () => {
-    expect(SupertrendLadder.metadata.title).toBe('SuperTrend Ladder ATR');
+    expect(SupertrendLadder.metadata.title).toBe('Supertrend - Ladder ATR - 1909Capital [Trendoscope®]');
     expect(SupertrendLadder.metadata.overlay).toBe(true);
   });
 });

@@ -5,12 +5,16 @@
  * RSI, and RSI+MFI for signal generation.
  *
  * Display elements from Pine:
- * - 8 EMA ribbon lines with conditional colors (blue shades when bullish, gray when bearish)
+ * - 8 EMA ribbon lines with conditional colors (blue shades when bullish, gray when bearish), each from the first
+ *   bar where its ta.ema exists (bar index length - 1)
+ * - RSI+MFI = sma(((close - open) / (high - low)) * multiplier, period): na while a bar whose high equals its low
+ *   is in the window (division by zero), so the Yellow Cross is not drawn there
  * - Fills between EMA1-EMA2 and EMA2-EMA8
- * - 8 plotshape markers: longEma, shortEma, redCross, blueTriangle, redDiamond,
- *   bullCandle, bloodDiamond, yellowCross
+ * - 8 plotshape markers, all above the bar: longEma, shortEma, redCross, blueTriangle, redDiamond,
+ *   bullCandle, bloodDiamond, yellowCross; drawn from the first bar where their series exist (no extra warm-up);
+ *   Bull candle and Yellow Cross in color.yellow (#FFEB3B), the Blood Diamond without text
  * Alerts (alertcondition, `alerts` of the result): Red Diamond, Blood Diamond, YellowX, RedX, Longema and
- * Bluetriangle, on every bar of the signal (also before the warmup the markers wait for).
+ * Bluetriangle, on every bar of the signal.
  *
  * Reference: "VuManChu Cipher A" (overlay=true)
  */
@@ -124,15 +128,25 @@ export function calculate(
   const rsiArr = ta.rsi(close, rsiLen).toArray();
 
   // --- RSI+MFI: sma(((close - open) / (high - low)) * multiplier, period) ---
-  const mfiRaw = new Series(bars, (b) => {
+  // A bar whose high equals its low divides by zero: na, and the sma is na while that bar is in its window
+  const mfiRaw = bars.map((b) => {
     const range = b.high - b.low;
-    if (range === 0) return 0;
-    return ((b.close - b.open) / range) * rsiMFIMultiplier;
+    return range === 0 ? NaN : ((b.close - b.open) / range) * rsiMFIMultiplier;
   });
-  const rsiMFIArr = ta.sma(mfiRaw, rsiMFIPeriod).toArray();
-
-  // --- Warmup ---
-  const warmup = Math.max(...lengths, wtChannelLen + wtAverageLen, rsiLen, rsiMFIPeriod);
+  const rsiMFIArr: number[] = new Array(n).fill(NaN);
+  {
+    let sum = 0;
+    let naCount = 0;
+    for (let i = 0; i < n; i++) {
+      const v = mfiRaw[i];
+      if (Number.isNaN(v)) naCount++; else sum += v;
+      if (i >= rsiMFIPeriod) {
+        const old = mfiRaw[i - rsiMFIPeriod];
+        if (Number.isNaN(old)) naCount--; else sum -= old;
+      }
+      if (i >= rsiMFIPeriod - 1 && naCount === 0) rsiMFIArr[i] = sum / rsiMFIPeriod;
+    }
+  }
 
   // --- EMA plots with conditional colors ---
   // Pine: ribbonDir = ema8 < ema2; color = ribbonDir ? blue_shade : gray
@@ -142,7 +156,8 @@ export function calculate(
 
   for (let p = 0; p < 8; p++) {
     plots[plotIds[p]] = emaArrays[p].map((v, i) => {
-      if (v == null || i < lengths[p]) return { time: bars[i].time, value: NaN };
+      // ta.ema exists from its length-th bar (bar index length - 1)
+      if (v == null || Number.isNaN(v)) return { time: bars[i].time, value: NaN };
       const e2 = ema2Arr[i];
       const e8 = ema8Arr[i];
       const ribbonDir = (e2 != null && e8 != null) ? e8 < e2 : false;
@@ -206,8 +221,7 @@ export function calculate(
     // alertcondition(redDiamond / bloodDiamond / yellowCross / redCross / longEma / blueTriangle != 0)
     [redDiamond, bloodDiamond, yellowCross, redCross, crossoverE2E8, crossoverE2E3].forEach((f, k) => flags[k].push(f));
 
-    // The markers start after the warmup of every series
-    if (i <= warmup) continue;
+    // The markers are drawn wherever their condition holds: an na series makes the condition false
     // Pine plotshape order (determines marker z-order / priority); ids: shape<k> in that order
     // longEma: green circle aboveBar (transp=50)
     if (crossoverE2E8) {
@@ -221,25 +235,25 @@ export function calculate(
     if (redCross) {
       markers.push({ time: bars[i].time, id: 'shape2', position: 'aboveBar', shape: 'xcross', color: 'rgba(255,0,0,0.50)', text: '' });
     }
-    // blueTriangle: blue triangleUp belowBar (transp=50)
+    // blueTriangle: blue triangleUp aboveBar (transp=50)
     if (crossoverE2E3) {
-      markers.push({ time: bars[i].time, id: 'shape3', position: 'belowBar', shape: 'triangleUp', color: 'rgba(0,100,255,0.50)', text: '' });
+      markers.push({ time: bars[i].time, id: 'shape3', position: 'aboveBar', shape: 'triangleUp', color: 'rgba(0,100,255,0.50)', text: '' });
     }
     // redDiamond: red diamond aboveBar (transp=25)
     if (redDiamond) {
       markers.push({ time: bars[i].time, id: 'shape4', position: 'aboveBar', shape: 'diamond', color: 'rgba(255,0,0,0.75)', text: '' });
     }
-    // bullCandle: yellow diamond aboveBar (transp=75)
+    // bullCandle: color.yellow (#FFEB3B) diamond aboveBar (transp=75)
     if (bullCandle) {
-      markers.push({ time: bars[i].time, id: 'shape5', position: 'aboveBar', shape: 'diamond', color: 'rgba(255,255,0,0.25)', text: '' });
+      markers.push({ time: bars[i].time, id: 'shape5', position: 'aboveBar', shape: 'diamond', color: 'rgba(255,235,59,0.25)', text: '' });
     }
-    // bloodDiamond: red diamond aboveBar large (transp=15)
+    // bloodDiamond: red diamond aboveBar, size small (transp=15), no text
     if (bloodDiamond) {
-      markers.push({ time: bars[i].time, id: 'shape6', position: 'aboveBar', shape: 'diamond', color: 'rgba(255,0,0,0.85)', text: 'Blood' });
+      markers.push({ time: bars[i].time, id: 'shape6', position: 'aboveBar', shape: 'diamond', color: 'rgba(255,0,0,0.85)', text: '' });
     }
-    // yellowCross: yellow xcross aboveBar (transp=25)
+    // yellowCross: color.yellow (#FFEB3B) xcross aboveBar (transp=25)
     if (yellowCross) {
-      markers.push({ time: bars[i].time, id: 'shape7', position: 'aboveBar', shape: 'xcross', color: 'rgba(255,255,0,0.75)', text: '' });
+      markers.push({ time: bars[i].time, id: 'shape7', position: 'aboveBar', shape: 'xcross', color: 'rgba(255,235,59,0.75)', text: '' });
     }
   }
 

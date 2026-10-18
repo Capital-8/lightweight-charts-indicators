@@ -488,9 +488,11 @@ describe('multiple-divergences', () => {
   it('gives the id of the plotshape of each kind and count on the markers', () => {
     const r = mdiv.calculate(bars, { minDivCount: 1 });
     expect(r.markers.length).toBeGreaterThan(5);
-    const first: Record<string, number> = { '#008080': 0, '#FF0000': 9, '#008000': 18, '#FFA500': 27 };
+    // teal regular bullish, red regular bearish, green hidden bullish, orange hidden bearish (Pine v4 colours)
+    const first: Record<string, number> = { '#00897B': 0, '#FF5252': 9, '#4CAF50': 18, '#FF9800': 27 };
     for (const m of r.markers) {
-      const count = Number(m.text);
+      // "1" .. "8", "8+" above 8 (the ninth shape of the kind)
+      const count = m.text === '8+' ? 9 : Number(m.text);
       expect(m.id).toBe(`shape${first[m.color as string] + Math.min(count, 9) - 1}`);
     }
     const ids = new Set(r.markers.map((m) => m.id));

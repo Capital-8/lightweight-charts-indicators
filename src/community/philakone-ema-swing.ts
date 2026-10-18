@@ -1,8 +1,10 @@
 /**
  * Philakone 55 EMA Swing Trading
  *
- * EMA 55 with EMA 9 for swing trading. Buy signal when close > EMA55 and EMA9 crosses
- * above EMA55. Sell signal when close < EMA55 and EMA9 crosses below EMA55.
+ * MAs 8 / 13 / 21 / 55 (EMA, or SMA with 'Exponential MA' off) for swing trading. Buy: MA 21 crosses MA 55 with
+ * MA 8 > MA 13 and MA 21 > MA 55; Sell: the mirror. Each MA is drawn from its first value (bar length - 1), the
+ * markers on every bar where the original's conditions are true (the cross needs both MAs on the bar before).
+ * Lines red (8), orange (13), yellow (21) and lime (55), as the original.
  * Alerts (alertcondition, `alerts` of the result): 'Buy Condition' / 'Sell Condition', true on the bars where EMA 21
  * crosses EMA 55 with EMA 8 > EMA 13 and EMA 21 > EMA 55 (buy) or the mirror (sell).
  *
@@ -15,21 +17,25 @@ import { alertStates, type AlertConditionDecl, type AlertConditionState } from '
 
 export interface PhilakoneEMASwingInputs {
   src: SourceType;
+  exponential: boolean;
 }
 
 export const defaultInputs: PhilakoneEMASwingInputs = {
   src: 'close',
+  exponential: true,
 };
 
 export const inputConfig: InputConfig[] = [
   { id: 'src', type: 'source', title: 'Source', defval: 'close' },
+  { id: 'exponential', type: 'bool', title: 'Exponential MA', defval: true },
 ];
 
+// plot(ma8 / ma13 / ma21 / ma55, color = color.new(color.red / orange / yellow / lime, 0), linewidth = 1 / 2 / 3 / 4)
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'MA 8', color: '#FF0000', lineWidth: 1 },
-  { id: 'plot1', title: 'MA 13', color: '#FF7F00', lineWidth: 2 },
-  { id: 'plot2', title: 'MA 21', color: '#FFFF00', lineWidth: 3 },
-  { id: 'plot3', title: 'MA 55', color: '#00FF00', lineWidth: 4 },
+  { id: 'plot0', title: '8', color: '#FF5252', lineWidth: 1 },
+  { id: 'plot1', title: '13', color: '#FF9800', lineWidth: 2 },
+  { id: 'plot2', title: '21', color: '#FFEB3B', lineWidth: 3 },
+  { id: 'plot3', title: '55', color: '#00E676', lineWidth: 4 },
 ];
 
 export const metadata = {
@@ -42,54 +48,18 @@ export function calculate(bars: Bar[], inputs: Partial<PhilakoneEMASwingInputs> 
   const cfg = { ...defaultInputs, ...inputs };
   const src = getSourceSeries(bars, cfg.src);
 
-  const ma8Arr = ta.ema(src, 8).toArray();
-  const ma13Arr = ta.ema(src, 13).toArray();
-  const ma21Arr = ta.ema(src, 21).toArray();
-  const ma55Arr = ta.ema(src, 55).toArray();
+  // maN = exponential ? ta.ema(src, N) : ta.sma(src, N)
+  const ma = (len: number) => (cfg.exponential ? ta.ema(src, len) : ta.sma(src, len)).toArray();
+  const ma8Arr = ma(8);
+  const ma13Arr = ma(13);
+  const ma21Arr = ma(21);
+  const ma55Arr = ma(55);
 
-  const warmup = 55;
-
-  const plot0 = ma8Arr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : (v ?? NaN),
-  }));
-
-  const plot1 = ma13Arr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : (v ?? NaN),
-  }));
-
-  const plot2 = ma21Arr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : (v ?? NaN),
-  }));
-
-  const plot3 = ma55Arr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : (v ?? NaN),
-  }));
-
-  // Pine buy/sell: cross(ma21, ma55) and ma8 > ma13 and ma21 > ma55
-  const markers: MarkerData[] = [];
-  for (let i = warmup + 1; i < bars.length; i++) {
-    const m8 = ma8Arr[i] ?? 0;
-    const m13 = ma13Arr[i] ?? 0;
-    const m21 = ma21Arr[i] ?? 0;
-    const m55 = ma55Arr[i] ?? 0;
-    const pm21 = ma21Arr[i - 1] ?? 0;
-    const pm55 = ma55Arr[i - 1] ?? 0;
-
-    const cross21_55 = (pm21 <= pm55 && m21 > m55) || (pm21 >= pm55 && m21 < m55);
-
-    // Buy: ma21 crosses ma55 and ma8 > ma13 and ma21 > ma55
-    if (cross21_55 && m8 > m13 && m21 > m55) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#00FF00', text: 'Buy' });
-    }
-    // Sell: ma21 crosses ma55 and ma8 < ma13 and ma21 < ma55
-    if (cross21_55 && m8 < m13 && m21 < m55) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: 'Sell' });
-    }
-  }
+  const line = (a: (number | null)[]) => a.map((v, i) => ({ time: bars[i].time, value: v ?? NaN }));
+  const plot0 = line(ma8Arr);
+  const plot1 = line(ma13Arr);
+  const plot2 = line(ma21Arr);
+  const plot3 = line(ma55Arr);
 
   // buy_cond / sell_cond of the original on every bar (na compares false)
   const v = (a: (number | null)[], i: number) => (i >= 0 ? a[i] ?? NaN : NaN);
@@ -100,6 +70,18 @@ export function calculate(bars: Bar[], inputs: Partial<PhilakoneEMASwingInputs> 
     const cross = (m21 > m55 && pm21 <= pm55) || (m21 < m55 && pm21 >= pm55);
     buyFlags.push(cross && m8 > m13 && m21 > m55);
     sellFlags.push(cross && m8 < m13 && m21 < m55);
+  }
+
+  // plotshape(buy_cond, 'buy', shape.triangleup, location.belowbar, color.new(color.lime, 35), text = 'Buy') and
+  // plotshape(sell_cond, 'sell', shape.triangledown, location.abovebar, color.new(color.red, 35), text = 'Sell')
+  const markers: MarkerData[] = [];
+  for (let i = 0; i < bars.length; i++) {
+    if (buyFlags[i]) {
+      markers.push({ id: 'shape0', time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: 'rgba(0,230,118,0.65)', text: 'Buy', textColor: 'rgba(0,230,118,0.65)', size: 'normal' });
+    }
+    if (sellFlags[i]) {
+      markers.push({ id: 'shape1', time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: 'rgba(255,82,82,0.65)', text: 'Sell', textColor: 'rgba(255,82,82,0.65)', size: 'normal' });
+    }
   }
 
   return {

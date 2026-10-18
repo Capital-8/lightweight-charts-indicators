@@ -8,8 +8,8 @@
  * the same side, waiting for the opposite signal, and an AND mode (signals only when two or three kinds agree).
  * Signals are drawn in the RSI pane and on the price chart; a connector plot gives 1 (buy), -1 (sell) or 0.
  * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' and 'Sell Signal', true on the bars of the final buy
- * / sell signal (the one the connector gives). The two divergence labels of the original (display.none) are not
- * drawn.
+ * / sell signal (the one the connector gives). The two "Div" divergence labels on the pivot bar are hidden by
+ * default.
  *
  * Reference: "RSI BB StdDev Signal" by trade_lexx (Pine title "RSI Signal [trade_lexx]")
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -350,6 +350,7 @@ export function calculate(
   const bearCond: boolean[] = new Array(n).fill(false);
   const finalSignal: number[] = new Array(n).fill(0);
   const markers: MarkerData[] = [];
+  const interval = barInterval(bars);
   const green = String(color.new(color.green, 0));
   const red = String(color.new(color.red, 0));
   const textColor = color.blue; // Pine default plotshape text colour
@@ -416,8 +417,15 @@ export function calculate(
     const ma = cfg.maModeInput;
     const bb = cfg.bbModeInput;
     const dv = cfg.divergenceModeInput;
+    // plotshape(bullCond ? rsiLBR : na, offset = -lookbackRight, location.absolute, text = "Div") and the bearish one
+    // ("Regular Bullish / Bearish Label", display.none: hidden by default): the value of bar i drawn on bar i - 1
+    const lbr = rsiLBR(i);
+    if (i - lookbackRight >= 0 && !isNaN(lbr)) {
+      const lblTime = barTime(bars, i - lookbackRight, interval);
+      if (bull) markers.push({ id: 'shape0', time: lblTime, position: 'atPriceMiddle', price: lbr, shape: 'triangleUp', color: green, text: 'Div', textColor });
+      if (bear) markers.push({ id: 'shape1', time: lblTime, position: 'atPriceMiddle', price: lbr, shape: 'triangleDown', color: red, text: 'Div', textColor });
+    }
     // Oscillator signals: location.bottom / top, Div at the RSI of the pivot bar (location.absolute)
-    // shape0 / shape1 ("Regular Bullish / Bearish Label", display.none in the original): not drawn
     if (ma && buyMA) buyAt('shape2', i, 'bottom', 'MA');
     if (ma && sellMA) sellAt('shape3', i, 'top', 'MA');
     if (bb && buyBB) buyAt('shape4', i, 'bottom', 'BB');
@@ -459,7 +467,6 @@ export function calculate(
   }
 
   // plot(plFound ? rsiLBR : na, offset = -lookbackRight, color = bullCond ? bullColor : noneColor): bar i on bar i - 1
-  const interval = barInterval(bars);
   const divPlot = (found: boolean[], cond: boolean[], c: string) => {
     const out: Array<{ time: number; value: number; color: string }> = [];
     for (let i = lookbackRight; i < n; i++) {

@@ -10,7 +10,9 @@
  * (0 / 0); the averages of the VWAP skip na values, as in Pine.
  *
  * The four signal shapes of the original ("Buy Alert", "Risky", "WAIT", "Enter Here") are drawn fully transparent,
- * as the original does (transp 100): they are listed in the Style settings and can be made visible there.
+ * as the original does (transp 100): they are listed in the Style settings and can be made visible there. The
+ * "Long" triangle is green #008000, the "Short" triangle red #FF0000; the bars are green #008000 while Long is 1, else
+ * red #FF0000.
  *
  * Reference: "VWAP/MVWAP/EMA CROSSOVER" by DerrickLaFlame
  */
@@ -206,7 +208,8 @@ export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInpu
       const curShort = curLong === 0 ? 1 : 0;
 
       if (prevLong <= 0 && curLong > 0) {
-        markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: '#00FF00', text: 'Long', id: 'shape0' });
+        // plotshape(Longtrigger, "Long Entry", belowbar, color=green (#008000), triangleup, text="Long")
+        markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: '#008000', text: 'Long', id: 'shape0' });
       }
       if (prevShort <= 0 && curShort > 0) {
         markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: 'Short', id: 'shape1' });
@@ -220,8 +223,8 @@ export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInpu
     if (buyDipArr[i]) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: 'rgba(255, 127, 0, 0)', id: 'shape4' });
     if (greatBuyArr[i]) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: 'rgba(0, 128, 0, 0)', id: 'shape5' });
 
-    // Bar color: green when Long, red when Short
-    barColors.push({ time: t, color: longArr[i] === 1 ? '#00FF00' : '#FF0000' });
+    // barcolor(Long == 1 ? green : red): green #008000, red #FF0000
+    barColors.push({ id: 'barcolor0', time: t, color: longArr[i] === 1 ? '#008000' : '#FF0000' });
 
     // Fill between Senkou A and B
     const sa = senkouA[i];

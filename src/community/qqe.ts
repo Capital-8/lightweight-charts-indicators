@@ -1,15 +1,21 @@
 /**
  * Quantitative Qualitative Estimation (QQE)
  *
- * Basic QQE indicator. RSI smoothed with EMA, then dynamic trailing stop
- * computed from ATR-like RSI volatility multiplied by qqeFactor.
- * Alerts (alertcondition, `alerts` of the result): the original's five conditions, crosses of the smoothed RSI
- * with the trailing stop (any cross, crossover, crossunder) and with 50, on the plotted values.
+ * FAST = EMA ("Smooth Factor") of the RSI. Its absolute bar-to-bar change is smoothed twice with a Wilder factor
+ * (1 / RSI length, each smoothing starting from 0) and multiplied by the QQE factor (4.236 in the original) to give a
+ * band above and below FAST. SLOW, the trailing line, starts at 0 and follows the original's rule on each bar: the
+ * upper band when it is below the previous SLOW; the lower band when FAST crosses up through the previous SLOW or the
+ * lower band is above it; the upper band when FAST crosses down through it; else the previous SLOW. FAST and SLOW
+ * cross where the trend turns. With "Highlighter On/Off ?" the area between them is green when FAST is above and red
+ * when it is below (default fill transparency 90); with "Show Crossing Signals?" Buy / Sell labels mark the crosses
+ * (at SLOW x 0.995 / x 1.005). A circles plot at 50.
+ * Alerts (alertcondition, `alerts` of the result): the original's five conditions, crosses of FAST with SLOW (any
+ * cross, crossover, crossunder) and with 50.
  *
- * Reference: "QQE" by Glaz
+ * Reference: "Quantitative Qualitative Estimation" (QQE) by KivancOzbilgic
  */
 
-import { ta, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
@@ -18,6 +24,10 @@ export interface QQEInputs {
   smoothFactor: number;
   qqeFactor: number;
   src: SourceType;
+  /** Show Crossing Signals? (Buy / Sell labels) */
+  showSignals: boolean;
+  /** Highlighter On/Off ? (fill between FAST and SLOW) */
+  highlighting: boolean;
 }
 
 export const defaultInputs: QQEInputs = {
@@ -25,6 +35,8 @@ export const defaultInputs: QQEInputs = {
   smoothFactor: 5,
   qqeFactor: 4.236,
   src: 'close',
+  showSignals: true,
+  highlighting: true,
 };
 
 export const inputConfig: InputConfig[] = [
@@ -32,11 +44,22 @@ export const inputConfig: InputConfig[] = [
   { id: 'smoothFactor', type: 'int', title: 'Smooth Factor', defval: 5, min: 1 },
   { id: 'qqeFactor', type: 'float', title: 'QQE Factor', defval: 4.236, min: 0.01, step: 0.001 },
   { id: 'src', type: 'source', title: 'Source', defval: 'close' },
+  { id: 'showSignals', type: 'bool', title: 'Show Crossing Signals?', defval: true },
+  { id: 'highlighting', type: 'bool', title: 'Highlighter On/Off ?', defval: true },
 ];
 
+// Colour constants of Pine version 4
+const MAROON = '#880E4F';
+const BLUE = '#2196F3';
+const GRAY = '#787B86';
+const GREEN = '#4CAF50';
+const RED = '#FF5252';
+const WHITE = '#FFFFFF';
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Smoothed RSI', color: '#2962FF', lineWidth: 2 },
-  { id: 'plot1', title: 'Trailing Stop', color: '#FF6D00', lineWidth: 1 },
+  { id: 'plot0', title: 'FAST', color: MAROON, lineWidth: 2 },
+  { id: 'plot1', title: 'SLOW', color: BLUE, lineWidth: 1 },
+  { id: 'plot2', title: 'Plot', color: GRAY, lineWidth: 1, style: 'circles' },
 ];
 
 export const metadata = {
@@ -45,124 +68,92 @@ export const metadata = {
   overlay: false,
 };
 
+/** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
+const EPS = 1e-10;
+const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
+const nz = (v: number) => (isNaN(v) ? 0 : v);
+
 export function calculate(
   bars: Bar[],
   inputs: Partial<QQEInputs> = {},
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
-  const { rsiLen, smoothFactor, qqeFactor, src } = { ...defaultInputs, ...inputs };
+  const { rsiLen, smoothFactor, qqeFactor, src, showSignals, highlighting } = { ...defaultInputs, ...inputs };
   const n = bars.length;
-  const wildersLen = rsiLen * 2 - 1;
 
-  const source = getSourceSeries(bars, src);
-  const rsi = ta.rsi(source, rsiLen);
-  const smoothedRsi = ta.ema(rsi, smoothFactor);
-  const srArr = smoothedRsi.toArray();
+  // RSII = QQEF = ema(rsi(src, length), SSF)
+  const fastSeries = ta.ema(ta.rsi(getSourceSeries(bars, src), rsiLen), smoothFactor);
+  const fast = fastSeries.toArray().map((v) => v ?? NaN);
 
-  // ATR of RSI: EMA of abs(change in smoothedRsi)
-  const atrRsiRaw: number[] = new Array(n);
+  // TR = abs(RSII - RSII[1]); WWMA := wwalpha * TR + (1 - wwalpha) * nz(WWMA[1]);
+  // ATRRSI := wwalpha * WWMA + (1 - wwalpha) * nz(ATRRSI[1]); QUP / QDN = QQEF +/- ATRRSI * 4.236
+  // QQES := QUP < nz(QQES[1]) ? QUP : QQEF > nz(QQES[1]) and QQEF[1] < nz(QQES[1]) ? QDN : QDN > nz(QQES[1]) ? QDN
+  //   : QQEF < nz(QQES[1]) and QQEF[1] > nz(QQES[1]) ? QUP : nz(QQES[1])
+  const wwalpha = 1 / rsiLen;
+  const slow: number[] = new Array(n);
+  let wwma = NaN;
+  let atrRsi = NaN;
   for (let i = 0; i < n; i++) {
-    const prev = i > 0 ? (srArr[i - 1] ?? 0) : 0;
-    const cur = srArr[i] ?? 0;
-    atrRsiRaw[i] = Math.abs(cur - prev);
-  }
-  const atrRsiSeries = Series.fromArray(bars, atrRsiRaw);
-  const smoothedAtr = ta.ema(atrRsiSeries, wildersLen);
-  const atrArr = smoothedAtr.toArray();
-
-  // Trailing stop
-  const longBand: number[] = new Array(n);
-  const shortBand: number[] = new Array(n);
-  const trendDir: number[] = new Array(n);
-  const trailing: number[] = new Array(n);
-
-  for (let i = 0; i < n; i++) {
-    const sr = srArr[i] ?? 0;
-    const prevSr = i > 0 ? (srArr[i - 1] ?? 0) : 0;
-    const dar = (atrArr[i] ?? 0) * qqeFactor;
-    const newLong = sr - dar;
-    const newShort = sr + dar;
-
-    if (i === 0) {
-      longBand[i] = newLong;
-      shortBand[i] = newShort;
-      trendDir[i] = 1;
-    } else {
-      longBand[i] = (prevSr > longBand[i - 1] && sr > longBand[i - 1])
-        ? Math.max(longBand[i - 1], newLong)
-        : newLong;
-      shortBand[i] = (prevSr < shortBand[i - 1] && sr < shortBand[i - 1])
-        ? Math.min(shortBand[i - 1], newShort)
-        : newShort;
-
-      if (prevSr <= longBand[i - 1] && sr > longBand[i - 1]) {
-        trendDir[i] = 1;
-      } else if (prevSr >= shortBand[i - 1] && sr < shortBand[i - 1]) {
-        trendDir[i] = -1;
-      } else {
-        trendDir[i] = trendDir[i - 1];
-      }
-    }
-    trailing[i] = trendDir[i] === 1 ? longBand[i] : shortBand[i];
+    const f = fast[i];
+    const f1 = i > 0 ? fast[i - 1] : NaN;
+    const tr = Math.abs(f - f1);
+    wwma = wwalpha * tr + (1 - wwalpha) * nz(wwma);
+    atrRsi = wwalpha * wwma + (1 - wwalpha) * nz(atrRsi);
+    const qup = f + atrRsi * qqeFactor;
+    const qdn = f - atrRsi * qqeFactor;
+    const s1 = nz(i > 0 ? slow[i - 1] : NaN);
+    slow[i] = lt(qup, s1) ? qup
+      : gt(f, s1) && lt(f1, s1) ? qdn
+        : gt(qdn, s1) ? qdn
+          : lt(f, s1) && gt(f1, s1) ? qup
+            : s1;
   }
 
-  const warmup = rsiLen * 2 + smoothFactor;
+  // buySignalr = crossover(QQEF, QQES), sellSignallr = crossunder(QQEF, QQES)
+  const slowSeries = Series.fromArray(bars, slow);
+  const buy = ta.crossover(fastSeries, slowSeries).toArray().map((v) => !!v);
+  const sell = ta.crossunder(fastSeries, slowSeries).toArray().map((v) => !!v);
 
-  const plot0 = srArr.map((v, i) => ({
-    time: bars[i].time,
-    value: (v == null || i < warmup) ? NaN : v,
-  }));
-
-  const plot1 = trailing.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : v,
-  }));
-
-  // Markers: smoothed RSI crossing trailing stop
-  const markers: MarkerData[] = [];
-  for (let i = warmup + 1; i < n; i++) {
-    const sr = srArr[i] ?? 0;
-    const psr = srArr[i - 1] ?? 0;
-    const tr = trailing[i];
-    const ptr = trailing[i - 1];
-
-    // Buy: smoothed RSI crosses above trailing stop
-    if (psr <= ptr && sr > tr) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#26A69A', text: 'Buy' });
-    }
-    // Sell: smoothed RSI crosses below trailing stop
-    if (psr >= ptr && sr < tr) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#EF5350', text: 'Sell' });
-    }
-  }
-
-  // Pine: fill(QQF, QQS, color=QQEF>QQES ? green : na) / fill(QQF, QQS, color=QQEF<QQES ? red : na)
+  // fill(QQF, QQS, color = highlighting ? (QQEF > QQES ? color.green : na) : na): default fill transparency 90
+  const greenFill = String(color.new(GREEN, 90));
+  const redFill = String(color.new(RED, 90));
+  const plot0: Array<{ time: number; value: number }> = [];
+  const plot1: typeof plot0 = [];
+  const plot2: typeof plot0 = [];
   const upFillColors: string[] = [];
   const downFillColors: string[] = [];
+  const markers: MarkerData[] = [];
   for (let i = 0; i < n; i++) {
-    const up = i >= warmup && (srArr[i] ?? 0) > trailing[i];
-    const down = i >= warmup && !up;
-    upFillColors.push(up ? 'rgba(38,166,154,0.3)' : 'rgba(0,0,0,0)');
-    downFillColors.push(down ? 'rgba(239,83,80,0.3)' : 'rgba(0,0,0,0)');
+    const time = bars[i].time;
+    plot0.push({ time, value: fast[i] });
+    plot1.push({ time, value: slow[i] });
+    // plot(50, color = color.gray, style = 6): circles
+    plot2.push({ time, value: 50 });
+    upFillColors.push(highlighting && gt(fast[i], slow[i]) ? greenFill : 'transparent');
+    downFillColors.push(highlighting && lt(fast[i], slow[i]) ? redFill : 'transparent');
+    // plotshape(buySignalr and showsignals ? QQES * 0.995 : na, "Buy", location.absolute, shape.labelup, size.tiny)
+    if (showSignals && buy[i] && !isNaN(slow[i])) {
+      markers.push({ id: 'shape0', time, position: 'atPriceBottom', price: slow[i] * 0.995, shape: 'labelUp', color: GREEN,
+        text: 'Buy', textColor: WHITE, size: 'tiny' });
+    }
+    // plotshape(sellSignallr and showsignals ? QQES * 1.005 : na, "Sell", location.absolute, shape.labeldown)
+    if (showSignals && sell[i] && !isNaN(slow[i])) {
+      markers.push({ id: 'shape1', time, position: 'atPriceTop', price: slow[i] * 1.005, shape: 'labelDown', color: RED,
+        text: 'Sell', textColor: WHITE, size: 'tiny' });
+    }
   }
-
-  // Alerts on the plotted values (na before the warm-up compares false): cross(a, b) = crossover or crossunder
-  const fast = plot0.map((p) => p.value);
-  const slow = plot1.map((p) => p.value);
-  const over = crossedOver(fast, slow), under = crossedUnder(fast, slow);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1 },
+    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2 },
     fills: [
-      { plot1: 'plot0', plot2: 'plot1', options: { title: 'UpTrend Highligter', color: 'rgba(38,166,154,0.3)' }, colors: upFillColors },
-      { plot1: 'plot0', plot2: 'plot1', options: { title: 'DownTrend Highligter', color: 'rgba(239,83,80,0.3)' }, colors: downFillColors },
-    ],
-    hlines: [
-      { value: 50, options: { color: '#787B86', linestyle: 'dotted' as const, title: 'Midline' } },
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'UpTrend Highligter', color: greenFill }, colors: upFillColors },
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'DownTrend Highligter', color: redFill }, colors: downFillColors },
     ],
     markers,
+    // alertcondition(cross / crossover / crossunder(QQEF, QQES), crossover / crossunder(QQEF, 50))
     alerts: alertStates(alertConditions, bars, [
-      over.map((v, i) => v || under[i]), over, under, crossedOver(fast, 50), crossedUnder(fast, 50),
+      buy.map((v, i) => v || sell[i]), buy, sell, crossedOver(fast, 50), crossedUnder(fast, 50),
     ]),
   };
 }

@@ -268,11 +268,12 @@ describe('mfi-nexus-pro', () => {
     const or = nexus.calculate(bars, { mfiFilter: false, rsiFilter: false, andOrMode: 'MA or BB or Div' });
     expect(or.alerts[6].times).toEqual(timesOf(or, 'shape22'));
     expect(or.alerts[7].times).toEqual(timesOf(or, 'shape23'));
-    expect(markerIds(or).sort()).toEqual(['shape2', 'shape22', 'shape23', 'shape3', 'shape4', 'shape5', 'shape6', 'shape7']);
+    // shape0 / shape1: the original's divergence triangles at the pivot (display.none, shown from the Style settings)
+    expect(markerIds(or).sort()).toEqual(['shape0', 'shape1', 'shape2', 'shape22', 'shape23', 'shape3', 'shape4', 'shape5', 'shape6', 'shape7']);
   });
   it('gives each marker the id of its plotshape output', () => {
     const ids = markerIds(r);
-    expect(ids.sort()).toEqual(['shape10', 'shape11', 'shape12', 'shape13', 'shape2', 'shape3', 'shape4', 'shape5', 'shape6', 'shape7', 'shape8', 'shape9']);
+    expect(ids.sort()).toEqual(['shape0', 'shape1', 'shape10', 'shape11', 'shape12', 'shape13', 'shape2', 'shape3', 'shape4', 'shape5', 'shape6', 'shape7', 'shape8', 'shape9']);
     expect(timesOf(r, 'shape8')).toEqual(r.alerts[0].times);
     expect(timesOf(r, 'shape13')).toEqual(r.alerts[5].times);
   });

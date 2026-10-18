@@ -5,11 +5,13 @@
  * Price Bollinger Bands, watch signals, and MA-based candle coloring.
  * RSI crosses BB bands to set "watch" flags; buy/sell when RSI crosses
  * basis while watch flag is active within a configurable lookback window (the watch signals are cleared by each
- * buy / sell). Draws the buy / sell triangles with their 3 target circles, the RSI watch squares, the signal warning
- * background, the MA-coloured candles (plotcandle) and the band fills.
+ * buy / sell). Optional watch signals (off by default): the high over the previous outer upper price band / the low
+ * under the previous outer lower band, and the price crossing the ATR-adjusted bands. Draws the buy / sell triangles
+ * with their 3 target circles, the RSI watch squares, the price watch diamonds and ATR watch circles (when shown),
+ * the signal warning background, the bought / sold state background (off by default), the MA-coloured candles
+ * (plotcandle) and the band fills.
  * Alerts (alertcondition, `alerts` of the result): 'Buy signal' and 'Sell signal', on the bars of the warning
- * background (the original's "Advance alerts one candle", on by default). The price / ATR watch signals and the
- * bought / sold background are off by default in the original and not ported.
+ * background (the original's "Advance alerts one candle", on by default).
  *
  * Reference: "Ultimate Buy and Sell Indicator"
  */
@@ -34,6 +36,26 @@ export interface UltimateBuySellInputs {
   fastMaLength: number;
   slowMaType: string;
   slowMaLength: number;
+  /** Use Price Watch Signals: the high over the previous outer upper band / the low under the previous outer lower band */
+  usePriceBandWatchSignals: boolean;
+  /** Draw the price watch signals */
+  showPriceWatchPlot: boolean;
+  /** Use ATR Watch Signals: the price crossing the ATR-adjusted bands */
+  useAtrWatchSignals: boolean;
+  /** Draw the ATR watch signals */
+  showAtrWatchPlot: boolean;
+  /** Bought/Sold Colored Background */
+  showBSBackground: boolean;
+  /** ATR period of the ATR-adjusted bands */
+  atrPeriod: number;
+  /** Moving average (and standard deviation) period of the ATR-adjusted bands */
+  maPeriod: number;
+  /** ATR band multiplier */
+  atrMult: number;
+  /** Moving average type of the ATR-adjusted bands */
+  atrMaType: string;
+  /** ATR Bollinger Bands (MA +- (ATR + mult * stdev)) instead of ATR bands (MA +- ATR * mult) */
+  atrBollingerBands: boolean;
 }
 
 export const defaultInputs: UltimateBuySellInputs = {
@@ -51,6 +73,16 @@ export const defaultInputs: UltimateBuySellInputs = {
   fastMaLength: 10,
   slowMaType: 'WMA',
   slowMaLength: 20,
+  usePriceBandWatchSignals: false,
+  showPriceWatchPlot: false,
+  useAtrWatchSignals: false,
+  showAtrWatchPlot: false,
+  showBSBackground: false,
+  atrPeriod: 20,
+  maPeriod: 20,
+  atrMult: 1.5,
+  atrMaType: 'WMA',
+  atrBollingerBands: true,
 };
 
 export const inputConfig: InputConfig[] = [
@@ -64,10 +96,20 @@ export const inputConfig: InputConfig[] = [
   { id: 'priceInnerMult', type: 'float', title: 'Price Inner BB Mult', defval: 2.1, min: 1, max: 4, step: 0.1 },
   { id: 'priceOuterMult', type: 'float', title: 'Price Outer BB Mult', defval: 2.4, min: 2, max: 6, step: 0.1 },
   { id: 'watchLookback', type: 'int', title: 'Watch Signal Lookback', defval: 35, min: 5, step: 5 },
+  { id: 'usePriceBandWatchSignals', type: 'bool', title: 'Use Price Watch Signals', defval: false },
+  { id: 'showPriceWatchPlot', type: 'bool', title: 'Show?', defval: false },
+  { id: 'useAtrWatchSignals', type: 'bool', title: 'Use ATR Watch Signals', defval: false },
+  { id: 'showAtrWatchPlot', type: 'bool', title: 'Show?', defval: false },
+  { id: 'showBSBackground', type: 'bool', title: 'Bought/Sold Colored Background', defval: false },
   { id: 'fastMaType', type: 'string', title: 'Fast MA Type', defval: 'WMA', options: ['SMA', 'EMA', 'WMA', 'RMA'] },
   { id: 'fastMaLength', type: 'int', title: 'Fast MA Length', defval: 10, min: 1 },
   { id: 'slowMaType', type: 'string', title: 'Slow MA Type', defval: 'WMA', options: ['SMA', 'EMA', 'WMA', 'RMA'] },
   { id: 'slowMaLength', type: 'int', title: 'Slow MA Length', defval: 20, min: 1 },
+  { id: 'atrPeriod', type: 'int', title: 'ATR Period', defval: 20 },
+  { id: 'maPeriod', type: 'int', title: 'ATR MA Period', defval: 20 },
+  { id: 'atrMult', type: 'float', title: 'ATR Band multiplier', defval: 1.5, min: 1, step: 0.1 },
+  { id: 'atrMaType', type: 'string', title: 'ATR Moving Average Type', defval: 'WMA', options: ['SMA', 'EMA', 'WMA', 'RMA'] },
+  { id: 'atrBollingerBands', type: 'bool', title: 'ATR Bollinger Bands', defval: true },
 ];
 
 export const plotConfig: PlotConfig[] = [
@@ -153,7 +195,7 @@ export function calculate(
   const closeSeries = new Series(bars, b => b.close);
   const priceBasis = computeMA(bars, closeArr, cfg.priceBbLength, cfg.priceMaType);
   const priceDevArr = ta.stdev(closeSeries, cfg.priceBbLength).toArray().map(v => v ?? 0);
-  const priceDevSrc = ta.stdev(closeSeries, 20).toArray().map(v => v ?? NaN);
+  const atrDevSrc = ta.stdev(closeSeries, cfg.maPeriod).toArray().map(v => v ?? NaN);
   const upperInner: number[] = priceBasis.map((b, i) => b + cfg.priceInnerMult * priceDevArr[i]);
   const lowerInner: number[] = priceBasis.map((b, i) => b - cfg.priceInnerMult * priceDevArr[i]);
   const upperOuter: number[] = priceBasis.map((b, i) => b + cfg.priceOuterMult * priceDevArr[i]);
@@ -167,17 +209,53 @@ export function calculate(
 
   // buyWatch2 / buyWatch3 (RSI crosses over its lower band / under 30) and sellWatch2 / sellWatch3 (RSI crosses under
   // its upper band / over 70), on confirmed bars
-  const buyWatchArr: boolean[] = new Array(n).fill(false);
-  const sellWatchArr: boolean[] = new Array(n).fill(false);
+  const rsiBuyWatch: boolean[] = new Array(n).fill(false);
+  const rsiSellWatch: boolean[] = new Array(n).fill(false);
   for (let i = 1; i < n; i++) {
     if (i < warmup || !confirmedAt(i)) continue;
     const rsiCrossOverLower = rsi[i - 1] <= rsiLower[i - 1] && rsi[i] > rsiLower[i];
     const rsiCrossUnderUpper = rsi[i - 1] >= rsiUpper[i - 1] && rsi[i] < rsiUpper[i];
     const rsiCrossUnder30 = rsi[i - 1] >= 30 && rsi[i] < 30;
     const rsiCrossOver70 = rsi[i - 1] <= 70 && rsi[i] > 70;
-    buyWatchArr[i] = rsiCrossOverLower || rsiCrossUnder30;
-    sellWatchArr[i] = rsiCrossUnderUpper || rsiCrossOver70;
+    rsiBuyWatch[i] = rsiCrossOverLower || rsiCrossUnder30;
+    rsiSellWatch[i] = rsiCrossUnderUpper || rsiCrossOver70;
   }
+
+  // ATR-adjusted bands: atrMaValue = MA(src, maPeriod, atrMaType), ATR bands atrMaValue +- ATR * mult, ATR Bollinger
+  // Bands atrMaValue +- (ATR + mult * stdev(src, maPeriod))
+  const atrMa = computeMA(bars, closeArr, cfg.maPeriod, cfg.atrMaType);
+  const atr = taCore.atr(cfg.atrPeriod, bars.map(b => b.high), bars.map(b => b.low), closeArr);
+  const upperAtrBand = atrMa.map((m, i) => m + atr[i] * cfg.atrMult);
+  const lowerAtrBand = atrMa.map((m, i) => m - atr[i] * cfg.atrMult);
+  const upperAtrBb = atrMa.map((m, i) => m + atr[i] + cfg.atrMult * atrDevSrc[i]);
+  const lowerAtrBb = atrMa.map((m, i) => m - atr[i] - cfg.atrMult * atrDevSrc[i]);
+  const upperAtr = cfg.atrBollingerBands ? upperAtrBb : upperAtrBand;
+  const lowerAtr = cfg.atrBollingerBands ? lowerAtrBb : lowerAtrBand;
+
+  // ta.crossover / ta.crossunder of close with a band (false while a value is na)
+  const crossOver = (b: number[], i: number) => i > 0 && closeArr[i] > b[i] && closeArr[i - 1] <= b[i - 1];
+  const crossUnder = (b: number[], i: number) => i > 0 && closeArr[i] < b[i] && closeArr[i - 1] >= b[i - 1];
+  // buyWatch1 / sellWatch1: low < lowerPriceOuter[1] / high > upperPriceOuter[1]; buyWatch4 / sellWatch4:
+  // underAtrLower / overAtrUpper (the original crosses under the upper ATR band when the ATR Bollinger Bands are
+  // off); all on confirmed bars
+  const priceBuyWatch: boolean[] = new Array(n).fill(false);
+  const priceSellWatch: boolean[] = new Array(n).fill(false);
+  const atrBuyWatch: boolean[] = new Array(n).fill(false);
+  const atrSellWatch: boolean[] = new Array(n).fill(false);
+  for (let i = 0; i < n; i++) {
+    if (!confirmedAt(i)) continue;
+    if (cfg.usePriceBandWatchSignals && i > 0) {
+      priceBuyWatch[i] = bars[i].low < lowerOuter[i - 1];
+      priceSellWatch[i] = bars[i].high > upperOuter[i - 1];
+    }
+    if (cfg.useAtrWatchSignals) {
+      atrBuyWatch[i] = cfg.atrBollingerBands ? crossUnder(lowerAtrBb, i) : crossUnder(lowerAtrBand, i);
+      atrSellWatch[i] = cfg.atrBollingerBands ? crossOver(upperAtrBb, i) : crossUnder(upperAtrBand, i);
+    }
+  }
+  // buyWatched = buyWatch1 or buyWatch2 or buyWatch3 or buyWatch4 (sell mirror)
+  const buyWatchArr = rsiBuyWatch.map((w, i) => w || priceBuyWatch[i] || atrBuyWatch[i]);
+  const sellWatchArr = rsiSellWatch.map((w, i) => w || priceSellWatch[i] || atrSellWatch[i]);
 
   // The watch arrays of the original: the last `watchLookback` bars, emptied on every buy / sell signal (cleared
   // after bar `clearedAt`); a watch signal in them is the watch quota
@@ -215,6 +293,9 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  // var bool bought / sold: set by a buy / sell signal, reset by the opposite one
+  let bought = false;
+  let sold = false;
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // plotshape(plotBuy, "BUY/LONG", belowbar, triangleup, orange) / plotshape(plotSell, "SELL/SHORT", abovebar,
@@ -231,12 +312,30 @@ export function calculate(
         time: t, position: 'atPriceMiddle', price: bars[i].high, shape: 'circle', color: c, size, id: `shape${5 + k}`,
       }));
     }
-    // RSI watch signals: squares below / above the bar
-    if (buyWatchArr[i]) markers.push({ time: t, position: 'belowBar', shape: 'square', color: BUY_WATCH, size: 'tiny', id: 'shape8' });
-    if (sellWatchArr[i]) markers.push({ time: t, position: 'aboveBar', shape: 'square', color: SELL_WATCH, size: 'tiny', id: 'shape9' });
     // Signal warning background: bgcolor(plotBuyBG ? orange 80) / bgcolor(plotSellBG ? fuchsia 80)
     if (plotBuyBG[i]) bgColors.push({ time: t, color: 'rgba(255,152,0,0.2)', id: 'bgcolor0' });
     if (plotSellBG[i]) bgColors.push({ time: t, color: 'rgba(224,64,251,0.2)', id: 'bgcolor1' });
+    // bgcolor(showBSBackground and bought ? color.new(color.green, 90) : na) / sold: color.new(color.red, 90)
+    if (plotBuy[i]) { bought = true; sold = false; }
+    else if (plotSell[i]) { sold = true; bought = false; }
+    if (cfg.showBSBackground && bought) bgColors.push({ time: t, color: 'rgba(76,175,80,0.1)', id: 'bgcolor2' });
+    if (cfg.showBSBackground && sold) bgColors.push({ time: t, color: 'rgba(242,54,69,0.1)', id: 'bgcolor3' });
+    // RSI watch signals: squares below / above the bar
+    if (rsiBuyWatch[i]) markers.push({ time: t, position: 'belowBar', shape: 'square', color: BUY_WATCH, size: 'tiny', id: 'shape8' });
+    if (rsiSellWatch[i]) markers.push({ time: t, position: 'aboveBar', shape: 'square', color: SELL_WATCH, size: 'tiny', id: 'shape9' });
+    // Price watch signals (diamonds) and ATR watch signals (circles), with their "Show?" inputs
+    if (cfg.showPriceWatchPlot && priceBuyWatch[i]) {
+      markers.push({ time: t, position: 'belowBar', shape: 'diamond', color: BUY_WATCH, size: 'tiny', id: 'shape10' });
+    }
+    if (cfg.showPriceWatchPlot && priceSellWatch[i]) {
+      markers.push({ time: t, position: 'aboveBar', shape: 'diamond', color: SELL_WATCH, size: 'tiny', id: 'shape11' });
+    }
+    if (cfg.showAtrWatchPlot && atrBuyWatch[i]) {
+      markers.push({ time: t, position: 'belowBar', shape: 'circle', color: BUY_WATCH, size: 'tiny', id: 'shape12' });
+    }
+    if (cfg.showAtrWatchPlot && atrSellWatch[i]) {
+      markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: SELL_WATCH, size: 'tiny', id: 'shape13' });
+    }
   }
 
   // 5. MA-coloured candles (plotcandle): orange on a buy, fuchsia on a sell, else green over both MAs, yellow between
@@ -261,11 +360,7 @@ export function calculate(
     return ((c - prevC) / prevC) * 100 > 0 ? BAND_UP : BAND_DOWN;
   });
 
-  // ATR-adjusted bands (ATR Bollinger Bands: WMA 20 +- (ATR 20 + 1.5 stdev 20)); lines and fill hidden by default
-  const atrMa = computeMA(bars, closeArr, 20, 'WMA');
-  const atr = taCore.atr(20, bars.map(b => b.high), bars.map(b => b.low), closeArr);
-  const upperAtr = atrMa.map((m, i) => m + atr[i] + 1.5 * priceDevSrc[i]);
-  const lowerAtr = atrMa.map((m, i) => m - atr[i] - 1.5 * priceDevSrc[i]);
+  // ATR-adjusted band lines and fill: hidden by default
 
   // Build plots
   const plotPriceBasis = priceBasis.map((v, i) => ({ time: bars[i].time, value: i < warmup ? NaN : v }));

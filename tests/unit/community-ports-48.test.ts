@@ -192,28 +192,32 @@ describe('absorption-bubbles', () => {
 });
 
 describe('ehlers-mesa-ma', () => {
-  const r = mesa.calculate(bars);
-  it('crossover markers are plotarrow arrows (arrow0, +1 up / -1 down); no markers left', () => {
+  const r = mesa.calculate(bars, { markCrossovers: true });
+  it('crossover markers are plotarrow arrows (arrow0, +1 up / -1 down) with Mark crossover points; no markers', () => {
     const m = vals(r.plots.plot0);
     const f = vals(r.plots.plot1);
     const expected: { time: number; value: number }[] = [];
     for (let i = 51; i < bars.length; i++) {
       if ((m[i - 1] > f[i - 1]) !== (m[i] > f[i])) expected.push({ time: bars[i].time as number, value: m[i] > f[i] ? 1 : -1 });
     }
-    expect(r.arrows.map((a) => ({ time: a.time, value: a.value }))).toEqual(expected);
+    // (compared after the warm-up: MAMA / FAMA start from 0 and may cross on the first bars, as in the original)
+    expect(r.arrows.filter((a) => a.time >= (bars[51].time as number)).map((a) => ({ time: a.time, value: a.value }))).toEqual(expected);
     expect(expected.length).toBeGreaterThan(10);
     expect(idsOf(r.arrows)).toEqual(['arrow0']);
     expect((r as { markers?: unknown[] }).markers ?? []).toEqual([]);
+    // off by default (input 'Mark crossover points')
+    expect(mesa.calculate(bars).arrows).toEqual([]);
   });
-  it('fills titled as the original (NegativeFill below, PositiveFill above)', () => {
-    expect(r.fills?.map((x) => x.options?.title)).toEqual(['NegativeFill', 'PositiveFill']);
-    const m = vals(r.plots.plot0);
-    const f = vals(r.plots.plot1);
-    const [neg, pos] = r.fills!;
-    for (let i = 50; i < bars.length; i++) {
-      expect(neg.colors![i] === 'transparent').toBe(m[i] > f[i]);
-      expect(pos.colors![i] === 'transparent').toBe(!(m[i] > f[i]));
-    }
+  it('fills titled as the original (NegativeFill DummyL to MAMA, PositiveFill DummyL to FAMA)', () => {
+    const rf = mesa.calculate(bars, { fillRegion: true });
+    expect(rf.fills?.map((x) => [x.options?.title, x.plot1, x.plot2])).toEqual([
+      ['NegativeFill', 'duml', 'plot0'], ['PositiveFill', 'duml', 'plot1'],
+    ]);
+    // DummyL = max(MAMA, FAMA): the fill to the higher line is empty, so each fill shows on its side only
+    const m = vals(rf.plots.plot0), f = vals(rf.plots.plot1), d = vals(rf.plots.duml);
+    for (let i = 50; i < bars.length; i++) expect(d[i]).toBe(m[i] > f[i] ? m[i] : f[i]);
+    // off by default (input 'Fill MAMA/FAMA Region'): DummyL is na
+    expect(vals(mesa.calculate(bars).plots.duml).every((v) => Number.isNaN(v))).toBe(true);
   });
 });
 

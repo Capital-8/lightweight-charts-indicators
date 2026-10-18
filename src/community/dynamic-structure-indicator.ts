@@ -1,22 +1,27 @@
 /**
  * Dynamic Structure Indicator
  *
- * ATR(14)-based S/R zone detection using fractal swing highs/lows.
- * Zones are defined by wick-to-body range, filtered by maxZoneSize * ATR.
- * Potential zones must see significant price movement (atrMovement * ATR)
- * before becoming active. Active zones get resistance and support plot pairs.
- * Previous zones (flipped S/R) are also plotted. Zone violation resets.
+ * Support / resistance zones from fractal swing highs / lows (the original's rules): a swing high (the previous high
+ * is the highest of "High/Low Lookback" bars and the high is below it) gives a potential resistance zone from that
+ * wick high (R1) to the highest body of the three bars around it (R2), kept when it is no larger than "Max Zone Size"
+ * x ATR(14); it becomes the current zone once price falls "ATR Movement Required" x the saved ATR below it (support:
+ * the mirror rules with the lows). A confirmed close beyond the current zone starts the search for a new one; the
+ * zone that was broken is kept as a previous zone (support turned resistance, resistance turned support) until a
+ * confirmed close beyond its body level, or replaced after "Zone Update Count Before Reset" updates.
+ * As in the original, the levels are `var` values that start at 0: R1 / R2 and S1 / S2 are drawn wherever the wick
+ * level did not change on the bar (also at 0 before the first zone, a gap on the bar of a change); green / red by the
+ * side of the close, with a fill (opaque green above the resistance, 50 % red else; red below the support, 50 %
+ * green else). PS1 / PS2 (red) and PR1 / PR2 (green) draw the previous zones while unchanged and different from the
+ * current one ("Draw Previous Structure"), filled 10 % transparent.
  *
  * Alerts (alertcondition, `alerts` of the result): '[DSI] Alert!' (any of the four below), '[DSI] Resistance Alert'
- * (high >= resistance body level), '[DSI] Support Alert' (low <= support body level), '[DSI] Resistance Breakout'
- * (close >= resistance wick level) and '[DSI] Support Breakout' (close <= support wick level). The levels are those of
- * the original's zone rules (its res1 / res2 / sup1 / sup2, computed on their own below, starting at 0 as there;
- * barstate.isconfirmed from the chart context, the third argument), not the zones this port draws.
+ * (high >= R2), '[DSI] Support Alert' (low <= S2), '[DSI] Resistance Breakout' (close >= R1) and '[DSI] Support
+ * Breakout' (close <= S1). barstate.isconfirmed comes from the chart context, the third argument.
  *
  * Reference: "Dynamic Structure Indicator" (community)
  */
 
-import { ta, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
@@ -44,15 +49,18 @@ export const inputConfig: InputConfig[] = [
   { id: 'drawPreviousStructure', type: 'bool', title: 'Draw Previous Structure', defval: true },
 ];
 
+const GREEN = color.green;
+const RED = color.red;
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'r1', title: 'Resistance 1', color: '#EF5350', lineWidth: 1 },
-  { id: 'r2', title: 'Resistance 2', color: '#EF5350', lineWidth: 1 },
-  { id: 's1', title: 'Support 1', color: '#26A69A', lineWidth: 1 },
-  { id: 's2', title: 'Support 2', color: '#26A69A', lineWidth: 1 },
-  { id: 'pr1', title: 'Prev Resistance 1', color: '#26A69A', lineWidth: 1 },
-  { id: 'pr2', title: 'Prev Resistance 2', color: '#26A69A', lineWidth: 1 },
-  { id: 'ps1', title: 'Prev Support 1', color: '#EF5350', lineWidth: 1 },
-  { id: 'ps2', title: 'Prev Support 2', color: '#EF5350', lineWidth: 1 },
+  { id: 'r1', title: 'R1', color: RED, lineWidth: 1, style: 'linebr' },
+  { id: 'r2', title: 'R2', color: RED, lineWidth: 1, style: 'linebr' },
+  { id: 's1', title: 'S1', color: GREEN, lineWidth: 1, style: 'linebr' },
+  { id: 's2', title: 'S2', color: GREEN, lineWidth: 1, style: 'linebr' },
+  { id: 'ps1', title: 'PS1', color: RED, lineWidth: 1, style: 'linebr' },
+  { id: 'ps2', title: 'PS2', color: RED, lineWidth: 1, style: 'linebr' },
+  { id: 'pr1', title: 'PR1', color: GREEN, lineWidth: 1, style: 'linebr' },
+  { id: 'pr2', title: 'PR2', color: GREEN, lineWidth: 1, style: 'linebr' },
 ];
 
 export const metadata = {
@@ -61,24 +69,19 @@ export const metadata = {
   overlay: true,
 };
 
-interface Zone {
-  top: number;    // upper boundary (wick)
-  bottom: number; // lower boundary (body)
-  startIdx: number;
-  active: boolean;
-  potential: boolean; // waiting for ATR movement confirmation
-  potentialHigh: number;
-  potentialLow: number;
+/** The original's levels at the end of each bar */
+interface Levels {
+  res1: number[]; res2: number[]; sup1: number[]; sup2: number[];
+  prevRes1: number[]; prevRes2: number[]; prevSup1: number[]; prevSup2: number[];
 }
 
 /**
  * The original's zone levels per bar (res1 / res2 / sup1 / sup2: wick and body of the current resistance and support,
- * 0 until the first zone), from its rules: fractal swing high / low, a zone no larger than maxZoneSize x ATR, taken
- * once price moved atrMovement x the saved ATR away from it; searching again after a confirmed close beyond it.
+ * 0 until the first zone; previousRes1 / 2, previousSup1 / 2: the previous zones, na when reset), from its rules.
  */
-function originalLevels(bars: Bar[], cfg: DynamicStructureIndicatorInputs, atr: number[], lastBarOpen: boolean) {
+function originalLevels(bars: Bar[], cfg: DynamicStructureIndicatorInputs, atr: number[], lastBarOpen: boolean): Levels {
   const n = bars.length;
-  const res1: number[] = [], res2: number[] = [], sup1: number[] = [], sup2: number[] = [];
+  const out: Levels = { res1: [], res2: [], sup1: [], sup2: [], prevRes1: [], prevRes2: [], prevSup1: [], prevSup2: [] };
   const hb = bars.map((b) => (b.open > b.close ? b.open : b.close));
   const lb = bars.map((b) => (b.open > b.close ? b.close : b.open));
   const at = (a: number[], i: number) => (i >= 0 ? a[i] : NaN);
@@ -134,9 +137,10 @@ function originalLevels(bars: Bar[], cfg: DynamicStructureIndicatorInputs, atr: 
     }
     if (close < prevRes2 && confirmed) { prevRes1 = NaN; prevRes2 = NaN; }
     if (close > prevSup2 && confirmed) { prevSup1 = NaN; prevSup2 = NaN; }
-    res1.push(r1v); res2.push(r2v); sup1.push(s1v); sup2.push(s2v);
+    out.res1.push(r1v); out.res2.push(r2v); out.sup1.push(s1v); out.sup2.push(s2v);
+    out.prevRes1.push(prevRes1); out.prevRes2.push(prevRes2); out.prevSup1.push(prevSup1); out.prevSup2.push(prevSup2);
   }
-  return { res1, res2, sup1, sup2 };
+  return out;
 }
 
 export function calculate(
@@ -146,245 +150,78 @@ export function calculate(
 ): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
-  const lb = cfg.lookback;
 
-  const atrArr = ta.atr(bars, 14).toArray();
+  const atrNum = ta.atr(bars, 14).toArray().map((v) => v ?? NaN);
+  const lv = originalLevels(bars, cfg, atrNum, !lastBarConfirmedOf(chart));
+  const { res1, res2, sup1, sup2, prevRes1, prevRes2, prevSup1, prevSup2 } = lv;
+
+  // x == x[1] (na on the first bar, and na == na is false)
+  const same = (a: number[], i: number) => i > 0 && a[i] === a[i - 1];
+  // na != x is false as well
+  const differs = (a: number, b: number) => !isNaN(a) && !isNaN(b) && a !== b;
+  const point = (i: number, value: number, c: string) => ({ time: bars[i].time, value, color: c });
+
+  const plots: Record<string, { time: number; value: number; color: string }[]> = {
+    r1: [], r2: [], s1: [], s2: [], ps1: [], ps2: [], pr1: [], pr2: [],
+  };
+  const resFill: string[] = [];
+  const supFill: string[] = [];
+  const prevSupFill: string[] = [];
+  const prevResFill: string[] = [];
+  const red50 = String(color.new(RED, 50));
+  const green50 = String(color.new(GREEN, 50));
+  const red10 = String(color.new(RED, 10));
+  const green10 = String(color.new(GREEN, 10));
+  for (let i = 0; i < n; i++) {
+    const c = bars[i].close;
+    // r1 = plot(res1 == res1[1] ? res1 : na, color = close >= res1 ? color.green : color.red, plot.style_linebr)
+    // r2 = plot(res1 == res1[1] ? res2 : na, ...); fill(r1, r2, close > res1 ? color.green : color.new(color.red, 50))
+    const rOn = same(res1, i);
+    const rColor = c >= res1[i] ? GREEN : RED;
+    plots.r1.push(point(i, rOn ? res1[i] : NaN, rColor));
+    plots.r2.push(point(i, rOn ? res2[i] : NaN, rColor));
+    resFill.push(c > res1[i] ? GREEN : red50);
+    // s1 = plot(sup1 == sup1[1] ? sup1 : na, color = close < sup1 ? color.red : color.green) / s2;
+    // fill(s1, s2, close < sup1 ? color.red : color.new(color.green, 50))
+    const sOn = same(sup1, i);
+    const sColor = c < sup1[i] ? RED : GREEN;
+    plots.s1.push(point(i, sOn ? sup1[i] : NaN, sColor));
+    plots.s2.push(point(i, sOn ? sup2[i] : NaN, sColor));
+    supFill.push(c < sup1[i] ? RED : green50);
+    // ps1 = plot(previousSup1 == previousSup1[1] and previousSup1 != sup1 and drawPreviousStructure ? previousSup1 : na,
+    // color.red) / ps2 (previousSup2); fill(ps1, ps2, color.new(color.red, 10))
+    const psOn = cfg.drawPreviousStructure && same(prevSup1, i) && differs(prevSup1[i], sup1[i]);
+    plots.ps1.push(point(i, psOn ? prevSup1[i] : NaN, RED));
+    plots.ps2.push(point(i, psOn ? prevSup2[i] : NaN, RED));
+    prevSupFill.push(red10);
+    // pr1 / pr2: the same with previousRes1 / previousRes2 against res1, color.green; fill color.new(color.green, 10)
+    const prOn = cfg.drawPreviousStructure && same(prevRes1, i) && differs(prevRes1[i], res1[i]);
+    plots.pr1.push(point(i, prOn ? prevRes1[i] : NaN, GREEN));
+    plots.pr2.push(point(i, prOn ? prevRes2[i] : NaN, GREEN));
+    prevResFill.push(green10);
+  }
 
   // alertResistance = high >= res2, alertSupport = low <= sup2, alertResistanceBO = close >= res1,
-  // alertSupportBO = close <= sup1 (the original's levels)
-  const atrNum = atrArr.map((v) => v ?? NaN);
-  const { res1, res2, sup1, sup2 } = originalLevels(bars, cfg, atrNum, !lastBarConfirmedOf(chart));
-  const lv = {
+  // alertSupportBO = close <= sup1
+  const al = {
     resAlert: bars.map((b, i) => b.high >= res2[i]),
     supAlert: bars.map((b, i) => b.low <= sup2[i]),
     resBo: bars.map((b, i) => b.close >= res1[i]),
     supBo: bars.map((b, i) => b.close <= sup1[i]),
   };
 
-  // Output arrays
-  const r1Arr: number[] = new Array(n).fill(NaN);
-  const r2Arr: number[] = new Array(n).fill(NaN);
-  const s1Arr: number[] = new Array(n).fill(NaN);
-  const s2Arr: number[] = new Array(n).fill(NaN);
-  const pr1Arr: number[] = new Array(n).fill(NaN);
-  const pr2Arr: number[] = new Array(n).fill(NaN);
-  const ps1Arr: number[] = new Array(n).fill(NaN);
-  const ps2Arr: number[] = new Array(n).fill(NaN);
-
-  // Active zones
-  let resZone: Zone | null = null;
-  let supZone: Zone | null = null;
-  let prevResZone: Zone | null = null;
-  let prevSupZone: Zone | null = null;
-
-  // Helper: rolling highest/lowest
-  function highest(arr: Bar[], idx: number, period: number, field: 'high' | 'low' | 'close'): number {
-    let max = -Infinity;
-    const start = Math.max(0, idx - period + 1);
-    for (let j = start; j <= idx; j++) max = Math.max(max, arr[j][field]);
-    return max;
-  }
-  function lowest(arr: Bar[], idx: number, period: number, field: 'high' | 'low' | 'close'): number {
-    let min = Infinity;
-    const start = Math.max(0, idx - period + 1);
-    for (let j = start; j <= idx; j++) min = Math.min(min, arr[j][field]);
-    return min;
-  }
-
-  const warmup = Math.max(14, lb + 1);
-
-  for (let i = warmup; i < n; i++) {
-    const atr = atrArr[i] ?? 0;
-    if (atr === 0) continue;
-
-    const close = bars[i].close;
-    const high = bars[i].high;
-    const low = bars[i].low;
-
-    // Fractal swing high detection:
-    // high[1] == highest(high, lookback) at [1] AND high < high[1]
-    if (i >= 2) {
-      const prevHigh = bars[i - 1].high;
-      const highestHigh = highest(bars, i - 1, lb, 'high');
-
-      if (prevHigh === highestHigh && high < prevHigh) {
-        // Swing high found at bar i-1
-        const wickTop = bars[i - 1].high;
-        const bodyTop = Math.max(bars[i - 1].open, bars[i - 1].close);
-        const zoneSize = wickTop - bodyTop;
-
-        if (zoneSize <= cfg.maxZoneSize * atr && zoneSize > 0) {
-          // Create potential resistance zone
-          const zone: Zone = {
-            top: wickTop,
-            bottom: bodyTop,
-            startIdx: i - 1,
-            active: false,
-            potential: true,
-            potentialHigh: high,
-            potentialLow: low,
-          };
-
-          // Save current resistance as previous if it exists
-          if (resZone && resZone.active && cfg.drawPreviousStructure) {
-            prevSupZone = { ...resZone, active: true, potential: false, potentialHigh: 0, potentialLow: 0 };
-          }
-          resZone = zone;
-        }
-      }
-
-      // Fractal swing low detection:
-      // low[1] == lowest(low, lookback) at [1] AND low > low[1]
-      const prevLow = bars[i - 1].low;
-      const lowestLow = lowest(bars, i - 1, lb, 'low');
-
-      if (prevLow === lowestLow && low > prevLow) {
-        // Swing low found at bar i-1
-        const wickBottom = bars[i - 1].low;
-        const bodyBottom = Math.min(bars[i - 1].open, bars[i - 1].close);
-        const zoneSize = bodyBottom - wickBottom;
-
-        if (zoneSize <= cfg.maxZoneSize * atr && zoneSize > 0) {
-          // Create potential support zone
-          const zone: Zone = {
-            top: bodyBottom,
-            bottom: wickBottom,
-            startIdx: i - 1,
-            active: false,
-            potential: true,
-            potentialHigh: high,
-            potentialLow: low,
-          };
-
-          // Save current support as previous if it exists
-          if (supZone && supZone.active && cfg.drawPreviousStructure) {
-            prevResZone = { ...supZone, active: true, potential: false, potentialHigh: 0, potentialLow: 0 };
-          }
-          supZone = zone;
-        }
-      }
-    }
-
-    // Check potential zones for ATR movement confirmation
-    if (resZone && resZone.potential) {
-      resZone.potentialLow = Math.min(resZone.potentialLow, low);
-      if (resZone.top - resZone.potentialLow >= cfg.atrMovement * atr) {
-        resZone.active = true;
-        resZone.potential = false;
-      }
-      // Reset if too many bars without confirmation
-      if (i - resZone.startIdx > cfg.newStructureReset && !resZone.active) {
-        resZone = null;
-      }
-    }
-
-    if (supZone && supZone.potential) {
-      supZone.potentialHigh = Math.max(supZone.potentialHigh, high);
-      if (supZone.potentialHigh - supZone.bottom >= cfg.atrMovement * atr) {
-        supZone.active = true;
-        supZone.potential = false;
-      }
-      // Reset if too many bars without confirmation
-      if (i - supZone.startIdx > cfg.newStructureReset && !supZone.active) {
-        supZone = null;
-      }
-    }
-
-    // Zone violation checks
-    if (resZone && resZone.active && close > resZone.top) {
-      // Resistance violated - becomes previous support
-      if (cfg.drawPreviousStructure) {
-        prevSupZone = { ...resZone };
-      }
-      resZone = null;
-    }
-
-    if (supZone && supZone.active && close < supZone.bottom) {
-      // Support violated - becomes previous resistance
-      if (cfg.drawPreviousStructure) {
-        prevResZone = { ...supZone };
-      }
-      supZone = null;
-    }
-
-    // Previous zone violations
-    if (prevResZone && close < prevResZone.bottom) {
-      prevResZone = null;
-    }
-    if (prevSupZone && close > prevSupZone.top) {
-      prevSupZone = null;
-    }
-
-    // Output active zone levels
-    if (resZone && resZone.active) {
-      r1Arr[i] = resZone.top;
-      r2Arr[i] = resZone.bottom;
-    }
-    if (supZone && supZone.active) {
-      s1Arr[i] = supZone.top;
-      s2Arr[i] = supZone.bottom;
-    }
-
-    // Output previous zone levels (flipped S/R)
-    if (cfg.drawPreviousStructure) {
-      if (prevResZone && prevResZone.active) {
-        // Previous support turned resistance
-        ps1Arr[i] = prevResZone.top;
-        ps2Arr[i] = prevResZone.bottom;
-      }
-      if (prevSupZone && prevSupZone.active) {
-        // Previous resistance turned support
-        pr1Arr[i] = prevSupZone.top;
-        pr2Arr[i] = prevSupZone.bottom;
-      }
-    }
-  }
-
-  const makePlot = (arr: number[]) =>
-    arr.map((v, i) => ({ time: bars[i].time, value: isNaN(v) ? NaN : v }));
-
-  // Fill colors
-  const resFillColors = bars.map((_b, i) => {
-    if (isNaN(r1Arr[i]) || isNaN(r2Arr[i])) return 'transparent';
-    return bars[i].close > r2Arr[i] ? 'rgba(239,83,80,0.08)' : 'rgba(239,83,80,0.15)';
-  });
-
-  const supFillColors = bars.map((_b, i) => {
-    if (isNaN(s1Arr[i]) || isNaN(s2Arr[i])) return 'transparent';
-    return bars[i].close < s1Arr[i] ? 'rgba(38,166,154,0.08)' : 'rgba(38,166,154,0.15)';
-  });
-
-  const prevResFillColors = bars.map((_b, i) => {
-    if (isNaN(ps1Arr[i]) || isNaN(ps2Arr[i])) return 'transparent';
-    return 'rgba(239,83,80,0.06)';
-  });
-
-  const prevSupFillColors = bars.map((_b, i) => {
-    if (isNaN(pr1Arr[i]) || isNaN(pr2Arr[i])) return 'transparent';
-    return 'rgba(38,166,154,0.06)';
-  });
-
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: {
-      r1: makePlot(r1Arr),
-      r2: makePlot(r2Arr),
-      s1: makePlot(s1Arr),
-      s2: makePlot(s2Arr),
-      pr1: makePlot(pr1Arr),
-      pr2: makePlot(pr2Arr),
-      ps1: makePlot(ps1Arr),
-      ps2: makePlot(ps2Arr),
-    },
+    plots,
     fills: [
-      { plot1: 'r1', plot2: 'r2', options: { color: 'rgba(239,83,80,0.15)' }, colors: resFillColors },
-      { plot1: 's1', plot2: 's2', options: { color: 'rgba(38,166,154,0.15)' }, colors: supFillColors },
-      { plot1: 'ps1', plot2: 'ps2', options: { color: 'rgba(239,83,80,0.06)' }, colors: prevResFillColors },
-      { plot1: 'pr1', plot2: 'pr2', options: { color: 'rgba(38,166,154,0.06)' }, colors: prevSupFillColors },
+      { plot1: 'r1', plot2: 'r2', options: { color: GREEN }, colors: resFill },
+      { plot1: 's1', plot2: 's2', options: { color: RED }, colors: supFill },
+      { plot1: 'ps1', plot2: 'ps2', options: { color: red10 }, colors: prevSupFill },
+      { plot1: 'pr1', plot2: 'pr2', options: { color: green10 }, colors: prevResFill },
     ],
     alerts: alertStates(alertConditions, bars, [
-      bars.map((_, i) => lv.resAlert[i] || lv.supAlert[i] || lv.resBo[i] || lv.supBo[i]),
-      lv.resAlert, lv.supAlert, lv.resBo, lv.supBo,
+      bars.map((_, i) => al.resAlert[i] || al.supAlert[i] || al.resBo[i] || al.supBo[i]),
+      al.resAlert, al.supAlert, al.resBo, al.supBo,
     ]),
   };
 }

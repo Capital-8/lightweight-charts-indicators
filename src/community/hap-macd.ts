@@ -3,8 +3,8 @@
  *
  * Standard MACD (EMA or SMA oscillator and signal) with signal dots from a DEMA MACD: a dot on the MACD line while
  * the DEMA MACD is above its DEMA signal and that signal rises (blue on the first bar, then green when the MACD
- * rises, orange otherwise), and a red exit dot on the first bar after. The histogram and the MACD / signal cross
- * triangles are hidden in Pine (display.none).
+ * rises, orange otherwise), a red exit dot on the first bar after, and MACD / signal cross triangles on the MACD line
+ * (lime up, red down). The histogram and the cross triangles are hidden by default (shown from the Style settings).
  *
  * Reference: "HaP MACD" by agahakanaga
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -104,6 +104,18 @@ export function calculate(
     // plotshape(buy_condition[1] and not buy_condition ? macd : na, shape.circle, color.red, size.tiny)
     if (prevBuy && !buy[i] && !isNaN(macd[i])) {
       markers.push({ time: t, position: 'atPriceMiddle', price: macd[i], shape: 'circle', color: color.red, size: 'tiny', id: 'shape1' });
+    }
+    // bull_cross = ta.crossover(macd, signal) / bear_cross = ta.crossunder(macd, signal) (false while a value is na)
+    // plotshape(bull_cross ? macd : na, shape.triangleup, location.absolute, color.lime, size.small, display.none)
+    // plotshape(bear_cross ? macd : na, shape.triangledown, location.absolute, color.red, size.small, display.none)
+    if (i > 0) {
+      const m0 = macd[i], s0 = signal[i], m1 = macd[i - 1], s1 = signal[i - 1];
+      if (m0 > s0 && m1 <= s1) {
+        markers.push({ time: t, position: 'atPriceMiddle', price: m0, shape: 'triangleUp', color: color.lime, size: 'small', id: 'shape2' });
+      }
+      if (m0 < s0 && m1 >= s1) {
+        markers.push({ time: t, position: 'atPriceMiddle', price: m0, shape: 'triangleDown', color: color.red, size: 'small', id: 'shape3' });
+      }
     }
   }
 

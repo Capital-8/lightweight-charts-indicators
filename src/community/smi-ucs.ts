@@ -1,98 +1,86 @@
 /**
- * Stochastic Momentum Index UCSgears Variant
+ * UCS_Stochastic Momentum Index
  *
- * SMI variant with double EMA smoothing.
- * rel = close - (highest(high, kLen) + lowest(low, kLen)) / 2.
- * SMI = 100 * EMA(EMA(rel, dLen), smoothLen) / (EMA(EMA(range, dLen), smoothLen) / 2).
- * signal = EMA(smi, smoothLen).
+ * Stochastic Momentum Index with nested EMAs: over the highest high / lowest low of a (Percent K Length) bars,
+ * rdiff = close - (hh + ll) / 2 and diff = hh - ll; SMI = EMA(EMA(rdiff, b), b) / (EMA(EMA(diff, b), b) / 2) * 100
+ * (0 when the smoothed range is 0 or na), signal = EMA(SMI, b) (b: Percent D Length). Lines at 40 (Over Bought),
+ * -40 (Over Sold) and 0 (Zero Line) are plots.
  *
- * Reference: "Stochastic Momentum Index (SMI) UCSgears"
+ * Reference: "UCS_Stochastic Momentum Index" by UCSgears
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 
 export interface SMIUCSInputs {
+  /** a: Percent K Length */
   kLen: number;
+  /** b: Percent D Length */
   dLen: number;
-  smoothLen: number;
 }
 
 export const defaultInputs: SMIUCSInputs = {
-  kLen: 13,
-  dLen: 25,
-  smoothLen: 2,
+  kLen: 5,
+  dLen: 3,
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'kLen', type: 'int', title: 'K Length', defval: 13, min: 1 },
-  { id: 'dLen', type: 'int', title: 'D Length', defval: 25, min: 1 },
-  { id: 'smoothLen', type: 'int', title: 'Smooth Length', defval: 2, min: 1 },
+  { id: 'kLen', type: 'int', title: 'Percent K Length', defval: 5 },
+  { id: 'dLen', type: 'int', title: 'Percent D Length', defval: 3 },
 ];
 
+/** Pine default plot colour (the SMI plot has no colour argument) */
+const PINE_BLUE = '#2962FF';
+/** Pine v1 colour constants */
+const RED = '#FF0000';
+const GREEN = '#008000';
+const BLUE = '#0000FF';
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'SMI', color: '#2962FF', lineWidth: 2 },
-  { id: 'plot1', title: 'Signal', color: '#FF6D00', lineWidth: 1 },
+  { id: 'plot0', title: 'Stochastic Momentum Index', color: PINE_BLUE, lineWidth: 1 },
+  { id: 'plot1', title: 'SMI Signal Line', color: RED, lineWidth: 1 },
+  { id: 'plot2', title: 'Over Bought', color: RED, lineWidth: 1 },
+  { id: 'plot3', title: 'Over Sold', color: GREEN, lineWidth: 1 },
+  { id: 'plot4', title: 'Zero Line', color: BLUE, lineWidth: 1 },
 ];
 
 export const metadata = {
-  title: 'Stochastic Momentum Index UCS',
-  shortTitle: 'SMIUCS',
+  title: 'UCS_Stochastic Momentum Index',
+  shortTitle: 'UCS_SMI',
   overlay: false,
 };
 
+/** Pine `x != 0`: false when x is na, true when |x| > 1e-10 */
+const EPS = 1e-10;
+const ne0 = (a: number) => !isNaN(a) && Math.abs(a) > EPS;
+
 export function calculate(bars: Bar[], inputs: Partial<SMIUCSInputs> = {}): IndicatorResult {
-  const { kLen, dLen, smoothLen } = { ...defaultInputs, ...inputs };
+  const { kLen: a, dLen: b } = { ...defaultInputs, ...inputs };
+  const num = (v: number | null | undefined) => (v == null ? NaN : v);
 
-  const highSeries = new Series(bars, (b) => b.high);
-  const lowSeries = new Series(bars, (b) => b.low);
-  const closeSeries = new Series(bars, (b) => b.close);
+  // ll = lowest(low, a); hh = highest(high, a); diff = hh - ll; rdiff = close - (hh + ll) / 2
+  const ll = ta.lowest(new Series(bars, (x) => x.low), a);
+  const hh = ta.highest(new Series(bars, (x) => x.high), a);
+  const diff = hh.sub(ll);
+  const rdiff = new Series(bars, (x) => x.close).sub(hh.add(ll).div(2));
 
-  const hh = ta.highest(highSeries, kLen);
-  const ll = ta.lowest(lowSeries, kLen);
+  // avgrel = ema(ema(rdiff, b), b); avgdiff = ema(ema(diff, b), b)
+  const avgrel = ta.ema(ta.ema(rdiff, b), b).toArray().map(num);
+  const avgdiff = ta.ema(ta.ema(diff, b), b).toArray().map(num);
 
-  // rel = close - midpoint
-  const midpoint = hh.add(ll).div(2);
-  const rel = closeSeries.sub(midpoint);
-  const hlRange = hh.sub(ll);
-
-  // Double smooth
-  const numerator = ta.ema(ta.ema(rel, dLen), smoothLen);
-  const denominator = ta.ema(ta.ema(hlRange, dLen), smoothLen).mul(0.5);
-
-  const numArr = numerator.toArray();
-  const denArr = denominator.toArray();
-
-  const smiArr: number[] = new Array(bars.length);
-  for (let i = 0; i < bars.length; i++) {
-    const n = numArr[i];
-    const d = denArr[i];
-    smiArr[i] = (d != null && d !== 0 && n != null) ? 100 * n / d : 0;
-  }
-
-  const smiSeries = new Series(bars, (_b, i) => smiArr[i]);
-  const signal = ta.ema(smiSeries, smoothLen);
-  const sigArr = signal.toArray();
-
-  const warmup = kLen + dLen;
-
-  const plot0 = smiArr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : v,
-  }));
-
-  const plot1 = sigArr.map((v, i) => ({
-    time: bars[i].time,
-    value: (v == null || i < warmup) ? NaN : v,
-  }));
+  // SMI = avgdiff != 0 ? (avgrel / (avgdiff / 2) * 100) : 0
+  const smi = bars.map((_x, i) => (ne0(avgdiff[i]) ? avgrel[i] / (avgdiff[i] / 2) * 100 : 0));
+  // SMIsignal = ema(SMI, b)
+  const signal = ta.ema(Series.fromArray(bars, smi), b).toArray().map(num);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1 },
-    hlines: [
-      { value: 40, options: { color: '#787B86', linestyle: 'dashed' as const, title: 'Overbought' } },
-      { value: 0, options: { color: '#787B86', linestyle: 'dotted' as const, title: 'Zero' } },
-      { value: -40, options: { color: '#787B86', linestyle: 'dashed' as const, title: 'Oversold' } },
-    ],
+    plots: {
+      plot0: bars.map((x, i) => ({ time: x.time, value: smi[i] })),
+      plot1: bars.map((x, i) => ({ time: x.time, value: signal[i] })),
+      plot2: bars.map((x) => ({ time: x.time, value: 40 })),
+      plot3: bars.map((x) => ({ time: x.time, value: -40 })),
+      plot4: bars.map((x) => ({ time: x.time, value: 0 })),
+    },
   };
 }
 

@@ -1,156 +1,142 @@
 /**
  * CM Gann Swing High Low V2
  *
- * Gann swing high/low detection. Tracks the highest high and lowest low
- * over a lookback period as step-style swing lines.
+ * Swing direction from the close against the moving averages of the highs and lows of the previous bar: +1 when the
+ * close is above the SMA of the highs, -1 when it is below the SMA of the lows, 0 otherwise. The direction used is
+ * the one of the non-zero bar before the last one (valuewhen(hld != 0, hld, 1)). In a down swing (-1) the SMA of the
+ * highs is the swing high, in an up swing (+1) the SMA of the lows is the swing low.
  *
- * Reference: "CM_Gann Swing High Low V2" by ChrisMoody (community)
+ * Draws the swing high (fuchsia) and the swing low (lime) as broken lines ("circles" plots, on by default), optional
+ * triangles above / below the bars on them (off by default), triangles at the top / bottom of the pane on each bar of
+ * a swing high / low (on by default), a green / red background on the bars closing across the swing high / low (on by
+ * default) and yellow bars on these crosses (off by default).
+ *
+ * Reference: "CM_Gann Swing HighLow V2" by ChrisMoody (created with Glaz)
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, color, compare, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
 
 export interface CMGannSwingInputs {
+  /** Moving Average Period */
   length: number;
+  /** Plot Up/Down Triangles at Top and Bottom of Candles/Bars? */
+  pt: boolean;
+  /** Plot Circles at Top and Bottom of Candles/Bars? */
+  pc: boolean;
+  /** Plot Triangles at Top and Bottom of Screen? */
+  pttb: boolean;
+  /** Show Highlight Bars on Cross Up or Cross Down? */
+  shb: boolean;
+  /** Show Background Highlights at Cross Up or Cross Down? */
+  sbh: boolean;
 }
 
 export const defaultInputs: CMGannSwingInputs = {
-  length: 12,
+  length: 3,
+  pt: false,
+  pc: true,
+  pttb: true,
+  shb: false,
+  sbh: true,
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'length', type: 'int', title: 'Length', defval: 12, min: 1 },
+  { id: 'length', type: 'int', title: 'Moving Average Period', defval: 3, min: 1 },
+  { id: 'pt', type: 'bool', title: 'Plot Up/Down Triangles at Top and Bottom of Candles/Bars?', defval: false },
+  { id: 'pc', type: 'bool', title: 'Plot Circles at Top and Bottom of Candles/Bars?', defval: true },
+  { id: 'pttb', type: 'bool', title: 'Plot Triangles at Top and Bottom of Screen?', defval: true },
+  { id: 'shb', type: 'bool', title: 'Show Highlight Bars on Cross Up or Cross Down?', defval: false },
+  { id: 'sbh', type: 'bool', title: 'Show Background Highlights at Cross Up or Cross Down?', defval: true },
 ];
 
+// Colour constants of the original's Pine version (1 / 2)
+const FUCHSIA = '#FF00FF';
+const LIME = '#00FF00';
+const RED = '#FF0000';
+const GREEN = '#008000';
+const YELLOW = '#FFFF00';
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Swing High', color: '#EF5350', lineWidth: 2 },
-  { id: 'plot1', title: 'Swing Low', color: '#26A69A', lineWidth: 2 },
+  { id: 'plot0', title: 'Gann Swing High Plots-Circles', color: FUCHSIA, lineWidth: 4, style: 'linebr' },
+  { id: 'plot1', title: 'Gann Swing Low Plots-Circles', color: LIME, lineWidth: 4, style: 'linebr' },
 ];
 
 export const metadata = {
-  title: 'CM Gann Swing High Low V2',
-  shortTitle: 'Gann Swing',
+  title: 'CM_Gann Swing HighLow V2',
+  shortTitle: 'CM_Gann_Swing_HL_V2',
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<CMGannSwingInputs> = {}): Omit<IndicatorResult, 'markers'> {
-  const { length } = { ...defaultInputs, ...inputs };
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<CMGannSwingInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+  const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  const arr = (s: Series) => s.toArray().map((v) => v ?? NaN);
+  const smaHigh = arr(ta.sma(new Series(bars, (b) => b.high), cfg.length));
+  const smaLow = arr(ta.sma(new Series(bars, (b) => b.low), cfg.length));
 
-  const highSeries = new Series(bars, (b) => b.high);
-  const lowSeries = new Series(bars, (b) => b.low);
-
-  const highestArr = ta.highest(highSeries, length).toArray();
-  const lowestArr = ta.lowest(lowSeries, length).toArray();
-
-  // Track step-style swing levels that only update on new swings
-  let swingHigh = NaN;
-  let swingLow = NaN;
-
-  const shPlot: { time: number; value: number }[] = [];
-  const slPlot: { time: number; value: number }[] = [];
-
-  const warmup = length;
-
-  for (let i = 0; i < n; i++) {
-    if (i < warmup) {
-      shPlot.push({ time: bars[i].time, value: NaN });
-      slPlot.push({ time: bars[i].time, value: NaN });
-      continue;
-    }
-
-    const hh = highestArr[i];
-    const ll = lowestArr[i];
-
-    // Update swing high when bar high equals the highest high (new swing high)
-    if (bars[i].high >= hh) {
-      swingHigh = hh;
-    }
-    // Update swing low when bar low equals the lowest low (new swing low)
-    if (bars[i].low <= ll) {
-      swingLow = ll;
-    }
-
-    shPlot.push({ time: bars[i].time, value: swingHigh });
-    slPlot.push({ time: bars[i].time, value: swingLow });
-  }
-
-  // Pine: hld = iff(close > sma(high,periods)[1], 1, iff(close<sma(low,periods)[1],-1, 0))
-  // Pine: hlv = valuewhen(hld != 0, hld, 1)
-  // Determine active swing direction for persistent markers
-  const smaHighArr = ta.sma(highSeries, length).toArray();
-  const smaLowArr = ta.sma(lowSeries, length).toArray();
-  let hlv = 0;
-  const hlvArr: number[] = new Array(n).fill(0);
-  for (let i = warmup + 1; i < n; i++) {
-    const prevSmaHigh = smaHighArr[i - 1];
-    const prevSmaLow = smaLowArr[i - 1];
-    if (prevSmaHigh != null && bars[i].close > prevSmaHigh) {
-      hlv = 1;
-    } else if (prevSmaLow != null && bars[i].close < prevSmaLow) {
-      hlv = -1;
-    }
-    hlvArr[i] = hlv;
-  }
-
-  // Pine display elements based on cross conditions
+  const bgUp = String(color.new(GREEN, 60));
+  const bgDown = String(color.new(RED, 60));
+  const plot0: { time: number; value: number }[] = [];
+  const plot1: { time: number; value: number }[] = [];
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
 
-  // Build arrays from plots for cross detection
-  const hiArr = shPlot.map(p => p.value);
-  const loArr = slPlot.map(p => p.value);
-
-  for (let i = warmup + 1; i < n; i++) {
-    const hi = hiArr[i];
-    const lo = loArr[i];
-
-    // Cross above swing high: close > hi and close[1] < hi
-    const crossAbove = !isNaN(hi) && bars[i].close > hi && bars[i - 1].close < hi;
-    // Cross below swing low: close < lo and close[1] > lo
-    const crossBelow = !isNaN(lo) && bars[i].close < lo && bars[i - 1].close > lo;
-
-    // Pine barcolor: yellow on cross (barcolor(closeAbove() ? yellow : na), barcolor(closeBelow() ? yellow : na))
-    if (crossAbove) {
-      barColors.push({ id: 'barcolor0', time: bars[i].time, color: '#FFFF00' });
-    } else if (crossBelow) {
-      barColors.push({ id: 'barcolor1', time: bars[i].time, color: '#FFFF00' });
+  // valuewhen(hld != 0, hld, 1): the hld of the non-zero bar before the last one (the current bar counts)
+  let lastHld = NaN;
+  let prevHld = NaN;
+  for (let i = 0; i < n; i++) {
+    const b = bars[i];
+    const t = b.time as number;
+    // hld = iff(close > sma(high, periods)[1], 1, iff(close < sma(low, periods)[1], -1, 0))
+    const hld = i > 0 && compare.gt(b.close, smaHigh[i - 1]) ? 1 : i > 0 && compare.lt(b.close, smaLow[i - 1]) ? -1 : 0;
+    if (hld !== 0) {
+      prevHld = lastHld;
+      lastHld = hld;
     }
+    const hlv = prevHld;
+    // hi = hlv == -1 ? sma(high, periods) : na; lo = hlv == 1 ? sma(low, periods) : na
+    const hi = hlv === -1 ? smaHigh[i] : NaN;
+    const lo = hlv === 1 ? smaLow[i] : NaN;
+    // A float as a condition: true when not na and not 0
+    const hiOn = !Number.isNaN(hi) && hi !== 0;
+    const loOn = !Number.isNaN(lo) && lo !== 0;
 
-    // Pine bgcolor: green on cross above, red on cross below (transp=60)
-    if (crossAbove) {
-      bgColors.push({ id: 'bgcolor0', time: bars[i].time, color: 'rgba(0,128,0,0.40)' });
-    }
-    if (crossBelow) {
-      bgColors.push({ id: 'bgcolor1', time: bars[i].time, color: 'rgba(255,0,0,0.40)' });
-    }
+    // close > hi and close[1] < hi (hi of this bar) / close < lo and close[1] > lo
+    const close1 = i > 0 ? bars[i - 1].close : NaN;
+    const crossAbove = compare.gt(b.close, hi) && compare.lt(close1, hi);
+    const crossBelow = compare.lt(b.close, lo) && compare.gt(close1, lo);
 
-    // Pine plotshape: triangles on cross events (pttb=true by default)
-    if (crossAbove) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#00FF00', text: 'Cross Up' });
-    }
-    if (crossBelow) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: 'Cross Down' });
-    }
+    // barcolor(closeAbove() ? yellow : na) / barcolor(closeBelow() ? yellow : na)
+    if (cfg.shb && crossAbove) barColors.push({ id: 'barcolor0', time: t, color: YELLOW });
+    if (cfg.shb && crossBelow) barColors.push({ id: 'barcolor1', time: t, color: YELLOW });
+    // bgcolor(BHcloseAbove ? green : na, transp=60) / bgcolor(BHcloseBelow ? red : na, transp=60)
+    if (cfg.sbh && crossAbove) bgColors.push({ id: 'bgcolor0', time: t, color: bgUp });
+    if (cfg.sbh && crossBelow) bgColors.push({ id: 'bgcolor1', time: t, color: bgDown });
 
-    // Pine: plotshape(pttb and hi ? hi : na, style=triangledown, location=top, color=red)
-    // Pine: plotshape(pttb and lo ? lo : na, style=triangleup, location=bottom, color=lime)
-    // Persistent per-bar triangles: hi is non-na when hlv==-1, lo is non-na when hlv==1
-    if (hlvArr[i] === -1) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: '' });
-    } else if (hlvArr[i] === 1) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#00FF00', text: '' });
-    }
+    // plot(pc and hi ? hi : na, style=linebr, linewidth=4) / the same with lo
+    plot0.push({ time: t, value: cfg.pc && hiOn ? hi : NaN });
+    plot1.push({ time: t, value: cfg.pc && loOn ? lo : NaN });
+
+    // plotshape(pt and hi ? hi : na, location.abovebar, triangledown, fuchsia) / (pt and lo, belowbar, triangleup, lime)
+    if (cfg.pt && hiOn) markers.push({ id: 'shape0', time: t, position: 'aboveBar', shape: 'triangleDown', color: FUCHSIA });
+    if (cfg.pt && loOn) markers.push({ id: 'shape1', time: t, position: 'belowBar', shape: 'triangleUp', color: LIME });
+    // plotshape(pttb and hi ? hi : na, location.top, triangledown, red) / (pttb and lo, bottom, triangleup, lime)
+    if (cfg.pttb && hiOn) markers.push({ id: 'shape2', time: t, position: 'top', shape: 'triangleDown', color: RED });
+    if (cfg.pttb && loOn) markers.push({ id: 'shape3', time: t, position: 'bottom', shape: 'triangleUp', color: LIME });
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': shPlot, 'plot1': slPlot },
+    plots: { plot0, plot1 },
     markers,
     barColors,
     bgColors,
-  } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] };
+  };
 }
 
 export const CMGannSwing = { calculate, metadata, defaultInputs, inputConfig, plotConfig };

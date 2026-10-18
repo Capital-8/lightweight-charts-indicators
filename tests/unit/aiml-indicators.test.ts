@@ -71,7 +71,7 @@ describe('ML Adaptive SuperTrend', () => {
   });
 
   it('should have correct metadata', () => {
-    expect(MlAdaptiveSupertrend.metadata.title).toBe('ML Adaptive SuperTrend');
+    expect(MlAdaptiveSupertrend.metadata.title).toBe('Machine Learning Adaptive SuperTrend [AlgoAlpha]');
     expect(MlAdaptiveSupertrend.metadata.overlay).toBe(true);
   });
 });
@@ -87,15 +87,16 @@ describe('ML: kNN Strategy', () => {
   });
 
   it('should produce markers or plot data', () => {
-    const result = MlKnnStrategy.calculate(bars) as any;
+    // the fixture is in 1970: the training window (Start Date .. Stop Date of the original) must cover it
+    const result = MlKnnStrategy.calculate(bars, { startDate: 0 }) as any;
     const hasMarkers = Array.isArray(result.markers) && result.markers.length > 0;
     const hasPlots = Object.values(result.plots).some((p: any) => p.some((v: any) => !isNaN(v.value)));
     expect(hasMarkers || hasPlots).toBe(true);
   });
 
   it('should have correct metadata', () => {
-    expect(MlKnnStrategy.metadata.title).toBe('ML: kNN Strategy');
-    expect(MlKnnStrategy.metadata.overlay).toBe(false);
+    expect(MlKnnStrategy.metadata.title).toBe('Machine Learning: kNN-based Strategy');
+    expect(MlKnnStrategy.metadata.overlay).toBe(true);
   });
 });
 
@@ -121,7 +122,7 @@ describe('ML Momentum Index', () => {
   });
 
   it('should have correct metadata', () => {
-    expect(MlMomentumIndex.metadata.title).toBe('ML Momentum Index');
+    expect(MlMomentumIndex.metadata.title).toBe('Machine Learning Momentum Index (MLMI) [Zeiierman]');
     expect(MlMomentumIndex.metadata.overlay).toBe(false);
   });
 });
@@ -237,7 +238,7 @@ describe('Volume SuperTrend AI', () => {
   });
 
   it('should have correct metadata', () => {
-    expect(VolumeSuperTrendAi.metadata.title).toBe('Volume SuperTrend AI');
+    expect(VolumeSuperTrendAi.metadata.title).toBe('Volume SuperTrend AI (Expo)');
     expect(VolumeSuperTrendAi.metadata.overlay).toBe(true);
   });
 });

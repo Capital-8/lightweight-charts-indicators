@@ -73,8 +73,8 @@ describe('alert conditions of the standard built-ins', () => {
 
 describe('community ports: alerts of their originals on the registry entries (#8, #13)', () => {
   const ids = indicatorRegistry.filter((e) => e.group === 'community' && ((e.alertConditions?.length ?? 0) > 0 || e.hasAlertFunction)).map((e) => e.id);
-  it('634 community ports give the alerts of their originals', () => {
-    expect(ids.length).toBeGreaterThanOrEqual(634);
+  it('647 community ports give the alerts of their originals', () => {
+    expect(ids.length).toBeGreaterThanOrEqual(647);
   });
   it('every port declares its alertcondition()s or its alert() calls, and its result gives them', () => {
     for (const id of ids) {

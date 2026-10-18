@@ -16,7 +16,6 @@
  * "Show Arrows" inputs on).
  *
  * Reference: "CCI Stochastic" by Daveatt
- * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import {
@@ -84,7 +83,8 @@ const MAROON = '#880E4F';
 const NONE = String(color.new('#FFFFFF', 100));
 
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Moving Average', color: GRAY, lineWidth: 3 },
+  // plot(ma, "Moving Average", linewidth=3, color=ma_color): red above OB, green below OS, gray between
+  { id: 'plot0', title: 'Moving Average', color: GRAY, lineWidth: 3, palette: [RED, GREEN, GRAY] },
 ];
 
 export const hlineConfig: HLineConfig[] = [
@@ -95,10 +95,13 @@ export const hlineConfig: HLineConfig[] = [
   { id: 'hline_min', price: 0, title: 'Min Level', color: NONE, linestyle: 'dotted', linewidth: 1 },
 ];
 
-/** fill(maxLevelPlot, overbought) and fill(minLevelPlot, oversold): the colour changes per bar (result `fills`) */
+/**
+ * fill(maxLevelPlot, overbought) and fill(minLevelPlot, oversold), untitled ("Hlines Background"): the colour changes
+ * per bar (result `fills`)
+ */
 export const fillConfig: FillConfig[] = [
-  { id: 'fill_ob', plot1: 'hline_max', plot2: 'hline_ob', color: String(color.new(RED, 90)), title: 'Overbought Fill' },
-  { id: 'fill_os', plot1: 'hline_min', plot2: 'hline_os', color: String(color.new(GREEN, 90)), title: 'Oversold Fill' },
+  { id: 'fill_ob', plot1: 'hline_max', plot2: 'hline_ob', color: String(color.new(RED, 90)), title: 'Hlines Background' },
+  { id: 'fill_os', plot1: 'hline_min', plot2: 'hline_os', color: String(color.new(GREEN, 90)), title: 'Hlines Background' },
 ];
 
 export const metadata = {
@@ -200,8 +203,8 @@ export function calculate(
       { value: 0, options: { title: 'Min Level', color: NONE, linestyle: 'dotted', linewidth: 1 } },
     ],
     fills: [
-      { plot1: 'hline_max', plot2: 'hline_ob', options: { title: 'Overbought Fill' }, colors: obColors },
-      { plot1: 'hline_min', plot2: 'hline_os', options: { title: 'Oversold Fill' }, colors: osColors },
+      { plot1: 'hline_max', plot2: 'hline_ob', options: { title: 'Hlines Background' }, colors: obColors },
+      { plot1: 'hline_min', plot2: 'hline_os', options: { title: 'Hlines Background' }, colors: osColors },
     ],
     markers,
     alerts: alertStates(alertConditions, bars, flags),

@@ -9,12 +9,12 @@
  * v5.0 adds TPX swing alerts.
  * Alerts (alertcondition, `alerts` of the result): 'TPX Bulls in Control' (bull pressure >= control level), 'TPX
  * Bears in Control' (bear pressure >= control level) and 'Net Pressure Swing' (TPX crosses 0).
+ * No swing markers: the original draws the swing only as the colour change of the Net Pressure line.
  *
  * Reference: "RedK Trader Pressure Index (TPX)" by RedKTrader
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
 import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RedKTPXInputs {
@@ -61,7 +61,7 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<RedKTPXInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
+export function calculate(bars: Bar[], inputs: Partial<RedKTPXInputs> = {}): Omit<IndicatorResult, 'markers'> & { alerts: AlertConditionState[] } {
   const { length, smooth, controlLevel, preSmooth, preSmoothLen, slevelOn, slevel } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -163,20 +163,6 @@ export function calculate(bars: Bar[], inputs: Partial<RedKTPXInputs> = {}): Omi
     return { time: b.time, value: maxbulls ? slevel : NaN };
   });
 
-  // Markers for TPX swing (crosses 0 line)
-  const markers: MarkerData[] = [];
-  for (let i = 1; i < n; i++) {
-    if (i < warmup) continue;
-    const curr = tpxArr[i];
-    const prev = tpxArr[i - 1];
-    if (curr == null || prev == null || isNaN(curr) || isNaN(prev)) continue;
-    if (prev <= 0 && curr > 0) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#33ff00', text: 'Swing' });
-    } else if (prev >= 0 && curr < 0) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#ff1111', text: 'Swing' });
-    }
-  }
-
   // maxbulls = avgbulls >= clevel; maxbears = avgbears >= clevel; TPXswing = ta.cross(TPX, 0)
   const maxBulls = avgBullsArr.map((v) => v != null && !isNaN(v) && v >= controlLevel);
   const maxBears = avgBearsArr.map((v) => v != null && !isNaN(v) && v >= controlLevel);
@@ -194,7 +180,6 @@ export function calculate(bars: Bar[], inputs: Partial<RedKTPXInputs> = {}): Omi
       { value: 0, options: { color: '#ffee00', linestyle: 'solid' as const, title: 'Zero' } },
       { value: controlLevel, options: { color: '#ffee00', linestyle: 'dotted' as const, title: 'Control Level' } },
     ],
-    markers,
     alerts: alertStates(alertConditions, bars, [maxBulls, maxBears, tpxSwing]),
   };
 }

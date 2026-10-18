@@ -19,8 +19,10 @@
  * without them a bar that opens at 12:00 UTC or later belongs to the next UTC day. Without the bars the port throws
  * a MissingSymbolDataError. `syminfo.type` comes from the context (`chart.symbolType`, crypto: 30 bars a month).
  *
- * Limits of the port: the line is drawn on the price scale of the chart (the original uses the left scale); the
- * four alert conditions give no output.
+ * Alerts (alertcondition, `alerts` of the result): the trend turning bullish / bearish (fast and slow moving averages of
+ * the total) and the chart symbol starting to lead / lag the total (tracking >= 0 / < 0), on the bar of the change.
+ *
+ * Limit of the port: the line is drawn on the price scale of the chart (the original uses the left scale).
  *
  * Reference: "Global Liquidity Index" by QuantitativeAlpha
  * Original notice: © QuantitativeAlpha
@@ -32,6 +34,7 @@ import {
   type Bar, type IndicatorResult, type InputConfig, type PlotConfig,
 } from 'oakscriptjs';
 import type { TableCellData, TableData, TablePosition } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { symbolBarsOf, symbolTypeOf, type ChartContext, type SymbolRequest } from '../chart-context';
 import { otherSymbolChart, securityOtherValues, spreadBars, spreadOptions, spreadSymbols } from '../other-symbol';
 
@@ -214,7 +217,7 @@ const BLACK = '#000000';
 
 export function calculate(
   bars: Bar[], inputs: Partial<GlobalLiquidityIndexInputs> = {}, chart?: ChartContext,
-): IndicatorResult & { tables: TableData[] } {
+): IndicatorResult & { tables: TableData[]; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const {
     smaInputRaw, rocInput, offsetInput, strategyType, fastLength, slowLength, changeLength, changeSma, betaInput,
@@ -288,6 +291,19 @@ export function calculate(
       : corrInput === '2Y' ? tradingDays * 24 : corrInput === '3Y' ? tradingDays * 36
         : corrInput === '5Y' ? tradingDays * 60 : tradingDays * 1;
 
+  // is_bull = bull and not bull[1], ... (a bool is false on the bar before the first one)
+  const bullAt = (i: number) => i >= 0 && ge(fast[i], slow[i]);
+  const bearAt = (i: number) => i >= 0 && gt(slow[i], fast[i]);
+  const trackingAt = (i: number) => {
+    const gliTrack = offsetInput > 0 ? hist(gliChange, i, absOffset) : gliChange[i];
+    const assetTrack = offsetInput < 0 ? hist(assetChange, i, absOffset) : assetChange[i];
+    return assetTrack - gliTrack;
+  };
+  const tracking = total.map((_, i) => trackingAt(i));
+  const aheadAt = (i: number) => i >= 0 && ge(tracking[i], 0);
+  const behindAt = (i: number) => i >= 0 && gt(0, tracking[i]);
+  const alertFlags = [bullAt, bearAt, aheadAt, behindAt].map((f) => total.map((_, i) => f(i) && !f(i - 1)));
+
   // plot(roc_sma, offset = offset_input): the value of bar i on bar i + offset
   const interval = barInterval(bars);
   const plot0 = [];
@@ -301,14 +317,11 @@ export function calculate(
   if (n > 0) {
     // the table shows the values of the last bar
     const i = n - 1;
-    const bull = ge(fast[i], slow[i]);
-    const bear = gt(slow[i], fast[i]);
-    const gliTrack = offsetInput > 0 ? hist(gliChange, i, absOffset) : gliChange[i];
-    const assetTrack = offsetInput < 0 ? hist(assetChange, i, absOffset) : assetChange[i];
+    const bull = bullAt(i);
+    const bear = bearAt(i);
     const changePct = gliChangeSmooth[i] / gliBaseSmooth[i];
-    const tracking = assetTrack - gliTrack;
-    const ahead = ge(tracking, 0);
-    const behind = gt(0, tracking);
+    const ahead = aheadAt(i);
+    const behind = behindAt(i);
     const corrs = [1, 3, 6, 12, 36].map((m) => corr(tradingDays * m)[i]);
     const beta = (corrBeta[i] * stdAssetBeta[i]) / stdGliBeta[i];
 
@@ -375,8 +388,17 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     tables,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Trend Bullish', message: 'Global Liquidity Bullish!' },
+  { id: 'alert1', title: 'Trend Bearish', message: 'Global Liquidity Bearish!' },
+  { id: 'alert2', title: 'Tracking Ahead', message: '{{ticker}} Leading Global Liquidity!' },
+  { id: 'alert3', title: 'Tracking Behind', message: '{{ticker}} Lagging Global Liquidity!' },
+];
 
 export const GlobalLiquidityIndex = {
   calculate,
@@ -385,4 +407,5 @@ export const GlobalLiquidityIndex = {
   inputConfig,
   plotConfig,
   requiredSymbols,
+  alertConditions,
 };

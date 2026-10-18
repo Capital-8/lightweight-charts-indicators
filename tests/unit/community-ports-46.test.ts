@@ -164,7 +164,8 @@ describe('VuManChu Swing (Range Filter - B&S Signals)', () => {
   const r = vumanchu.calculate(bars);
   it('longCondition / shortCondition re-computed from the range filter', () => {
     const per = 20, qty = 3.5;
-    const absCh = close.map((c, i) => (i > 0 ? Math.abs(c - close[i - 1]) : 0));
+    // abs(x - x[1]) is na on the first bar (x[1] is na)
+    const absCh = close.map((c, i) => (i > 0 ? Math.abs(c - close[i - 1]) : NaN));
     const ac = A(ta.ema(Series.fromArray(bars, A(ta.ema(S(absCh), per))), per * 2 - 1)).map((v) => v * qty);
     const filt: number[] = [];
     for (let i = 0; i < n; i++) {

@@ -2,7 +2,7 @@
  * Banker Fund Flow Trend Oscillator
  *
  * Models institutional fund flow using a weighted simple average normalization
- * combined with EMA smoothing. Produces two lines: fund flow trend and bull/bear line.
+ * combined with EMA smoothing. Computes two series: fund flow trend and bull/bear line (drawn as candles only).
  * Fund flow trend = double-smoothed stochastic-like normalization over 27 bars.
  * Bull/bear line = EMA(13) of typical price normalized over 34-bar highest/lowest.
  * Entry signal fires when fund_flow crosses above bull_bear and bull_bear < 25.
@@ -11,12 +11,13 @@
  * previous fund flow), red (fund flow below the line) and blue (below the line and above 95 % of the previous fund
  * flow) candles from the fund flow to the bull bear line.
  * Alerts (alertcondition, `alerts` of the result): one per candle colour, with the candle's condition.
+ * No entry markers: the original shows the entry as the yellow candle only.
  *
  * Reference: "[blackcat] L3 Banker Fund Flow Trend Oscillator"
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, PlotCandleData } from '../types';
+import type { PlotCandleData } from '../types';
 import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface BankerFundFlowInputs {
@@ -40,10 +41,8 @@ export const inputConfig: InputConfig[] = [
   { id: 'entryThreshold', type: 'int', title: 'Entry Threshold', defval: 25, min: 1 },
 ];
 
-export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Fund Flow Trend', color: '#26A69A', lineWidth: 2 },
-  { id: 'plot1', title: 'Bull Bear Line', color: '#EF5350', lineWidth: 2 },
-];
+// No line plots: the original draws the fund flow and the bull bear line only as its candles
+export const plotConfig: PlotConfig[] = [];
 
 export const metadata = {
   title: 'Banker Fund Flow Trend Oscillator',
@@ -91,7 +90,7 @@ function calcWeightedSimpleAverage(srcArr: number[], length: number, weight: num
 export function calculate(
   bars: Bar[],
   inputs: Partial<BankerFundFlowInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]> }
   & { alerts: AlertConditionState[] } {
   const { normLength, typicalLength, emaLength, entryThreshold } = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -152,33 +151,6 @@ export function calculate(
 
   const bullBearArr = ta.ema(Series.fromArray(bars, normTypical), emaLength).toArray();
 
-  const warmup = Math.max(normLength, typicalLength) + emaLength;
-
-  // Markers for entry signals: crossover of fund_flow_trend and bull_bear_line when bull_bear < threshold
-  const markers: MarkerData[] = [];
-  for (let i = warmup; i < n; i++) {
-    const fft = fundFlowTrend[i];
-    const bbl = bullBearArr[i];
-    const fftPrev = fundFlowTrend[i - 1];
-    const bblPrev = bullBearArr[i - 1];
-    if (isNaN(fft) || bbl == null || isNaN(bbl) || isNaN(fftPrev) || bblPrev == null || isNaN(bblPrev)) continue;
-
-    // crossover: fft crosses above bbl and bbl < threshold
-    if (fftPrev <= bblPrev && fft > bbl && bbl < entryThreshold) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#FFD700', text: 'Entry' });
-    }
-  }
-
-  const plot0 = fundFlowTrend.map((v, i) => ({
-    time: bars[i].time,
-    value: (i < warmup || isNaN(v)) ? NaN : v,
-  }));
-
-  const plot1 = bullBearArr.map((v, i) => ({
-    time: bars[i].time,
-    value: (i < warmup || v == null || isNaN(v)) ? NaN : v,
-  }));
-
   // The original's five plotcandle() outputs, in their order, each with its own colour condition (bordercolor = na).
   // find_recent_value(fund_flow_trend * 0.95, 1): the previous value * 0.95, or the current one when it is na.
   const YELLOW = '#FFEB3B', GREEN = '#4CAF50', WHITE = '#FFFFFF', RED = '#FF5252', BLUE = '#2962FF';
@@ -218,7 +190,7 @@ export function calculate(
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1 },
+    plots: {},
     hlines: [
       { value: 90, options: { color: '#E040FB', linestyle: 'dotted' as const, title: 'Strong' } },
       { value: 80, options: { color: '#EF5350', linestyle: 'dotted' as const, title: 'Overbought' } },
@@ -229,7 +201,6 @@ export function calculate(
       { plot1: 'hline_oversold', plot2: 'hline_weak', options: { color: 'rgba(255, 235, 59, 0.3)' } },
       { plot1: 'hline_overbought', plot2: 'hline_strong', options: { color: 'rgba(224, 64, 251, 0.3)' } },
     ],
-    markers,
     // later candles are drawn on top
     plotCandles: { entrySignal: entryCandles, green: greenCandles, white: whiteCandles, red: redCandles, blue: blueCandles },
     alerts: alertStates(alertConditions, bars, flags),

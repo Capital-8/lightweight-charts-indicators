@@ -9,6 +9,9 @@
  * Alerts (alertcondition, `alerts` of the result, on the bar that confirms the pattern): 'SELL Alarm' ISOPEAK 1
  * (PEAK2) and ISOPEAK 2 (PEAK1), 'BUY Alarm' ISOBOTTOM 1 (BOT2) and ISOBOTTOM 2, which the original also gives on
  * BOT2 (its condition is the same as ISOBOTTOM 1).
+ * Each pattern is tested on every bar with the original's history (na compares false): PEAK1 / BOT1 read 3 bars
+ * back and can show from bar 3, PEAK2 / BOT2 read 4 bars back and can show from bar 4; the labels are drawn with the
+ * original's offsets (-1 / -2 bars).
  *
  * Reference: "Isolated Peak and Bottom" (community) by KivancOzbilgic
  */
@@ -40,64 +43,38 @@ export function calculate(bars: Bar[], _inputs: Partial<IsolatedPeakBottomInputs
   const markers: MarkerData[] = [];
   const plot0 = bars.map((b) => ({ time: b.time, value: NaN }));
 
-  for (let i = 4; i < n; i++) {
-    const h0 = bars[i].high;
-    const h1 = bars[i - 1].high;
-    const h2 = bars[i - 2].high;
-    const h3 = bars[i - 3].high;
-    const h4 = bars[i - 4].high;
-
-    const l0 = bars[i].low;
-    const l1 = bars[i - 1].low;
-    const l2 = bars[i - 2].low;
-    const l3 = bars[i - 3].low;
-    const l4 = bars[i - 4].low;
-
-    // Pine: izotepe1 = iztepe2 > t02 and iztepe2 >= t12 and iztepe2 > t32 and iztepe2 > t42
-    //                   and low[1] > math.min(L32, L22) and low < math.min(L32, L22)
-    // Plotted with offset=-2 as PEAK2
-    const minL32_L22 = Math.min(l3, l2);
-    if (h2 > h0 && h2 >= h1 && h2 > h3 && h2 > h4 && l1 > minL32_L22 && l0 < minL32_L22) {
-      markers.push({ time: bars[i - 2].time, position: 'aboveBar', shape: 'labelDown', color: '#EF5350', text: 'PEAK2' });
-    }
-
-    // Pine: izotepe2 = t12 > t02 and t12 > iztepe2 and t12 > t32
-    //                   and low < math.min(L22, low[1])
-    // Plotted with offset=-1 as PEAK1
-    if (h1 > h0 && h1 > h2 && h1 > h3 && l0 < Math.min(l2, l1)) {
-      markers.push({ time: bars[i - 1].time, position: 'aboveBar', shape: 'labelDown', color: '#EF5350', text: 'PEAK1' });
-    }
-
-    // Pine: izodip1 = izdip2 < d02 and izdip2 < d12 and izdip2 < d32 and izdip2 < d42
-    //                  and high[1] < math.max(h32, h22) and high > math.max(h32, h22)
-    // Plotted with offset=-2 as BOT2
-    const maxH32_H22 = Math.max(h3, h2);
-    if (l2 < l0 && l2 < l1 && l2 < l3 && l2 < l4 && h1 < maxH32_H22 && h0 > maxH32_H22) {
-      markers.push({ time: bars[i - 2].time, position: 'belowBar', shape: 'labelUp', color: '#26A69A', text: 'BOT2' });
-    }
-
-    // Pine: izodip2 = d12 < d02 and d12 < izdip2 and d12 < d32
-    //                  and high > math.max(h22, high[1])
-    // Plotted with offset=-1 as BOT1
-    if (l1 < l0 && l1 < l2 && l1 < l3 && h0 > Math.max(h2, h1)) {
-      markers.push({ time: bars[i - 1].time, position: 'belowBar', shape: 'labelUp', color: '#26A69A', text: 'BOT1' });
-    }
-  }
-
-  // Alert flags on the current bar (na history: the comparisons are false)
+  // The original's conditions on every bar (na history compares false)
   const hi = (i: number) => (i >= 0 ? bars[i].high : NaN);
   const lo = (i: number) => (i >= 0 ? bars[i].low : NaN);
-  const peak1: boolean[] = [];
-  const peak2: boolean[] = [];
-  const bot1: boolean[] = [];
+  const peak1: boolean[] = []; // izotepe1 (PEAK2, offset -2)
+  const peak2: boolean[] = []; // izotepe2 (PEAK1, offset -1)
+  const bot1: boolean[] = []; // izodip1 (BOT2, offset -2)
+  const bot2: boolean[] = []; // izodip2 (BOT1, offset -1)
   for (let i = 0; i < n; i++) {
+    // izotepe1 = high[2] > high and high[2] >= high[1] and high[2] > high[3] and high[2] > high[4]
+    //            and low[1] > math.min(low[3], low[2]) and low < math.min(low[3], low[2])
     const minL = Math.min(lo(i - 3), lo(i - 2));
     peak1.push(hi(i - 2) > hi(i) && hi(i - 2) >= hi(i - 1) && hi(i - 2) > hi(i - 3) && hi(i - 2) > hi(i - 4)
       && lo(i - 1) > minL && lo(i) < minL);
+    // izotepe2 = high[1] > high and high[1] > high[2] and high[1] > high[3] and low < math.min(low[2], low[1])
     peak2.push(hi(i - 1) > hi(i) && hi(i - 1) > hi(i - 2) && hi(i - 1) > hi(i - 3) && lo(i) < Math.min(lo(i - 2), lo(i - 1)));
+    // izodip1 = low[2] < low and low[2] < low[1] and low[2] < low[3] and low[2] < low[4]
+    //           and high[1] < math.max(high[3], high[2]) and high > math.max(high[3], high[2])
     const maxH = Math.max(hi(i - 3), hi(i - 2));
     bot1.push(lo(i - 2) < lo(i) && lo(i - 2) < lo(i - 1) && lo(i - 2) < lo(i - 3) && lo(i - 2) < lo(i - 4)
       && hi(i - 1) < maxH && hi(i) > maxH);
+    // izodip2 = low[1] < low and low[1] < low[2] and low[1] < low[3] and high > math.max(high[2], high[1])
+    bot2.push(lo(i - 1) < lo(i) && lo(i - 1) < lo(i - 2) && lo(i - 1) < lo(i - 3) && hi(i) > Math.max(hi(i - 2), hi(i - 1)));
+  }
+
+  // plotshape(izodip1, 'BOT2', offset = -2), plotshape(izodip2, 'BOT1', offset = -1),
+  // plotshape(izotepe1, 'PEAK2', offset = -2), plotshape(izotepe2, 'PEAK1', offset = -1)
+  const green = '#4CAF50', red = '#F23645';
+  for (let i = 0; i < n; i++) {
+    if (bot1[i]) markers.push({ id: 'shape0', time: bars[i - 2].time, position: 'belowBar', shape: 'labelUp', color: green, text: 'BOT2', textColor: '#FFFFFF', size: 'tiny' });
+    if (bot2[i]) markers.push({ id: 'shape1', time: bars[i - 1].time, position: 'belowBar', shape: 'labelUp', color: green, text: 'BOT1', textColor: '#FFFFFF', size: 'tiny' });
+    if (peak1[i]) markers.push({ id: 'shape2', time: bars[i - 2].time, position: 'aboveBar', shape: 'labelDown', color: red, text: 'PEAK2', textColor: '#FFFFFF', size: 'tiny' });
+    if (peak2[i]) markers.push({ id: 'shape3', time: bars[i - 1].time, position: 'aboveBar', shape: 'labelDown', color: red, text: 'PEAK1', textColor: '#FFFFFF', size: 'tiny' });
   }
 
   return {

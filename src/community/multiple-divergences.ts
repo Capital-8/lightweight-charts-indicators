@@ -1,18 +1,34 @@
 /**
  * Multiple Divergences NON-REPAINT
  *
- * Detects divergences across 10 oscillators (RSI, MACD, MACD Histogram,
- * Stochastic, CCI, Momentum, OBV, DI Oscillator, VW-MACD, CMF) at pivot
- * points. Counts how many oscillators show the same divergence type
- * simultaneously and displays markers when count >= threshold.
+ * Counts, as the original, how many of 10 oscillators show each kind of divergence on the bar: RSI 14, MACD
+ * 12 / 26 / 9 line and histogram, Momentum 10, CCI 10, OBV, Stochastic 14 smoothed by an SMA 3, DI oscillator
+ * (fixnan(100 * rma(change(high) + change(low), 14) / rma(tr, 14))), volume weighted MACD (VWMA 12 - VWMA 26) and
+ * Chaikin Money Flow 21, each with its check box. Per oscillator (each from the first bar where it exists, na where
+ * it divides by zero):
+ * - plFound / phFound: pivotlow / pivothigh of the oscillator (lbL left, lbR right; found on the bar lbR bars after
+ *   the pivot, na values skipped);
+ * - regular bullish: plFound, low[lbR] below and osc[lbR] above their values on the pivot low found before
+ *   (valuewhen(plFound, x, 1)), and barssince(plFound[1]) between the min and max of the lookback range;
+ *   hidden bullish: low[lbR] above and osc[lbR] below; regular / hidden bearish: the same on the pivot highs (high
+ *   higher and osc lower / high lower and osc higher).
+ *
+ * Markers (plotshape, location absolute, as the original): one label per kind and count, "1" to "8" and "8+" for
+ * more than 8 (a count above 8 is shown whatever the minimum count), under the pivot low (low[lbR] - 5 ticks) for
+ * the bullish kinds and over the pivot high (high[lbR] + 5 ticks) for the bearish kinds, on the bar that confirms
+ * the pivot (lbR bars earlier with "Repaint or not?"); teal regular bullish, red regular bearish, green hidden
+ * bullish, orange hidden bearish. The symbol tick (`syminfo.mintick`) comes from the chart context.
  *
  * Reference: "Multiple Divergences NON-REPAINT" by PeterO
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { mintickOf, type ChartContext } from '../chart-context';
 
 export interface MultipleDivergencesInputs {
+  /** Repaint or not? (the shapes lbR bars back) */
+  offset: boolean;
   minDivCount: number;
   lbR: number;
   lbL: number;
@@ -22,9 +38,20 @@ export interface MultipleDivergencesInputs {
   plotHiddenBull: boolean;
   plotBear: boolean;
   plotHiddenBear: boolean;
+  calcmacd: boolean;
+  calcmacda: boolean;
+  calcrsi: boolean;
+  calcstoc: boolean;
+  calccci: boolean;
+  calcmom: boolean;
+  calcobv: boolean;
+  calcdi: boolean;
+  calcvwmacd: boolean;
+  calccmf: boolean;
 }
 
 export const defaultInputs: MultipleDivergencesInputs = {
+  offset: false,
   minDivCount: 2,
   lbR: 1,
   lbL: 3,
@@ -34,18 +61,39 @@ export const defaultInputs: MultipleDivergencesInputs = {
   plotHiddenBull: true,
   plotBear: true,
   plotHiddenBear: true,
+  calcmacd: true,
+  calcmacda: true,
+  calcrsi: true,
+  calcstoc: true,
+  calccci: true,
+  calcmom: true,
+  calcobv: true,
+  calcdi: true,
+  calcvwmacd: true,
+  calccmf: true,
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'minDivCount', type: 'int', title: 'Min Divergence Count', defval: 2, min: 1, max: 10 },
+  { id: 'offset', type: 'bool', title: 'Repaint or not?', defval: false },
+  { id: 'minDivCount', type: 'int', title: 'Minimum Div Count to Display', defval: 2, min: 1, max: 10 },
   { id: 'lbR', type: 'int', title: 'Pivot Lookback Right', defval: 1, min: 1 },
   { id: 'lbL', type: 'int', title: 'Pivot Lookback Left', defval: 3, min: 1 },
-  { id: 'rangeUpper', type: 'int', title: 'Max Bars Back', defval: 60, min: 1 },
-  { id: 'rangeLower', type: 'int', title: 'Min Bars Back', defval: 1, min: 1 },
-  { id: 'plotBull', type: 'bool', title: 'Show Regular Bullish', defval: true },
-  { id: 'plotHiddenBull', type: 'bool', title: 'Show Hidden Bullish', defval: true },
-  { id: 'plotBear', type: 'bool', title: 'Show Regular Bearish', defval: true },
-  { id: 'plotHiddenBear', type: 'bool', title: 'Show Hidden Bearish', defval: true },
+  { id: 'rangeUpper', type: 'int', title: 'Max of Lookback Range', defval: 60, min: 1 },
+  { id: 'rangeLower', type: 'int', title: 'Min of Lookback Range', defval: 1, min: 1 },
+  { id: 'plotBull', type: 'bool', title: 'Plot Bullish', defval: true },
+  { id: 'plotHiddenBull', type: 'bool', title: 'Plot Hidden Bullish', defval: true },
+  { id: 'plotBear', type: 'bool', title: 'Plot Bearish', defval: true },
+  { id: 'plotHiddenBear', type: 'bool', title: 'Plot Hidden Bearish', defval: true },
+  { id: 'calcmacd', type: 'bool', title: 'MACD', defval: true },
+  { id: 'calcmacda', type: 'bool', title: 'MACD Histogram', defval: true },
+  { id: 'calcrsi', type: 'bool', title: 'RSI', defval: true },
+  { id: 'calcstoc', type: 'bool', title: 'Stochastic', defval: true },
+  { id: 'calccci', type: 'bool', title: 'CCI', defval: true },
+  { id: 'calcmom', type: 'bool', title: 'Momentum', defval: true },
+  { id: 'calcobv', type: 'bool', title: 'OBV', defval: true },
+  { id: 'calcdi', type: 'bool', title: 'Diosc', defval: true },
+  { id: 'calcvwmacd', type: 'bool', title: 'VWmacd', defval: true },
+  { id: 'calccmf', type: 'bool', title: 'Chaikin Money Flow', defval: true },
 ];
 
 export const plotConfig: PlotConfig[] = [
@@ -58,235 +106,159 @@ export const metadata = {
   overlay: true,
 };
 
-/**
- * Detect if bar at idx is a pivot low within the given arrays.
- * Pivot confirmed at idx means osc[idx] is lower than all surrounding bars in [idx-lbL, idx+lbR].
- */
-function isPivotLow(arr: number[], idx: number, lbL: number, lbR: number): boolean {
-  const val = arr[idx];
-  if (val == null || isNaN(val)) return false;
-  for (let j = 1; j <= lbL; j++) {
-    const left = arr[idx - j];
-    if (left == null || isNaN(left) || left <= val) return false;
-  }
-  for (let j = 1; j <= lbR; j++) {
-    const right = arr[idx + j];
-    if (right == null || isNaN(right) || right <= val) return false;
-  }
-  return true;
-}
-
-function isPivotHigh(arr: number[], idx: number, lbL: number, lbR: number): boolean {
-  const val = arr[idx];
-  if (val == null || isNaN(val)) return false;
-  for (let j = 1; j <= lbL; j++) {
-    const left = arr[idx - j];
-    if (left == null || isNaN(left) || left >= val) return false;
-  }
-  for (let j = 1; j <= lbR; j++) {
-    const right = arr[idx + j];
-    if (right == null || isNaN(right) || right >= val) return false;
-  }
-  return true;
-}
-
-interface PivotState {
-  lastLowVal: number;
-  lastLowPrice: number;
-  lastLowBar: number;
-  lastHighVal: number;
-  lastHighPrice: number;
-  lastHighBar: number;
-}
-
-export function calculate(bars: Bar[], inputs: Partial<MultipleDivergencesInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
-  const { minDivCount, lbR, lbL, rangeUpper, rangeLower, plotBull, plotHiddenBull, plotBear, plotHiddenBear } =
-    { ...defaultInputs, ...inputs };
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<MultipleDivergencesInputs> = {},
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  const cfg = { ...defaultInputs, ...inputs };
+  const { minDivCount, lbR, lbL, rangeUpper, rangeLower, plotBull, plotHiddenBull, plotBear, plotHiddenBear } = cfg;
 
   const n = bars.length;
+  const A = (s: Series) => s.toArray().map((v) => (v == null ? NaN : v));
   const closeSeries = new Series(bars, (b) => b.close);
   const highSeries = new Series(bars, (b) => b.high);
   const lowSeries = new Series(bars, (b) => b.low);
-  const volumeSeries = new Series(bars, (b) => b.volume ?? 0);
+  const volume = bars.map((b) => b.volume ?? 0);
+  const volumeSeries = Series.fromArray(bars, volume);
+  const div = (a: number, b: number) => (b === 0 ? NaN : a / b); // x / 0 is na in Pine
 
-  // ---- Compute all 10 oscillators ----
-  // 1. RSI
-  const rsiArr = ta.rsi(closeSeries, 14).toArray().map((v) => v ?? NaN);
-
-  // 2. MACD line (EMA12 - EMA26)
-  const ema12 = ta.ema(closeSeries, 12).toArray();
-  const ema26 = ta.ema(closeSeries, 26).toArray();
-  const macdLine: number[] = new Array(n);
-  for (let i = 0; i < n; i++) macdLine[i] = (ema12[i] ?? 0) - (ema26[i] ?? 0);
-
-  // 3. MACD histogram (macd - signal where signal = EMA9 of macd)
-  const macdSeries = Series.fromArray(bars, macdLine);
-  const signalArr = ta.ema(macdSeries, 9).toArray();
-  const macdHist: number[] = new Array(n);
-  for (let i = 0; i < n; i++) macdHist[i] = macdLine[i] - (signalArr[i] ?? 0);
-
-  // 4. Stochastic %K smoothed (stoch k=14, sma k=3)
-  const rawK = ta.stoch(closeSeries, highSeries, lowSeries, 14);
-  const stochArr = ta.sma(rawK, 3).toArray().map((v) => v ?? NaN);
-
-  // 5. CCI
-  const cciArr = ta.cci(closeSeries, 10).toArray().map((v) => v ?? NaN);
-
-  // 6. Momentum
-  const momArr = ta.mom(closeSeries, 10).toArray().map((v) => v ?? NaN);
-
-  // 7. OBV (cumulative sum of signed volume)
-  const obvArr: number[] = new Array(n);
-  obvArr[0] = 0;
-  for (let i = 1; i < n; i++) {
-    const dir = bars[i].close > bars[i - 1].close ? 1 : bars[i].close < bars[i - 1].close ? -1 : 0;
-    obvArr[i] = obvArr[i - 1] + dir * (bars[i].volume ?? 0);
-  }
-
-  // 8. DI Oscillator: (plus_dm smoothed / atr) - (minus_dm smoothed / atr)
-  // plus_dm = change(high) > -change(low) && change(high) > 0 ? change(high) : 0
-  // minus_dm = -change(low) > change(high) && -change(low) > 0 ? -change(low) : 0
-  const diLen = 14;
-  const plusDM: number[] = new Array(n).fill(0);
-  const minusDM: number[] = new Array(n).fill(0);
-  for (let i = 1; i < n; i++) {
-    const upMove = bars[i].high - bars[i - 1].high;
-    const downMove = bars[i - 1].low - bars[i].low;
-    plusDM[i] = upMove > downMove && upMove > 0 ? upMove : 0;
-    minusDM[i] = downMove > upMove && downMove > 0 ? downMove : 0;
-  }
-  const plusDMSmoothed = ta.rma(Series.fromArray(bars, plusDM), diLen).toArray();
-  const minusDMSmoothed = ta.rma(Series.fromArray(bars, minusDM), diLen).toArray();
-  const atrArr = ta.rma(ta.tr(bars), diLen).toArray();
-  const diOscArr: number[] = new Array(n);
+  // ---- The 10 oscillators of the original (na until their windows are full) ----
+  // rsi = rsi(close, 14)
+  const rsi = A(ta.rsi(closeSeries, 14));
+  // [macd, signal, deltamacd] = macd(close, 12, 26, 9)
+  const ema12 = A(ta.ema(closeSeries, 12));
+  const ema26 = A(ta.ema(closeSeries, 26));
+  const macd = ema12.map((v, i) => v - ema26[i]);
+  const signal = A(ta.ema(Series.fromArray(bars, macd), 9));
+  const deltamacd = macd.map((v, i) => v - signal[i]);
+  // moment = mom(close, 10)
+  const moment = A(ta.mom(closeSeries, 10));
+  // cci = cci(close, 10)
+  const cci = A(ta.cci(closeSeries, 10));
+  // obv = cum(change(close) > 0 ? volume : change(close) < 0 ? -volume : 0 * volume)
+  const obv: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
-    const a = atrArr[i] ?? 0;
-    if (a === 0) { diOscArr[i] = 0; continue; }
-    const plusDI = ((plusDMSmoothed[i] ?? 0) / a) * 100;
-    const minusDI = ((minusDMSmoothed[i] ?? 0) / a) * 100;
-    diOscArr[i] = plusDI - minusDI;
+    const ch = i > 0 ? bars[i].close - bars[i - 1].close : NaN;
+    obv[i] = (i > 0 ? obv[i - 1] : 0) + (ch > 0 ? volume[i] : ch < 0 ? -volume[i] : 0);
   }
-
-  // 9. VW-MACD: VWMA(close,12) - VWMA(close,26)
-  const vwma12 = ta.vwma(closeSeries, 12, volumeSeries).toArray();
-  const vwma26 = ta.vwma(closeSeries, 26, volumeSeries).toArray();
-  const vwMacdArr: number[] = new Array(n);
-  for (let i = 0; i < n; i++) vwMacdArr[i] = (vwma12[i] ?? 0) - (vwma26[i] ?? 0);
-
-  // 10. CMF: SMA(((close-low)-(high-close))/(high-low)*volume, 21) / SMA(volume, 21)
-  const cmfRaw: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const hl = bars[i].high - bars[i].low;
-    if (hl === 0) { cmfRaw[i] = 0; continue; }
-    cmfRaw[i] = ((bars[i].close - bars[i].low) - (bars[i].high - bars[i].close)) / hl * (bars[i].volume ?? 0);
+  // stk = sma(stoch(close, high, low, 14), 3)
+  const stk = A(ta.sma(ta.stoch(closeSeries, highSeries, lowSeries, 14), 3));
+  // DI = change(high) - (-change(low)), trur = rma(tr, 14), diosc = fixnan(100 * rma(DI, 14) / trur)
+  const di = bars.map((b, i) => (i > 0 ? (b.high - bars[i - 1].high) + (b.low - bars[i - 1].low) : NaN));
+  const rmaDi = A(ta.rma(Series.fromArray(bars, di), 14));
+  const trur = A(ta.rma(ta.tr(bars), 14));
+  const diosc: number[] = new Array(n);
+  {
+    let last = NaN;
+    for (let i = 0; i < n; i++) {
+      const v = div(100 * rmaDi[i], trur[i]);
+      if (Number.isFinite(v)) last = v;
+      diosc[i] = last;
+    }
   }
-  const cmfNum = ta.sma(Series.fromArray(bars, cmfRaw), 21).toArray();
-  const cmfDen = ta.sma(volumeSeries, 21).toArray();
-  const cmfArr: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const d = cmfDen[i] ?? 0;
-    cmfArr[i] = d === 0 ? 0 : (cmfNum[i] ?? 0) / d;
-  }
+  // vwmacd = vwma(close, 12) - vwma(close, 26)
+  const vwma12 = A(ta.vwma(closeSeries, 12, volumeSeries));
+  const vwma26 = A(ta.vwma(closeSeries, 26, volumeSeries));
+  const vwmacd = vwma12.map((v, i) => v - vwma26[i]);
+  // Cmfm = ((close - low) - (high - close)) / (high - low), Cmfv = Cmfm * volume, cmf = sma(Cmfv, 21) / sma(volume, 21)
+  const cmfv = bars.map((b, i) => div((b.close - b.low) - (b.high - b.close), b.high - b.low) * volume[i]);
+  const cmfNum = A(ta.sma(Series.fromArray(bars, cmfv), 21));
+  const cmfDen = A(ta.sma(volumeSeries, 21));
+  const cmf = cmfNum.map((v, i) => div(v, cmfDen[i]));
 
-  const oscillators: number[][] = [rsiArr, macdLine, macdHist, stochArr, cciArr, momArr, obvArr, diOscArr, vwMacdArr, cmfArr];
-
-  // ---- Divergence detection per oscillator ----
-  // For the non-repaint version, pivot is confirmed at bar (pivotBar + lbR).
-  // The confirmation bar is where we emit the signal.
-  // We scan from the perspective of the pivot bar itself, checking pivot conditions.
+  // In the order of the original's counting: rsi, macd, deltamacd, moment, cci, obv, stk, diosc, vwmacd, cmf
+  const oscillators: Array<{ on: boolean; values: number[] }> = [
+    { on: cfg.calcrsi, values: rsi },
+    { on: cfg.calcmacd, values: macd },
+    { on: cfg.calcmacda, values: deltamacd },
+    { on: cfg.calcmom, values: moment },
+    { on: cfg.calccci, values: cci },
+    { on: cfg.calcobv, values: obv },
+    { on: cfg.calcstoc, values: stk },
+    { on: cfg.calcdi, values: diosc },
+    { on: cfg.calcvwmacd, values: vwmacd },
+    { on: cfg.calccmf, values: cmf },
+  ];
 
   const lowArr = bars.map((b) => b.low);
   const highArr = bars.map((b) => b.high);
+  const at = (arr: number[], i: number) => (i >= 0 ? arr[i] : NaN);
 
-  // Per-oscillator pivot tracking
-  const states: PivotState[] = oscillators.map(() => ({
-    lastLowVal: NaN, lastLowPrice: NaN, lastLowBar: -999,
-    lastHighVal: NaN, lastHighPrice: NaN, lastHighBar: -999,
-  }));
-
-  // Per-bar divergence counts
+  // Per-bar counts: posdivergence, negdivergence, posdivergencehidden, negdivergencehidden
   const regBullCount: number[] = new Array(n).fill(0);
   const regBearCount: number[] = new Array(n).fill(0);
   const hidBullCount: number[] = new Array(n).fill(0);
   const hidBearCount: number[] = new Array(n).fill(0);
 
-  const warmup = 30; // enough for all oscillators to stabilize
-
-  // Scan each bar as a potential pivot center
-  for (let pivotBar = lbL; pivotBar < n - lbR; pivotBar++) {
-    const confirmBar = pivotBar + lbR; // non-repaint: signal appears here
-    if (confirmBar < warmup) continue;
-
-    // Check price pivots
-    const isPricePL = isPivotLow(lowArr, pivotBar, lbL, lbR);
-    const isPricePH = isPivotHigh(highArr, pivotBar, lbL, lbR);
-
-    for (let o = 0; o < oscillators.length; o++) {
-      const osc = oscillators[o];
-      const st = states[o];
-
-      // Check oscillator pivot low
-      if (isPricePL && isPivotLow(osc, pivotBar, lbL, lbR)) {
-        const barsSince = pivotBar - st.lastLowBar;
-        const inRange = barsSince >= rangeLower && barsSince <= rangeUpper;
-
-        if (inRange && !isNaN(st.lastLowVal)) {
-          // Regular Bullish: price LL, osc HL
-          if (lowArr[pivotBar] < st.lastLowPrice && osc[pivotBar] > st.lastLowVal) {
-            regBullCount[confirmBar]++;
-          }
-          // Hidden Bullish: price HL, osc LL
-          if (lowArr[pivotBar] > st.lastLowPrice && osc[pivotBar] < st.lastLowVal) {
-            hidBullCount[confirmBar]++;
-          }
-        }
-
-        st.lastLowVal = osc[pivotBar];
-        st.lastLowPrice = lowArr[pivotBar];
-        st.lastLowBar = pivotBar;
-      }
-
-      // Check oscillator pivot high
-      if (isPricePH && isPivotHigh(osc, pivotBar, lbL, lbR)) {
-        const barsSince = pivotBar - st.lastHighBar;
-        const inRange = barsSince >= rangeLower && barsSince <= rangeUpper;
-
-        if (inRange && !isNaN(st.lastHighVal)) {
-          // Regular Bearish: price HH, osc LH
-          if (highArr[pivotBar] > st.lastHighPrice && osc[pivotBar] < st.lastHighVal) {
-            regBearCount[confirmBar]++;
-          }
-          // Hidden Bearish: price LH, osc HH
-          if (highArr[pivotBar] < st.lastHighPrice && osc[pivotBar] > st.lastHighVal) {
-            hidBearCount[confirmBar]++;
-          }
-        }
-
-        st.lastHighVal = osc[pivotBar];
-        st.lastHighPrice = highArr[pivotBar];
-        st.lastHighBar = pivotBar;
-      }
+  for (const { on, values: osc } of oscillators) {
+    if (!on) continue;
+    // plFound(_osc) = not na(pivotlow(_osc, lbL, lbR)), phFound(_osc) = not na(pivothigh(_osc, lbL, lbR))
+    const pl = A(ta.pivotlow(Series.fromArray(bars, osc), lbL, lbR)).map((v) => !Number.isNaN(v));
+    const ph = A(ta.pivothigh(Series.fromArray(bars, osc), lbL, lbR)).map((v) => !Number.isNaN(v));
+    // valuewhen(found, x, 1): x on the found bar before the latest one (the latest is the current bar when found)
+    let plOsc = [NaN, NaN], plLow = [NaN, NaN], phOsc = [NaN, NaN], phHigh = [NaN, NaN];
+    // barssince(found[1] == true): bars since the bar after the last found bar
+    let lastPl = -1, lastPh = -1;
+    for (let i = 0; i < n; i++) {
+      const oscR = at(osc, i - lbR);
+      const lowR = at(lowArr, i - lbR);
+      const highR = at(highArr, i - lbR);
+      const plSince = i > 0 && lastPl >= 0 ? i - (lastPl + 1) : NaN;
+      const phSince = i > 0 && lastPh >= 0 ? i - (lastPh + 1) : NaN;
+      if (pl[i]) { plOsc = [plOsc[1], oscR]; plLow = [plLow[1], lowR]; }
+      if (ph[i]) { phOsc = [phOsc[1], oscR]; phHigh = [phHigh[1], highR]; }
+      const plRange = rangeLower <= plSince && plSince <= rangeUpper;
+      const phRange = rangeLower <= phSince && phSince <= rangeUpper;
+      // valuewhen(..., 1): the value one occurrence back (na until two occurrences)
+      const vwPlOsc = plOsc[0], vwPlLow = plLow[0], vwPhOsc = phOsc[0], vwPhHigh = phHigh[0];
+      // bullCond: priceLL and oscHL and plFound
+      if (plotBull && lowR < vwPlLow && oscR > vwPlOsc && plRange && pl[i]) regBullCount[i]++;
+      // bearCond: priceHH and oscLH and phFound
+      if (plotBear && highR > vwPhHigh && oscR < vwPhOsc && phRange && ph[i]) regBearCount[i]++;
+      // hiddenBullCond: priceHL and oscLL and plFound
+      if (plotHiddenBull && lowR > vwPlLow && oscR < vwPlOsc && plRange && pl[i]) hidBullCount[i]++;
+      // hiddenBearCond: priceLH and oscHH and phFound
+      if (plotHiddenBear && highR < vwPhHigh && oscR > vwPhOsc && phRange && ph[i]) hidBearCount[i]++;
+      if (pl[i]) lastPl = i;
+      if (ph[i]) lastPh = i;
     }
   }
 
   // ---- Generate markers ----
   // The original has one plotshape per kind and count: "1" to "8" and "8+" (more than 8) for the regular bullish
   // (shape0-shape8), regular bearish (shape9-shape17), hidden bullish (shape18-shape26) and hidden bearish
-  // (shape27-shape35) divergences
+  // (shape27-shape35) divergences. Shape k (1-8) shows when count == k and mindivcount < k + 1; "8+" when
+  // count > 8 and mindivcount < 11 (always: mindivcount is at most 10). Price: low[lbR] - voffset (labelup) /
+  // high[lbR] + voffset (labeldown), voffset = 5 * syminfo.mintick; offset = -off (lbR bars back with "Repaint or
+  // not?" on)
+  const voffset = 5 * mintickOf(chart);
+  const off = cfg.offset ? lbR : 0;
+  const shown = (count: number) => count > 8 || (count >= 1 && count >= minDivCount);
+  const label = (count: number) => (count > 8 ? '8+' : String(count));
   const shapeId = (first: number, count: number) => `shape${first + Math.min(count, 9) - 1}`;
+  const teal = '#00897B', red = '#FF5252', green = '#4CAF50', orange = '#FF9800';
   const markers: MarkerData[] = [];
-  for (let i = warmup; i < n; i++) {
-    if (plotBull && regBullCount[i] >= minDivCount) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008080', text: String(regBullCount[i]), id: shapeId(0, regBullCount[i]) });
+  for (let i = 0; i < n; i++) {
+    const p = i - lbR; // the pivot bar
+    const t = i - off; // the bar the shape is drawn on
+    if (p < 0 || t < 0) continue;
+    const time = bars[t].time;
+    if (shown(regBullCount[i])) {
+      markers.push({ time, position: 'atPriceBottom', price: lowArr[p] - voffset, shape: 'labelUp', color: teal,
+        textColor: '#FFFFFF', text: label(regBullCount[i]), id: shapeId(0, regBullCount[i]) });
     }
-    if (plotBear && regBearCount[i] >= minDivCount) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: String(regBearCount[i]), id: shapeId(9, regBearCount[i]) });
+    if (shown(regBearCount[i])) {
+      markers.push({ time, position: 'atPriceTop', price: highArr[p] + voffset, shape: 'labelDown', color: red,
+        textColor: '#FFFFFF', text: label(regBearCount[i]), id: shapeId(9, regBearCount[i]) });
     }
-    if (plotHiddenBull && hidBullCount[i] >= minDivCount) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008000', text: String(hidBullCount[i]), id: shapeId(18, hidBullCount[i]) });
+    if (shown(hidBullCount[i])) {
+      markers.push({ time, position: 'atPriceBottom', price: lowArr[p] - voffset, shape: 'labelUp', color: green,
+        textColor: '#FFFFFF', text: label(hidBullCount[i]), id: shapeId(18, hidBullCount[i]) });
     }
-    if (plotHiddenBear && hidBearCount[i] >= minDivCount) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FFA500', text: String(hidBearCount[i]), id: shapeId(27, hidBearCount[i]) });
+    if (shown(hidBearCount[i])) {
+      markers.push({ time, position: 'atPriceTop', price: highArr[p] + voffset, shape: 'labelDown', color: orange,
+        textColor: '#FFFFFF', text: label(hidBearCount[i]), id: shapeId(27, hidBearCount[i]) });
     }
   }
 

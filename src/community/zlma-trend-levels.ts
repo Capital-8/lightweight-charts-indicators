@@ -8,17 +8,20 @@
  * Draws boxes at crossover/crossunder levels, with labels when price
  * crosses box boundaries.
  *
- * Plots: p1 = zlma (colored by direction vs zlma[3])
+ * Plots: p1 = zlma (colored by direction vs zlma[3]; no segment into a bar where that colour is na: zlma equal to
+ *             zlma[3] or zlma[3] na, i.e. the first 3 bars of the line)
  *        p2 = emaValue (colored by ema < zlma)
  *        fill(p1, p2) gradient fill between ZLMA and EMA
- *        plotshape diamonds at zlma on signalUp/signalDn
+ *        plotshape diamonds (location absolute) at the zlma price on signalUp/signalDn
+ * zlma and emaValue are ta.ema series (SMA seed, na until the length-th value), drawn and crossed from the first
+ * bar where they exist.
  *        box.new at signal with ATR-based height and price text
  *        label.new when price crosses box boundaries
  *
  * Reference: "Zero-Lag MA Trend Levels [ChartPrime]"
  */
 
-import { ta, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, color, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BoxData, LabelData } from '../types';
 
 export interface ZlmaTrendLevelsInputs {
@@ -64,29 +67,13 @@ export function calculate(bars: Bar[], inputs: Partial<ZlmaTrendLevelsInputs> = 
     const e = emaArr[i] ?? NaN;
     correctionArr[i] = c + (c - e);
   }
-  // Compute EMA of correction series manually (ta.ema expects a Series, so build from array)
-  const zlArr = new Array(n).fill(NaN);
-  {
-    const alpha = 2 / (length + 1);
-    let started = false;
-    for (let i = 0; i < n; i++) {
-      const v = correctionArr[i];
-      if (isNaN(v)) continue;
-      if (!started) {
-        zlArr[i] = v;
-        started = true;
-      } else {
-        zlArr[i] = alpha * v + (1 - alpha) * (zlArr[i - 1] ?? v);
-      }
-    }
-  }
+  // Pine: zlma = ta.ema(correction, length): na until the length-th valid correction value (SMA seed)
+  const zlArr = ta.ema(Series.fromArray(bars, correctionArr), length).toArray();
 
   // ATR for box height: Pine uses ta.atr(200)
   const atrLen = Math.min(200, n);
   const atrSeries = ta.atr(bars, atrLen);
   const atrArr = atrSeries ? atrSeries.toArray() : new Array(n).fill(0);
-
-  const warmup = length * 2;
 
   const plot0: { time: number; value: number; color?: string }[] = [];
   const plot1: { time: number; value: number; color?: string }[] = [];
@@ -106,11 +93,11 @@ export function calculate(bars: Bar[], inputs: Partial<ZlmaTrendLevelsInputs> = 
   let checkSignalsPrev = false;
 
   for (let i = 0; i < n; i++) {
-    const val = i < warmup ? NaN : (zlArr[i] ?? NaN);
-    const prev3 = (i >= 3 && i >= warmup) ? (zlArr[i - 3] ?? NaN) : NaN;
+    const val = zlArr[i] ?? NaN;
+    const prev3 = i >= 3 ? (zlArr[i - 3] ?? NaN) : NaN;
     const prev = i > 0 ? (zlArr[i - 1] ?? NaN) : NaN;
-    const emaVal = i < warmup ? NaN : (emaArr[i] ?? NaN);
-    const emaPrev = (i > 0 && i - 1 >= warmup) ? (emaArr[i - 1] ?? NaN) : NaN;
+    const emaVal = emaArr[i] ?? NaN;
+    const emaPrev = i > 0 ? (emaArr[i - 1] ?? NaN) : NaN;
     const atr = atrArr[i] ?? 0;
     const closeVal = closeArr[i] ?? NaN;
 
@@ -121,25 +108,24 @@ export function calculate(bars: Bar[], inputs: Partial<ZlmaTrendLevelsInputs> = 
     }
 
     // Pine: ema_col = emaValue < zlma ? up : dn
-    let emaColor = '#787B86';
-    if (!isNaN(val) && !isNaN(emaVal)) {
-      emaColor = emaVal < val ? '#30d453' : '#4043f1';
-    }
+    // (dn when zlma is still na)
+    const emaColor = emaVal < val ? '#30d453' : '#4043f1';
 
     // Pine: signalUp = ta.crossover(zlma, emaValue), signalDn = ta.crossunder(zlma, emaValue)
     let signalUp = false;
     let signalDn = false;
-    if (i >= warmup && !isNaN(val) && !isNaN(emaVal) && !isNaN(prev) && !isNaN(emaPrev)) {
+    if (!isNaN(val) && !isNaN(emaVal) && !isNaN(prev) && !isNaN(emaPrev)) {
       signalUp = prev <= emaPrev && val > emaVal;
       signalDn = prev >= emaPrev && val < emaVal;
     }
 
     // Pine: plotshape(signalUp ? zlma : na, "", shape.diamond, location.absolute, color=up, size=size.tiny)
     if (signalUp) {
-      markers.push({ id: 'shape0', time: bars[i].time, position: 'inBar', shape: 'diamond', color: '#30d453', text: '' });
+      markers.push({ id: 'shape0', time: bars[i].time, position: 'atPriceMiddle', price: val, shape: 'diamond', color: '#30d453', text: '', size: 'tiny' });
     }
+    // Pine: plotshape(signalDn ? zlma : na, "", shape.diamond, location.absolute, color=dn, size=size.tiny)
     if (signalDn) {
-      markers.push({ id: 'shape1', time: bars[i].time, position: 'inBar', shape: 'diamond', color: '#4043f1', text: '' });
+      markers.push({ id: 'shape1', time: bars[i].time, position: 'atPriceMiddle', price: val, shape: 'diamond', color: '#4043f1', text: '', size: 'tiny' });
     }
 
     // Trend levels: boxes and labels (Pine: if show_levl)
@@ -221,7 +207,8 @@ export function calculate(bars: Bar[], inputs: Partial<ZlmaTrendLevelsInputs> = 
     // Pine: ema_col = emaValue < zlma ? up : dn (dn when a value is na)
     fillBottomColor[i] = color.new_color(emaVal < val ? '#30d453' : '#4043f1', 80) as string;
 
-    plot0.push({ time: bars[i].time, value: val, color: zlmaColor });
+    // zlma_color is na when zlma == zlma[3] or zlma[3] is na: the line is not drawn into that bar
+    plot0.push({ time: bars[i].time, value: val, color: zlmaColor ?? 'transparent' });
     plot1.push({ time: bars[i].time, value: emaVal, color: emaColor });
   }
 

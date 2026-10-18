@@ -367,13 +367,12 @@ describe('ChandelierExit', () => {
     assertShape(result, ['plot0', 'plot1'], true);
   });
 
-  it('plots both stops continuously after warmup', () => {
+  it('plots the stop of the direction at every bar after warmup', () => {
     const longPlot = (result.plots as Record<string, Array<{ value: number }>>)['plot0'];
     const shortPlot = (result.plots as Record<string, Array<{ value: number }>>)['plot1'];
-    // As in the PineScript ta.chandelier(): both lines drawn at every bar past warmup.
+    // As in the original: the long stop while the direction is long, the short stop while it is short.
     for (let i = 22; i < bars.length; i++) {
-      expect(isNaN(longPlot[i].value)).toBe(false);
-      expect(isNaN(shortPlot[i].value)).toBe(false);
+      expect(isNaN(longPlot[i].value)).not.toBe(isNaN(shortPlot[i].value));
     }
   });
 });
@@ -404,7 +403,7 @@ describe('SchaffTrendCycle', () => {
   const result = SchaffTrendCycle.calculate(bars);
 
   it('returns correct shape', () => {
-    assertShape(result, ['plot0'], false);
+    assertShape(result, ['plot0'], true);
   });
 
   it('values are bounded 0-100 after warmup', () => {
@@ -528,13 +527,18 @@ describe('ATRTrailingStops', () => {
   const result = ATRTrailingStops.calculate(bars);
 
   it('returns correct shape', () => {
-    assertShape(result, ['plot0'], true);
+    assertShape(result, ['plot0', 'plot2', 'plot4'], true);
   });
 
   it('produces finite values after warmup', () => {
-    const vals = validValues(result);
+    // Trailing mode (default) draws the long / short stops; the running lines only in Running mode
+    const vals = [...validValues(result, 'plot2'), ...validValues(result, 'plot4')];
     expect(vals.length).toBeGreaterThan(0);
     vals.forEach((v) => expect(isFinite(v)).toBe(true));
+    expect(validValues(result, 'plot0')).toEqual([]);
+    const running = validValues(ATRTrailingStops.calculate(bars, { trailMode: 'Running' }), 'plot0');
+    expect(running.length).toBeGreaterThan(0);
+    running.forEach((v) => expect(isFinite(v)).toBe(true));
   });
 });
 
@@ -992,21 +996,22 @@ describe('LinearRegressionChannel', () => {
 describe('TwinRangeFilter', () => {
   const result = TwinRangeFilter.calculate(bars);
 
-  it('returns correct shape', () => {
-    assertShape(result, ['plot0'], true);
+  it('returns correct shape (labels only, as the original)', () => {
+    assertShape(result, [], true);
+    expect(Object.keys(result.plots)).toEqual([]);
   });
 
-  it('produces finite values after warmup', () => {
-    const vals = validValues(result);
-    expect(vals.length).toBeGreaterThan(0);
-    vals.forEach((v) => expect(isFinite(v)).toBe(true));
-  });
-
-  it('tracks price level (overlay)', () => {
-    const vals = validValues(result);
-    const avgClose = bars.reduce((s, b) => s + b.close, 0) / bars.length;
-    const avg = vals.reduce((s, v) => s + v, 0) / vals.length;
-    expect(Math.abs(avg - avgClose)).toBeLessThan(avgClose * 0.3);
+  it('draws Long labels below and Short labels above the bars, alternating', () => {
+    const list = Array.from({ length: 6 }, (_, k) => bars.map((b) => ({ ...b, time: b.time + k * 80 * 86400 })))
+      .flatMap((chunk, k) => chunk.map((b) => ({ ...b, open: b.open + k * 3, high: b.high + k * 3, low: b.low + k * 3, close: b.close + k * 3 })));
+    const ms = TwinRangeFilter.calculate(list).markers ?? [];
+    expect(ms.length).toBeGreaterThan(0);
+    for (const m of ms) {
+      if (m.id === 'shape0') expect(m).toMatchObject({ position: 'belowBar', text: 'Long' });
+      else expect(m).toMatchObject({ id: 'shape1', position: 'aboveBar', text: 'Short' });
+    }
+    // a label only after the other side's condition
+    for (let k = 1; k < ms.length; k++) expect(ms[k].id).not.toBe(ms[k - 1].id);
   });
 });
 

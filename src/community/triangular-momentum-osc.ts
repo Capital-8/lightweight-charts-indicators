@@ -4,6 +4,9 @@
  * osc = mom(sma(sma(src, length), length), length)
  * Momentum of a double-SMA smoothed source.
  * Histogram with 4-color scheme + divergence markers and lines.
+ * Markers (plotshape, location absolute, as the original): the Bullish / Bearish circles and the Buy / Sell labels
+ * are drawn at the oscillator value of the signal bar (the labels point at it). Peaks / troughs:
+ * crossunder / crossover of change(osc) with 0.
  *
  * Reference: "Triangular Momentum Oscillator & Real Time Divergences [LuxAlgo]"
  */
@@ -125,10 +128,10 @@ export function calculate(bars: Bar[], inputs: Partial<TriangularMomentumOscInpu
     const chg = osc - oscPrev;
     const prevChg = oscPrev - oscPrev2;
 
-    // phosc: crossunder(change(osc), 0) -- prevChg > 0 && chg <= 0
-    const phosc = prevChg > 0 && chg <= 0;
-    // plosc: crossover(change(osc), 0) -- prevChg < 0 && chg >= 0
-    const plosc = prevChg < 0 && chg >= 0;
+    // phosc: crossunder(change(osc), 0) -- chg < 0 && prevChg >= 0
+    const phosc = chg < 0 && prevChg >= 0;
+    // plosc: crossover(change(osc), 0) -- chg > 0 && prevChg <= 0
+    const plosc = chg > 0 && prevChg <= 0;
 
     if (phosc) {
       prevPhoscIdx = curPhoscIdx;
@@ -167,15 +170,17 @@ export function calculate(bars: Bar[], inputs: Partial<TriangularMomentumOscInpu
     // Pine: plotshape(iff(bull,osc,na), shape.circle, location.absolute, #00c42b)
     // Pine: plotshape(iff(bull,osc,na), shape.labelup, location.absolute, #00c42b, text="Buy")
     if (bull) {
-      markers.push({ id: 'shape0', time: bars[i].time, position: 'inBar', shape: 'circle', color: '#00c42b' });
-      markers.push({ id: 'shape2', time: bars[i].time, position: 'inBar', shape: 'labelUp', color: '#00c42b', text: 'Buy' });
+      markers.push({ id: 'shape0', time: bars[i].time, position: 'atPriceMiddle', price: osc, shape: 'circle', color: '#00c42b', size: 'tiny' });
+      markers.push({ id: 'shape2', time: bars[i].time, position: 'atPriceBottom', price: osc, shape: 'labelUp', color: '#00c42b', text: 'Buy',
+        textColor: '#FFFFFF', size: 'tiny' });
     }
 
     // Pine: plotshape(iff(bear,osc,na), shape.circle, location.absolute, #ff441f)
     // Pine: plotshape(iff(bear,osc,na), shape.labeldown, location.absolute, #ff441f, text="Sell")
     if (bear) {
-      markers.push({ id: 'shape1', time: bars[i].time, position: 'inBar', shape: 'circle', color: '#ff441f' });
-      markers.push({ id: 'shape3', time: bars[i].time, position: 'inBar', shape: 'labelDown', color: '#ff441f', text: 'Sell' });
+      markers.push({ id: 'shape1', time: bars[i].time, position: 'atPriceMiddle', price: osc, shape: 'circle', color: '#ff441f', size: 'tiny' });
+      markers.push({ id: 'shape3', time: bars[i].time, position: 'atPriceTop', price: osc, shape: 'labelDown', color: '#ff441f', text: 'Sell',
+        textColor: '#FFFFFF', size: 'tiny' });
     }
 
     // Pine: line.new from previous crossover/crossunder to current

@@ -1,45 +1,82 @@
 /**
  * Profit Maximizer (PMax)
  *
- * ATR-based trailing stop applied to a moving average (not raw close).
- * SuperTrend-style logic on the MA value determines trend direction.
- * Alerts (alertcondition, `alerts` of the result): the original's six conditions, crosses of the MA and of the price
- * (close) with PMax (any cross, crossover, crossunder), on the plotted values.
+ * As the original: a moving average of the source (hl2 by default; SMA, EMA, WMA, TMA, VAR, WWMA, ZLEMA or TSF) with
+ * an ATR trailing stop around it (the ATR, or the SMA of the true range with "Change ATR Calculation Method ?" off;
+ * divided by the close with "Normalize ATR ?"). The long stop only rises while the MA stays above its previous value,
+ * the short stop only falls while the MA stays below it; the direction turns up when the MA crosses above the
+ * previous short stop, down when it crosses below the previous long stop. PMax is the long stop in an up direction,
+ * the short stop in a down one.
+ * Labels at PMax * 0.995 / 1.005 on the crosses of the MA with PMax (Buy shape0 / Sell shape1, "Show Crossing
+ * Signals?") and of the source with PMax (shape2 / shape3, "Show Price/Pmax Crossing Signals?"). The two highlighter
+ * fills are between a hidden ohlc4 plot and PMax: green while the MA is above PMax, red while it is below.
+ * Alerts (alertcondition, `alerts` of the result): the original's six conditions, crosses of the MA and of the source
+ * with PMax (any cross, crossover, crossunder).
  *
  * Reference: "Profit Maximizer PMax"
  */
 
-import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { taCore, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ProfitMaximizerInputs {
+  src: SourceType;
   atrPeriod: number;
   atrMult: number;
-  maLength: number;
   maType: string;
+  maLength: number;
+  changeATR: boolean;
+  normalize: boolean;
+  showSupport: boolean;
+  showSignalsK: boolean;
   showSignalsC: boolean;
+  highlighting: boolean;
 }
 
 export const defaultInputs: ProfitMaximizerInputs = {
+  src: 'hl2',
   atrPeriod: 10,
   atrMult: 3.0,
+  maType: 'EMA',
   maLength: 10,
-  maType: 'ema',
+  changeATR: true,
+  normalize: false,
+  showSupport: true,
+  showSignalsK: true,
   showSignalsC: false,
+  highlighting: true,
 };
 
+const MA_TYPES = ['SMA', 'EMA', 'WMA', 'TMA', 'VAR', 'WWMA', 'ZLEMA', 'TSF'];
+
 export const inputConfig: InputConfig[] = [
-  { id: 'atrPeriod', type: 'int', title: 'ATR Period', defval: 10, min: 1 },
-  { id: 'atrMult', type: 'float', title: 'ATR Multiplier', defval: 3.0, min: 0.1, step: 0.1 },
-  { id: 'maLength', type: 'int', title: 'MA Length', defval: 10, min: 1 },
-  { id: 'maType', type: 'string', title: 'MA Type', defval: 'ema', options: ['sma', 'ema', 'wma', 'hma'] },
-  { id: 'showSignalsC', type: 'bool', title: 'Show Price Crossing Signals', defval: false },
+  { id: 'src', type: 'source', title: 'Source', defval: 'hl2' },
+  { id: 'atrPeriod', type: 'int', title: 'ATR Length', defval: 10 },
+  { id: 'atrMult', type: 'float', title: 'ATR Multiplier', defval: 3.0, step: 0.1 },
+  { id: 'maType', type: 'string', title: 'Moving Average Type', defval: 'EMA', options: MA_TYPES },
+  { id: 'maLength', type: 'int', title: 'Moving Average Length', defval: 10, min: 1 },
+  { id: 'changeATR', type: 'bool', title: 'Change ATR Calculation Method ?', defval: true },
+  { id: 'normalize', type: 'bool', title: 'Normalize ATR ?', defval: false },
+  { id: 'showSupport', type: 'bool', title: 'Show Moving Average?', defval: true },
+  { id: 'showSignalsK', type: 'bool', title: 'Show Crossing Signals?', defval: true },
+  { id: 'showSignalsC', type: 'bool', title: 'Show Price/Pmax Crossing Signals?', defval: false },
+  { id: 'highlighting', type: 'bool', title: 'Highlighter On/Off ?', defval: true },
 ];
 
+/** Colours of the original (color.green / color.red; fills: transparency 90, the fill default) */
+const GREEN = '#4CAF50';
+const RED = '#FF5252';
+const BLUE_LABEL = '#0F18BF';
+const UP_FILL = 'rgba(76, 175, 80, 0.1)';
+const DOWN_FILL = 'rgba(255, 82, 82, 0.1)';
+const NO_FILL = 'rgba(0,0,0,0)';
+
+// Declaration order of the original: MA line, PMax, the hidden ohlc4 plot of the fills
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'PMax', color: '#2962FF', lineWidth: 2 },
-  { id: 'plot1', title: 'MA', color: '#FF6D00', lineWidth: 1 },
+  { id: 'plot1', title: 'Moving Avg Line', color: '#0585E1', lineWidth: 2 },
+  { id: 'plot0', title: 'PMax', color: RED, lineWidth: 2 },
+  { id: 'plot2', title: '', color: '#2962FF', lineWidth: 0, style: 'circles', display: 'none' },
 ];
 
 export const metadata = {
@@ -48,135 +85,151 @@ export const metadata = {
   overlay: true,
 };
 
+const fin = (v: number | undefined) => v !== undefined && Number.isFinite(v);
+
+function sourceOf(bars: Bar[], src: SourceType): number[] {
+  return bars.map((b) => {
+    switch (src) {
+      case 'open': return b.open;
+      case 'high': return b.high;
+      case 'low': return b.low;
+      case 'hl2': return (b.high + b.low) / 2;
+      case 'hlc3': return (b.high + b.low + b.close) / 3;
+      case 'ohlc4': return (b.open + b.high + b.low + b.close) / 4;
+      case 'hlcc4': return (b.high + b.low + b.close + b.close) / 4;
+      default: return b.close;
+    }
+  });
+}
+
+/** getMA(src, length) of the original */
+function movingAverage(src: number[], length: number, type: string): number[] {
+  const n = src.length;
+  switch (type) {
+    case 'SMA': return taCore.sma(src, length);
+    case 'WMA': return taCore.wma(src, length);
+    case 'TMA': return taCore.sma(taCore.sma(src, Math.ceil(length / 2)), Math.floor(length / 2) + 1);
+    case 'VAR': {
+      // vud1 / vdd1: the up / down moves (0 on the first bar), summed over 9 bars; VAR uses |CMO| * alpha
+      const valpha = 2 / (length + 1);
+      const vud1 = src.map((v, i) => (i > 0 && v > src[i - 1] ? v - src[i - 1] : 0));
+      const vdd1 = src.map((v, i) => (i > 0 && v < src[i - 1] ? src[i - 1] - v : 0));
+      const sum9 = (a: number[]) => a.map((_, i) => {
+        if (i < 8) return NaN;
+        let s = 0;
+        for (let k = i - 8; k <= i; k++) s += a[k];
+        return s;
+      });
+      const vUD = sum9(vud1);
+      const vDD = sum9(vdd1);
+      const out: number[] = new Array(n);
+      let prev = NaN;
+      for (let i = 0; i < n; i++) {
+        const cmoRaw = (vUD[i] - vDD[i]) / (vUD[i] + vDD[i]);
+        const cmo = fin(cmoRaw) ? cmoRaw : 0;
+        const a = valpha * Math.abs(cmo);
+        const term = a * src[i];
+        prev = (fin(term) ? term : 0) + (1 - a) * (fin(prev) ? prev : 0);
+        out[i] = prev;
+      }
+      return out;
+    }
+    case 'WWMA': {
+      const a = 1 / length;
+      const out: number[] = new Array(n);
+      let prev = NaN;
+      for (let i = 0; i < n; i++) {
+        prev = a * src[i] + (1 - a) * (fin(prev) ? prev : 0);
+        out[i] = prev;
+      }
+      return out;
+    }
+    case 'ZLEMA': {
+      const lag = length / 2 === Math.round(length / 2) ? length / 2 : (length - 1) / 2;
+      const data = src.map((v, i) => (i - lag >= 0 ? v + (v - src[i - lag]) : NaN));
+      return taCore.ema(data, length);
+    }
+    case 'TSF': {
+      const lrc = taCore.linreg(src, length, 0);
+      const lrc1 = taCore.linreg(src, length, 1);
+      return lrc.map((v, i) => v + (v - lrc1[i]));
+    }
+    default: return taCore.ema(src, length);
+  }
+}
+
 export function calculate(
   bars: Bar[],
   inputs: Partial<ProfitMaximizerInputs> = {},
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
-  const { atrPeriod, atrMult, maLength, maType, showSignalsC } = { ...defaultInputs, ...inputs };
+  const cfg = { ...defaultInputs, ...inputs };
+  const { atrPeriod, atrMult, maLength, normalize } = cfg;
+  const maType = String(cfg.maType).toUpperCase();
   const n = bars.length;
+  const high = bars.map((b) => b.high), low = bars.map((b) => b.low), close = bars.map((b) => b.close);
 
-  const src = getSourceSeries(bars, 'close');
+  const src = sourceOf(bars, cfg.src);
+  // atr = changeATR ? atr(Periods) : sma(tr, Periods) (tr is na on the first bar)
+  const atr = cfg.changeATR
+    ? taCore.atr(atrPeriod, high, low, close)
+    : taCore.sma(taCore.tr(false, high, low, close), atrPeriod);
+  const ma = movingAverage(src, maLength, maType);
 
-  // Calculate MA based on type
-  let maSeries;
-  switch (maType) {
-    case 'sma': maSeries = ta.sma(src, maLength); break;
-    case 'wma': maSeries = ta.wma(src, maLength); break;
-    case 'hma': maSeries = ta.hma(src, maLength); break;
-    default: maSeries = ta.ema(src, maLength); break;
-  }
-  const maArr = maSeries.toArray();
-
-  const atrArr = ta.atr(bars, atrPeriod).toArray();
-
-  // SuperTrend-style trailing stop on MA
-  const pmaxArr: number[] = new Array(n);
-  const dirArr: number[] = new Array(n);
-
+  const pmax: number[] = new Array(n);
+  let longStopLast = NaN, shortStopLast = NaN, dir = 1;
   for (let i = 0; i < n; i++) {
-    const ma = maArr[i] ?? 0;
-    const atr = (atrArr[i] ?? 0) * atrMult;
-    const up = ma - atr;
-    const dn = ma + atr;
-
-    if (i === 0) {
-      pmaxArr[i] = up;
-      dirArr[i] = 1;
-      continue;
-    }
-
-    const prevDir = dirArr[i - 1];
-    const prevPmax = pmaxArr[i - 1];
-    const prevMa = maArr[i - 1] ?? 0;
-
-    const trailUp = prevMa > prevPmax && prevDir === 1 ? Math.max(up, prevPmax) : up;
-    const trailDn = prevMa < prevPmax && prevDir === -1 ? Math.min(dn, prevPmax) : dn;
-
-    if (prevDir === 1) {
-      if (ma < trailUp) {
-        dirArr[i] = -1;
-        pmaxArr[i] = trailDn;
-      } else {
-        dirArr[i] = 1;
-        pmaxArr[i] = trailUp;
-      }
-    } else {
-      if (ma > trailDn) {
-        dirArr[i] = 1;
-        pmaxArr[i] = trailUp;
-      } else {
-        dirArr[i] = -1;
-        pmaxArr[i] = trailDn;
-      }
-    }
+    const m = ma[i];
+    const band = normalize ? atrMult * atr[i] / close[i] : atrMult * atr[i];
+    let longStop = m - band;
+    const longStopPrev = fin(longStopLast) ? longStopLast : longStop;
+    longStop = m > longStopPrev ? Math.max(longStop, longStopPrev) : longStop;
+    let shortStop = m + band;
+    const shortStopPrev = fin(shortStopLast) ? shortStopLast : shortStop;
+    shortStop = m < shortStopPrev ? Math.min(shortStop, shortStopPrev) : shortStop;
+    dir = dir === -1 && m > shortStopPrev ? 1 : dir === 1 && m < longStopPrev ? -1 : dir;
+    pmax[i] = dir === 1 ? longStop : shortStop;
+    longStopLast = longStop;
+    shortStopLast = shortStop;
   }
+  const num = (v: number) => (fin(v) ? v : NaN);
+  const pmaxVals = pmax.map(num);
+  const maVals = ma.map(num);
 
-  const warmup = Math.max(atrPeriod, maLength);
-
-  // Markers: buy when MA crosses above PMax, sell when MA crosses below PMax
-  // Pine: buySignalk = crossover(MAvg, PMax)
-  const markers: MarkerData[] = [];
-  for (let i = warmup + 1; i < n; i++) {
-    const maCur = maArr[i] ?? 0;
-    const maPrev = maArr[i - 1] ?? 0;
-    const pmaxCur = pmaxArr[i];
-    const pmaxPrev = pmaxArr[i - 1];
-    // crossover: prev MA <= prev PMax and cur MA > cur PMax
-    if (maPrev <= pmaxPrev && maCur > pmaxCur) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#26A69A', text: 'Buy', id: 'shape0' });
-    }
-    // crossunder: prev MA >= prev PMax and cur MA < cur PMax
-    if (maPrev >= pmaxPrev && maCur < pmaxCur) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#EF5350', text: 'Sell', id: 'shape1' });
-    }
-
-    // Pine: buySignalc = crossover(src, PMax), sellSignalc = crossunder(src, PMax)
-    if (showSignalsC) {
-      const closeCur = bars[i].close;
-      const closePrev = bars[i - 1].close;
-      if (closePrev <= pmaxPrev && closeCur > pmaxCur) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#0F18BF', text: 'Buy', id: 'shape2' });
-      }
-      if (closePrev >= pmaxPrev && closeCur < pmaxCur) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#0F18BF', text: 'Sell', id: 'shape3' });
-      }
-    }
-  }
-
-  // Fill between ohlc4 (price) and PMax: green when MAvg>PMax, red when MAvg<PMax
-  // Pine: fill(mPlot, pALL, title="UpTrend Highligter", color=longFillColor) and the "DownTrend Highligter" fill
-  const upFillColors: string[] = [];
-  const downFillColors: string[] = [];
-  for (let i = 0; i < n; i++) {
-    const on = i >= warmup;
-    upFillColors.push(on && dirArr[i] === 1 ? 'rgba(38,166,154,0.15)' : 'rgba(0,0,0,0)');
-    downFillColors.push(on && dirArr[i] !== 1 ? 'rgba(239,83,80,0.15)' : 'rgba(0,0,0,0)');
-  }
-
-  const plot0 = pmaxArr.map((v, i) => {
-    if (i < warmup) return { time: bars[i].time, value: NaN };
-    const color = dirArr[i] === 1 ? '#26A69A' : '#EF5350';
-    return { time: bars[i].time, value: v, color };
-  });
-
-  const plot1 = maArr.map((v, i) => ({
-    time: bars[i].time,
-    value: (i < warmup || v == null) ? NaN : v,
-  }));
-
-  // Alerts on the plotted values (na before the warm-up compares false): cross(a, b) = crossover or crossunder
-  const maVals = plot1.map((p) => p.value);
-  const pmaxVals = plot0.map((p) => p.value);
-  const closeVals = bars.map((b) => b.close);
   const maOver = crossedOver(maVals, pmaxVals), maUnder = crossedUnder(maVals, pmaxVals);
-  const pxOver = crossedOver(closeVals, pmaxVals), pxUnder = crossedUnder(closeVals, pmaxVals);
+  const pxOver = crossedOver(src, pmaxVals), pxUnder = crossedUnder(src, pmaxVals);
+
+  const markers: MarkerData[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = bars[i].time;
+    const p = pmaxVals[i];
+    if (cfg.showSignalsK && maOver[i]) {
+      markers.push({ id: 'shape0', time: t, position: 'atPriceBottom', price: p * 0.995, shape: 'labelUp', color: GREEN, text: 'Buy', textColor: '#FFFFFF', size: 'tiny' });
+    }
+    if (cfg.showSignalsK && maUnder[i]) {
+      markers.push({ id: 'shape1', time: t, position: 'atPriceTop', price: p * 1.005, shape: 'labelDown', color: RED, text: 'Sell', textColor: '#FFFFFF', size: 'tiny' });
+    }
+    if (cfg.showSignalsC && pxOver[i]) {
+      markers.push({ id: 'shape2', time: t, position: 'atPriceBottom', price: p * 0.995, shape: 'labelUp', color: BLUE_LABEL, text: 'Buy', textColor: '#FFFFFF', size: 'tiny' });
+    }
+    if (cfg.showSignalsC && pxUnder[i]) {
+      markers.push({ id: 'shape3', time: t, position: 'atPriceTop', price: p * 1.005, shape: 'labelDown', color: BLUE_LABEL, text: 'Sell', textColor: '#FFFFFF', size: 'tiny' });
+    }
+  }
+
+  // fill(mPlot, pALL): ohlc4 to PMax; green when MAvg > PMax, red when MAvg < PMax (na: no fill)
+  const upFillColors = maVals.map((m, i) => (cfg.highlighting && m > pmaxVals[i] ? UP_FILL : NO_FILL));
+  const downFillColors = maVals.map((m, i) => (cfg.highlighting && m < pmaxVals[i] ? DOWN_FILL : NO_FILL));
+
+  const plot0 = pmaxVals.map((v, i) => ({ time: bars[i].time, value: v }));
+  const plot1 = maVals.map((v, i) => ({ time: bars[i].time, value: cfg.showSupport ? v : NaN }));
+  const plot2 = bars.map((b) => ({ time: b.time, value: (b.open + b.high + b.low + b.close) / 4 }));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1 },
+    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2 },
     fills: [
-      { plot1: 'plot0', plot2: 'plot1', options: { title: 'UpTrend Highligter', color: 'rgba(38,166,154,0.15)' }, colors: upFillColors },
-      { plot1: 'plot0', plot2: 'plot1', options: { title: 'DownTrend Highligter', color: 'rgba(239,83,80,0.15)' }, colors: downFillColors },
+      { plot1: 'plot2', plot2: 'plot0', options: { title: 'UpTrend Highligter', color: UP_FILL }, colors: upFillColors },
+      { plot1: 'plot2', plot2: 'plot0', options: { title: 'DownTrend Highligter', color: DOWN_FILL }, colors: downFillColors },
     ],
     markers,
     alerts: alertStates(alertConditions, bars, [

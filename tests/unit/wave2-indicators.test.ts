@@ -70,6 +70,27 @@ function makeFixture(): Array<{
 
 const bars = makeFixture();
 
+/** A longer oscillating walk (1500 bars): enough trend turns for the signal labels of the originals */
+function longFixture(count = 1500) {
+  const out: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }> = [];
+  let seed = 7;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  let price = 100;
+  for (let i = 0; i < count; i++) {
+    const open = price;
+    const close = Math.max(5, price + Math.sin(i / 20) * 0.8 + (rand() - 0.5) * 4);
+    const high = Math.max(open, close) + rand() * 2;
+    const low = Math.min(open, close) - rand() * 2;
+    out.push({ time: 1609459200 + i * 86400, open, high, low, close, volume: 500 + Math.floor(rand() * 1000) });
+    price = close;
+  }
+  return out;
+}
+const longBars = longFixture();
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -120,13 +141,18 @@ describe('AlphaTrend', () => {
     expect(Math.abs(avg - avgClose)).toBeLessThan(avgClose * 0.5);
   });
 
-  it('produces buy/sell markers', () => {
+  it('produces BUY / SELL labels at AlphaTrend[2] on the potential buy / sell signals', () => {
     expect(Array.isArray(result.markers)).toBe(true);
-    expect(result.markers.length).toBeGreaterThan(0);
-    for (const m of result.markers) {
-      expect(['aboveBar', 'belowBar']).toContain(m.position);
-      expect(['arrowUp', 'arrowDown', 'labelUp', 'labelDown']).toContain(m.shape);
+    const r = AlphaTrend.calculate(longBars) as any;
+    expect(r.markers.length).toBeGreaterThan(0);
+    for (const m of r.markers) {
+      if (m.id === 'shape0') expect(m).toMatchObject({ position: 'atPriceBottom', shape: 'labelUp', text: 'BUY' });
+      else expect(m).toMatchObject({ id: 'shape1', position: 'atPriceTop', shape: 'labelDown', text: 'SELL' });
+      expect(Number.isFinite(m.price)).toBe(true);
     }
+    const at = (id: string) => r.markers.filter((m: any) => m.id === id).map((m: any) => m.time);
+    expect(at('shape0')).toEqual(r.alerts[0].times);
+    expect(at('shape1')).toEqual(r.alerts[1].times);
   });
 
   it('has fill between plot0 and plot1', () => {
@@ -203,12 +229,18 @@ describe('FollowLine', () => {
     expect(Math.abs(avg - avgClose)).toBeLessThan(avgClose * 0.5);
   });
 
-  it('produces buy/sell markers', () => {
+  it('produces bomb / hammer labels at the line -/+ ATR(8) on the trend turns', () => {
     expect(Array.isArray(result.markers)).toBe(true);
-    expect(result.markers.length).toBeGreaterThan(0);
-    for (const m of result.markers) {
-      expect(['aboveBar', 'belowBar']).toContain(m.position);
+    // the ATR(8) of a label has its own history (the bars of that label): the first 7 labels have no price
+    const r = FollowLine.calculate(longBars) as any;
+    expect(r.markers.length).toBeGreaterThan(0);
+    for (const m of r.markers) {
+      if (m.id === 'shape0') expect(m).toMatchObject({ position: 'atPriceBottom', shape: 'labelUp' });
+      else expect(m).toMatchObject({ id: 'shape1', position: 'atPriceTop', shape: 'labelDown' });
+      expect(Number.isFinite(m.price)).toBe(true);
     }
+    const buys = r.markers.filter((m: any) => m.id === 'shape0').map((m: any) => m.time);
+    expect(buys).toEqual(r.alerts[1].times.slice(7));
   });
 });
 
@@ -285,10 +317,11 @@ describe('OptimizedTrendTracker', () => {
     vals.forEach((v: number) => expect(isFinite(v)).toBe(true));
   });
 
-  it('produces buy/sell markers', () => {
+  it('produces Buy / Sell labels at OTT * 0.995 / 1.005', () => {
     expect(Array.isArray(result.markers)).toBe(true);
     for (const m of result.markers) {
-      expect(['aboveBar', 'belowBar']).toContain(m.position);
+      expect(['atPriceBottom', 'atPriceTop']).toContain(m.position);
+      expect(Number.isFinite(m.price)).toBe(true);
     }
   });
 

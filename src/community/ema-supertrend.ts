@@ -3,16 +3,14 @@
  *
  * Overlay with 5 EMAs + SuperTrend + NovaWave cloud (fast/slow EMA + fill) +
  * Signal MA + 3 DMAs + Buy/Sell labels on NovaWave fast/slow crossover.
+ * The EMA / SMA plots (5 EMAs, NovaWave EMAs and signal SMA, DMAs) start on the first bar where their ta.ema /
+ * ta.sma has a value (bar length - 1, seeded with the SMA); a DMA displacement shifts its SMA by that many bars.
  *
- * Plots:
- *   plot0: EMA 9       (#E0FFFF)
- *   plot1: EMA 21      (#ff0040)
- *   plot2: EMA 50      (#1900ff, lineWidth 2)
- *   plot3: EMA 100     (#87CEFA)
- *   plot4: EMA 200     (#FAFAD2)
- *   plot5: SuperTrend Up   (green, linebr)
- *   plot6: SuperTrend Down (red, linebr)
- *   plot7: bodyMiddle   (hidden, for fill)
+ * Plots (the original's titles / colours, in its order):
+ *   plot0..plot4: ema_01..ema_05 (#E0FFFF, #ff0040, #1900ff width 2, #87CEFA, #FAFAD2)
+ *   plot7: bodyMiddle (open + close) / 2 (hidden, for the fills)
+ *   plot5: Up Trend (ta.supertrend(factor, ATR length) where direction < 0, green, linebr)
+ *   plot6: Down Trend (the supertrend elsewhere, red, linebr); no supertrend on the bars where the ATR is na
  *   plot8: NovaWave Fast EMA (#D8EDFC)
  *   plot9: NovaWave Slow EMA (#7AE671)
  *   plot10: NovaWave Signal MA (purple)
@@ -23,10 +21,12 @@
  * Fills:
  *   bodyMiddle <-> upTrend (green 90% transparent)
  *   bodyMiddle <-> downTrend (red 90% transparent)
- *   NovaWave Fast <-> NovaWave Slow (green/red based on fast > slow)
+ *   NovaWave Fast <-> NovaWave Slow (green / red 80% transparent from fast > slow)
  *
- * Markers:
- *   BUY on NovaWave fast crossover slow, SELL on crossunder
+ * Markers (the original's label.new labels):
+ *   BUY (label up at the low) on the bars where the NovaWave fast EMA crosses over the slow EMA (ta.crossover: from the
+ *   first bar where both EMAs have a value on the bar before), SELL (label down at the high) on the crossunders; green
+ *   / red, small, white text. As the original's labels (default max_labels_count = 50), only the newest 50 are kept.
  *
  * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' / 'Sell Signal', true on the bars where the NovaWave
  * fast EMA crosses above / below the slow EMA.
@@ -34,7 +34,7 @@
  * Reference: "EMA+Super" by All_in_Traders
  */
 
-import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { ta, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
@@ -92,21 +92,30 @@ export const inputConfig: InputConfig[] = [
   { id: 'dmaDisp200', type: 'int', title: 'DMA 200 Displacement', defval: 0 },
 ];
 
+/** Pine version 6 colours of the original */
+const GREEN = '#4CAF50';
+const RED = '#F23645';
+const TRANSPARENT = 'rgba(0,0,0,0)';
+const ST_UP_FILL = String(color.new(GREEN, 90));
+const ST_DOWN_FILL = String(color.new(RED, 90));
+const NW_BULL_FILL = String(color.new(GREEN, 80));
+const NW_BEAR_FILL = String(color.new(RED, 80));
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'EMA 9', color: '#E0FFFF', lineWidth: 1 },
-  { id: 'plot1', title: 'EMA 21', color: '#ff0040', lineWidth: 1 },
-  { id: 'plot2', title: 'EMA 50', color: '#1900ff', lineWidth: 2 },
-  { id: 'plot3', title: 'EMA 100', color: '#87CEFA', lineWidth: 1 },
-  { id: 'plot4', title: 'EMA 200', color: '#FAFAD2', lineWidth: 1 },
-  { id: 'plot5', title: 'SuperTrend Up', color: '#26A69A', lineWidth: 2, style: 'linebr' },
-  { id: 'plot6', title: 'SuperTrend Down', color: '#EF5350', lineWidth: 2, style: 'linebr' },
-  { id: 'plot7', title: 'Body Middle', color: 'rgba(0,0,0,0)', lineWidth: 0 },
-  { id: 'plot8', title: 'NovaWave Fast', color: '#D8EDFC', lineWidth: 1 },
-  { id: 'plot9', title: 'NovaWave Slow', color: '#7AE671', lineWidth: 1 },
-  { id: 'plot10', title: 'NovaWave Signal', color: '#9C27B0', lineWidth: 1 },
+  { id: 'plot0', title: 'ema_01', color: '#E0FFFF', lineWidth: 1 },
+  { id: 'plot1', title: 'ema_02', color: '#ff0040', lineWidth: 1 },
+  { id: 'plot2', title: 'ema_03', color: '#1900ff', lineWidth: 2 },
+  { id: 'plot3', title: 'ema_04', color: '#87CEFA', lineWidth: 1 },
+  { id: 'plot4', title: 'ema_05', color: '#FAFAD2', lineWidth: 1 },
+  { id: 'plot7', title: 'Plot', color: '#2962FF', lineWidth: 1, display: 'none' },
+  { id: 'plot5', title: 'Up Trend', color: GREEN, lineWidth: 1, style: 'linebr' },
+  { id: 'plot6', title: 'Down Trend', color: RED, lineWidth: 1, style: 'linebr' },
+  { id: 'plot8', title: 'NovaWave Fast EMA', color: '#D8EDFC', lineWidth: 1 },
+  { id: 'plot9', title: 'NovaWave Slow EMA', color: '#7AE671', lineWidth: 1 },
+  { id: 'plot10', title: 'NovaWave Signal MA', color: '#9C27B0', lineWidth: 1 },
   { id: 'plot11', title: 'DMA 20', color: '#E040FB', lineWidth: 2 },
-  { id: 'plot12', title: 'DMA 50', color: '#FFEB3B', lineWidth: 2 },
-  { id: 'plot13', title: 'DMA 200', color: '#009688', lineWidth: 2 },
+  { id: 'plot12', title: 'DMA 50', color: '#FDD835', lineWidth: 2 },
+  { id: 'plot13', title: 'DMA 200', color: '#089981', lineWidth: 2 },
 ];
 
 export const metadata = {
@@ -114,6 +123,9 @@ export const metadata = {
   shortTitle: 'EMA+ST',
   overlay: true,
 };
+
+/** indicator() default max_labels_count */
+const MAX_LABELS = 50;
 
 export function calculate(
   bars: Bar[],
@@ -137,45 +149,34 @@ export function calculate(
   const ema5Arr = ta.ema(emaSrcSeries, ema5Len).toArray();
 
   // ====== SuperTrend ======
-  const atrArr = ta.atr(bars, atrLen).toArray();
-  const upperBand: number[] = new Array(n);
-  const lowerBand: number[] = new Array(n);
-  const dirArr: number[] = new Array(n);   // 1 = bullish (up), -1 = bearish (down)
-  const stArr: number[] = new Array(n);
-
+  // [supertrend, direction] = ta.supertrend(factor, atrPeriod): bands hl2 -+ factor * atr, each kept from the bar
+  // before unless it moves toward the price or the close of the bar before is beyond it (prev band nz() = 0);
+  // direction 1 (down) while atr[1] is na, else -1 (up) / 1 from the close against the band of the trend.
+  // Bars where atr is na: no supertrend (both plots na).
+  const atrArr = ta.atr(bars, atrLen).toArray().map((v) => v ?? NaN);
+  const dirArr: number[] = new Array(n).fill(NaN);
+  const stArr: number[] = new Array(n).fill(NaN);
+  let prevLower = NaN;
+  let prevUpper = NaN;
   for (let i = 0; i < n; i++) {
+    const atr = atrArr[i];
+    if (Number.isNaN(atr)) continue;
     const hl2 = (bars[i].high + bars[i].low) / 2;
-    const atr = atrArr[i] ?? 0;
-    upperBand[i] = hl2 + factor * atr;
-    lowerBand[i] = hl2 - factor * atr;
-
-    if (i === 0) {
-      dirArr[i] = 1;
-      stArr[i] = lowerBand[i];
-      continue;
-    }
-
-    // Clamp lower band: keep previous if new is lower and prev close was above it
-    if (!(lowerBand[i] > lowerBand[i - 1] || bars[i - 1].close < lowerBand[i - 1])) {
-      lowerBand[i] = lowerBand[i - 1];
-    }
-
-    // Clamp upper band: keep previous if new is higher and prev close was below it
-    if (!(upperBand[i] < upperBand[i - 1] || bars[i - 1].close > upperBand[i - 1])) {
-      upperBand[i] = upperBand[i - 1];
-    }
-
-    // Direction flip
-    const prevDir = dirArr[i - 1];
-    if (prevDir === -1 && bars[i].close > upperBand[i - 1]) {
-      dirArr[i] = 1;
-    } else if (prevDir === 1 && bars[i].close < lowerBand[i - 1]) {
-      dirArr[i] = -1;
-    } else {
-      dirArr[i] = prevDir;
-    }
-
-    stArr[i] = dirArr[i] === 1 ? lowerBand[i] : upperBand[i];
+    const pl = Number.isNaN(prevLower) ? 0 : prevLower;
+    const pu = Number.isNaN(prevUpper) ? 0 : prevUpper;
+    const c1 = i > 0 ? bars[i - 1].close : NaN;
+    let lower = hl2 - factor * atr;
+    let upper = hl2 + factor * atr;
+    lower = lower > pl || c1 < pl ? lower : pl;
+    upper = upper < pu || c1 > pu ? upper : pu;
+    let dir: number;
+    if (i === 0 || Number.isNaN(atrArr[i - 1])) dir = 1;
+    else if (stArr[i - 1] === pu) dir = bars[i].close > upper ? -1 : 1;
+    else dir = bars[i].close < lower ? 1 : -1;
+    dirArr[i] = dir;
+    stArr[i] = dir === -1 ? lower : upper;
+    prevLower = lower;
+    prevUpper = upper;
   }
 
   // ====== NovaWave Cloud ======
@@ -191,10 +192,11 @@ export function calculate(
   const dma200Arr = ta.sma(dmaSrcSeries, 200).toArray();
 
   // --- Helpers ---
-  const makePlot = (arr: (number | null)[], wu: number) =>
+  // The plots start on the first bar of their series: ta.ema / ta.sma have a value from bar length - 1
+  const makePlot = (arr: (number | null)[]) =>
     arr.map((v, i) => ({
       time: bars[i].time,
-      value: (i < wu || v == null || isNaN(v as number)) ? NaN : v as number,
+      value: (v == null || isNaN(v as number)) ? NaN : v as number,
     }));
 
   const displace = (arr: (number | null)[], disp: number): (number | null)[] => {
@@ -210,81 +212,66 @@ export function calculate(
   // --- Build plots ---
 
   // plot0..4: 5 EMAs
-  const plot0 = makePlot(ema1Arr, ema1Len);
-  const plot1 = makePlot(ema2Arr, ema2Len);
-  const plot2 = makePlot(ema3Arr, ema3Len);
-  const plot3 = makePlot(ema4Arr, ema4Len);
-  const plot4 = makePlot(ema5Arr, ema5Len);
+  const plot0 = makePlot(ema1Arr);
+  const plot1 = makePlot(ema2Arr);
+  const plot2 = makePlot(ema3Arr);
+  const plot3 = makePlot(ema4Arr);
+  const plot4 = makePlot(ema5Arr);
 
-  // plot5: SuperTrend Up (dirArr === 1 means bullish → show upTrend line)
-  // Pine: plot(direction < 0 ? supertrend : na, "Up Trend", green)
-  // Our dirArr: 1 = bullish = Pine's direction < 0
-  const plot5 = stArr.map((v, i) => ({
-    time: bars[i].time,
-    value: (i < atrLen || dirArr[i] !== 1) ? NaN : v,
-  }));
-
-  // plot6: SuperTrend Down (dirArr === -1 means bearish → show downTrend line)
-  // Pine: plot(direction < 0 ? na : supertrend, "Down Trend", red)
-  const plot6 = stArr.map((v, i) => ({
-    time: bars[i].time,
-    value: (i < atrLen || dirArr[i] !== -1) ? NaN : v,
-  }));
-
-  // plot7: bodyMiddle = (open + close) / 2 (hidden, used for SuperTrend fill)
-  const plot7 = bars.map((b, i) => ({
-    time: b.time,
-    value: i < atrLen ? NaN : (b.open + b.close) / 2,
-  }));
+  // plot5: plot(direction < 0 ? supertrend : na, "Up Trend", color.green, style = linebr)
+  const plot5 = stArr.map((v, i) => ({ time: bars[i].time, value: dirArr[i] < 0 ? v : NaN }));
+  // plot6: plot(direction < 0 ? na : supertrend, "Down Trend", color.red, style = linebr)
+  const plot6 = stArr.map((v, i) => ({ time: bars[i].time, value: dirArr[i] < 0 ? NaN : v }));
+  // plot7: bodyMiddle = plot((open + close) / 2, display = display.none), used by the SuperTrend fills
+  const plot7 = bars.map((b) => ({ time: b.time, value: (b.open + b.close) / 2 }));
 
   // plot8..10: NovaWave
-  const plot8 = makePlot(nwFastArr, nwFastLen);
-  const plot9 = makePlot(nwSlowArr, nwSlowLen);
-  const plot10 = makePlot(nwSignalArr, nwSignalLen);
+  const plot8 = makePlot(nwFastArr);
+  const plot9 = makePlot(nwSlowArr);
+  const plot10 = makePlot(nwSignalArr);
 
   // plot11..13: DMAs
-  const plot11 = makePlot(displace(dma20Arr, dmaDisp20), 20);
-  const plot12 = makePlot(displace(dma50Arr, dmaDisp50), 50);
-  const plot13 = makePlot(displace(dma200Arr, dmaDisp200), 200);
+  const plot11 = makePlot(displace(dma20Arr, dmaDisp20));
+  const plot12 = makePlot(displace(dma50Arr, dmaDisp50));
+  const plot13 = makePlot(displace(dma200Arr, dmaDisp200));
 
   // --- Fills ---
 
-  // SuperTrend fill: bodyMiddle <-> upTrend (green), bodyMiddle <-> downTrend (red)
-  const stFillUpColors: string[] = new Array(n);
-  const stFillDownColors: string[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    stFillUpColors[i] = (i >= atrLen && dirArr[i] === 1) ? 'rgba(0,128,0,0.10)' : 'rgba(0,0,0,0)';
-    stFillDownColors[i] = (i >= atrLen && dirArr[i] === -1) ? 'rgba(255,0,0,0.10)' : 'rgba(0,0,0,0)';
-  }
+  // fill(bodyMiddle, upTrend, color.new(color.green, 90), fillgaps = false) / fill(bodyMiddle, downTrend,
+  // color.new(color.red, 90)): drawn where both plots have a value
+  const stFillUpColors = plot5.map((p) => (Number.isNaN(p.value) ? TRANSPARENT : ST_UP_FILL));
+  const stFillDownColors = plot6.map((p) => (Number.isNaN(p.value) ? TRANSPARENT : ST_DOWN_FILL));
 
   // NovaWave cloud fill: green when fast > slow, red otherwise
-  const nwWarmup = Math.max(nwFastLen, nwSlowLen);
   const nwFillColors: string[] = new Array(n);
   for (let i = 0; i < n; i++) {
-    if (i < nwWarmup || nwFastArr[i] == null || nwSlowArr[i] == null) {
-      nwFillColors[i] = 'rgba(0,0,0,0)';
+    if (nwFastArr[i] == null || nwSlowArr[i] == null || isNaN(nwFastArr[i] as number) || isNaN(nwSlowArr[i] as number)) {
+      nwFillColors[i] = TRANSPARENT;
     } else {
-      nwFillColors[i] = (nwFastArr[i] as number) > (nwSlowArr[i] as number)
-        ? 'rgba(0,128,0,0.20)' : 'rgba(255,0,0,0.20)';
+      // nw_cloud_color = nw_bull ? color.new(color.green, 80) : color.new(color.red, 80)
+      nwFillColors[i] = (nwFastArr[i] as number) > (nwSlowArr[i] as number) ? NW_BULL_FILL : NW_BEAR_FILL;
     }
   }
 
-  // --- Markers: BUY/SELL on NovaWave fast crossover/crossunder slow ---
-  const markers: MarkerData[] = [];
-  for (let i = nwWarmup + 1; i < n; i++) {
-    const fCur = nwFastArr[i];
-    const fPrev = nwFastArr[i - 1];
-    const sCur = nwSlowArr[i];
-    const sPrev = nwSlowArr[i - 1];
-    if (fCur == null || fPrev == null || sCur == null || sPrev == null) continue;
-
-    if (fPrev <= sPrev && fCur > sCur) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#4CAF50', text: 'BUY' });
+  // --- Markers: the original's labels ---
+  // buy_signal = ta.crossover(nw_fast, nw_slow): label.new(bar_index, low, "BUY", color = color.green,
+  // style = label.style_label_up, textcolor = color.white, size = size.small); sell_signal = ta.crossunder(...):
+  // label.new(bar_index, high, "SELL", color = color.red, style = label.style_label_down, ...)
+  const buySignal = crossedOver(nwFastArr, nwSlowArr);
+  const sellSignal = crossedUnder(nwFastArr, nwSlowArr);
+  const allMarkers: MarkerData[] = [];
+  for (let i = 0; i < n; i++) {
+    if (buySignal[i]) {
+      allMarkers.push({ time: bars[i].time, position: 'atPriceBottom', price: bars[i].low, shape: 'labelUp',
+        color: color.green, text: 'BUY', textColor: color.white, size: 'small' });
     }
-    if (fPrev >= sPrev && fCur < sCur) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#F44336', text: 'SELL' });
+    if (sellSignal[i]) {
+      allMarkers.push({ time: bars[i].time, position: 'atPriceTop', price: bars[i].high, shape: 'labelDown',
+        color: color.red, text: 'SELL', textColor: color.white, size: 'small' });
     }
   }
+  // Default max_labels_count = 50: the oldest labels are deleted
+  const markers = allMarkers.slice(-MAX_LABELS);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -295,13 +282,13 @@ export function calculate(
       'plot11': plot11, 'plot12': plot12, 'plot13': plot13,
     },
     fills: [
-      { plot1: 'plot7', plot2: 'plot5', options: { color: 'rgba(0,128,0,0.10)' }, colors: stFillUpColors },
-      { plot1: 'plot7', plot2: 'plot6', options: { color: 'rgba(255,0,0,0.10)' }, colors: stFillDownColors },
-      { plot1: 'plot8', plot2: 'plot9', options: { color: 'rgba(0,128,0,0.20)' }, colors: nwFillColors },
+      { plot1: 'plot7', plot2: 'plot5', options: { color: ST_UP_FILL }, colors: stFillUpColors },
+      { plot1: 'plot7', plot2: 'plot6', options: { color: ST_DOWN_FILL }, colors: stFillDownColors },
+      { plot1: 'plot8', plot2: 'plot9', options: { color: NW_BULL_FILL }, colors: nwFillColors },
     ],
     markers,
     // alertcondition(buy_signal = ta.crossover(nw_fast, nw_slow)) / alertcondition(sell_signal = ta.crossunder(...))
-    alerts: alertStates(alertConditions, bars, [crossedOver(nwFastArr, nwSlowArr), crossedUnder(nwFastArr, nwSlowArr)]),
+    alerts: alertStates(alertConditions, bars, [buySignal, sellSignal]),
   } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] };
 }
 

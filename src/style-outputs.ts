@@ -12,7 +12,8 @@ import { COMMUNITY_STYLE_OUTPUTS } from './style-outputs-community';
 export type StudyDrawingKind = 'label' | 'line' | 'box' | 'linefill' | 'polyline' | 'table';
 
 /** A shape / character output */
-export type StyleShapeConfig = ShapeConfig;
+/** A shape / character output; `display: 'none'`: hidden by default (the reference lists it unchecked) */
+export type StyleShapeConfig = ShapeConfig & { display?: 'none' };
 
 export interface StyleOutputs {
   /** Plots not listed in the Style settings */

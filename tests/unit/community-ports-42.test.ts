@@ -476,20 +476,34 @@ describe('Tweezers and Kangaroo Tail', () => {
 });
 
 describe('Twin Range Filter', () => {
-  it("Long / Short with the original's conditions on the port's filter line", () => {
+  it("Long / Short with the original's conditions on the original's range filter", () => {
     const r = trf.calculate(bars);
-    // the port's filter: EMA of the true range times the range factors
-    const tr = bars.map((b, i) => (i === 0 ? b.high - b.low : Math.max(b.high - b.low, Math.abs(b.high - close[i - 1]), Math.abs(b.low - close[i - 1]))));
-    const f = A(ta.ema(S(tr.map((v) => v * 1.6)), 5));
-    const s = A(ta.ema(S(tr.map((v) => v * 1.0)), 27));
-    const rng = f.map((v, i) => ((Number.isNaN(v) ? 0 : v) + (Number.isNaN(s[i]) ? 0 : s[i])) / 2);
-    const filt: number[] = [close[0]];
-    for (let i = 1; i < n; i++) {
-      const p = filt[i - 1];
-      filt.push(close[i] > p - rng[i] ? Math.max(p, close[i] - rng[i]) : close[i] < p + rng[i] ? Math.min(p, close[i] + rng[i]) : p);
+    // the original draws only the labels (no filter line)
+    expect(r.plots).toEqual({});
+    /** ta.ema: na until the length-th value, seeded with the mean of the first ones */
+    const ema = (x: number[], len: number) => {
+      const out: number[] = [];
+      let cnt = 0, sum = 0, prev = NaN;
+      for (const v of x) {
+        if (Number.isNaN(v)) { out.push(NaN); continue; }
+        if (Number.isNaN(prev)) { cnt++; sum += v; if (cnt === len) prev = sum / len; } else prev = (2 / (len + 1)) * v + (1 - 2 / (len + 1)) * prev;
+        out.push(prev);
+      }
+      return out;
+    };
+    // smoothrng(x, t, m) = ema(ema(abs(x - x[1]), t), 2 t - 1) * m; smrng = average of the fast / slow ranges
+    const absChg = close.map((v, i) => (i > 0 ? Math.abs(v - close[i - 1]) : NaN));
+    const sm = (t: number, m: number) => ema(ema(absChg, t), 2 * t - 1).map((v) => v * m);
+    const s1 = sm(27, 1.6), s2 = sm(55, 2);
+    const rng = s1.map((v, i) => (v + s2[i]) / 2);
+    // rngfilt(x, r): x > nz(rngfilt[1]) ? max(nz(rngfilt[1]), x - r) : min(nz(rngfilt[1]), x + r) (na while r is na)
+    const filt: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const p = i > 0 && !Number.isNaN(filt[i - 1]) ? filt[i - 1] : 0;
+      const x = close[i], rr = rng[i];
+      const v = x > p ? (x - rr < p ? p : x - rr) : (x + rr > p ? p : x + rr);
+      filt.push(Number.isFinite(v) ? v : NaN);
     }
-    // the filter line the port draws after its warm-up
-    r.plots.plot0.forEach((p, i) => { if (i >= 27) expect(p.value).toBeCloseTo(filt[i], 9); });
     let up = 0, dn = 0, ci = NaN;
     const longF: boolean[] = [], shortF: boolean[] = [];
     for (let i = 0; i < n; i++) {
@@ -508,6 +522,9 @@ describe('Twin Range Filter', () => {
     expect(times(r, 1)).toEqual(timeAt(bars, shortF));
     expect(times(r, 0).length).toBeGreaterThan(0);
     expect(times(r, 1).length).toBeGreaterThan(0);
+    // the Long / Short labels are on the alert bars
+    expect((r.markers as M[]).filter((m) => m.text === 'Long').map((m) => m.time as number)).toEqual(times(r, 0));
+    expect((r.markers as M[]).filter((m) => m.text === 'Short').map((m) => m.time as number)).toEqual(times(r, 1));
   });
 });
 

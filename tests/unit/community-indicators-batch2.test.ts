@@ -351,10 +351,13 @@ describe('AutoFib', () => {
     assertShape(result, ['plot0', 'plot1', 'plot2', 'plot3', 'plot4', 'plot5', 'plot6'], true);
   });
 
-  it('produces finite values after warmup', () => {
-    const vals = validValues(result);
-    expect(vals.length).toBeGreaterThan(0);
-    vals.forEach((v: number) => expect(isFinite(v)).toBe(true));
+  it('produces finite values on the last bar only (show_last = 1), na before Fibo Period bars', () => {
+    // 80 bars < the default Fibo Period (144): no level yet
+    expect(validValues(result)).toEqual([]);
+    const short = AutoFib.calculate(bars, { length: 50 });
+    const plot0 = (short.plots as Record<string, Array<{ value: number }>>).plot0;
+    expect(plot0.slice(0, -1).every((p) => isNaN(p.value))).toBe(true);
+    expect(isFinite(plot0[plot0.length - 1].value)).toBe(true);
   });
 });
 
@@ -403,14 +406,18 @@ describe('BBStochRSI', () => {
 describe('BinaryOptionArrows', () => {
   const result = BinaryOptionArrows.calculate(bars);
 
-  it('returns correct shape', () => {
-    assertShape(result, ['plot0'], true);
+  it('returns correct shape (a plotarrow and the background, no plot)', () => {
+    assertShape(result, [], true);
+    expect(Object.keys(result.plots)).toEqual([]);
   });
 
-  it('produces finite values after warmup', () => {
-    const vals = validValues(result);
-    expect(vals.length).toBeGreaterThanOrEqual(0);
-    vals.forEach((v: number) => expect(isFinite(v)).toBe(true));
+  it('gives plotarrow values of +1 (CALL) / -1 (PUT) only', () => {
+    const arrows = (result as any).arrows as Array<{ id: string; value: number }>;
+    expect(Array.isArray(arrows)).toBe(true);
+    arrows.forEach((a) => {
+      expect(a.id).toBe('arrow0');
+      expect([1, -1]).toContain(a.value);
+    });
   });
 });
 
@@ -434,14 +441,17 @@ describe('BitcoinKillZones', () => {
 describe('BullishEngulfingFinder', () => {
   const result = BullishEngulfingFinder.calculate(bars);
 
-  it('returns correct shape', () => {
-    assertShape(result, ['plot0'], true);
+  it('returns correct shape (bar colours only, no plot)', () => {
+    assertShape(result, [], true);
+    expect(Object.keys(result.plots)).toEqual([]);
   });
 
-  it('produces finite values after warmup', () => {
-    const vals = validValues(result);
-    expect(vals.length).toBeGreaterThanOrEqual(0);
-    vals.forEach((v: number) => expect(isFinite(v)).toBe(true));
+  it('colours the bullish engulfing bars, each with its alert() call', () => {
+    const r = result as any;
+    expect(Array.isArray(r.barColors)).toBe(true);
+    expect(r.alertCalls.map((a: { time: number }) => a.time)).toEqual(
+      r.barColors.filter((c: { color?: string }) => c.color).map((c: { time: number }) => c.time),
+    );
   });
 });
 
@@ -1902,7 +1912,7 @@ describe('ST0P', () => {
   const result = ST0P.calculate(bars);
 
   it('returns correct shape', () => {
-    assertShape(result, ['plot0', 'ohlc4'], true);
+    assertShape(result, ['plot0', 'plot1', 'plot2', 'plot3'], true);
   });
 
   it('produces finite values after warmup', () => {
@@ -2183,8 +2193,9 @@ describe('TrendMagic', () => {
 describe('TrendTrader', () => {
   const result = TrendTrader.calculate(bars);
 
-  it('returns correct shape', () => {
-    assertShape(result, ['plot0', 'plot1'], true);
+  it('returns correct shape (one line, as the original)', () => {
+    assertShape(result, ['plot0'], true);
+    expect(Object.keys(result.plots)).toEqual(['plot0']);
   });
 
   it('produces finite values after warmup', () => {

@@ -5,8 +5,11 @@
  * finds the extreme RSI value within that zone, then compares consecutive
  * OB/OS events for bearish/bullish divergence (price makes new high but
  * RSI doesn't, or vice versa). Outputs RSI plot with OB/OS bands and
- * optionally colors bars on divergence signals. A divergence is tested on the bar where the RSI leaves the zone
- * (the original's change(lastlowestrsi) != 0 / change(lasthighestrsi) != 0).
+ * optionally colors bars on divergence signals (blue #2196F3 on a bottom divergence, else black #363A45 on a top
+ * divergence; barcolor0). A divergence is tested on the bar where the RSI leaves the zone
+ * (the original's change(lastlowestrsi) != 0 / change(lasthighestrsi) != 0) and drawn as the original's line.new:
+ * an arrow line (style arrow_left) from that exit bar at the new extreme RSI back to the previous extreme's bar at
+ * its RSI, in 'Line Colors' (tops / bottoms) with 'Line Width'.
  * Alerts (alertcondition, `alerts` of the result): 'Divergence at Bottoms' and 'Divergence at Tops', true on the bars
  * of these divergences.
  *
@@ -14,7 +17,7 @@
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BarColorData, LineDrawingData } from '../types';
+import type { BarColorData, LineDrawingData } from '../types';
 import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiTopsBottomsInputs {
@@ -25,6 +28,9 @@ export interface RsiTopsBottomsInputs {
   maxBarsInZone: number;
   minDist: number;
   maxDist: number;
+  topColor: string;
+  bottomColor: string;
+  lineWidth: number;
   changeBarColor: boolean;
 }
 
@@ -36,6 +42,9 @@ export const defaultInputs: RsiTopsBottomsInputs = {
   maxBarsInZone: 10,
   minDist: 5,
   maxDist: 100,
+  topColor: '#FF5252',
+  bottomColor: '#00E676',
+  lineWidth: 2,
   changeBarColor: true,
 };
 
@@ -47,6 +56,9 @@ export const inputConfig: InputConfig[] = [
   { id: 'maxBarsInZone', type: 'int', title: 'Max Bars in OB/OS', defval: 10, min: 1 },
   { id: 'minDist', type: 'int', title: 'Min Bars Between Tops/Bottoms', defval: 5, min: 1 },
   { id: 'maxDist', type: 'int', title: 'Max Bars Between Tops/Bottoms', defval: 100, min: 1 },
+  { id: 'topColor', type: 'color', title: 'Line Colors', defval: '#FF5252', inline: 'cols' },
+  { id: 'bottomColor', type: 'color', title: '', defval: '#00E676', inline: 'cols' },
+  { id: 'lineWidth', type: 'int', title: 'Line Width', defval: 2, min: 1, max: 4 },
   { id: 'changeBarColor', type: 'bool', title: 'Change Bar Color', defval: true },
 ];
 
@@ -55,6 +67,10 @@ export const plotConfig: PlotConfig[] = [
   { id: 'upper', title: 'Upper Band', color: '#C0C0C0', lineWidth: 1 },
   { id: 'lower', title: 'Lower Band', color: '#C0C0C0', lineWidth: 1 },
 ];
+
+/** color.blue / color.black of Pine version 4 (the original's version) */
+const BAR_BLUE = '#2196F3';
+const BAR_BLACK = '#363A45';
 
 export const metadata = {
   title: 'RSI Tops and Bottoms',
@@ -74,7 +90,7 @@ function getSource(bar: Bar, src: string): number {
   }
 }
 
-export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; lines: LineDrawingData[] }
+export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {}): IndicatorResult & { barColors: BarColorData[]; lines: LineDrawingData[] }
   & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -117,7 +133,6 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
   const mayGoUp: boolean[] = new Array(n).fill(false);
   const mayGoDown: boolean[] = new Array(n).fill(false);
 
-  const markers: MarkerData[] = [];
   const lines: LineDrawingData[] = [];
 
   for (let i = 1; i < n; i++) {
@@ -157,7 +172,7 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
     }
 
     // Bullish divergence: RSI higher low but price lower low (change(lastlowestrsi) != 0: only on the exit bar)
-    if (exitOs && !isNaN(lastLowestRsi) && !isNaN(prevLastLowestRsi) &&
+    if (exitOs && !isNaN(lastLowestRsi) && !isNaN(prevLastLowestRsi) && lastLowestRsi !== 0 && prevLastLowestRsi !== 0 &&
         lastLowestRsi !== prevLastLowestRsi &&
         lastLowestRsi > prevLastLowestRsi &&
         lastLowestPrice < prevLastLowestPrice &&
@@ -165,14 +180,12 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
         itsFineOs && prevItsFineOs &&
         i - prevLastLowestBi > cfg.minDist) {
       mayGoUp[i] = true;
-      // Diagonal line connecting consecutive RSI pivot lows (bullish divergence)
-      if (lastLowestBi >= 0 && lastLowestBi < n && prevLastLowestBi >= 0 && prevLastLowestBi < n) {
-        lines.push({
-          time1: bars[lastLowestBi].time, price1: lastLowestRsi,
-          time2: bars[prevLastLowestBi].time, price2: prevLastLowestRsi,
-          color: '#00FF00', width: 2,
-        });
-      }
+      // line.new(x1 = bar_index, y1 = lastlowestrsi, x2 = lastlowestbi[1], y2 = lastlowestrsi[1], style_arrow_left)
+      lines.push({
+        time1: bars[i].time, price1: lastLowestRsi,
+        time2: bars[prevLastLowestBi].time, price2: prevLastLowestRsi,
+        color: cfg.bottomColor, width: cfg.lineWidth, style: 'arrow_left',
+      });
     }
 
     // --- Top (overbought) tracking ---
@@ -208,7 +221,7 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
     }
 
     // Bearish divergence: RSI lower high but price higher high (change(lasthighestrsi) != 0: only on the exit bar)
-    if (exitOb && !isNaN(lastHighestRsi) && !isNaN(prevLastHighestRsi) &&
+    if (exitOb && !isNaN(lastHighestRsi) && !isNaN(prevLastHighestRsi) && lastHighestRsi !== 0 && prevLastHighestRsi !== 0 &&
         lastHighestRsi !== prevLastHighestRsi &&
         lastHighestRsi < prevLastHighestRsi &&
         lastHighestPrice > prevLastHighestPrice &&
@@ -216,14 +229,12 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
         itsFineOb && prevItsFineOb &&
         i - prevLastHighestBi > cfg.minDist) {
       mayGoDown[i] = true;
-      // Diagonal line connecting consecutive RSI pivot highs (bearish divergence)
-      if (lastHighestBi >= 0 && lastHighestBi < n && prevLastHighestBi >= 0 && prevLastHighestBi < n) {
-        lines.push({
-          time1: bars[lastHighestBi].time, price1: lastHighestRsi,
-          time2: bars[prevLastHighestBi].time, price2: prevLastHighestRsi,
-          color: '#FF0000', width: 2,
-        });
-      }
+      // line.new(x1 = bar_index, y1 = lasthighestrsi, x2 = lasthighestbi[1], y2 = lasthighestrsi[1], style_arrow_left)
+      lines.push({
+        time1: bars[i].time, price1: lastHighestRsi,
+        time2: bars[prevLastHighestBi].time, price2: prevLastHighestRsi,
+        color: cfg.topColor, width: cfg.lineWidth, style: 'arrow_left',
+      });
     }
   }
 
@@ -236,21 +247,12 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
   const barColors: BarColorData[] = [];
   if (cfg.changeBarColor) {
     for (let i = 0; i < n; i++) {
+      // barcolor(iff(chbarcol, iff(maygoup, color.blue, iff(maygodown, color.black, na)), na)): version 4 colours
       if (mayGoUp[i]) {
-        barColors.push({ time: bars[i].time, color: '#0000FF' }); // blue
+        barColors.push({ id: 'barcolor0', time: bars[i].time, color: BAR_BLUE });
       } else if (mayGoDown[i]) {
-        barColors.push({ time: bars[i].time, color: '#000000' }); // black
+        barColors.push({ id: 'barcolor0', time: bars[i].time, color: BAR_BLACK });
       }
-    }
-  }
-
-  // Markers for divergence signals
-  for (let i = 0; i < n; i++) {
-    if (mayGoUp[i]) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#00FF00', text: 'Div' });
-    }
-    if (mayGoDown[i]) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#FF0000', text: 'Div' });
     }
   }
 
@@ -258,7 +260,6 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'rsi': rsiPlot, 'upper': upperPlot, 'lower': lowerPlot },
     fills: [{ plot1: 'lower', plot2: 'upper', options: { color: 'rgba(153,21,255,0.10)' } }],
-    markers,
     barColors,
     lines,
     // alertcondition(maygoup, ...) / alertcondition(maygodown, ...)

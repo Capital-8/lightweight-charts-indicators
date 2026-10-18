@@ -1,188 +1,87 @@
 /**
- * Directional Movement Index + ADX & Key Levels
+ * Directional Movement Index + ADX + Ploted KEYLEVEL
  *
- * DMI with ADX and key levels at 20 and 25.
- * Standard Wilder's smoothing for +DI, -DI, ADX.
+ * Wilder's directional movement: +DM = change(high) when it is above -change(low) and positive, else 0 (also 0 on
+ * the first bar), -DM likewise; +DI / -DI = fixnan(100 * RMA(DM, DI Length) / RMA(TR, DI Length)) and
+ * ADX = 100 * RMA(|+DI - -DI| / (+DI + -DI, 1 when 0), ADX Smoothing). Draws ADX, +DI, -DI and the key level
+ * (a constant plot, 23 by default).
  *
- * Reference: "Directional Movement Index + ADX & Key Levels" (community)
+ * Reference: "Directional Movement Index + ADX + Ploted KEYLEVEL" by console
  */
 
-import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BarColorData } from '../types';
+import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 
 export interface DMIADXInputs {
+  /** ADX smoothing (RMA length of the DX) */
   adxLen: number;
+  /** DI length */
+  diLen: number;
+  /** Key level plotted for the ADX */
   keyLevel: number;
 }
 
 export const defaultInputs: DMIADXInputs = {
   adxLen: 14,
+  diLen: 14,
   keyLevel: 23,
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'adxLen', type: 'int', title: 'ADX Length', defval: 14, min: 1 },
-  { id: 'keyLevel', type: 'int', title: 'Key Level', defval: 23, min: 0 },
+  { id: 'adxLen', type: 'int', title: 'ADX Smoothing', defval: 14 },
+  { id: 'diLen', type: 'int', title: 'DI Length', defval: 14 },
+  { id: 'keyLevel', type: 'int', title: 'key level for ADX', defval: 23 },
 ];
 
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'ADX', color: '#FFEB3B', lineWidth: 2 },
-  { id: 'plot1', title: '+DI', color: '#26A69A', lineWidth: 1 },
-  { id: 'plot2', title: '-DI', color: '#EF5350', lineWidth: 1 },
-];
-
-export const hlineConfig = [
-  { value: 25, options: { color: '#FF6D00', linestyle: 'dashed' as const, title: 'Strong Trend' } },
-  { value: 20, options: { color: '#787B86', linestyle: 'dashed' as const, title: 'Weak Trend' } },
+  { id: 'plot0', title: 'ADX', color: '#FF0000', lineWidth: 1 },
+  { id: 'plot1', title: '+DI', color: '#0000FF', lineWidth: 1 },
+  { id: 'plot2', title: '-DI', color: '#808080', lineWidth: 1 },
+  { id: 'plot3', title: 'Key Level', color: '#FFFFFF', lineWidth: 1 },
 ];
 
 export const metadata = {
-  title: 'Directional Movement Index + ADX & Key Levels',
-  shortTitle: 'DMI ADX',
+  title: 'Directional Movement Index + ADX + Ploted KEYLEVEL',
+  shortTitle: 'DMI/ADX/KEYLEVEL',
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<DMIADXInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
-  const { adxLen, keyLevel } = { ...defaultInputs, ...inputs };
-  const n = bars.length;
+export function calculate(bars: Bar[], inputs: Partial<DMIADXInputs> = {}): IndicatorResult {
+  const cfg = { ...defaultInputs, ...inputs };
+  const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
+  const S = (a: number[]) => Series.fromArray(bars, a);
+  const fixnan = (x: number[]) => {
+    let last = NaN;
+    return x.map((v) => (isNaN(v) ? last : (last = v)));
+  };
 
-  const diPlusArr: number[] = new Array(n);
-  const diMinusArr: number[] = new Array(n);
-  const adxArr: number[] = new Array(n);
-
-  let smoothTR = 0;
-  let smoothPlusDM = 0;
-  let smoothMinusDM = 0;
-  let adx = 0;
-
-  for (let i = 0; i < n; i++) {
-    const high = bars[i].high;
-    const low = bars[i].low;
-    const prevHigh = i > 0 ? bars[i - 1].high : high;
-    const prevLow = i > 0 ? bars[i - 1].low : low;
-    const prevClose = i > 0 ? bars[i - 1].close : bars[i].close;
-
-    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-    const upMove = high - prevHigh;
-    const downMove = prevLow - low;
-    const plusDM = upMove > downMove && upMove > 0 ? upMove : 0;
-    const minusDM = downMove > upMove && downMove > 0 ? downMove : 0;
-
-    if (i <= adxLen) {
-      smoothTR += tr;
-      smoothPlusDM += plusDM;
-      smoothMinusDM += minusDM;
-    } else {
-      smoothTR = smoothTR - smoothTR / adxLen + tr;
-      smoothPlusDM = smoothPlusDM - smoothPlusDM / adxLen + plusDM;
-      smoothMinusDM = smoothMinusDM - smoothMinusDM / adxLen + minusDM;
-    }
-
-    const diPlus = smoothTR !== 0 ? (smoothPlusDM / smoothTR) * 100 : 0;
-    const diMinus = smoothTR !== 0 ? (smoothMinusDM / smoothTR) * 100 : 0;
-    const diSum = diPlus + diMinus;
-    const dx = diSum !== 0 ? Math.abs(diPlus - diMinus) / diSum * 100 : 0;
-
-    if (i === 2 * adxLen - 1) {
-      adx = dx;
-    } else if (i >= 2 * adxLen) {
-      adx = (adx * (adxLen - 1) + dx) / adxLen;
-    }
-
-    diPlusArr[i] = diPlus;
-    diMinusArr[i] = diMinus;
-    adxArr[i] = adx;
-  }
-
-  const warmup = adxLen;
-  const adxWarmup = 2 * adxLen - 1;
-
-  const toPlot = (arr: number[], wu: number) =>
-    arr.map((v, i) => ({ time: bars[i].time, value: i < wu ? NaN : v }));
-
-  // Markers: trend entry signals based on DI crossovers + ADX strength
-  const markers: MarkerData[] = [];
-  const barColors: BarColorData[] = [];
-  const hlRange = 20;
-  const hlTrend = 35;
-
-  for (let i = adxWarmup + 1; i < n; i++) {
-    const sig = adxArr[i];
-    const diUp = diPlusArr[i] >= diMinusArr[i];
-    const diDn = diMinusArr[i] > diPlusArr[i];
-    const diUpPrev = diPlusArr[i - 1] >= diMinusArr[i - 1];
-    const diDnPrev = diMinusArr[i - 1] > diPlusArr[i - 1];
-    const sigUp = sig > adxArr[i - 1];
-    const inRange = sig <= hlRange;
-    const inRangePrev = adxArr[i - 1] <= hlRange;
-
-    // Bullish trend entry
-    const entryLong = (!inRange && diUp && sigUp && !diUpPrev) ||
-                      (!inRange && diUp && sigUp && sig > hlRange && inRangePrev);
-    // Bearish trend entry
-    const entryShort = (!inRange && diDn && sigUp && !diDnPrev) ||
-                       (!inRange && diDn && sigUp && sig > hlRange && inRangePrev);
-    // Strong bullish
-    const entryLongStr = !inRange && diUp && sigUp && diPlusArr[i] >= hlTrend;
-    // Strong bearish
-    const entryShortStr = !inRange && diDn && sigUp && diMinusArr[i] > hlTrend;
-    // DI cross (exit)
-    const crossDi = (diPlusArr[i] >= diMinusArr[i]) !== (diPlusArr[i - 1] >= diMinusArr[i - 1]);
-    const exitLong = (crossDi && diUpPrev) || (inRange && !inRangePrev);
-    const exitShort = (crossDi && diDnPrev) || (inRange && !inRangePrev);
-
-    if (entryLongStr) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#006400', text: 'Strong Bull' });
-    } else if (entryLong) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#006400', text: 'Bull' });
-    }
-    if (entryShortStr) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#8B0000', text: 'Strong Bear' });
-    } else if (entryShort) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#8B0000', text: 'Bear' });
-    }
-    if (exitLong || exitShort) {
-      markers.push({ time: bars[i].time, position: 'inBar', shape: 'xcross', color: '#FF9800', text: 'Exit' });
-    }
-
-    // Bar color based on ADX/DI state
-    const barCol = inRange ? '#FF9800' :
-      (sigUp && diUp) ? '#006400' :
-      (!sigUp && diUp) ? '#388e3c' :
-      (sigUp && diDn) ? '#8B0000' :
-      (!sigUp && diDn) ? '#b71c1c' : '';
-    if (barCol) {
-      barColors.push({ time: bars[i].time, color: barCol });
-    }
-  }
-
-  // Fill between +DI and -DI
-  const fillColors = bars.map((_b, i) => {
-    if (i < adxWarmup) return 'transparent';
-    const sig = adxArr[i];
-    const diUp = diPlusArr[i] >= diMinusArr[i];
-    const inRange = sig <= hlRange;
-    if (inRange) return 'rgba(255,152,0,0.10)';
-    if (diUp && diPlusArr[i] >= hlTrend) return 'rgba(0,100,0,0.10)';
-    if (diUp) return 'rgba(56,142,60,0.10)';
-    if (diMinusArr[i] > hlTrend) return 'rgba(139,0,0,0.10)';
-    return 'rgba(183,28,28,0.10)';
+  // dirmov(len): up = change(high), down = -change(low); a comparison with na is false, so DM = 0 on bar 0
+  const up = bars.map((b, i) => (i > 0 ? b.high - bars[i - 1].high : NaN));
+  const down = bars.map((b, i) => (i > 0 ? -(b.low - bars[i - 1].low) : NaN));
+  const plusDM = up.map((u, i) => (u > down[i] && u > 0 ? u : 0));
+  const minusDM = down.map((d, i) => (d > up[i] && d > 0 ? d : 0));
+  // truerange = rma(tr, len): tr is na on bar 0
+  const truerange = A(ta.rma(ta.tr(bars), cfg.diLen));
+  const rp = A(ta.rma(S(plusDM), cfg.diLen));
+  const rm = A(ta.rma(S(minusDM), cfg.diLen));
+  // fixnan(100 * rma(dm, len) / truerange): a plain division (x / 0 is +-infinity, 0 / 0 is na)
+  const plus = fixnan(rp.map((v, i) => (100 * v) / truerange[i]));
+  const minus = fixnan(rm.map((v, i) => (100 * v) / truerange[i]));
+  // adx = 100 * rma(abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+  const dx = plus.map((p, i) => {
+    const sum = p + minus[i];
+    return Math.abs(p - minus[i]) / (sum === 0 ? 1 : sum);
   });
+  const adx = A(ta.rma(S(dx), cfg.adxLen)).map((v) => 100 * v);
 
+  const line = (vals: number[]) => bars.map((b, i) => ({ time: b.time, value: vals[i] }));
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
-      'plot0': toPlot(adxArr, adxWarmup),
-      'plot1': toPlot(diPlusArr, warmup),
-      'plot2': toPlot(diMinusArr, warmup),
+      plot0: line(adx),
+      plot1: line(plus),
+      plot2: line(minus),
+      plot3: bars.map((b) => ({ time: b.time, value: cfg.keyLevel })),
     },
-    hlines: [
-      ...hlineConfig.map(h => ({ value: h.value, options: h.options })),
-      { value: keyLevel, options: { color: '#FFFFFF', linestyle: 'dashed' as const, title: 'Key Level' } },
-    ],
-    fills: [{ plot1: 'plot1', plot2: 'plot2', colors: fillColors }],
-    markers,
-    barColors,
   };
 }
 

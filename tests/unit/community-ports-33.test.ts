@@ -129,7 +129,8 @@ describe('RSI + BB (EMA) + Dispersion: fill titles', () => {
 });
 
 describe('RSI BB StdDev Signal', () => {
-  const spec = ['shape2', 'shape3', 'shape4', 'shape5', 'shape6', 'shape7', 'shape8', 'shape9', 'shape10', 'shape11',
+  // shape0 / shape1: the original's Regular Bullish / Bearish Labels at the pivot (display.none)
+  const spec = ['shape0', 'shape1', 'shape2', 'shape3', 'shape4', 'shape5', 'shape6', 'shape7', 'shape8', 'shape9', 'shape10', 'shape11',
     'shape12', 'shape13', 'shape14', 'shape15', 'shape16', 'shape17', 'shape18', 'shape19', 'shape20', 'shape21'];
   it('declares the alertconditions of the original', () => {
     expect(decls(bbStd)).toEqual([['alert0', 'Buy Signal', 'Final Buy Signal Triggered'], ['alert1', 'Sell Signal', 'Final Sell Signal Triggered']]);
@@ -161,6 +162,7 @@ describe('RSI BB StdDev Signal', () => {
     for (const id of ['shape2', 'shape3', 'shape4', 'shape5', 'shape8', 'shape9', 'shape10', 'shape11']) expect(ids).toContain(id);
     // a Div marker sits at the RSI of the bar before
     for (const m of r.markers.filter((x) => x.id === 'shape6' || x.id === 'shape7')) expect(m.position).toBe('atPriceMiddle');
+    for (const m of r.markers.filter((x) => x.id === 'shape0' || x.id === 'shape1')) expect(m).toMatchObject({ position: 'atPriceMiddle', text: 'Div' });
   });
   it('AND mode: the SaD markers carry shape14..shape21 and give the alerts', () => {
     const r = bbStd.calculate(bars, { andMode: true, overboughtOversold: false, minBarsBetweenSignals: 0 });

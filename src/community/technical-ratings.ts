@@ -15,10 +15,16 @@
  * (All, MAs, Oscillators), six labels on the last bar with the three rating states ("Strong Buy" above 0.5, "Buy"
  * above 0.1, "Neutral", "Sell", "Strong Sell"), and optional long / short markers when the rating crosses a level
  * or when the count of rising bars reaches a value ('Direction', off by default).
+ * Colours and inputs of the original's v3 (2023.01.19): three bull colours (lime #00FF00, gold #CCCC00, white) and
+ * three bear colours (pink #FF0080, violet #AA00FF, blue #013BCA), each with a check box, the first checked one used
+ * (the first colour when none is); neutral #434650. The signal colour is the neutral colour as is with no count,
+ * else the bull / bear colour at transparency 100 - 20 x count (75 for one bar); the data window plots and the label
+ * states use the bull / bear colour at 20 beyond +-0.5, at 50 beyond +-0.1, else the neutral colour as is. Groups
+ * 'Calculations' and 'Alert Markers (non-repainting)'.
  * Alerts (alert() calls, `alertCalls` of the result, once per bar): the 'Alert message: Long' / 'Short' text on the
  * bars where the original triggers a long / short: the level cross or count condition of the bar, or of the bar
  * before on the chart timeframe with 'Repainting' On (as the original, `[ensureNoRepaintIdx]`), alternating when
- * 'Alternate longs & shorts' applies. The markers keep the rule of the version the port was built from (no delay).
+ * 'Alternate longs & shorts' applies. The long / short markers are drawn on the same bars as these triggers.
  *
  * Timeframe: "" is the chart timeframe. A higher timeframe takes the ratings computed on the bars of that timeframe
  * built from the chart bars (src/anchor-period.ts, with the exchange calendar of the chart context when it has the
@@ -27,8 +33,7 @@
  * chart timeframe is the runtime error of the original.
  *
  * Plot style and width come from inputs in the original; the plot configuration is static (the default columns,
- * width 1). Chart values read: the chart timeframe (`timeframe` of the chart context, else from the bar spacing) and
- * whether the last bar is closed (markers with 'Repainting' Off on the chart timeframe).
+ * width 1). Chart values read: the chart timeframe (`timeframe` of the chart context, else from the bar spacing).
  *
  * Reference: "Technical Ratings"
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -40,7 +45,7 @@ import {
 } from 'oakscriptjs';
 import type { AlertCall, LabelData, MarkerData } from '../types';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
-import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import type { ChartContext } from '../chart-context';
 
 export interface TechnicalRatingsInputs {
   /** Timeframe ("" = chart timeframe) */
@@ -55,17 +60,21 @@ export interface TechnicalRatingsInputs {
   styleInput: 'Columns' | 'Histogram' | 'Area' | 'Line';
   /** Plot width (the plot configuration keeps the default width) */
   widthInput: number;
-  /** Bull color preset */
-  presetInput1: '1' | '2' | '3';
+  /** Bull colours: the first one checked is used (the first colour when none is) */
   colorInput1: string;
+  showColorInput1: boolean;
   colorInput2: string;
+  showColorInput2: boolean;
   colorInput3: string;
-  /** Bear color preset */
-  presetInput2: '1' | '2' | '3';
+  showColorInput3: boolean;
+  /** Bear colours: the first one checked is used (the fourth colour when none is) */
   colorInput4: string;
+  showColorInput4: boolean;
   colorInput5: string;
+  showColorInput5: boolean;
   colorInput6: string;
-  /** Neutral color */
+  showColorInput6: boolean;
+  /** Neutral */
   neutColorInput: string;
   /** Direction of the alerts and markers */
   dirInput: 'None' | 'Longs' | 'Shorts' | 'Longs and Shorts';
@@ -90,15 +99,19 @@ export const defaultInputs: TechnicalRatingsInputs = {
   maInput: 50,
   styleInput: 'Columns',
   widthInput: 1,
-  presetInput1: '1',
-  colorInput1: '#00ff00',
-  colorInput2: '#cccc00',
-  colorInput3: '#ffffff',
-  presetInput2: '1',
-  colorInput4: '#ff0080',
-  colorInput5: '#aa00ff',
-  colorInput6: '#013bca',
-  neutColorInput: '#808080',
+  colorInput1: '#00FF00',
+  showColorInput1: true,
+  colorInput2: '#CCCC00',
+  showColorInput2: false,
+  colorInput3: '#FFFFFF',
+  showColorInput3: false,
+  colorInput4: '#FF0080',
+  showColorInput4: true,
+  colorInput5: '#AA00FF',
+  showColorInput5: false,
+  colorInput6: '#013BCA',
+  showColorInput6: false,
+  neutColorInput: '#434650',
   dirInput: 'None',
   altInput: 'On',
   levelUpInput: 0.5,
@@ -109,49 +122,53 @@ export const defaultInputs: TechnicalRatingsInputs = {
 };
 
 const GRP1 = 'Calculations';
-const GRP2 = 'Ratings display';
-const GRP3 = 'Alerts and markers';
+const GRP2 = 'Alert Markers (non-repainting)';
+const C_TT = 'Pick only one. These are preset colors, but you can modify anyone of them.';
 
 export const inputConfig: InputConfig[] = [
-  { id: 'tfInput', type: 'timeframe', title: 'Timeframe', defval: '', group: GRP1 },
+  { id: 'tfInput', type: 'timeframe', title: 'Higher timeframe', defval: '', group: GRP1 },
   { id: 'repaintInput', type: 'string', title: 'Repainting', defval: 'On', options: ['On', 'Off'], group: GRP1 },
   { id: 'calcsInput', type: 'string', title: 'Rating uses', defval: 'MAs and Oscillators', options: ['MAs', 'Oscillators', 'MAs and Oscillators'], group: GRP1 },
   { id: 'maInput', type: 'int', title: 'Weight of MAs (%)', defval: 50, min: 0, max: 100, step: 10, group: GRP1 },
-  { id: 'styleInput', type: 'string', title: 'Plot style', defval: 'Columns', options: ['Columns', 'Histogram', 'Area', 'Line'], group: GRP2, inline: '01' },
-  { id: 'widthInput', type: 'int', title: '', defval: 1, min: 1, max: 50, group: GRP2, inline: '01' },
-  { id: 'presetInput1', type: 'string', title: 'Bull color', defval: '1', options: ['1', '2', '3'], group: GRP2, inline: '02' },
-  { id: 'colorInput1', type: 'color', title: '', defval: '#00ff00', group: GRP2, inline: '02' },
-  { id: 'colorInput2', type: 'color', title: '', defval: '#cccc00', group: GRP2, inline: '02' },
-  { id: 'colorInput3', type: 'color', title: '', defval: '#ffffff', group: GRP2, inline: '02' },
-  { id: 'presetInput2', type: 'string', title: 'Bear color', defval: '1', options: ['1', '2', '3'], group: GRP2, inline: '03' },
-  { id: 'colorInput4', type: 'color', title: '', defval: '#ff0080', group: GRP2, inline: '03' },
-  { id: 'colorInput5', type: 'color', title: '', defval: '#aa00ff', group: GRP2, inline: '03' },
-  { id: 'colorInput6', type: 'color', title: '', defval: '#013bca', group: GRP2, inline: '03' },
-  { id: 'neutColorInput', type: 'color', title: 'Neutral color', defval: '#808080', group: GRP2, inline: '04' },
-  { id: 'dirInput', type: 'string', title: 'Direction', defval: 'None', options: ['None', 'Longs', 'Shorts', 'Longs and Shorts'], group: GRP3 },
-  { id: 'altInput', type: 'string', title: 'Alternate longs & shorts', defval: 'On', options: ['On', 'Off'], group: GRP3 },
-  { id: 'levelUpInput', type: 'float', title: 'Longs level', defval: 0.5, min: 0, max: 1, step: 0.05, group: GRP3 },
-  { id: 'levelDnInput', type: 'float', title: 'Shorts level', defval: -0.5, min: -1, max: 0, step: 0.05, group: GRP3 },
-  { id: 'gradInput', type: 'float', title: 'Cumulative adv./decl.', defval: 0, min: 0, max: 5, step: 1, group: GRP3 },
-  { id: 'alertUpInput', type: 'string', title: 'Alert message: Long', defval: 'Long', group: GRP3 },
-  { id: 'alertDnInput', type: 'string', title: 'Alert message: Short', defval: 'Short', group: GRP3 },
+  { id: 'styleInput', type: 'string', title: 'Plot style', defval: 'Columns', options: ['Columns', 'Histogram', 'Area', 'Line'], group: GRP1, inline: '01' },
+  { id: 'widthInput', type: 'int', title: '', defval: 1, min: 1, max: 50, group: GRP1, inline: '01' },
+  { id: 'colorInput1', type: 'color', title: 'Bull  ', defval: '#00FF00', group: GRP1, inline: '02', tooltip: C_TT },
+  { id: 'showColorInput1', type: 'bool', title: '', defval: true, group: GRP1, inline: '02' },
+  { id: 'colorInput2', type: 'color', title: '', defval: '#CCCC00', group: GRP1, inline: '02' },
+  { id: 'showColorInput2', type: 'bool', title: '', defval: false, group: GRP1, inline: '02' },
+  { id: 'colorInput3', type: 'color', title: '', defval: '#FFFFFF', group: GRP1, inline: '02' },
+  { id: 'showColorInput3', type: 'bool', title: '', defval: false, group: GRP1, inline: '02' },
+  { id: 'colorInput4', type: 'color', title: 'Bear   ', defval: '#FF0080', group: GRP1, inline: '03', tooltip: C_TT },
+  { id: 'showColorInput4', type: 'bool', title: '', defval: true, group: GRP1, inline: '03' },
+  { id: 'colorInput5', type: 'color', title: '', defval: '#AA00FF', group: GRP1, inline: '03' },
+  { id: 'showColorInput5', type: 'bool', title: '', defval: false, group: GRP1, inline: '03' },
+  { id: 'colorInput6', type: 'color', title: '', defval: '#013BCA', group: GRP1, inline: '03' },
+  { id: 'showColorInput6', type: 'bool', title: '', defval: false, group: GRP1, inline: '03' },
+  { id: 'neutColorInput', type: 'color', title: 'Neutral', defval: '#434650', group: GRP1, inline: '04' },
+  { id: 'dirInput', type: 'string', title: 'Direction', defval: 'None', options: ['None', 'Longs', 'Shorts', 'Longs and Shorts'], group: GRP2 },
+  { id: 'altInput', type: 'string', title: 'Alternate Longs & Shorts', defval: 'On', options: ['On', 'Off'], group: GRP2 },
+  { id: 'levelUpInput', type: 'float', title: 'Longs Level', defval: 0.5, min: 0, max: 1, step: 0.05, group: GRP2 },
+  { id: 'levelDnInput', type: 'float', title: 'Shorts Level', defval: -0.5, min: -1, max: 0, step: 0.05, group: GRP2 },
+  { id: 'gradInput', type: 'float', title: 'Cumulative adv./decl.', defval: 0, min: 0, max: 5, step: 1, group: GRP2 },
+  { id: 'alertUpInput', type: 'string', title: 'Alert message: Long', defval: 'Long', group: GRP2, inline: '11' },
+  { id: 'alertDnInput', type: 'string', title: 'Short', defval: 'Short', group: GRP2, inline: '11' },
 ];
 
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Rating', color: '#808080', lineWidth: 1, style: 'columns' },
-  { id: 'plot1', title: 'All', color: '#808080', display: 'data_window' },
-  { id: 'plot2', title: 'MAs', color: '#808080', display: 'data_window' },
-  { id: 'plot3', title: 'Oscillators', color: '#808080', display: 'data_window' },
-  { id: 'plot4', title: '═══════', color: '#808080', display: 'data_window' },
-  { id: 'plot5', title: 'Advances/Declines', color: '#808080', display: 'data_window' },
+  { id: 'plot0', title: 'Rating', color: '#434650', lineWidth: 1, style: 'columns' },
+  { id: 'plot1', title: 'All', color: '#434650', display: 'data_window' },
+  { id: 'plot2', title: 'MAs', color: '#434650', display: 'data_window' },
+  { id: 'plot3', title: 'Oscillators', color: '#434650', display: 'data_window' },
+  { id: 'plot4', title: '═══════', color: '#434650', display: 'data_window' },
+  { id: 'plot5', title: 'Advances/Declines', color: '#434650', display: 'data_window' },
 ];
 
 export const hlineConfig: HLineConfig[] = [
-  { id: 'hline_strong_buy', price: 0.5, title: 'Strong Buy level', color: 'rgba(0, 255, 0, 0.5)', linestyle: 'dashed', linewidth: 1 },
-  { id: 'hline_buy', price: 0.1, title: 'Buy level', color: 'rgba(0, 255, 0, 0.35)', linestyle: 'dashed', linewidth: 1 },
-  { id: 'hline_zero', price: 0, title: 'Zero level', color: 'rgba(120, 123, 134, 0.5)', linestyle: 'dashed', linewidth: 1 },
-  { id: 'hline_sell', price: -0.1, title: 'Sell level', color: 'rgba(255, 0, 128, 0.25)', linestyle: 'dashed', linewidth: 1 },
-  { id: 'hline_strong_sell', price: -0.5, title: 'Strong Sell level', color: 'rgba(255, 0, 128, 0.5)', linestyle: 'dashed', linewidth: 1 },
+  { id: 'hline_strong_buy', price: 0.5, title: 'Strong Buy Level', color: 'rgba(0, 255, 0, 0.5)', linestyle: 'dashed', linewidth: 1 },
+  { id: 'hline_buy', price: 0.1, title: 'Buy Level', color: 'rgba(0, 255, 0, 0.35)', linestyle: 'dashed', linewidth: 1 },
+  { id: 'hline_zero', price: 0, title: '0.0 Level', color: 'rgba(120, 123, 134, 0.5)', linestyle: 'dashed', linewidth: 1 },
+  { id: 'hline_sell', price: -0.1, title: 'Sell Level', color: 'rgba(255, 0, 128, 0.25)', linestyle: 'dashed', linewidth: 1 },
+  { id: 'hline_strong_sell', price: -0.5, title: 'Strong Sell Level', color: 'rgba(255, 0, 128, 0.5)', linestyle: 'dashed', linewidth: 1 },
 ];
 
 export const metadata = {
@@ -304,13 +321,13 @@ function calcRatingAll(bars: Bar[]): { other: number[]; ma: number[] } {
   return { other, ma };
 }
 
-/** colorFromRating() */
+/** colorFromRating(): bull / bear at transparency 20 beyond 0.5, 50 beyond 0.1, else the neutral colour as is */
 function colorFromRating(rating: number, bull: string, bear: string, neutral: string): string {
   if (gt(rating, LEVEL_STRONG)) return String(color.new(bull, 20));
-  if (gt(rating, LEVEL_WEAK)) return String(color.new(bull, 40));
+  if (gt(rating, LEVEL_WEAK)) return String(color.new(bull, 50));
   if (lt(rating, -LEVEL_STRONG)) return String(color.new(bear, 20));
-  if (lt(rating, -LEVEL_WEAK)) return String(color.new(bear, 40));
-  return String(color.new(neutral, 20));
+  if (lt(rating, -LEVEL_WEAK)) return String(color.new(bear, 50));
+  return neutral;
 }
 
 /** textFromRating() */
@@ -322,12 +339,15 @@ function textFromRating(rating: number): string {
   return 'Neutral';
 }
 
-/** signalColor(): base colour by the sign of the count, transparency 100 - 20 * |count| (75 instead of 80) */
+/**
+ * signalColor(): base colour by the sign of the count, transparency 100 - 20 * |count| (75 instead of 80); the
+ * neutral colour (also a bull / bear colour equal to it) is returned as is
+ */
 function signalColor(gradient: number, bull: string, bear: string, neutral: string): string {
   const col = gradient > 0 ? bull : gradient < 0 ? bear : neutral;
   let transp = 100 - Math.abs(gradient) * 20;
   transp = transp === 80 ? 75 : transp;
-  return col.toLowerCase() === neutral.toLowerCase() ? String(color.new(neutral, 75)) : String(color.new(col, transp));
+  return col.toLowerCase() === neutral.toLowerCase() ? col : String(color.new(col, transp));
 }
 
 /** countRising() of the TechnicalRating library (one state per call) */
@@ -352,10 +372,11 @@ export function calculate(
   const n = bars.length;
   const repaint = cfg.repaintInput === 'On';
   const maWeight = Math.trunc(cfg.maInput) / 100;
-  const bullColor = cfg.presetInput1 === '1' ? cfg.colorInput1 : cfg.presetInput1 === '2' ? cfg.colorInput2
-    : cfg.presetInput1 === '3' ? cfg.colorInput3 : '#00000000';
-  const bearColor = cfg.presetInput2 === '1' ? cfg.colorInput4 : cfg.presetInput2 === '2' ? cfg.colorInput5
-    : cfg.presetInput2 === '3' ? cfg.colorInput6 : '#00000000';
+  // bullColor = showColorInput1 ? colorInput1 : showColorInput2 ? colorInput2 : showColorInput3 ? colorInput3 : colorInput1
+  const bullColor = cfg.showColorInput1 ? cfg.colorInput1 : cfg.showColorInput2 ? cfg.colorInput2
+    : cfg.showColorInput3 ? cfg.colorInput3 : cfg.colorInput1;
+  const bearColor = cfg.showColorInput4 ? cfg.colorInput4 : cfg.showColorInput5 ? cfg.colorInput5
+    : cfg.showColorInput6 ? cfg.colorInput6 : cfg.colorInput4;
   const neutral = cfg.neutColorInput;
   const isBiDirectional = cfg.dirInput === 'Longs and Shorts';
   const doLongs = cfg.dirInput === 'Longs' || isBiDirectional;
@@ -406,7 +427,6 @@ export function calculate(
 
   const risingBuys = countRising();
   const fallingSells = countRising();
-  const lastConfirmed = lastBarConfirmedOf(chart);
   const xUp = ta.crossover(Series.fromArray(bars, userRating), cfg.levelUpInput).toArray();
   const xDn = ta.crossunder(Series.fromArray(bars, userRating), cfg.levelDnInput).toArray();
 
@@ -420,7 +440,6 @@ export function calculate(
   const longColor = String(color.new(bullColor, 0));
   const shortColor = String(color.new(bearColor, 0));
   const plotValue = (v: number) => (Number.isFinite(v) ? v : NaN);
-  let lastDir = 0;
   let prevGradient = NaN;
   // alert(): int ensureNoRepaintIdx = not htfUsed and repaintInput ? 1 : 0; var bool lastDirectionUp = na
   const alertCalls: AlertCall[] = [];
@@ -453,34 +472,28 @@ export function calculate(
     const gUp = g !== 0 && eq(gradientLvl, g) && lt(prevGradient, g);
     const gDn = g !== 0 && eq(gradientLvl, -g) && gt(prevGradient, -g);
     prevGradient = gradientLvl;
-    const allowLong = !altInput || lastDir === 0 || lastDir === -1;
-    const allowShort = !altInput || lastDir === 0 || lastDir === 1;
-    // historical bars are new and confirmed; the last bar is confirmed when the chart context says so
-    const confirmed = i < n - 1 || lastConfirmed;
-    const allowAlert = repaint || htfUsed || confirmed;
-    const triggerLong = allowAlert && (up || gUp) && allowLong && doLongs;
-    const triggerShort = allowAlert && (dn || gDn) && allowShort && doShorts;
-    if (triggerLong) lastDir = 1;
-    else if (triggerShort) lastDir = -1;
-    // the original's triggers: ((xUp or gUp) and (...) and doLongs)[ensureNoRepaintIdx]
+    // the original's triggers: ((xUp or gUp) and (...) and doLongs)[ensureNoRepaintIdx], the series of both the
+    // alert() calls and the markers
     const rawLong = (up || gUp) && (!altInput || lastDirectionUp === null || !lastDirectionUp) && doLongs;
     const rawShort = (dn || gDn) && (!altInput || lastDirectionUp === null || lastDirectionUp) && doShorts;
-    const alertLong = noRepaintIdx === 1 ? prevRawLong : rawLong;
-    const alertShort = noRepaintIdx === 1 ? prevRawShort : rawShort;
+    const triggerLong = noRepaintIdx === 1 ? prevRawLong : rawLong;
+    const triggerShort = noRepaintIdx === 1 ? prevRawShort : rawShort;
     prevRawLong = rawLong;
     prevRawShort = rawShort;
-    if (alertLong) {
+    if (triggerLong) {
       alertCalls.push({ time: t, message: cfg.alertUpInput, freq: 'once_per_bar' });
       lastDirectionUp = true;
-    } else if (alertShort) {
+    } else if (triggerShort) {
       alertCalls.push({ time: t, message: cfg.alertDnInput, freq: 'once_per_bar' });
       lastDirectionUp = false;
     }
+    // plotchar(triggerLong, "Long Marker", "▲", location.bottom, color.new(bullColor, 00), size = size.tiny)
+    // plotchar(triggerShort, "Short Marker", "▼", location.top, color.new(bearColor, 00), size = size.tiny)
     if (triggerLong) {
-      markers.push({ time: t, position: 'bottom', shape: 'circle', color: 'transparent', text: '▲', textColor: longColor, size: 'tiny' });
+      markers.push({ time: t, position: 'bottom', shape: 'circle', color: 'transparent', text: '▲', textColor: longColor, size: 'tiny', id: 'char0' });
     }
     if (triggerShort) {
-      markers.push({ time: t, position: 'top', shape: 'circle', color: 'transparent', text: '▼', textColor: shortColor, size: 'tiny' });
+      markers.push({ time: t, position: 'top', shape: 'circle', color: 'transparent', text: '▼', textColor: shortColor, size: 'tiny', id: 'char1' });
     }
   }
 
@@ -510,18 +523,18 @@ export function calculate(
   }
 
   const hlines: NonNullable<IndicatorResult['hlines']> = [
-    { value: LEVEL_STRONG, options: { title: 'Strong Buy level', color: String(color.new(bullColor, 50)), linestyle: 'dashed' } },
-    { value: LEVEL_WEAK, options: { title: 'Buy level', color: String(color.new(bullColor, 65)), linestyle: 'dashed' } },
-    { value: 0, options: { title: 'Zero level', color: String(color.new(GRAY, 50)), linestyle: 'dashed' } },
-    { value: -LEVEL_WEAK, options: { title: 'Sell level', color: String(color.new(bearColor, 75)), linestyle: 'dashed' } },
-    { value: -LEVEL_STRONG, options: { title: 'Strong Sell level', color: String(color.new(bearColor, 50)), linestyle: 'dashed' } },
+    { value: LEVEL_STRONG, options: { title: 'Strong Buy Level', color: String(color.new(bullColor, 50)), linestyle: 'dashed' } },
+    { value: LEVEL_WEAK, options: { title: 'Buy Level', color: String(color.new(bullColor, 65)), linestyle: 'dashed' } },
+    { value: 0, options: { title: '0.0 Level', color: String(color.new(GRAY, 50)), linestyle: 'dashed' } },
+    { value: -LEVEL_WEAK, options: { title: 'Sell Level', color: String(color.new(bearColor, 75)), linestyle: 'dashed' } },
+    { value: -LEVEL_STRONG, options: { title: 'Strong Sell Level', color: String(color.new(bearColor, 50)), linestyle: 'dashed' } },
   ];
   // hline(na) is not drawn; an na colour neither
   if (doLongs && cfg.levelUpInput !== 0) {
-    hlines.push({ value: cfg.levelUpInput, options: { title: 'Long level', color: bullColor, linestyle: 'dotted' } });
+    hlines.push({ value: cfg.levelUpInput, options: { title: 'Long Level', color: bullColor, linestyle: 'dotted' } });
   }
   if (doShorts && cfg.levelDnInput !== 0) {
-    hlines.push({ value: cfg.levelDnInput, options: { title: 'Short level', color: bearColor, linestyle: 'dotted' } });
+    hlines.push({ value: cfg.levelDnInput, options: { title: 'Short Level', color: bearColor, linestyle: 'dotted' } });
   }
 
   return {

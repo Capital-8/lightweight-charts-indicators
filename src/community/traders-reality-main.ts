@@ -908,7 +908,9 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
   const flags = new Map<string, number>();
   const pvsraColor: string[] = [];
   const pvsra: number[] = [];
-  // alertFlag of calcPvsra(): the bar is a vector candle (one of the two vector rules)
+  // alertFlag of calcPvsra() (Traders_Reality_Lib v2): true on the high-volume branch (volume >= 2 x average or
+  // volume x spread >= highest of the 10 bars before) and the medium-volume branch (volume >= 1.5 x average), false
+  // on the low-volume branch (also while the averages are na): the bar is a red / green / blue / violet vector candle
   const vectorFlag: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];

@@ -9,8 +9,8 @@
  * are drawn in the pane and on the price chart (each signal alone, or in AND mode the combinations of two or three
  * signals on the same bar). A transparent "Connector" plot gives 1 (buy), -1 (sell) or 0.
  * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' and 'Sell Signal', true on the bars of the final buy /
- * sell signal (the Connector at 1 / -1). The "Regular Bullish / Bearish Label" shapes are hidden in the original
- * (display.none) and are not drawn.
+ * sell signal (the Connector at 1 / -1). The "Regular Bullish / Bearish Label" shapes ("Div" on the pivot bar) are
+ * hidden by default.
  *
  * Reference: "Williams Signal [trade_lexx]" by trade_lexx
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -478,7 +478,19 @@ export function calculate(
     const mBuyDiv = cfg.divergenceModeInput && buyDiv[i];
     const mSellDiv = cfg.divergenceModeInput && sellDiv[i];
 
-    // Pane signals (the "Regular Bullish / Bearish Label" plotshapes have display.none in Pine: not drawn)
+    // plotshape(bullCond ? percentRLBR : na, offset = -lookbackRight, location.absolute, text = "Div") and the
+    // bearish one ("Regular Bullish / Bearish Label", display.none: hidden by default): bar i drawn on bar i - 1
+    const lbr = fin(percentRLBR[i]);
+    if (i - lookbackRight >= 0 && !isNaN(lbr)) {
+      const tt = barTime(bars, i - lookbackRight, interval);
+      if (bullCond[i]) {
+        markers.push({ time: tt, textColor: PINE_TEXT, id: 'shape0', position: 'atPriceMiddle', price: lbr, shape: 'triangleUp', color: GREEN, text: 'Div' });
+      }
+      if (bearCond[i]) {
+        markers.push({ time: tt, textColor: PINE_TEXT, id: 'shape1', position: 'atPriceMiddle', price: lbr, shape: 'triangleDown', color: RED, text: 'Div' });
+      }
+    }
+    // Pane signals
     if (mBuyMA) mark(i, 'shape2', { position: 'bottom', shape: 'triangleUp', color: GREEN, text: 'MA' });
     if (mSellMA) mark(i, 'shape3', { position: 'top', shape: 'triangleDown', color: RED, text: 'MA' });
     if (mBuyBB) mark(i, 'shape4', { position: 'bottom', shape: 'triangleUp', color: GREEN, text: 'BB' });

@@ -5,6 +5,8 @@
  * Primary QQE: RSI smoothed via EMA, with dynamic ATR-RSI bands.
  * Secondary QQE: Same logic, different parameters.
  * BB on primary QQE trend line highlights strong momentum zones.
+ * Draws plots only: the secondary QQE trend line, the secondary RSI histogram (grey beyond the threshold) and the
+ * QQE up / down columns where both QQEs agree.
  * Alerts (alertcondition, `alerts` of the result): 'Primary RSI Cross Above Zero' / 'Primary RSI Cross Below Zero',
  * the smoothed primary RSI crossing over / under 50.
  *
@@ -12,7 +14,6 @@
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BarColorData } from '../types';
 import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 /** The original's alertconditions */
@@ -141,7 +142,7 @@ function calculateQQE(
   };
 }
 
-export function calculate(bars: Bar[], inputs: Partial<QQEModInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
+export function calculate(bars: Bar[], inputs: Partial<QQEModInputs> = {}): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const close = new Series(bars, (b) => b.close);
 
@@ -188,63 +189,10 @@ export function calculate(bars: Bar[], inputs: Partial<QQEModInputs> = {}): Omit
     plot3.push({ time: t, value: w ? NaN : (secRsi50 < -cfg.thresholdSecondary && priRsi50 < bbLo ? secRsi50 : NaN) });
   }
 
-  // Markers: Primary RSI zero-cross signals and combined QQE buy/sell signals
-  const markers: MarkerData[] = [];
-  const barColors: BarColorData[] = [];
-
-  for (let i = warmup + 1; i < bars.length; i++) {
-    const prevPriRsi = primary.smoothedRsi[i - 1];
-    const curPriRsi = primary.smoothedRsi[i];
-    const secRsi50 = secondary.smoothedRsi[i] - 50;
-    const priRsi50 = primary.smoothedRsi[i] - 50;
-    const bbUp = (bbBasisArr[i] ?? 0) + (bbDevArr[i] ?? 0) * cfg.bollingerMultiplier;
-    const bbLo = (bbBasisArr[i] ?? 0) - (bbDevArr[i] ?? 0) * cfg.bollingerMultiplier;
-
-    // Primary RSI crosses above 50 = bullish zero cross
-    if (prevPriRsi <= 50 && curPriRsi > 50) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#00c3ff', text: 'Z+' });
-    }
-    // Primary RSI crosses below 50 = bearish zero cross
-    if (prevPriRsi >= 50 && curPriRsi < 50) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#ff0062', text: 'Z-' });
-    }
-
-    // Combined QQE buy signal: both QQE agree on bullish
-    const greenBar1 = secRsi50 > cfg.thresholdSecondary;
-    const greenBar2 = priRsi50 > bbUp;
-    const redBar1 = secRsi50 < -cfg.thresholdSecondary;
-    const redBar2 = priRsi50 < bbLo;
-
-    const prevSecRsi50 = secondary.smoothedRsi[i - 1] - 50;
-    const prevPriRsi50 = primary.smoothedRsi[i - 1] - 50;
-    const prevBbUp = (bbBasisArr[i - 1] ?? 0) + (bbDevArr[i - 1] ?? 0) * cfg.bollingerMultiplier;
-    const prevBbLo = (bbBasisArr[i - 1] ?? 0) - (bbDevArr[i - 1] ?? 0) * cfg.bollingerMultiplier;
-    const prevGreen = prevSecRsi50 > cfg.thresholdSecondary && prevPriRsi50 > prevBbUp;
-    const prevRed = prevSecRsi50 < -cfg.thresholdSecondary && prevPriRsi50 < prevBbLo;
-
-    if (greenBar1 && greenBar2 && !prevGreen) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'diamond', color: '#00c3ff', text: 'Buy' });
-    }
-    if (redBar1 && redBar2 && !prevRed) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'diamond', color: '#ff0062', text: 'Sell' });
-    }
-
-    // Bar color: blue when both QQE bullish, red when bearish, gray otherwise
-    if (greenBar1 && greenBar2) {
-      barColors.push({ time: bars[i].time, color: '#00c3ff' });
-    } else if (redBar1 && redBar2) {
-      barColors.push({ time: bars[i].time, color: '#ff0062' });
-    } else {
-      barColors.push({ time: bars[i].time, color: '#808080' });
-    }
-  }
-
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3 },
     hlines: [{ value: 0, options: { color: '#787B86', linestyle: 'dotted', title: 'Zero' } }],
-    markers,
-    barColors,
     // alertcondition(ta.crossover(primaryRSI, 50)) / alertcondition(ta.crossunder(primaryRSI, 50))
     alerts: alertStates(alertConditions, bars, [
       crossedOver(primary.smoothedRsiNa, 50),

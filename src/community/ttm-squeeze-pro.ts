@@ -1,8 +1,11 @@
 /**
  * TTM Squeeze Pro
  *
- * John Carter's TTM Squeeze Pro. Three Keltner Channel widths (1x, 1.5x, 2x)
- * for squeeze detection with enhanced squeeze classification.
+ * John Carter's TTM Squeeze Pro. Squeeze dots at 0 as the original: three Keltner channels around the SMA of the
+ * source with the SMA of the true range times 1.0 / 1.5 / 2.0; a squeeze of a channel when the lower Bollinger Band
+ * is at or above its lower band or the upper Bollinger Band at or below its upper band: orange (#1), else red (#2),
+ * else black (#3), else green (no squeeze, also before the bands exist). Momentum columns as the original: above 0
+ * aqua when rising over the bar before (na before = 0), else #2962ff; at or below 0 red when falling, else yellow.
  *
  * Alerts (alert() calls, `alertCalls` of the result, once per bar), as the original computes them: no squeeze = the
  * lower Bollinger Band below the lower widest Keltner Channel or the upper band above the upper one (Keltner basis:
@@ -62,9 +65,18 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
+/** color.orange / color.red / color.black / color.green / color.aqua / #2962ff / color.yellow */
+const ORANGE = '#FF9800';
+const RED = '#FF5252';
+const BLACK = '#363A45';
+const GREEN = '#4CAF50';
+const AQUA = '#00BCD4';
+const BLUE = '#2962ff';
+const YELLOW = '#FFEB3B';
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Momentum', color: '#26A69A', lineWidth: 4, style: 'histogram' },
-  { id: 'plot1', title: 'Squeeze', color: '#787B86', lineWidth: 2, style: 'cross' },
+  { id: 'plot0', title: 'Momentum', color: '#2962ff', lineWidth: 4, style: 'histogram' },
+  { id: 'plot1', title: 'SQZ', color: '#2962ff', lineWidth: 3, style: 'circles' },
 ];
 
 export const metadata = {
@@ -86,19 +98,6 @@ export function calculate(
   const upperBB = bbBasis.add(bbDev);
   const lowerBB = bbBasis.sub(bbDev);
 
-  // 3 Keltner Channel levels
-  const [kcUpper1, , kcLower1] = ta.kc(bars, source, kcLength, kcMult1, true);
-  const [kcUpper2, , kcLower2] = ta.kc(bars, source, kcLength, kcMult2, true);
-  const [kcUpper3, , kcLower3] = ta.kc(bars, source, kcLength, kcMult3, true);
-
-  // Squeeze states
-  const sqz1On = lowerBB.gt(kcLower1).and(upperBB.lt(kcUpper1));
-  const sqz2On = lowerBB.gt(kcLower2).and(upperBB.lt(kcUpper2));
-  const sqz3On = lowerBB.gt(kcLower3).and(upperBB.lt(kcUpper3));
-  const sqz1Arr = sqz1On.toArray();
-  const sqz2Arr = sqz2On.toArray();
-  const sqz3Arr = sqz3On.toArray();
-
   // Momentum: linreg(close - avg((highest+lowest)/2, sma), kcLength, 0)
   const highSeries = new Series(bars, (bar) => bar.high);
   const lowSeries = new Series(bars, (bar) => bar.low);
@@ -112,38 +111,18 @@ export function calculate(
 
   const warmup = Math.max(bbLength, kcLength);
 
-  // Momentum histogram: 4-color scheme
+  // Momentum histogram colour: mom > 0 ? (mom > nz(mom[1]) ? aqua : #2962ff) : (mom < nz(mom[1]) ? red : yellow)
   const momData = valArr.map((value, i) => {
     const v = value ?? NaN;
     if (i < warmup || isNaN(v)) return { time: bars[i].time, value: NaN };
-    const prev = i > 0 ? (valArr[i - 1] ?? NaN) : NaN;
-    let color: string;
-    if (v >= 0) {
-      color = v > prev ? '#00E676' : '#26A69A';
-    } else {
-      color = v < prev ? '#FF5252' : '#EF5350';
-    }
+    const p = i > 0 ? (valArr[i - 1] ?? NaN) : NaN;
+    const prev = Number.isNaN(p) ? 0 : p;
+    const color = gt(v, 0) ? (gt(v, prev) ? AQUA : BLUE) : (lt(v, prev) ? RED : YELLOW);
     return { time: bars[i].time, value: v, color };
   });
 
-  // Squeeze dots: black=tight(1x), red=normal(1.5x), orange=wide(2x), green=no squeeze
-  const sqzData = valArr.map((value, i) => {
-    if (i < warmup || value == null) return { time: bars[i].time, value: NaN };
-    let color: string;
-    if (sqz1Arr[i]) {
-      color = '#000000'; // tight squeeze - inside 1x KC
-    } else if (sqz2Arr[i]) {
-      color = '#FF0000'; // normal squeeze - inside 1.5x KC
-    } else if (sqz3Arr[i]) {
-      color = '#FF6D00'; // wide squeeze - inside 2x KC
-    } else {
-      color = '#00E676'; // no squeeze
-    }
-    return { time: bars[i].time, value: 0, color };
-  });
-
-  // Alerts of the original: NoSqz = BB_lower < KC_lower_low or BB_upper > KC_upper_low, with
-  // KC_basis = ta.sma(close, length) and devKC = ta.sma(ta.tr, length) (ta.tr is na on the first bar)
+  // Keltner channels of the original: KC_basis = ta.sma(close, length), devKC = ta.sma(ta.tr, length) (ta.tr is na on
+  // the first bar), bands at basis +/- devKC * 1.0 / 1.5 / 2.0
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const upperBBArr = A(upperBB);
   const lowerBBArr = A(lowerBB);
@@ -152,8 +131,22 @@ export function calculate(
     ? Math.max(b.high - b.low, Math.abs(b.high - bars[i - 1].close), Math.abs(b.low - bars[i - 1].close))
     : NaN));
   const devKC = A(ta.sma(Series.fromArray(bars, trArr), kcLength));
+  // a >= b / a <= b with the 1e-10 tolerance (na compares false)
+  const ge = (x: number, y: number) => !Number.isNaN(x) && !Number.isNaN(y) && !lt(x, y);
+  const le = (x: number, y: number) => !Number.isNaN(x) && !Number.isNaN(y) && !gt(x, y);
+  const inside = (i: number, mult: number) => ge(lowerBBArr[i], kcBasis[i] - devKC[i] * mult)
+    || le(upperBBArr[i], kcBasis[i] + devKC[i] * mult);
+  // NoSqz = BB_lower < KC_lower_low or BB_upper > KC_upper_low
   const noSqz = bars.map((_b, i) => lt(lowerBBArr[i], kcBasis[i] - devKC[i] * kcMult3)
     || gt(upperBBArr[i], kcBasis[i] + devKC[i] * kcMult3));
+
+  // plot(0, 'SQZ', style circles): HighSqz (KC #1) orange, else MidSqz (KC #2) red, else LowSqz (KC #3) black, else
+  // green; each squeeze = the lower band at or above the lower Keltner band OR the upper band at or below the upper one
+  const sqzData = bars.map((b, i) => {
+    const color = inside(i, kcMult1) ? ORANGE : inside(i, kcMult2) ? RED : inside(i, kcMult3) ? BLACK : GREEN;
+    return { time: b.time, value: 0, color };
+  });
+
   const alertCalls: AlertCall[] = [];
   for (let i = 0; i < bars.length; i++) {
     // NoSqz[1] is na (false) on the first bar

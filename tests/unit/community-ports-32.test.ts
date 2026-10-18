@@ -288,7 +288,8 @@ const REV_SHAPES: [string, string][] = (() => {
   out.push(['₊', 'belowBar'], ['E', 'belowBar']);
   for (let k = 0; k < 12; k++) out.push([d[k], 'belowBar']);
   out.push(['₊', 'belowBar'], ['E', 'aboveBar']);
-  out.push(['⇩', 'atPriceMiddle'], ['⇧', 'atPriceMiddle']);
+  // the overall trend marks (display.none, shown from the Style settings): label down at bSR / label up at sSS
+  out.push(['⇩', 'atPriceTop'], ['⇧', 'atPriceBottom']);
   return out;
 })();
 
@@ -302,13 +303,13 @@ describe('Reversal Signals: shape ids and alert() calls', () => {
       for (const m of r.markers) {
         const k = Number(/^shape(\d+)$/.exec(m.id ?? '')?.[1] ?? NaN);
         expect(k).toBeGreaterThanOrEqual(0);
-        expect(k).toBeLessThan(54);
+        expect(k).toBeLessThan(56);
         expect([m.text ?? '', m.position]).toEqual(REV_SHAPES[k]);
         seen.add(m.id as string);
       }
     }
     // the detailed counts of both phases are drawn on these bars
-    for (const id of ['shape0', 'shape6', 'shape9', 'shape12', 'shape13', 'shape22', 'shape25', 'shape26', 'shape39', 'shape40']) {
+    for (const id of ['shape0', 'shape6', 'shape9', 'shape12', 'shape13', 'shape22', 'shape25', 'shape26', 'shape39', 'shape40', 'shape54', 'shape55']) {
       expect(seen.has(id)).toBe(true);
     }
   });

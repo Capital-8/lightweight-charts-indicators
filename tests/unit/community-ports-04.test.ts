@@ -390,8 +390,15 @@ describe('B + A + D: alertcondition and output ids', () => {
 describe('Banker Fund Flow: alertconditions and the five candle outputs', () => {
   const bars = walk(1500, 23);
   const res = banker.calculate(bars);
-  const fft = values(res.plots.plot0 as { value: number }[]);
-  const bbl = values(res.plots.plot1 as { value: number }[]);
+  // the original draws no line: the fund flow trend / bull bear line are read from the fund flow candles
+  // (open = fund_flow_trend, close = bull_bear_line; a bar with both values has a green or a red candle)
+  const fromCandles = (field: 'open' | 'close') => {
+    const byTime = new Map<number, number>();
+    for (const key of ['green', 'white', 'red', 'blue']) for (const c of res.plotCandles[key]) byTime.set(c.time as number, c[field]);
+    return bars.map((b) => byTime.get(b.time as number) ?? NaN);
+  };
+  const fft = fromCandles('open');
+  const bbl = fromCandles('close');
 
   it('declares the five conditions of the original', () => {
     expect(banker.alertConditions).toEqual(decls([

@@ -1,49 +1,79 @@
 /**
- * ATR Trailing Stops Colored
+ * ATR + Trailing Stops
  *
- * ATR-based trailing stop with direction color.
- * Trailing stop ratchets in favorable direction only.
- * Green when price above stop (long), red when below (short).
+ * An ATR of a weighted true range: the body range max(|open - close|, |open - close[1]|, |close - close[1]|) times the
+ * body percentage plus the wicks (high - max(open, close) + min(open, close) - low) times the wick percentage,
+ * smoothed by RMA / SMA / EMA / WMA over the lookback, times the multiplier. Running mode draws low - ATR and
+ * high + ATR on every bar. Trailing mode draws a long stop (low - ATR, only rising) while long and a short stop
+ * (high + ATR, only falling) while short, each as a wide line with a thin highlight on top; the side flips when the
+ * close (or the wick, per "Flip Trail on") goes beyond the opposite stop, the stop of the new side then restarting at
+ * the current low - ATR / high + ATR. Both stops are drawn until the first flip.
  *
- * Alerts (alertcondition, `alerts` of the result): the original's two crosses, computed with the original's trail
- * logic (not with the line drawn here): an ATR of the body true range plus the wicks (RMA of ATR Period, times the
- * multiplier), a long stop low - ATR that only rises and a short stop high + ATR that only falls, the long / short
- * state flipping when the close goes beyond the opposite stop (the stop of the new side is then reset to the current
- * low - ATR / high + ATR). 'Long: Price crossed ATR up': the close goes above the short stop of the bar before (and
- * was not above the one of 2 bars back); 'Short: Price crossed ATR down': the mirror below the long stop. The
- * original's other inputs are at their defaults (flip on the close, 100 % body and wick, RMA).
+ * Alerts (alertcondition, `alerts` of the result): 'Long: Price crossed ATR up' when the flip source goes above the
+ * drawn short stop of the bar before (and was not above the one of 2 bars back); 'Short: Price crossed ATR down' the
+ * mirror below the drawn long stop.
  *
- * Reference: "ATR Trailing Stops" (community)
+ * Reference: "ATR + Trailing Stops" by SimpleCryptoLife
  */
 
-import { ta, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BarColorData } from '../types';
+import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ATRTrailingStopsInputs {
+  /** ATR Lookback Period */
   atrPeriod: number;
   atrMultiplier: number;
+  trailMode: 'Running' | 'Trailing';
+  flipOn: 'Close' | 'Wick';
+  bodyPercent: number;
+  wickPercent: number;
+  smoothing: 'RMA' | 'SMA' | 'EMA' | 'WMA';
 }
 
 export const defaultInputs: ATRTrailingStopsInputs = {
-  atrPeriod: 5,
-  atrMultiplier: 3.5,
+  atrPeriod: 14,
+  atrMultiplier: 3,
+  trailMode: 'Trailing',
+  flipOn: 'Close',
+  bodyPercent: 100,
+  wickPercent: 100,
+  smoothing: 'RMA',
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'atrPeriod', type: 'int', title: 'ATR Period', defval: 5, min: 1 },
-  { id: 'atrMultiplier', type: 'float', title: 'ATR Multiplier', defval: 3.5, min: 0.1, step: 0.1 },
+  { id: 'atrPeriod', type: 'int', title: 'ATR Lookback Period', defval: 14 },
+  { id: 'atrMultiplier', type: 'float', title: 'ATR Multiplier', defval: 3, min: 0.5, max: 4, step: 0.1 },
+  { id: 'trailMode', type: 'string', title: 'Trail Mode', defval: 'Trailing', options: ['Running', 'Trailing'] },
+  { id: 'flipOn', type: 'string', title: 'Flip Trail on:', defval: 'Close', options: ['Close', 'Wick'] },
+  { id: 'bodyPercent', type: 'int', title: 'Percentage of Body to Include', defval: 100, min: 0, max: 200, step: 10, group: 'Advanced Settings' },
+  { id: 'wickPercent', type: 'int', title: 'Percentage of Wick to Include', defval: 100, min: 0, max: 200, step: 10 },
+  { id: 'smoothing', type: 'string', title: 'ATR Smoothing Mode', defval: 'RMA', options: ['RMA', 'SMA', 'EMA', 'WMA'] },
 ];
 
+const WHITE_60 = String(color.new(color.white, 60));
+const NAVY_50 = String(color.new(color.navy, 50));
+const MAROON_50 = String(color.new(color.maroon, 50));
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Trailing Stop', color: '#2962FF', lineWidth: 2 },
+  { id: 'plot0', title: 'Running ATR Low', color: WHITE_60, lineWidth: 1 },
+  { id: 'plot1', title: 'Running ATR High', color: WHITE_60, lineWidth: 1 },
+  { id: 'plot2', title: 'Trailing ATR Long Stop', color: NAVY_50, lineWidth: 3, style: 'linebr' },
+  { id: 'plot3', title: 'Trailing ATR Long Stop Highlight', color: '#00897B', lineWidth: 1, style: 'linebr' },
+  { id: 'plot4', title: 'Trailing ATR Short Stop', color: MAROON_50, lineWidth: 3, style: 'linebr' },
+  { id: 'plot5', title: 'Trailing ATR Short Stop Highlight', color: '#FF5252', lineWidth: 1, style: 'linebr' },
 ];
 
 export const metadata = {
-  title: 'ATR Trailing Stops',
-  shortTitle: 'ATRTS',
+  title: 'ATR + Trailing Stops',
+  shortTitle: 'ATR Trail',
   overlay: true,
 };
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long: Price crossed ATR up', message: 'Price crossed the trailing ATR short stop (bullish)' },
+  { id: 'alert1', title: 'Short: Price crossed ATR down', message: 'Price crossed trailing ATR long stop (bearish)' },
+];
 
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
@@ -52,163 +82,89 @@ const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
-/**
- * The original's alert conditions (alertCrossAtrShortStop, alertCrossAtrLongStop) for an ATR lookback and multiplier,
- * the other inputs of the original at their defaults ('Close' flip source, 100 % body and wick, RMA smoothing).
- */
-function originalAlertFlags(bars: Bar[], lookback: number, multiplier: number): [boolean[], boolean[]] {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<ATRTrailingStopsInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
+  const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
-  // atrPercentAdjustedTrueRange = max(|open - close|, |open - close[1]|, |close - close[1]|) + wicks (na on bar 0)
+
+  // atrPercentAdjustedTrueRange (na on bar 0: close[1] is na)
   const tr = bars.map((b, i) => {
     if (i === 0) return NaN;
     const c1 = bars[i - 1].close;
     const body = Math.max(Math.abs(b.open - b.close), Math.abs(b.open - c1), Math.abs(b.close - c1));
     const wick = b.high - Math.max(b.open, b.close) + Math.min(b.open, b.close) - b.low;
-    return body + wick;
+    return body * (cfg.bodyPercent / 100) + wick * (cfg.wickPercent / 100);
   });
-  // ta.rma: seeded by ta.sma of the first `lookback` values (na while one of them is na)
-  const atr: number[] = new Array(n).fill(NaN);
-  let prev = NaN;
-  for (let i = 0; i < n; i++) {
-    if (isNaN(prev)) {
-      if (i >= lookback - 1) {
-        let sum = 0;
-        for (let k = i - lookback + 1; k <= i; k++) sum += tr[k];
-        prev = sum / lookback;
-      }
-    } else {
-      prev = (tr[i] + (lookback - 1) * prev) / lookback;
-    }
-    atr[i] = prev;
-  }
+  // f_ma(_source, atrLookback, atrSmoothingMode)
+  const trSeries = Series.fromArray(bars, tr);
+  const maSeries =
+    cfg.smoothing === 'RMA' ? ta.rma(trSeries, cfg.atrPeriod)
+    : cfg.smoothing === 'SMA' ? ta.sma(trSeries, cfg.atrPeriod)
+    : cfg.smoothing === 'EMA' ? ta.ema(trSeries, cfg.atrPeriod)
+    : ta.wma(trSeries, cfg.atrPeriod);
+  const atr = maSeries.toArray().map((v) => v ?? NaN);
 
-  const longPlot: number[] = new Array(n).fill(NaN);
-  const shortPlot: number[] = new Array(n).fill(NaN);
-  let trailLong = NaN; // var float trailAtrLong = atrLow (na on bar 0)
+  const atrLow = new Array<number>(n);
+  const atrHigh = new Array<number>(n);
+  const longPlot = new Array<number>(n).fill(NaN);
+  const shortPlot = new Array<number>(n).fill(NaN);
+  const flipLongSrc = bars.map((b) => (cfg.flipOn === 'Close' ? b.close : b.high));
+  const flipShortSrc = bars.map((b) => (cfg.flipOn === 'Close' ? b.close : b.low));
+
+  // var float trailAtrLong = atrLow / trailAtrShort = atrHigh (na on bar 0: the ATR is na there)
+  let trailLong = NaN;
   let trailShort = NaN;
-  // var bool _isLong = true / _isShort = true; their [1] is na on bar 0
+  // var bool _isLong = true / _isShort = true of f_flip; their [1] is na on bar 0
   let isLongPrev: boolean | null = null;
   let isShortPrev: boolean | null = null;
   for (let i = 0; i < n; i++) {
     const b = bars[i];
-    const atrM = atr[i] * multiplier;
-    const atrLow = b.low - atrM;
-    const atrHigh = b.high + atrM;
-    // f_trail: the long stop keeps its value while the source is at or below it, the short stop while at or above
-    trailLong = le(atrLow, trailLong) ? trailLong : atrLow;
-    trailShort = ge(atrHigh, trailShort) ? trailShort : atrHigh;
-    // f_flip with the close as the flip source
-    let flipLong: boolean = isShortPrev === true && gt(b.close, trailShort);
-    let flipShort: boolean = isLongPrev === true && lt(b.close, trailLong);
+    const atrM = atr[i] * cfg.atrMultiplier;
+    atrLow[i] = b.low - atrM;
+    atrHigh[i] = b.high + atrM;
+    // f_trail: the long stop keeps its value while the source is at or below it ('up'), the short stop while the
+    // source is at or above it ('down')
+    trailLong = le(atrLow[i], trailLong) ? trailLong : atrLow[i];
+    trailShort = ge(atrHigh[i], trailShort) ? trailShort : atrHigh[i];
+    // f_flip
+    let flipLong: boolean = isShortPrev === true && gt(flipLongSrc[i], trailShort);
+    let flipShort: boolean = isLongPrev === true && lt(flipShortSrc[i], trailLong);
     flipLong = flipShort && flipLong && gt(b.close, trailLong) ? true : flipShort && flipLong && le(b.close, trailLong) ? false : flipLong;
     flipShort = flipLong && flipShort && lt(b.close, trailShort) ? true : flipShort && flipLong && ge(b.close, trailShort) ? false : flipShort;
     const isLong: boolean = flipLong ? true : flipShort ? false : isLongPrev === null ? true : isLongPrev;
     const isShort: boolean = flipShort ? true : flipLong ? false : isShortPrev === null ? true : isShortPrev;
     // a side that starts on this bar resets its stop (`not _isLong[1]` is na, so false, on bar 0)
-    if (isLong && isLongPrev === false) trailLong = atrLow;
-    if (isShort && isShortPrev === false) trailShort = atrHigh;
-    longPlot[i] = isLong ? trailLong : NaN;
-    shortPlot[i] = isShort ? trailShort : NaN;
+    if (isLong && isLongPrev === false) trailLong = atrLow[i];
+    if (isShort && isShortPrev === false) trailShort = atrHigh[i];
+    if (isLong) longPlot[i] = trailLong;
+    if (isShort) shortPlot[i] = trailShort;
     isLongPrev = isLong;
     isShortPrev = isShort;
   }
 
+  const running = cfg.trailMode === 'Running';
+  const trailing = cfg.trailMode === 'Trailing';
+  const pts = (vals: number[], on: boolean) => bars.map((b, i) => ({ time: b.time, value: on ? vals[i] : NaN }));
+
+  // alertCrossAtrShortStop = flipLongSource > trailAtrShortPlot[1] and flipLongSource[1] <= trailAtrShortPlot[2]
   const at = (a: number[], i: number) => (i >= 0 ? a[i] : NaN);
-  const close = (i: number) => (i >= 0 ? bars[i].close : NaN);
-  // close > trailAtrShortPlot[1] and close[1] <= trailAtrShortPlot[2]; the mirror for the long stop
-  const crossShortStop = bars.map((_b, i) => gt(close(i), at(shortPlot, i - 1)) && le(close(i - 1), at(shortPlot, i - 2)));
-  const crossLongStop = bars.map((_b, i) => lt(close(i), at(longPlot, i - 1)) && ge(close(i - 1), at(longPlot, i - 2)));
-  return [crossShortStop, crossLongStop];
-}
-
-export function calculate(
-  bars: Bar[],
-  inputs: Partial<ATRTrailingStopsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; alerts: AlertConditionState[] } {
-  const { atrPeriod, atrMultiplier } = { ...defaultInputs, ...inputs };
-  const n = bars.length;
-
-  const atrArr = ta.atr(bars, atrPeriod).toArray();
-
-  const stopArr: number[] = new Array(n);
-  const dirArr: number[] = new Array(n); // 1 = long, -1 = short
-
-  for (let i = 0; i < n; i++) {
-    const atrVal = (atrArr[i] ?? 0) * atrMultiplier;
-    const close = bars[i].close;
-
-    if (i === 0) {
-      stopArr[i] = close - atrVal;
-      dirArr[i] = 1;
-      continue;
-    }
-
-    const prevStop = stopArr[i - 1];
-    const prevDir = dirArr[i - 1];
-
-    if (prevDir === 1) {
-      // Long: trailing stop is below price
-      const newStop = close - atrVal;
-      stopArr[i] = close > prevStop ? Math.max(newStop, prevStop) : newStop;
-      dirArr[i] = close < prevStop ? -1 : 1;
-    } else {
-      // Short: trailing stop is above price
-      const newStop = close + atrVal;
-      stopArr[i] = close < prevStop ? Math.min(newStop, prevStop) : newStop;
-      dirArr[i] = close > prevStop ? 1 : -1;
-    }
-  }
-
-  const warmup = atrPeriod;
-  const plot = stopArr.map((v, i) => {
-    if (i < warmup) return { time: bars[i].time, value: NaN };
-    const color = dirArr[i] === 1 ? '#26A69A' : '#EF5350';
-    return { time: bars[i].time, value: v, color };
-  });
-
-  // Pine barcolor: green when close > TS, red when close < TS, black otherwise
-  const barColors: BarColorData[] = [];
-  for (let i = warmup; i < n; i++) {
-    const c = bars[i].close;
-    const ts = stopArr[i];
-    if (c > ts) {
-      barColors.push({ time: bars[i].time, color: '#00FF00' });
-    } else if (c < ts) {
-      barColors.push({ time: bars[i].time, color: '#FF0000' });
-    } else {
-      barColors.push({ time: bars[i].time, color: '#000000' });
-    }
-  }
-
-  // Pine plotshape: Buy on crossover(close, TS), Sell on crossunder(close, TS)
-  const markers: MarkerData[] = [];
-  for (let i = warmup + 1; i < n; i++) {
-    const prevBelow = bars[i - 1].close <= stopArr[i - 1];
-    const curAbove = bars[i].close > stopArr[i];
-    const prevAbove = bars[i - 1].close >= stopArr[i - 1];
-    const curBelow = bars[i].close < stopArr[i];
-
-    if (prevBelow && curAbove) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#00FF00', text: 'BUY' });
-    }
-    if (prevAbove && curBelow) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'SELL' });
-    }
-  }
+  const crossShortStop = bars.map((_b, i) => gt(flipLongSrc[i], at(shortPlot, i - 1)) && le(at(flipLongSrc, i - 1), at(shortPlot, i - 2)));
+  const crossLongStop = bars.map((_b, i) => lt(flipShortSrc[i], at(longPlot, i - 1)) && ge(at(flipShortSrc, i - 1), at(longPlot, i - 2)));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot },
-    markers,
-    barColors,
-    alerts: alertStates(alertConditions, bars, originalAlertFlags(bars, atrPeriod, atrMultiplier)),
+    plots: {
+      plot0: pts(atrLow, running),
+      plot1: pts(atrHigh, running),
+      plot2: pts(longPlot, trailing),
+      plot3: pts(longPlot, trailing),
+      plot4: pts(shortPlot, trailing),
+      plot5: pts(shortPlot, trailing),
+    },
+    alerts: alertStates(alertConditions, bars, [crossShortStop, crossLongStop]),
   };
 }
-
-/** The original's alertconditions */
-export const alertConditions: AlertConditionDecl[] = [
-  { id: 'alert0', title: 'Long: Price crossed ATR up', message: 'Price crossed the trailing ATR short stop (bullish)' },
-  { id: 'alert1', title: 'Short: Price crossed ATR down', message: 'Price crossed trailing ATR long stop (bearish)' },
-];
 
 export const ATRTrailingStops = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

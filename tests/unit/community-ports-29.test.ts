@@ -142,7 +142,9 @@ describe('profit-maximizer', () => {
     expect(pmax.ProfitMaximizer.alertConditions).toBe(pmax.alertConditions);
   });
   it('fires on the crosses of the MA and of the price with PMax', () => {
-    const mo = over(ma, pm), mu = under(ma, pm), po = over(close, pm), pu = under(close, pm);
+    // the price crosses of the original read its source (hl2 by default), not the close
+    const hl2 = bars.map((b) => (b.high + b.low) / 2);
+    const mo = over(ma, pm), mu = under(ma, pm), po = over(hl2, pm), pu = under(hl2, pm);
     expect(mo.filter(Boolean).length).toBeGreaterThan(3);
     expect(po.filter(Boolean).length).toBeGreaterThan(3);
     expect(r.alerts[0].times).toEqual(timeAt(bars, or(mo, mu)));

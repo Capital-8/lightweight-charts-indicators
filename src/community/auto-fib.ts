@@ -1,11 +1,14 @@
 /**
  * Auto Fibonacci
  *
- * Automatic Fibonacci retracement levels based on highest high and lowest low
- * over a lookback period. Plots 7 standard Fibonacci levels.
- * On the last bar, the original's level labels (%0 ... %161.8, 15 bars after the last bar, at the original's levels:
- * from the low up when the highest high is older than the lowest low, else from the high down) and the High / Low
- * labels on the bars of the highest high / lowest low.
+ * Fibonacci levels between the highest high and the lowest low of the last "Fibo Period" bars (144). When the
+ * highest high is older than the lowest low (a downward leg) the levels go up from the low (low + range x ratio,
+ * green #00cc00), else down from the high (high - range x ratio, red #E41019). Levels 0, 0.236, 0.382, 0.5, 0.618,
+ * 0.786, 1 and 1.618 (the last one when "Plot 1.618 Level?" is on and the level is not 0).
+ * As in the original, each level plot has a value on the last bar only (show_last = 1) and a price line at that value
+ * across the chart (trackprice = true, `lines` of the result, dashed, in the level colour); na until "Fibo Period"
+ * bars exist. On the last bar, the original's level labels (%0 ... %161.8, 15 bars after the last bar) and the
+ * High / Low labels on the bars of the highest high / lowest low.
  * Alerts (alertcondition, `alerts` of the result): the close crossing over / under the 0.236 ... 0.786 levels of the
  * original, in an upward (highest high more recent than the lowest low) or a downward retracement.
  *
@@ -13,34 +16,40 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { LineDrawingData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AutoFibInputs {
+  /** Fibo Period */
   length: number;
   /** Draw the 1.618 level label */
   plotF1618: boolean;
 }
 
 export const defaultInputs: AutoFibInputs = {
-  length: 50,
+  length: 144,
   plotF1618: true,
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'length', type: 'int', title: 'Length', defval: 50, min: 2 },
+  { id: 'length', type: 'int', title: 'Fibo Period', defval: 144, min: 1 },
   { id: 'plotF1618', type: 'bool', title: 'Plot 1.618 Level?', defval: true },
 ];
 
+/** Level colours: downward leg (levels from the low up) / upward leg (from the high down) */
+const DOWN_COLOR = '#00cc00';
+const UP_COLOR = '#E41019';
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Fib 0.0', color: '#787B86', lineWidth: 1 },
-  { id: 'plot1', title: 'Fib 0.236', color: '#FF6D00', lineWidth: 1 },
-  { id: 'plot2', title: 'Fib 0.382', color: '#FF6D00', lineWidth: 1 },
-  { id: 'plot3', title: 'Fib 0.5', color: '#FFEB3B', lineWidth: 1 },
-  { id: 'plot4', title: 'Fib 0.618', color: '#FF6D00', lineWidth: 1 },
-  { id: 'plot5', title: 'Fib 0.786', color: '#FF6D00', lineWidth: 1 },
-  { id: 'plot6', title: 'Fib 1.0', color: '#787B86', lineWidth: 1 },
+  { id: 'plot0', title: '0', color: DOWN_COLOR, lineWidth: 2 },
+  { id: 'plot1', title: '0.236', color: DOWN_COLOR, lineWidth: 1 },
+  { id: 'plot2', title: '0.382', color: DOWN_COLOR, lineWidth: 1 },
+  { id: 'plot3', title: '0.5', color: DOWN_COLOR, lineWidth: 2 },
+  { id: 'plot4', title: '0.618', color: DOWN_COLOR, lineWidth: 1 },
+  { id: 'plot5', title: '0.786', color: DOWN_COLOR, lineWidth: 1 },
+  { id: 'plot6', title: '1', color: DOWN_COLOR, lineWidth: 2 },
+  { id: 'plot7', title: '1.618', color: DOWN_COLOR, lineWidth: 3 },
 ];
 
 export const metadata = {
@@ -52,50 +61,15 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AutoFibInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
+): Omit<IndicatorResult, 'markers' | 'lines'> & { markers: MarkerData[]; lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const { length, plotF1618 } = { ...defaultInputs, ...inputs };
 
   const highSeries = new Series(bars, (b) => b.high);
   const lowSeries = new Series(bars, (b) => b.low);
 
+  // Fhigh = ta.highest(FPeriod), Flow = ta.lowest(FPeriod): na until FPeriod bars exist
   const highestArr = ta.highest(highSeries, length).toArray();
   const lowestArr = ta.lowest(lowSeries, length).toArray();
-
-  const warmup = length;
-  const fibLevels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0];
-
-  const plots: Record<string, { time: number; value: number }[]> = {};
-  for (let f = 0; f < fibLevels.length; f++) {
-    plots[`plot${f}`] = [];
-  }
-
-  for (let i = 0; i < bars.length; i++) {
-    if (i < warmup || isNaN(highestArr[i]) || isNaN(lowestArr[i])) {
-      for (let f = 0; f < fibLevels.length; f++) {
-        plots[`plot${f}`].push({ time: bars[i].time, value: NaN });
-      }
-    } else {
-      const h = highestArr[i];
-      const l = lowestArr[i];
-      const range = h - l;
-      for (let f = 0; f < fibLevels.length; f++) {
-        plots[`plot${f}`].push({ time: bars[i].time, value: l + range * fibLevels[f] });
-      }
-    }
-  }
-
-  // Pine fills between adjacent fib level plots:
-  // fill(ON,SS, red), fill(SS,SO, #3399FF), fill(SO,FI, lime),
-  // fill(FI,TE, lime), fill(TE,TT, #3399FF), fill(TT,ZZ, red)
-  // Levels: plot6=1.0, plot5=0.786, plot4=0.618, plot3=0.5, plot2=0.382, plot1=0.236, plot0=0.0
-  const fills = [
-    { plot1: 'plot6', plot2: 'plot5', options: { color: 'rgba(255,0,0,0.20)' } },
-    { plot1: 'plot5', plot2: 'plot4', options: { color: 'rgba(51,153,255,0.20)' } },
-    { plot1: 'plot4', plot2: 'plot3', options: { color: 'rgba(0,255,0,0.20)' } },
-    { plot1: 'plot3', plot2: 'plot2', options: { color: 'rgba(0,255,0,0.20)' } },
-    { plot1: 'plot2', plot2: 'plot1', options: { color: 'rgba(51,153,255,0.20)' } },
-    { plot1: 'plot1', plot2: 'plot0', options: { color: 'rgba(255,0,0,0.20)' } },
-  ];
 
   // The original's levels: FH / FL = ta.highestbars(high) / ta.lowestbars(low), downfibo = FH < FL; a downward fib
   // goes up from the low (Flow + range * r), an upward fib down from the high (Fhigh - range * r)
@@ -112,21 +86,38 @@ export function calculate(
       F[k][i] = down ? (h - l) * r + l : h - (h - l) * r;
     });
   }
+  // plot(plotF1618 and F1618 ? F1618 : na, ...): na when off, 0 or na
+  const shown = (k: number, v: number) => (k === 7 && !(plotF1618 && v !== 0 && !isNaN(v)) ? NaN : v);
+
+  // plot(F<r>, color = Fcolor, trackprice = true, show_last = 1): only the value of the last bar is drawn, with a
+  // price line at that value across the chart
+  const last = n - 1;
+  const lastColor = last >= 0 && FH[last] < FL[last] ? DOWN_COLOR : UP_COLOR;
+  const plots: Record<string, { time: number; value: number; color?: string }[]> = {};
+  const lines: LineDrawingData[] = [];
+  ratios.forEach((_r, k) => {
+    const lastValue = last >= 0 ? shown(k, F[k][last]) : NaN;
+    plots[`plot${k}`] = bars.map((b, i) => (i === last && !isNaN(lastValue)
+      ? { time: b.time, value: lastValue, color: lastColor }
+      : { time: b.time, value: NaN }));
+    if (!isNaN(lastValue)) {
+      lines.push({ time1: bars[0].time as number, price1: lastValue, time2: bars[last].time as number, price2: lastValue,
+        color: lastColor, width: 1, style: 'dashed', extend: 'both' });
+    }
+  });
 
   // plotshape(F<r>, style = shape.labeldown, location.absolute, color = Fcolor, show_last = 1, text = '%<r>',
   // offset = 15) and the High / Low labels (size.large, yellow, offset = FH / FL): drawn on the last bar only
   const markers: MarkerData[] = [];
-  const last = n - 1;
   if (last >= 0) {
     const interval = barInterval(bars);
     const down = FH[last] < FL[last];
-    const fColor = down ? '#00cc00' : '#E41019';
+    const fColor = down ? DOWN_COLOR : UP_COLOR;
     const textColor = String(color.new(color.black, 30));
     const texts = ['%0', '%23.6', '%38.2', '%50', '%61.8', '%78.6', '%100', '%161.8'];
     texts.forEach((text, k) => {
-      let v = F[k][last];
       // plotF1618 and F1618 ? F1618 : na
-      if (k === 7 && !(plotF1618 && v !== 0 && !isNaN(v))) v = NaN;
+      const v = shown(k, F[k][last]);
       if (isNaN(v)) return;
       markers.push({ id: `shape${k}`, time: barTime(bars, last + 15, interval), position: 'atPriceTop', price: v,
         shape: 'labelDown', color: fColor, text, textColor });
@@ -161,8 +152,8 @@ export function calculate(
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
-    fills,
     markers,
+    lines,
     alerts: alertStates(alertConditions, bars, flags),
   };
 }

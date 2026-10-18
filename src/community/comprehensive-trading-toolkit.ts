@@ -21,8 +21,9 @@
  * `chart.fg_color` (RSI, levels, level lines) comes from the chart context (foregroundColorOf; a dark theme value
  * without it).
  *
- * Reference: "Comprehensive Trading Toolkit [BigBeluga]" by BigBeluga
- * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
+ * Reference: "Trading Toolkit (Michaël van de Poppe) [BigBeluga]" by BigBeluga
+ * Licence: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International, as the original
+ * (https://creativecommons.org/licenses/by-nc-sa/4.0/).
  * Original notice: © BigBeluga
  */
 
@@ -102,11 +103,12 @@ export const inputConfig: InputConfig[] = [
 /** Chart foreground colour without a chart context (the RSI and the levels follow the chart context) */
 const FG = foregroundColorOf();
 
-// The divergence plots have display = show_div ? display.pane : display.none
+// pr = plot(rsi), p7 = plot(overb, display = display.none, editable = false), p3 = plot(overs, ...) (untitled).
+// The divergence plots have display = show_div ? display.pane : display.none: shown with the `showDiv` input
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'RSI', color: FG, lineWidth: 1 },
-  { id: 'plot1', title: 'Overbought Anchor', color: FG, lineWidth: 1, display: 'none' },
-  { id: 'plot2', title: 'Oversold Anchor', color: FG, lineWidth: 1, display: 'none' },
+  { id: 'plot0', title: 'Plot', color: FG, lineWidth: 1 },
+  { id: 'plot1', title: 'Plot', color: FG, lineWidth: 1, display: 'none', editable: false },
+  { id: 'plot2', title: 'Plot', color: FG, lineWidth: 1, display: 'none', editable: false },
   { id: 'plot3', title: 'Regular Bullish', color: '#00E6D3', lineWidth: 2, visible: 'showDiv' },
   { id: 'plot4', title: 'Regular Bearish', color: '#FF5252', lineWidth: 2, visible: 'showDiv' },
   { id: 'plot5', title: 'Regular Bullish', color: '#00E6D3', lineWidth: 1, visible: 'showDiv', forceOverlay: true },
@@ -121,7 +123,7 @@ export const hlineConfig: HLineConfig[] = [
 
 /** fill(h1, h2, color.new(m_col, 85)) */
 export const fillConfig: FillConfig[] = [
-  { id: 'fill_levels', plot1: 'hline_ob', plot2: 'hline_os', color: String(color.new(FG, 85)) },
+  { id: 'fill_levels', plot1: 'hline_ob', plot2: 'hline_os', color: String(color.new(FG, 85)), title: 'Hlines Background' },
 ];
 
 export const metadata = {
@@ -331,13 +333,14 @@ export function calculate(
       { value: 50, options: { title: 'Level', color: String(color.new(mCol, 50)), linestyle: 'dashed' } },
     ],
     fills: [
-      { plot1: 'hline_ob', plot2: 'hline_os', colors: new Array<string>(n).fill(String(color.new(mCol, 85))) },
+      { plot1: 'hline_ob', plot2: 'hline_os', options: { title: 'Hlines Background' },
+        colors: new Array<string>(n).fill(String(color.new(mCol, 85))) },
       // fill(p3, pr, overs, 20, na, rsi < overs ? color.red : na)
-      { plot1: 'plot2', plot2: 'plot0',
+      { plot1: 'plot2', plot2: 'plot0', options: { title: 'Plots Background' },
         gradient: { topValue: new Array(n).fill(cfg.overs), bottomValue: new Array(n).fill(20),
           topColor: new Array(n).fill(null), bottomColor: rsi.map((r) => (lt(r, cfg.overs) ? red : null)) } },
       // fill(p7, pr, overb, 85, na, rsi > overb ? color.lime : na)
-      { plot1: 'plot1', plot2: 'plot0',
+      { plot1: 'plot1', plot2: 'plot0', options: { title: 'Plots Background' },
         gradient: { topValue: new Array(n).fill(cfg.overb), bottomValue: new Array(n).fill(85),
           topColor: new Array(n).fill(null), bottomColor: rsi.map((r) => (gt(r, cfg.overb) ? lime : null)) } },
     ],

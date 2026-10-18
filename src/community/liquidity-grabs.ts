@@ -3,18 +3,19 @@
  *
  * Detects liquidity grabs by tracking pivot highs/lows as liquidity zones,
  * then flagging bars where price wicks beyond a zone but closes back inside.
- * Size is proportional to the wick-body ratio relative to the WBR threshold.
- * A cooldown prevents rapid-fire signals.
+ * Bubble size (small / medium / large circles) = floor(min(wick / body / WBR, 3)), a plain division (a bar with no
+ * body: wick / 0 is +infinity, a large grab); a size of 0 draws nothing. A cooldown prevents rapid-fire bubbles. As in the original, detection
+ * (and the zones it keeps) only runs on the confirmed bars of the last 5000 (the last bar counts when the chart
+ * context gives it as closed).
  *
  * Alerts (alertcondition, `alerts` of the result): 'Buyside Liquidity Grab @ {{ticker}}' and 'Sellside Liquidity
- * Grab @ {{ticker}}' on the confirmed bars with a grab of that side, as in the original also when the cooldown hides
- * its bubble (detection on the last 5000 bars, a bar with no body has no grab size; the last bar counts when the
- * chart context gives it as closed).
+ * Grab @ {{ticker}}' on the bars with a grab of that side, as in the original also when the cooldown hides its
+ * bubble.
  *
  * Reference: "Liquidity Grabs | Flux Charts" by fluxchart
  */
 
-import { Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
@@ -40,12 +41,14 @@ export const inputConfig: InputConfig[] = [
 ];
 
 export const plotConfig: PlotConfig[] = [
-  { id: 'buySm', title: 'Buyside Liq Grab Small', color: '#f23646', lineWidth: 5, style: 'cross' },
-  { id: 'buyMd', title: 'Buyside Liq Grab Medium', color: '#f23646', lineWidth: 7, style: 'cross' },
-  { id: 'buyLg', title: 'Buyside Liq Grab Large', color: '#f23646', lineWidth: 10, style: 'cross' },
-  { id: 'sellSm', title: 'Sellside Liq Grab Small', color: '#089981', lineWidth: 5, style: 'cross' },
-  { id: 'sellMd', title: 'Sellside Liq Grab Medium', color: '#089981', lineWidth: 7, style: 'cross' },
-  { id: 'sellLg', title: 'Sellside Liq Grab Large', color: '#089981', lineWidth: 10, style: 'cross' },
+  // plot(..., buysideColorGrab (#f2364680) / sellsideColorGrab (#08998180), bubbleSize (5) / int(5 * 1.5) / 5 * 2,
+  //   plot.style_circles)
+  { id: 'buySm', title: 'Buyside Liq Grab Small', color: '#f2364680', lineWidth: 5, style: 'circles' },
+  { id: 'buyMd', title: 'Buyside Liq Grab Medium', color: '#f2364680', lineWidth: 7, style: 'circles' },
+  { id: 'buyLg', title: 'Buyside Liq Grab Large', color: '#f2364680', lineWidth: 10, style: 'circles' },
+  { id: 'sellSm', title: 'Sellside Liq Grab Small', color: '#08998180', lineWidth: 5, style: 'circles' },
+  { id: 'sellMd', title: 'Sellside Liq Grab Medium', color: '#08998180', lineWidth: 7, style: 'circles' },
+  { id: 'sellLg', title: 'Sellside Liq Grab Large', color: '#08998180', lineWidth: 10, style: 'circles' },
 ];
 
 export const metadata = {
@@ -53,6 +56,9 @@ export const metadata = {
   shortTitle: 'LiqGrab',
   overlay: true,
 };
+
+/** maxDistanceToLastBar: grabs are only detected on the last 5000 bars */
+const MAX_DISTANCE_TO_LAST_BAR = 5000;
 
 export function calculate(
   bars: Bar[],
@@ -63,26 +69,16 @@ export function calculate(
   const n = bars.length;
   const len = pivotLength;
 
-  const highArr = new Series(bars, (b) => b.high).toArray();
-  const lowArr = new Series(bars, (b) => b.low).toArray();
-  const closeArr = new Series(bars, (b) => b.close).toArray();
-  const openArr = new Series(bars, (b) => b.open).toArray();
+  const highSeries = new Series(bars, (b) => b.high);
+  const lowSeries = new Series(bars, (b) => b.low);
+  const highArr = highSeries.toArray();
+  const lowArr = lowSeries.toArray();
+  const closeArr = bars.map((b) => b.close);
+  const openArr = bars.map((b) => b.open);
 
-  // Detect pivot highs and lows (confirmed len bars later)
-  const pivotHighs: (number | null)[] = new Array(n).fill(null);
-  const pivotLows: (number | null)[] = new Array(n).fill(null);
-
-  for (let i = len; i < n - len; i++) {
-    let isHigh = true;
-    let isLow = true;
-    for (let j = 1; j <= len; j++) {
-      if (highArr[i] <= highArr[i - j] || highArr[i] <= highArr[i + j]) isHigh = false;
-      if (lowArr[i] >= lowArr[i - j] || lowArr[i] >= lowArr[i + j]) isLow = false;
-      if (!isHigh && !isLow) break;
-    }
-    if (isHigh) pivotHighs[i + len] = highArr[i];
-    if (isLow) pivotLows[i + len] = lowArr[i];
-  }
+  // ta.pivothigh(len, len) / ta.pivotlow(len, len): the pivot value on the bar that confirms it (len bars later)
+  const pivotHighs = ta.pivothigh(highSeries, len, len).toArray().map((v) => v ?? NaN);
+  const pivotLows = ta.pivotlow(lowSeries, len, len).toArray().map((v) => v ?? NaN);
 
   // Liquidity grab detection
   const buySm: number[] = new Array(n).fill(NaN);
@@ -94,20 +90,25 @@ export function calculate(
 
   const buysideLiqs: number[] = [];
   const sellsideLiqs: number[] = [];
-  let lastBuysideGrab = -cooldown - 1;
-  let lastSellsideGrab = -cooldown - 1;
+  // var lastBuysideGrab = 0 / var lastSellsideGrab = 0
+  let lastBuysideGrab = 0;
+  let lastSellsideGrab = 0;
   const buyFlags: boolean[] = new Array(n).fill(false);
   const sellFlags: boolean[] = new Array(n).fill(false);
   const lastConfirmed = lastBarConfirmedOf(chart);
 
   for (let i = 0; i < n; i++) {
+    // if (last_bar_index - bar_index) < maxDistanceToLastBar and barstate.isconfirmed: detectLiquidityGrab() (and its
+    // zone arrays) only runs on the confirmed bars of the last 5000; the other bars draw nothing
+    if (!(n - 1 - i < MAX_DISTANCE_TO_LAST_BAR && (i < n - 1 || lastConfirmed))) continue;
+
     // Add new pivot zones
-    if (pivotHighs[i] !== null) {
-      buysideLiqs.push(pivotHighs[i]!);
+    if (!isNaN(pivotHighs[i])) {
+      buysideLiqs.push(pivotHighs[i]);
       if (buysideLiqs.length > zoneCount) buysideLiqs.shift();
     }
-    if (pivotLows[i] !== null) {
-      sellsideLiqs.push(pivotLows[i]!);
+    if (!isNaN(pivotLows[i])) {
+      sellsideLiqs.push(pivotLows[i]);
       if (sellsideLiqs.length > zoneCount) sellsideLiqs.shift();
     }
 
@@ -117,22 +118,27 @@ export function calculate(
     const op = openArr[i];
     const topClose = Math.max(cl, op);
     const botClose = Math.min(cl, op);
-    const bodySize = Math.abs(cl - op) || 0.0001; // avoid div by 0
+    // bodySize = math.abs(close - open); curWBR = wickSize / bodySize, a plain division (x / 0 is +infinity, so a
+    // grab bar with no body has size 3; 0 / 0 is na)
+    const bodySize = Math.abs(cl - op);
+    const sizeOf = (wickSize: number) => {
+      const curWBR = wickSize / bodySize;
+      // math.floor(math.min(curWBR / WBR, 3))
+      return Math.floor(Math.min(curWBR / wbr, 3));
+    };
 
     let grabFound = false;
     let grabBuyside = true;
-    let grabSize = 0;
+    let grabSize = 1;
     const toRemove: number[] = [];
 
     // Check buyside (price wicks above pivot high but closes below)
     for (let j = 0; j < buysideLiqs.length; j++) {
       const liq = buysideLiqs[j];
       if (hi > liq && topClose < liq) {
-        const wickSize = hi - topClose;
-        const curWBR = wickSize / bodySize;
         grabFound = true;
         grabBuyside = true;
-        grabSize = Math.min(Math.floor(curWBR / wbr), 3);
+        grabSize = sizeOf(hi - topClose);
         toRemove.push(liq);
         break;
       }
@@ -147,11 +153,9 @@ export function calculate(
       for (let j = 0; j < sellsideLiqs.length; j++) {
         const liq = sellsideLiqs[j];
         if (lo < liq && botClose > liq) {
-          const wickSize = botClose - lo;
-          const curWBR = wickSize / bodySize;
           grabFound = true;
           grabBuyside = false;
-          grabSize = Math.min(Math.floor(curWBR / wbr), 3);
+          grabSize = sizeOf(botClose - lo);
           toRemove.push(liq);
           break;
         }
@@ -170,20 +174,16 @@ export function calculate(
       if (idx !== -1) sellsideLiqs.splice(idx, 1);
     }
 
-    // alertcondition((buysideLiqGrabSmall or ...Medium or ...Large) and barstate.isconfirmed, ...): a grab with a size
-    // above 0, whatever the cooldown, on a confirmed bar of the last 5000 (maxDistanceToLastBar); the original's
-    // wick / body is na for a bar with no body (no grab size)
-    if (grabFound && grabSize > 0 && Math.abs(cl - op) > 0 && n - 1 - i < 5000 && (i < n - 1 || lastConfirmed)) {
+    // liqGrabCooldownOK: bars since the last drawn grab of the side found (buyside when no grab) above the cooldown
+    const cooldownOk = grabBuyside ? (i - lastBuysideGrab) > cooldown : (i - lastSellsideGrab) > cooldown;
+    // if _grabFound and _grabSize > 0 (na compares false): the size flags of the bar
+    if (grabFound && grabSize > 0) {
+      // alertcondition((buysideLiqGrabSmall or ...Medium or ...Large) and barstate.isconfirmed, ...): whatever the
+      // cooldown
       if (grabBuyside) buyFlags[i] = true;
       else sellFlags[i] = true;
-    }
 
-    // Apply cooldown and assign to plots
-    if (grabFound && grabSize > 0) {
-      const cooldownOk = grabBuyside
-        ? (i - lastBuysideGrab) > cooldown
-        : (i - lastSellsideGrab) > cooldown;
-
+      // plot((buysideLiqGrabSmall and renderingEnabled and liqGrabCooldownOK) ? high : na, ...)
       if (cooldownOk) {
         if (grabBuyside) {
           lastBuysideGrab = i;

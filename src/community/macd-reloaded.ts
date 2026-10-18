@@ -222,10 +222,8 @@ export function calculate(bars: Bar[], inputs: Partial<MacdReloadedInputs> = {})
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
+    // the original draws no horizontal line (no hline)
     plots: { 'histogram': histPlot, 'macd': macdPlot, 'trigger': triggerPlot },
-    hlines: [
-      { value: 0, options: { color: '#787B86', linestyle: 'dashed' as const, title: 'Zero' } },
-    ],
   };
 }
 

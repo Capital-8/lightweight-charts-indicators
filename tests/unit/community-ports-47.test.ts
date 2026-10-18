@@ -380,7 +380,7 @@ describe('style ids', () => {
     expect(r.bgColors.every((x) => ['bgcolor0', 'bgcolor1', 'bgcolor2', 'bgcolor3'].includes(x.id as string))).toBe(true);
   });
 
-  it('williams-bbdiv-signal: shape2..shape21 on the signal markers', () => {
+  it('williams-bbdiv-signal: shape0..shape21 on the signal markers', () => {
     const spec = Array.from({ length: 22 }, (_v, k) => `shape${k}`);
     const r = bbdiv.calculate(bars);
     const and = bbdiv.calculate(bars, { andMode: true, minBarsBetweenSignals: 0, wrFilterEnabled: false });
@@ -389,7 +389,9 @@ describe('style ids', () => {
       expect(res.markers.every((m) => spec.includes(m.id as string))).toBe(true);
     }
     // one look per id
+    // shape0 / shape1: the original's Regular Bullish / Bearish Labels at the pivot (display.none)
     const look: Record<string, [string, string, string]> = {
+      shape0: ['atPriceMiddle', 'triangleUp', 'Div'], shape1: ['atPriceMiddle', 'triangleDown', 'Div'],
       shape2: ['bottom', 'triangleUp', 'MA'], shape3: ['top', 'triangleDown', 'MA'], shape4: ['bottom', 'triangleUp', 'BB'],
       shape5: ['top', 'triangleDown', 'BB'], shape6: ['atPriceMiddle', 'triangleUp', 'Div'], shape7: ['atPriceMiddle', 'triangleDown', 'Div'],
       shape8: ['belowBar', 'triangleUp', 'Buy'], shape9: ['aboveBar', 'triangleDown', 'Sell'], shape10: ['belowBar', 'triangleUp', 'Buy'],
@@ -406,8 +408,9 @@ describe('style ids', () => {
     expect(idTimes(r.markers, 'shape9')).toEqual(idTimes(r.markers, 'shape3'));
     expect(idsOf(r.markers).filter((id) => ['shape6', 'shape7', 'shape12', 'shape13'].includes(id as string)).length).toBeGreaterThan(0);
     expect(idsOf(and.markers).some((id) => Number(String(id).slice(5)) >= 14)).toBe(true);
-    // the "Regular Bullish / Bearish Label" shapes are hidden in the original (display.none): not drawn
-    expect(r.markers.some((m) => m.id === 'shape0' || m.id === 'shape1')).toBe(false);
+    // the "Regular Bullish / Bearish Label" shapes (display.none in the original, shown from the Style settings) are
+    // given at the pivot bar, lookbackRight bars before the confirming bar
+    expect(r.markers.some((m) => m.id === 'shape0' || m.id === 'shape1')).toBe(true);
   });
 
   it('zlma-trend-levels: shape0 / shape1 on the diamonds', () => {

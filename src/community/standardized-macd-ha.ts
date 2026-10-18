@@ -1,8 +1,20 @@
 /**
  * Standardized MACD Heikin-Ashi Transformed
  *
- * Standardizes MACD by dividing by ATR-like range, then converts to Heikin-Ashi
- * candles with double HA transform. Signal line + histogram + OB/OS markers.
+ * As the original: the MACD of the source divided by the EMA of the bar range (high - low) over the slow length,
+ * times 100, turned into one Heikin-Ashi bar per bar from the previous and current values (the original's ha
+ * method, its persistent bar and history rules included); the signal is the EMA of a source of that HA bar, the
+ * histogram its close minus the signal. Candles coloured by the HA direction (hollow rising bodies with "Hollow
+ * Candles"), OB / OS triangles 40 above the HA high / below the HA low (shape0 / shape1).
+ * Histogram columns (width 1) as the original: above 0 light blue #8ac3f5, below (or na) light red #ffa7b6, at
+ * transparency 20 when the histogram is above its value of the bar before, else 30.
+ * Bar colours (barcolor0) by "Bar Coloring", None by default (no bar colour): MidLine (HA close above 0), Candles (HA
+ * direction), Sig Cross (signal above the HA close: red), Extremities (HA close beyond the reversion threshold, else
+ * the chart foreground colour at transparency 25), Reversions (OS / OB signals, else that foreground colour); na
+ * values compare false, as in the original. The foreground colour is `chart.fg_color` of the chart context.
+ * HA open: the original's persistent bar object (var bar x, its close set to the new ohlc4 before the new bar is
+ * built) read as Pine evaluates it: x.o[1] is the open of the HA bar before, x.src('oc2')[1] the value of that call
+ * on the bar before (0 through nz() on the first bar it runs).
  * Alerts (alertcondition, `alerts` of the result): Overbought / Oversold (HA close crossing its open beyond the
  * reversion threshold), Midline Crossover / Crossunder (HA close crossing 0), Positive / Negative Heikin-Ashi (the
  * crosses inside the threshold), MACD Bull / Bear Cross (HA close crossing the signal). alert() calls (`alertCalls`,
@@ -11,9 +23,10 @@
  * Reference: "Standardized MACD Heikin-Ashi Transformed" by EliCobra
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { taCore, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { AlertCall, MarkerData, BarColorData, PlotCandleData } from '../types';
 import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+import { foregroundColorOf, type ChartContext } from '../chart-context';
 
 /** The original makes alert() calls */
 export const hasAlertFunction = true;
@@ -25,6 +38,9 @@ export interface StandardizedMacdHAInputs {
   signalSrc: string;
   signalLength: number;
   reversionThreshold: number;
+  /** Bar Coloring */
+  barColoring: 'None' | 'MidLine' | 'Candles' | 'Sig Cross' | 'Extremities' | 'Reversions';
+  hollow: boolean;
 }
 
 export const defaultInputs: StandardizedMacdHAInputs = {
@@ -34,20 +50,24 @@ export const defaultInputs: StandardizedMacdHAInputs = {
   signalSrc: 'close',
   signalLength: 9,
   reversionThreshold: 100,
+  barColoring: 'None',
+  hollow: true,
 };
 
 export const inputConfig: InputConfig[] = [
   { id: 'src', type: 'source', title: 'Source', defval: 'close' },
   { id: 'fast', type: 'int', title: 'Fast Length', defval: 12, min: 1 },
   { id: 'slow', type: 'int', title: 'Slow Length', defval: 26, min: 1 },
-  { id: 'signalSrc', type: 'string', title: 'Signal Source', defval: 'close', options: ['open', 'high', 'low', 'close'] },
+  { id: 'signalSrc', type: 'string', title: 'Signal Source', defval: 'close', options: ['open', 'high', 'low', 'close', 'hl2', 'hlc3', 'ohlc4', 'hlcc4'] },
   { id: 'signalLength', type: 'int', title: 'Signal Length', defval: 9, min: 1 },
   { id: 'reversionThreshold', type: 'float', title: 'Reversion Threshold', defval: 100, min: 0, step: 10 },
+  { id: 'barColoring', type: 'string', title: 'Bar Coloring', defval: 'None', options: ['None', 'MidLine', 'Candles', 'Sig Cross', 'Extremities', 'Reversions'] },
+  { id: 'hollow', type: 'bool', title: 'Hollow Candles', defval: true },
 ];
 
 export const plotConfig: PlotConfig[] = [
   { id: 'signal', title: 'Signal', color: '#787B86', lineWidth: 1 },
-  { id: 'histogram', title: 'Histogram', color: '#8ac3f5', lineWidth: 2, style: 'histogram' },
+  { id: 'histogram', title: 'Histogram', color: '#8ac3f5', lineWidth: 1, style: 'columns' },
 ];
 
 export const plotCandleConfig = [
@@ -60,187 +80,156 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<StandardizedMacdHAInputs> = {}): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]>; markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
-  const { src, fast, slow, signalSrc, signalLength, reversionThreshold } = { ...defaultInputs, ...inputs };
+export function calculate(bars: Bar[], inputs: Partial<StandardizedMacdHAInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]>; markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
+  const { src, fast, slow, signalSrc, signalLength, reversionThreshold, barColoring, hollow } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
-  // Source series
-  const srcSeries = new Series(bars, (b) => {
-    if (src === 'open') return b.open;
-    if (src === 'high') return b.high;
-    if (src === 'low') return b.low;
-    return b.close;
+  const pick = (o: number, h: number, l: number, c: number, which: string): number => {
+    switch (which) {
+      case 'open': return o;
+      case 'high': return h;
+      case 'low': return l;
+      case 'oc2': return (o + c) / 2;
+      case 'hl2': return (h + l) / 2;
+      case 'hlc3': return (h + l + c) / 3;
+      case 'ohlc4': return (o + h + l + c) / 4;
+      case 'hlcc4': return (h + l + c + c) / 4;
+      default: return c;
+    }
+  };
+
+  // x = (ema(src, fast) - ema(src, slow)) / ema(high - low, slow) * 100
+  const srcArr = bars.map((b) => pick(b.open, b.high, b.low, b.close, src));
+  const emaFast = taCore.ema(srcArr, fast);
+  const emaSlow = taCore.ema(srcArr, slow);
+  const emaRange = taCore.ema(bars.map((b) => b.high - b.low), slow);
+  const macdArr = emaFast.map((f, i) => {
+    const v = ((f - emaSlow[i]) / emaRange[i]) * 100;
+    return Number.isFinite(v) ? v : NaN;
   });
 
-  // Range series (high - low)
-  const rangeSeries = new Series(bars, (b) => b.high - b.low);
-
-  // Standardized MACD = (EMA(src, fast) - EMA(src, slow)) / EMA(range, slow) * 100
-  const emaFast = ta.ema(srcSeries, fast).toArray();
-  const emaSlow = ta.ema(srcSeries, slow).toArray();
-  const emaRange = ta.ema(rangeSeries, slow).toArray();
-
-  const macdArr: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const f = emaFast[i] ?? NaN;
-    const s = emaSlow[i] ?? NaN;
-    const r = emaRange[i] ?? NaN;
-    if (isNaN(f) || isNaN(s) || isNaN(r) || r === 0) {
-      macdArr[i] = NaN;
-    } else {
-      macdArr[i] = ((f - s) / r) * 100;
-    }
-  }
-
-  // First HA transform on MACD values
-  const ha1Close: number[] = new Array(n);
-  const ha1Open: number[] = new Array(n);
-  const ha1High: number[] = new Array(n);
-  const ha1Low: number[] = new Array(n);
-
+  // One Heikin-Ashi pass (method ha) on the bar z = (x[1], max(x, x[1]), min(x, x[1]), x). The persistent object x
+  // holds the HA bar of the bar before; its close is first set to ohlc4(z), then the new bar is
+  //   open  = na(x.o[1]) ? oc2(z) : nz(x.src('oc2')[1])  (x.src('oc2') = avg(open of the HA bar before, ohlc4(z)),
+  //           evaluated in that branch only: its value of the bar before, na on the first bar of the branch)
+  //   high  = max(z.h, max(x.o, x.c)), low = min(z.l, min(x.o, x.c))  (x.o: the open of the HA bar before)
+  //   close = ohlc4(z)
+  const haOpen: number[] = new Array(n);
+  const haHigh: number[] = new Array(n);
+  const haLow: number[] = new Array(n);
+  const haClose: number[] = new Array(n);
+  let prevOpen = NaN; // x.o: the open of the HA bar before
+  let lastOc2 = NaN; // x.src('oc2') of the bar before (na when not evaluated)
   for (let i = 0; i < n; i++) {
     const m = macdArr[i];
-    if (isNaN(m)) {
-      ha1Close[i] = NaN;
-      ha1Open[i] = NaN;
-      ha1High[i] = NaN;
-      ha1Low[i] = NaN;
-      continue;
-    }
-
-    ha1Close[i] = m;
-
-    if (i === 0 || isNaN(ha1Open[i - 1])) {
-      ha1Open[i] = m;
+    const m1 = i > 0 ? macdArr[i - 1] : NaN;
+    const zo = m1, zh = Math.max(m, m1), zl = Math.min(m, m1), zc = m;
+    const c = (zo + zh + zl + zc) / 4;
+    let o: number;
+    if (!Number.isFinite(prevOpen)) {
+      o = (zo + zc) / 2;
+      lastOc2 = NaN;
     } else {
-      ha1Open[i] = (ha1Open[i - 1] + ha1Close[i - 1]) / 2;
+      o = Number.isFinite(lastOc2) ? lastOc2 : 0;
+      lastOc2 = (prevOpen + c) / 2;
     }
-
-    ha1High[i] = Math.max(m, ha1Open[i], ha1Close[i]);
-    ha1Low[i] = Math.min(m, ha1Open[i], ha1Close[i]);
+    haOpen[i] = Number.isFinite(o) ? o : NaN;
+    haHigh[i] = Math.max(zh, Math.max(prevOpen, c));
+    haLow[i] = Math.min(zl, Math.min(prevOpen, c));
+    haClose[i] = Number.isFinite(c) ? c : NaN;
+    prevOpen = haOpen[i];
   }
+  const ha2Open = haOpen, ha2High = haHigh, ha2Low = haLow, ha2Close = haClose;
 
-  // Second HA transform
-  const ha2Close: number[] = new Array(n);
-  const ha2Open: number[] = new Array(n);
-  const ha2High: number[] = new Array(n);
-  const ha2Low: number[] = new Array(n);
+  // s = ema(z.src(sig), clen); H = z.c - s
+  const signalArr = taCore.ema(haClose.map((c, i) => pick(haOpen[i], haHigh[i], haLow[i], c, signalSrc)), signalLength);
+  const histArr = haClose.map((c, i) => c - signalArr[i]);
 
-  for (let i = 0; i < n; i++) {
-    if (isNaN(ha1Close[i])) {
-      ha2Close[i] = NaN;
-      ha2Open[i] = NaN;
-      ha2High[i] = NaN;
-      ha2Low[i] = NaN;
-      continue;
-    }
-
-    // HA close = avg of first HA OHLC
-    ha2Close[i] = (ha1Open[i] + ha1High[i] + ha1Low[i] + ha1Close[i]) / 4;
-
-    if (i === 0 || isNaN(ha2Open[i - 1])) {
-      ha2Open[i] = (ha1Open[i] + ha1Close[i]) / 2;
-    } else {
-      ha2Open[i] = (ha2Open[i - 1] + ha2Close[i - 1]) / 2;
-    }
-
-    ha2High[i] = Math.max(ha1High[i], ha2Open[i], ha2Close[i]);
-    ha2Low[i] = Math.min(ha1Low[i], ha2Open[i], ha2Close[i]);
-  }
-
-  // Signal source from HA candle
-  const sigSrcArr: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    if (signalSrc === 'open') sigSrcArr[i] = ha2Open[i];
-    else if (signalSrc === 'high') sigSrcArr[i] = ha2High[i];
-    else if (signalSrc === 'low') sigSrcArr[i] = ha2Low[i];
-    else sigSrcArr[i] = ha2Close[i];
-  }
-
-  // Signal = EMA of signal source
-  const sigSeries = new Series(bars, (_b, i) => sigSrcArr[i]);
-  const signalArr = ta.ema(sigSeries, signalLength).toArray();
-
-  // Histogram = HA close - signal
-  const histArr: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const c = ha2Close[i];
-    const s = signalArr[i] ?? NaN;
-    histArr[i] = isNaN(c) || isNaN(s) ? NaN : c - s;
-  }
-
-  const warmup = slow;
-
-  // Plot candles
   const upColor = '#00bcd4';
   const downColor = '#fc1f1f';
+  // haColor = c > o ? colup : c < o ? coldn : na; no body on a rising candle with "Hollow Candles"
+  const haColor = (i: number) => (haClose[i] > haOpen[i] ? upColor : haClose[i] < haOpen[i] ? downColor : 'transparent');
 
   const candles: PlotCandleData[] = [];
   for (let i = 0; i < n; i++) {
-    if (i < warmup || isNaN(ha2Close[i])) {
+    const ok = [haOpen[i], haHigh[i], haLow[i], haClose[i]].every(Number.isFinite);
+    if (!ok) {
       candles.push({ time: bars[i].time as number, open: NaN, high: NaN, low: NaN, close: NaN });
       continue;
     }
-    const col = ha2Close[i] >= ha2Open[i] ? upColor : downColor;
+    const col = haColor(i);
     candles.push({
       time: bars[i].time as number,
-      open: ha2Open[i],
-      high: ha2High[i],
-      low: ha2Low[i],
-      close: ha2Close[i],
-      color: col,
+      open: haOpen[i],
+      high: haHigh[i],
+      low: haLow[i],
+      close: haClose[i],
+      color: hollow && haClose[i] > haOpen[i] ? 'transparent' : col,
       borderColor: col,
       wickColor: col,
     });
   }
 
-  // Signal plot
   const signalPlot = signalArr.map((v, i) => ({
     time: bars[i].time,
-    value: i < warmup || isNaN(v ?? NaN) ? NaN : v!,
+    value: Number.isFinite(v) ? v : NaN,
   }));
 
-  // Histogram plot with colors
-  const histPlot = histArr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup || isNaN(v) ? NaN : v,
-    color: v >= 0 ? '#8ac3f5' : '#ffa7b6',
-  }));
+  // colh = o.h > 0 ? (o.h > o.h[1] ? color.new(colhu, 20) : color.new(colhu, 30))
+  //                 : (o.h > o.h[1] ? color.new(colhd, 20) : color.new(colhd, 30))
+  const histColors = ['#8ac3f5', '#ffa7b6'].map((c) => [String(color.new(c, 20)), String(color.new(c, 30))]);
+  const histPlot = histArr.map((v, i) => {
+    const rising = i > 0 && v > histArr[i - 1];
+    return {
+      time: bars[i].time,
+      value: Number.isFinite(v) ? v : NaN,
+      color: histColors[v > 0 ? 0 : 1][rising ? 0 : 1],
+    };
+  });
 
-  // Markers: OB when HA close crosses under HA open AND HA high > threshold
-  // OS when HA close crosses over HA open AND HA low < -threshold
+  // plotshape(a.s ? o.b.h + 40 : na, "OB", triangledown, absolute) / plotshape(a.b ? o.b.l - 40 : na, "OS", triangleup)
   const markers: MarkerData[] = [];
-  for (let i = warmup + 1; i < n; i++) {
-    if (isNaN(ha2Close[i]) || isNaN(ha2Close[i - 1])) continue;
-
-    const prevAbove = ha2Close[i - 1] >= ha2Open[i - 1];
-    const curAbove = ha2Close[i] >= ha2Open[i];
-
-    // Cross under: was above, now below
-    if (prevAbove && !curAbove && ha2High[i] > reversionThreshold) {
-      markers.push({ time: bars[i].time as number, position: 'aboveBar', shape: 'triangleDown', color: downColor, text: 'OB' });
-    }
-    // Cross over: was below, now above
-    if (!prevAbove && curAbove && ha2Low[i] < -reversionThreshold) {
-      markers.push({ time: bars[i].time as number, position: 'belowBar', shape: 'triangleUp', color: upColor, text: 'OS' });
+  const obSignal: boolean[] = new Array(n).fill(false);
+  const osSignal: boolean[] = new Array(n).fill(false);
+  {
+    const under = crossedUnder(haClose, haOpen);
+    const over = crossedOver(haClose, haOpen);
+    for (let i = 0; i < n; i++) {
+      obSignal[i] = under[i] && haHigh[i] > reversionThreshold;
+      osSignal[i] = over[i] && haLow[i] < -reversionThreshold;
+      if (obSignal[i]) {
+        markers.push({ id: 'shape0', time: bars[i].time as number, position: 'atPriceMiddle', price: haHigh[i] + 40, shape: 'triangleDown', color: downColor, size: 'tiny' });
+      }
+      if (osSignal[i]) {
+        markers.push({ id: 'shape1', time: bars[i].time as number, position: 'atPriceMiddle', price: haLow[i] - 40, shape: 'triangleUp', color: upColor, size: 'tiny' });
+      }
     }
   }
 
-  // Bar colors based on HA candle direction
+  // barcolor(col): col = switch colb ('None' => na: no bar colour); na values compare false
   const barColors: BarColorData[] = [];
-  for (let i = warmup; i < n; i++) {
-    if (isNaN(ha2Close[i])) continue;
-    barColors.push({
-      time: bars[i].time as number,
-      color: ha2Close[i] >= ha2Open[i] ? upColor : downColor,
-    });
+  if (barColoring !== 'None') {
+    const neutralBar = String(color.new(foregroundColorOf(chart), 25));
+    for (let i = 0; i < n; i++) {
+      const c = haClose[i];
+      let col: string;
+      switch (barColoring) {
+        case 'MidLine': col = c > 0 ? upColor : downColor; break;
+        case 'Candles': col = c > haOpen[i] ? upColor : downColor; break;
+        case 'Sig Cross': col = signalArr[i] > c ? downColor : upColor; break;
+        case 'Extremities': col = c > reversionThreshold ? downColor : c < -reversionThreshold ? upColor : neutralBar; break;
+        case 'Reversions': col = osSignal[i] ? downColor : obSignal[i] ? upColor : neutralBar; break;
+        default: continue;
+      }
+      barColors.push({ id: 'barcolor0', time: bars[i].time as number, color: col });
+    }
   }
 
   // alerts.new(...): crossunder(c, o) and h > revt, crossover(c, o) and l < -revt, crossover(c, 0), crossunder(c, 0),
   // crossunder(c, o) and not h > revt, crossover(c, o) and not l < -revt, crossover(c, signal), crossunder(c, signal)
   const cUnderO = crossedUnder(ha2Close, ha2Open);
   const cOverO = crossedOver(ha2Close, ha2Open);
-  const sig = signalArr.map((v) => v ?? NaN);
+  const sig = signalArr;
   const flags: boolean[][] = [
     cUnderO.map((x, i) => x && ha2High[i] > reversionThreshold),
     cOverO.map((x, i) => x && ha2Low[i] < -reversionThreshold),

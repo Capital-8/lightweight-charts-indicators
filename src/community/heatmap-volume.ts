@@ -4,6 +4,9 @@
  * Volume heatmap using standard deviation distance from SMA.
  * 5-tier coloring: Extra High / High / Medium / Normal / Low based on
  * how many standard deviations volume is from the moving average.
+ * As the original, the lengths are cut to the bars so far (length := min(length, bar_index + 1)): the mean and the
+ * standard deviation exist from the first bar (all bars so far on the early bars), and every output is drawn from
+ * there. A zero standard deviation gives an na stdbar (0 / 0): such a bar takes the Low colour.
  * Heatmap zones ("Backgrounds"): fills between hidden level plots (ts1 + (ts1 - ts2), ts1 .. ts4 and 0).
  * Alerts (alertcondition, `alerts` of the result): extra high / high / medium volume (any bar, up bar, down bar).
  *
@@ -100,12 +103,12 @@ export function calculate(
 
   const volSeries = new Series(bars, (b) => b.volume ?? 0);
 
-  // Pine: length := length > bar_index + 1 ? bar_index + 1 : length
-  // We use the full arrays from ta functions which handle warmup naturally
-  const meanArr = ta.sma(volSeries, cfg.maLength).toArray();
-  const stdArr = ta.stdev(volSeries, cfg.stdLength).toArray();
-
-  const warmup = Math.max(cfg.maLength, cfg.stdLength);
+  // Pine: length := length > bar_index + 1 ? bar_index + 1 : length (same for slength): the windows grow on the first
+  // bars, so mean and std exist from bar 0
+  const lenSeries = Series.fromArray(bars, bars.map((_b, i) => Math.min(cfg.maLength, i + 1)));
+  const slenSeries = Series.fromArray(bars, bars.map((_b, i) => Math.min(cfg.stdLength, i + 1)));
+  const meanArr = ta.sma(volSeries, lenSeries).toArray();
+  const stdArr = ta.stdev(volSeries, slenSeries).toArray();
 
   // Determine per-bar color based on stdbar thresholds
   function getBarColor(stdbar: number, isUp: boolean): string {
@@ -143,12 +146,12 @@ export function calculate(
     const std = stdArr[i] ?? NaN;
     const isUp = bars[i].close > bars[i].open;
 
-    // stdbar = (volume - mean) / std
-    const stdbar = std > 0 ? (vol - mean) / std : 0;
-    const color = i < warmup ? '#787B86' : getBarColor(stdbar, isUp);
+    // stdbar = (volume - mean) / std: na when std is 0 (the comparisons are false: the Low colour)
+    const stdbar = std !== 0 ? (vol - mean) / std : NaN;
+    const color = getBarColor(stdbar, isUp);
 
-    volumePlot.push({ time: bars[i].time, value: i < warmup ? NaN : vol, color });
-    maPlot.push({ time: bars[i].time, value: i < warmup ? NaN : mean });
+    volumePlot.push({ time: bars[i].time, value: vol, color });
+    maPlot.push({ time: bars[i].time, value: mean });
 
     // Threshold lines: ts1 = std * thresholdExtraHigh + mean, etc.
     const ts1 = std * cfg.thresholdExtraHigh + mean;
@@ -156,17 +159,17 @@ export function calculate(
     const ts3 = std * cfg.thresholdMedium + mean;
     const ts4 = std * cfg.thresholdNormal + mean;
 
-    tsExtraHighPlot.push({ time: bars[i].time, value: i < warmup ? NaN : (showLines ? ts1 : NaN) });
-    tsHighPlot.push({ time: bars[i].time, value: i < warmup ? NaN : (showLines ? ts2 : NaN) });
-    tsMediumPlot.push({ time: bars[i].time, value: i < warmup ? NaN : (showLines ? ts3 : NaN) });
-    tsNormalPlot.push({ time: bars[i].time, value: i < warmup ? NaN : (showLines ? ts4 : NaN) });
+    tsExtraHighPlot.push({ time: bars[i].time, value: showLines ? ts1 : NaN });
+    tsHighPlot.push({ time: bars[i].time, value: showLines ? ts2 : NaN });
+    tsMediumPlot.push({ time: bars[i].time, value: showLines ? ts3 : NaN });
+    tsNormalPlot.push({ time: bars[i].time, value: showLines ? ts4 : NaN });
     // pt = plot(zshow_backgrounds ? tst : na) with tst = ts1 + (ts1 - ts2); p0 = 0; p1 .. p4 = ts1 .. ts4
     [ts1 + (ts1 - ts2), 0, ts1, ts2, ts3, ts4].forEach((v, k) => {
-      zones[k].push({ time: bars[i].time, value: i < warmup || !showBgs ? NaN : v });
+      zones[k].push({ time: bars[i].time, value: !showBgs ? NaN : v });
     });
 
     // conditionExtraHigh = stdbar > thresholdExtraHigh, conditionHigh / conditionMedium: the tiers below (na: false)
-    const sb = (vol - mean) / std;
+    const sb = stdbar;
     const extraHigh = sb > cfg.thresholdExtraHigh;
     const high = sb <= cfg.thresholdExtraHigh && sb > cfg.thresholdHigh;
     const medium = sb <= cfg.thresholdHigh && sb > cfg.thresholdMedium;
@@ -178,8 +181,8 @@ export function calculate(
       flags[3 * k + 2].push(c && down);
     });
 
-    if (cfg.coloredBars && i >= warmup) {
-      barColors.push({ time: bars[i].time, color });
+    if (cfg.coloredBars) {
+      barColors.push({ id: 'barcolor0', time: bars[i].time, color });
     }
   }
 

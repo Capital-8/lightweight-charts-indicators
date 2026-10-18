@@ -2,11 +2,9 @@
  * Parabolic SAR + EMA 200 + MACD Signals
  *
  * Combined indicator using SAR, EMA200, and MACD histogram for buy/sell signals.
- * Buy: SAR below price AND close > EMA200 AND MACD histogram > 0.
- * Sell: SAR above price AND close < EMA200 AND MACD histogram < 0.
- * Alerts (alertcondition, `alerts` of the result), with the original's rule: buy = SAR below the low, the MACD
- * histogram (EMA 12 - EMA 26 minus its EMA 9) crossing above 0 and ohlc4 not below the EMA 200; sell = SAR above the
- * high, the histogram crossing below 0 and ohlc4 below the EMA 200.
+ * The Buy / Sell labels and the alerts (alertcondition, `alerts` of the result) follow the original's rule: buy = SAR
+ * below the low, the MACD histogram (EMA 12 - EMA 26 minus its EMA 9) crossing above 0 and ohlc4 not below the
+ * EMA 200; sell = SAR above the high, the histogram crossing below 0 and ohlc4 below the EMA 200.
  *
  * Reference: "Parabolic SAR + EMA 200 + MACD Signals" (community)
  */
@@ -119,23 +117,6 @@ export function calculate(
   const macdHistArr = macdHist.toArray();
 
   const warmup = emaLen;
-  const markers: MarkerData[] = [];
-
-  for (let i = warmup + 1; i < n; i++) {
-    const close = bars[i].close;
-    const emaVal = ema200Arr[i] ?? 0;
-    const histVal = macdHistArr[i] ?? 0;
-    const sarBelow = sarDirArr[i] === 1;
-    const sarAbove = sarDirArr[i] === -1;
-    const prevSarBelow = sarDirArr[i - 1] === 1;
-    const prevSarAbove = sarDirArr[i - 1] === -1;
-
-    if (sarBelow && !prevSarBelow && close > emaVal && histVal > 0) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#26A69A', text: 'Buy' });
-    } else if (sarAbove && !prevSarAbove && close < emaVal && histVal < 0) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#EF5350', text: 'Sell' });
-    }
-  }
 
   const plot0 = sarArr.map((v, i) => ({
     time: bars[i].time,
@@ -161,6 +142,21 @@ export function calculate(
     const bearish = lt((b.open + b.high + b.low + b.close) / 4, ema200Arr[i] ?? NaN);
     buyFlags.push(lt(pineSar[i], b.low) && deltaUp[i] && !bearish);
     sellFlags.push(gt(pineSar[i], b.high) && deltaDown[i] && bearish);
+  }
+
+  // plotshape(buy_signal, "Buy Label", text="Buy", location.belowbar, shape.labelup, size.tiny, color.green,
+  //   textcolor=color.white) / plotshape(sell_signal, "Sell Label", text="Sell", location.abovebar, shape.labeldown,
+  //   size.tiny, color.red, textcolor=color.white): the same signals as the alerts
+  const markers: MarkerData[] = [];
+  for (let i = 0; i < n; i++) {
+    if (buyFlags[i]) {
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#4CAF50', text: 'Buy',
+        textColor: '#FFFFFF', size: 'tiny', id: 'shape0' });
+    }
+    if (sellFlags[i]) {
+      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF5252', text: 'Sell',
+        textColor: '#FFFFFF', size: 'tiny', id: 'shape1' });
+    }
   }
 
   return {

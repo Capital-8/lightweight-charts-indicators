@@ -4,6 +4,9 @@
  * Non-overlay oscillator: ScalpLine = SMA(close, signalPeriod) - ssMA
  * where ssMA is a double-smoothed SMA clamped to close when price moves beyond percent band.
  * Fill between ScalpLine and zero: green when >= 0, red when < 0.
+ * As the original, ScalpLine exists from the first signal-line value (bar signalPeriod - 1): while the MA is na both
+ * band tests are false, so ssMA = close; the zero line is drawn from the first bar. The MA reads the Source input,
+ * the band tests, ssMA and the signal line read the close.
  * Alerts (alertcondition, `alerts` of the result): 'BUY ALARM!' / 'SELL ALARM!', ScalpLine crossing above / below 0.
  *
  * Reference: "Scalping Line Indicator" by KivancOzbilgic
@@ -52,7 +55,8 @@ export function calculate(
   const n = bars.length;
 
   const source = getSourceSeries(bars, src);
-  const closeArr = source.toArray();
+  const closeSeries = getSourceSeries(bars, 'close');
+  const closeArr = closeSeries.toArray();
 
   // MA = sma(sma(src, ceil(mainPeriod/2)), floor(mainPeriod/2) + 1)
   const halfUp = Math.ceil(mainPeriod / 2);
@@ -60,13 +64,14 @@ export function calculate(
   const sma1 = ta.sma(source, halfUp);
   const smaArr = ta.sma(sma1, halfDown).toArray();
 
-  // ssMA: clamp MA to close when price moves beyond percent band
+  // ssMA = MA > close + MA * percent / 100 ? MA : MA < close - MA * percent / 100 ? MA : close
+  // (na MA: both tests false, ssMA = close)
   const ssMAArr: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const ma = smaArr[i];
-    const c = closeArr[i] ?? 0;
+    const c = closeArr[i] ?? NaN;
     if (ma == null || isNaN(ma)) {
-      ssMAArr[i] = NaN;
+      ssMAArr[i] = c;
       continue;
     }
     const band = ma * percent / 100;
@@ -80,7 +85,7 @@ export function calculate(
   }
 
   // signalline = sma(close, signalPeriod)
-  const signalArr = ta.sma(source, signalPeriod).toArray();
+  const signalArr = ta.sma(closeSeries, signalPeriod).toArray();
 
   // ScalpLine = signalline - ssMA
   const scalpArr: number[] = new Array(n);
@@ -90,30 +95,14 @@ export function calculate(
     scalpArr[i] = (sig != null && !isNaN(sig) && !isNaN(ss)) ? sig - ss : NaN;
   }
 
-  // The alerts use the original's series: while MA is na both band tests are false, so ssMA = close and ScalpLine =
-  // signalline - close from the first signal value on (the plots of the port start after the MA warm-up)
-  const alertScalp = scalpArr.map((v, i) => {
-    const sig = signalArr[i];
-    const ma = smaArr[i];
-    if (ma != null && !isNaN(ma)) return v;
-    return sig != null && !isNaN(sig) ? sig - (closeArr[i] ?? NaN) : NaN;
-  });
+  const plot0 = scalpArr.map((v, i) => ({ time: bars[i].time, value: v }));
 
-  const warmup = halfUp + halfDown;
+  // plot(0, "") on every bar
+  const plot1 = bars.map((b) => ({ time: b.time, value: 0 }));
 
-  const plot0 = scalpArr.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup || isNaN(v) ? NaN : v,
-  }));
-
-  const plot1 = bars.map((b, i) => ({
-    time: b.time,
-    value: i < warmup ? NaN : 0,
-  }));
-
-  // Dynamic fill colors: green when ScalpLine >= 0, red when < 0
-  const fillColors = scalpArr.map((v, i) => {
-    if (i < warmup || isNaN(v)) return 'transparent';
+  // Fill colour: ScalpLine >= 0 ? green : red (transp 80); no fill where ScalpLine is na
+  const fillColors = scalpArr.map((v) => {
+    if (isNaN(v)) return 'transparent';
     return v >= 0 ? 'rgba(0,128,0,0.2)' : 'rgba(255,0,0,0.2)';
   });
 
@@ -122,7 +111,7 @@ export function calculate(
     plots: { 'plot0': plot0, 'plot1': plot1 },
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(0,128,0,0.2)' }, colors: fillColors }],
     // alertcondition(crossover(ScalpLine, 0), "BUY ALARM!") / alertcondition(crossunder(ScalpLine, 0), "SELL ALARM!")
-    alerts: alertStates(alertConditions, bars, [crossedOver(alertScalp, 0), crossedUnder(alertScalp, 0)]),
+    alerts: alertStates(alertConditions, bars, [crossedOver(scalpArr, 0), crossedUnder(scalpArr, 0)]),
   };
 }
 

@@ -401,10 +401,10 @@ describe('community ports 03: alerts and style ids', () => {
     expect(r.alerts[1].times.length).toBeGreaterThan(2);
   });
 
-  it('ATR Trailing Stops Colored: no alerts and no shape in the original (markers left as they are)', () => {
-    const r = trailColored.calculate(bars) as unknown as { markers: unknown[] };
+  it('ATR Trailing Stops Colored: no alerts and no shape in the original (no markers)', () => {
+    const r = trailColored.calculate(bars) as unknown as { markers?: unknown[] };
     expect('alertConditions' in trailColored).toBe(false);
-    expect(Array.isArray(r.markers)).toBe(true);
+    expect(r.markers === undefined || r.markers.length === 0).toBe(true);
   });
 
   it('ATR Trailing Stop with ATR Targets: flip buy / sell', () => {

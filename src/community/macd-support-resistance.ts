@@ -7,7 +7,8 @@
  * Levels are removed when price crosses through them. Max 20 levels.
  *
  * Sub-panel indicator (overlay: false): the signal line, the hidden MACD line, the fill between them in the colour of
- * MACD vs signal, a diamond on the signal line at each cross ("Macd UP" / "Macd DN") and the 100-bar MACD high / low.
+ * MACD vs signal, a diamond on the signal line at each cross ("Macd UP" / "Macd DN"), the 100-bar MACD high / low and
+ * the dashed Zero Line.
  * S/R lines are output as overlay drawing primitives.
  *
  * Reference: "MACD Support and Resistance [ChartPrime]" by ChartPrime
@@ -248,6 +249,10 @@ export function calculate(
       localHigh: localHighPlot,
       localLow: localLowPlot,
     },
+    // hline(0, "Zero Line", color = color.new(#787B86, 30)): default style dashed, width 1
+    hlines: [
+      { value: 0, options: { title: 'Zero Line', color: String(color.new('#787B86', 30)), linestyle: 'dashed', linewidth: 1 } },
+    ],
     fills: [{ plot1: 'macd', plot2: 'signal', options: { title: 'Plots Background' }, colors: fillColors }],
     lines,
     labels,

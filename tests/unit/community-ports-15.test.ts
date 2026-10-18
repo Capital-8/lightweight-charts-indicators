@@ -275,8 +275,8 @@ describe('gaussian-filter-trend', () => {
 });
 
 describe('global-liquidity-index', () => {
-  it('is skipped: the spec original is another version of the script (no alerts added)', () => {
-    expect((gli as Record<string, unknown>).alertConditions).toBeUndefined();
+  it('re-ported to the original: declares its four alertconditions (fired in community-reports-3)', () => {
+    expect(gli.alertConditions.map((a) => a.title)).toEqual(['Trend Bullish', 'Trend Bearish', 'Tracking Ahead', 'Tracking Behind']);
   });
 });
 

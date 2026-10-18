@@ -19,9 +19,9 @@
  * resistance and risk levels, the phase completions and the start of a bullish / bearish momentum, with the messages
  * of the original (ticker from the chart context).
  *
- * The two "Overall Trend Mark" shapes are hidden in the original (display.none) and are not drawn. The prices in
- * the label tooltips and alert messages use the price tick of the symbol: the port reads it from the chart context
- * (third argument) and uses 0.01 without it.
+ * The two "Overall Trend Mark" arrows (on the first bar of a resistance / support level) are hidden by default.
+ * The prices in the label tooltips and alert messages use the price tick of the symbol: the port reads it from the
+ * chart context (third argument) and uses 0.01 without it.
  *
  * Reference: "Reversal Signals [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -504,6 +504,15 @@ export function calculate(
     if (sCC === 13 && cmpltd) call(tTxt + ' bearish trend exhaustion phase completion detected, price ' + pTxt);
     if (gt(bSR, 0) && eq(bSR1, 0)) call(tTxt + ' bearish momentum detected, price ' + pTxt);
     if (gt(sSS, 0) && eq(sSS1, 0)) call(tTxt + ' bullish momentum detected, price ' + pTxt);
+
+    // plotshape(bSR > 0 and bSR[1] == 0 ? bSR : na, 'Overall Bearish Trend Mark', shape.labeldown, location.absolute,
+    // noC, 0, '⇩', rdC, size = size.small, display = display.none) and the bullish one at sSS (hidden by default)
+    if (gt(bSR, 0) && eq(bSR1, 0)) {
+      markers.push({ id: 'shape54', time, position: 'atPriceTop', price: bSR, shape: 'labelDown', color: NO_COLOR, text: '⇩', textColor: RED, size: 'small' });
+    }
+    if (gt(sSS, 0) && eq(sSS1, 0)) {
+      markers.push({ id: 'shape55', time, position: 'atPriceBottom', price: sSS, shape: 'labelUp', color: NO_COLOR, text: '⇧', textColor: GREEN, size: 'small' });
+    }
 
     bSCPrev = bSC;
     sSCPrev = sSC;

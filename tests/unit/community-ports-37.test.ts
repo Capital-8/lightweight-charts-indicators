@@ -245,8 +245,9 @@ describe('stoch-vx3 (style)', () => {
   const r = svx.calculate(bars) as { plots: Record<string, { time: number; value: number; color?: string }[]> } & { markers?: unknown };
   it('the cross circles are a plot (as the original), no markers', () => {
     expect(r.markers).toBeUndefined();
-    expect(svx.plotConfig.find((p) => p.id === 'plot2')?.style).toBe('circles');
-    const k = vals(r.plots.plot0), d = vals(r.plots.plot1), c = vals(r.plots.plot2);
+    // plot2 is the percentile rank line; the circles are the fourth plot (plot3), as in the original
+    expect(svx.plotConfig.find((p) => p.id === 'plot3')?.style).toBe('circles');
+    const k = vals(r.plots.plot0), d = vals(r.plots.plot1), c = vals(r.plots.plot3);
     const cross = xover(d, k).map((x, i) => x || xunder(d, k)[i]);
     c.forEach((v, i) => (cross[i] ? expect(v).toBe(d[i]) : expect(v).toBeNaN()));
     expect(cross.filter(Boolean).length).toBeGreaterThan(0);

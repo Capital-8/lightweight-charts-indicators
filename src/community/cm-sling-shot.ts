@@ -2,10 +2,10 @@
  * CM Sling Shot System
  *
  * Two-EMA crossover system that keeps traders on the trending side of the market.
- * EMA cloud with silver fill, bar coloring for pullback (yellow) and entry (aqua)
- * signals, persistent per-bar trend triangles, and conservative entry arrows (the original's two plotarrow outputs,
- * `arrows` of the result). "Show Letters" adds the original's 'B' / 'S' characters at low - true range / high + true
- * range on the entry bars.
+ * EMA cloud with silver fill, bar coloring for pullback (yellow) and entry (aqua: close[1] below / above the current
+ * fast EMA and close back across it, in the trend of the EMAs) signals, persistent per-bar trend triangles, and
+ * conservative entry arrows on the same entry rule (the original's two plotarrow outputs, `arrows` of the result).
+ * "Show Letters" adds the original's 'B' / 'S' characters at low - true range / high + true range on the entry bars.
  *
  * Reference: "CM Sling Shot System" by ChrisMoody
  */
@@ -73,80 +73,65 @@ export function calculate(
     return { time: bars[i].time, value: v, color: getColor(fast, v) };
   });
 
-  for (let i = 0; i < n; i++) {
-    if (i < warmup) {
-      fillColors.push('transparent');
-      continue;
-    }
+  // Pine: fill(p1, p2, color=silver, transp=50) => #C0C0C080
+  for (let i = 0; i < n; i++) fillColors.push(i < warmup ? 'transparent' : '#C0C0C080');
 
-    const close = bars[i].close;
-    const prevClose = i > 0 ? bars[i - 1].close : close;
-    const fast = emaFastArr[i] ?? 0;
-    const slow = emaSlowArr[i] ?? 0;
-    const prevFast = i > 0 ? (emaFastArr[i - 1] ?? 0) : fast;
-
-    // Pine: fill(p1, p2, color=silver, transp=50) => #C0C0C080
-    fillColors.push('#C0C0C080');
-
-    // Pine barcolor logic: second barcolor overrides first when both match.
-    // 1st: pullbackUpT (fast>slow && close<fast) => yellow
-    //      pullbackDnT (fast<slow && close>fast) => yellow
-    // 2nd: entryUpT (fast>slow && close[1]<fast && close>fast) => aqua
-    //      entryDnT (fast<slow && close[1]>fast && close<fast) => aqua
-    const pullbackUp = fast > slow && close < fast;
-    const pullbackDn = fast < slow && close > fast;
-    const entryUp = fast > slow && prevClose < prevFast && close > fast;
-    const entryDn = fast < slow && prevClose > prevFast && close < fast;
-
-    // Second barcolor overrides first in Pine
-    if (entryUp || entryDn) {
-      barColors.push({ time: bars[i].time as number, color: '#00FFFF' }); // aqua
-    } else if (pullbackUp || pullbackDn) {
-      barColors.push({ time: bars[i].time as number, color: '#FFFF00' }); // yellow
-    }
-    // No barcolor push when neither condition met (leave candle default)
-  }
-
-  // Markers: persistent trend triangles every bar; arrows: conservative entries
+  // The signals on the EMAs as the original computes them: na (NaN) until each EMA has its window, and a comparison
+  // with na is false, so no signal before both EMAs exist; close[1] is na on the first bar.
   const markers: MarkerData[] = [];
   const arrows: ArrowData[] = [];
-  for (let i = warmup; i < n; i++) {
-    const fast = emaFastArr[i] ?? 0;
-    const slow = emaSlowArr[i] ?? 0;
-    const prevFast = i > 0 ? (emaFastArr[i - 1] ?? 0) : fast;
-    const close = bars[i].close;
-    const prevClose = i > 0 ? bars[i - 1].close : close;
+  for (let i = 0; i < n; i++) {
+    const b = bars[i];
+    const time = b.time as number;
+    const close = b.close;
+    const prevClose = i > 0 ? bars[i - 1].close : NaN;
+    const fast = emaFastArr[i] ?? NaN;
+    const slow = emaSlowArr[i] ?? NaN;
 
-    // Pine: plotshape(st and upTrend, style=shape.triangleup, location=location.bottom, color=lime)
-    // Persistent every-bar trend triangles
-    if (fast >= slow) {
-      markers.push({ time: bars[i].time as number, position: 'belowBar', shape: 'triangleUp', color: '#00FF00', text: '' });
+    // pullbackUpT() => emaFast > emaSlow and close < emaFast; pullbackDnT() => emaFast < emaSlow and close > emaFast
+    const pullbackUp = fast > slow && close < fast;
+    const pullbackDn = fast < slow && close > fast;
+    // entryUpT() => emaFast > emaSlow and close[1] < emaFast and close > emaFast (the current bar's fast EMA)
+    // entryDnT() => emaFast < emaSlow and close[1] > emaFast and close < emaFast
+    const entryUp = fast > slow && prevClose < fast && close > fast;
+    const entryDn = fast < slow && prevClose > fast && close < fast;
+
+    // barcolor(sae and pullbackUpT() ? yellow : sae and pullbackDnT() ? yellow : na)
+    // barcolor(sce and entryUpT() ? aqua : sce and entryDnT() ? aqua : na): the later barcolor wins on the same bar
+    if (entryUp || entryDn) {
+      barColors.push({ time, color: '#00FFFF', id: 'barcolor1' }); // aqua
+    } else if (pullbackUp || pullbackDn) {
+      barColors.push({ time, color: '#FFFF00', id: 'barcolor0' }); // yellow
     }
-    // Pine: plotshape(st and downTrend, style=shape.triangledown, location=location.top, color=red)
+
+    // plotshape(st and upTrend ? upTrend : na, style=shape.triangleup, location=location.bottom, color=lime)
+    if (fast >= slow) {
+      markers.push({ time, position: 'belowBar', shape: 'triangleUp', color: '#00FF00', text: '', id: 'shape0' });
+    }
+    // plotshape(st and downTrend ? downTrend : na, style=shape.triangledown, location=location.top, color=red)
     if (fast < slow) {
-      markers.push({ time: bars[i].time as number, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: '' });
+      markers.push({ time, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: '', id: 'shape1' });
     }
 
     // tr: true range (na on the first bar)
-    const b = bars[i];
     const tr = i > 0 ? Math.max(b.high - b.low, Math.abs(b.high - bars[i - 1].close), Math.abs(b.low - bars[i - 1].close)) : NaN;
 
-    // Pine: plotarrow(pa and codiff ? codiff : na, "Up Entry Arrow", colorup=lime) - conservative entry up
-    // Pine: plotchar(sl and codiff ? low - tr : na, "Buy Entry", char='B', location.absolute, color=lime)
-    if (fast > slow && prevClose < prevFast && close > fast) {
-      arrows.push({ time: b.time as number, id: 'arrow0', value: 1, color: '#00FF00' });
+    // plotarrow(pa and codiff ? codiff : na, "Up Entry Arrow", colorup=lime): codiff = entryUpTrend
+    // plotchar(sl and codiff ? low - tr : na, "Buy Entry", char='B', location.absolute, color=lime)
+    if (entryUp) {
+      arrows.push({ time, id: 'arrow0', value: 1, color: '#00FF00' });
       if (showLetters && !isNaN(tr)) {
-        markers.push({ time: b.time as number, position: 'atPriceMiddle', price: b.low - tr, shape: 'circle', color: 'transparent',
-          text: 'B', textColor: '#00FF00' });
+        markers.push({ time, position: 'atPriceMiddle', price: b.low - tr, shape: 'circle', color: 'transparent',
+          text: 'B', textColor: '#00FF00', id: 'char2' });
       }
     }
-    // Pine: plotarrow(pa and codiff2*-1 ? codiff2*-1 : na, "Down Entry Arrow", colordown=red)
-    // Pine: plotchar(sl and codiff2 ? high + tr : na, "Short Entry", char='S', location.absolute, color=red)
-    if (fast < slow && prevClose > prevFast && close < fast) {
-      arrows.push({ time: b.time as number, id: 'arrow1', value: -1, color: '#FF0000' });
+    // plotarrow(pa and codiff2*-1 ? codiff2*-1 : na, "Down Entry Arrow", colordown=red): codiff2 = entryDnTrend
+    // plotchar(sl and codiff2 ? high + tr : na, "Short Entry", char='S', location.absolute, color=red)
+    if (entryDn) {
+      arrows.push({ time, id: 'arrow1', value: -1, color: '#FF0000' });
       if (showLetters && !isNaN(tr)) {
-        markers.push({ time: b.time as number, position: 'atPriceMiddle', price: b.high + tr, shape: 'circle', color: 'transparent',
-          text: 'S', textColor: '#FF0000' });
+        markers.push({ time, position: 'atPriceMiddle', price: b.high + tr, shape: 'circle', color: 'transparent',
+          text: 'S', textColor: '#FF0000', id: 'char3' });
       }
     }
   }

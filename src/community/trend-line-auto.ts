@@ -1,39 +1,61 @@
 /**
  * Trend Line Auto
  *
- * Auto-draws trend lines based on fractal highs/lows detected via highest/lowest
- * over a period. Uses angle calculation to find the best-fit trend line connecting
- * the most recent fractal to a prior fractal within a segment range.
- * Lines are colored green (top/upper) and red/yellow (bottom/lower).
+ * Auto-draws trend lines between fractal highs / lows, as the original: a top (bottom) fractal is the high (low)
+ * `mid` = int(term / 2) + 1 bars back when it is the highest high (lowest low) of the last `term` bars. On each bar
+ * with a fractal, among the earlier fractals of the last `segment` bars, the one giving the smallest angle
+ * atan(slope per bar) / (355 / 113) * 180 (bottom lines: the smallest negated angle) is joined to it by a line from
+ * fractal bar to fractal bar ('Ray Style' extension, 'Color Top Line' / 'Color Bottom Line'); lines are only drawn on
+ * the bars whose time is within `limit` chart intervals of the current time (timenow - limit * interval), and the
+ * 50 newest lines are kept (the default line limit). On the last bar each line of the last `limit` bars is deleted
+ * when its price on the last bar is more than 2 x (highest - lowest of `term` bars) away from the close or when it
+ * spans fewer than `term` bars, and made dotted when more than 1 x away.
  *
  * Alert (alertcondition, `alerts` of the result): 'HarryBot Alert', the close crossing the top or the bottom "defense
  * line". The original reads the line levels on the last bar only (care() returns na on the other bars), so the
  * condition can only be true on the last bar: the level is the price on the last bar of the oldest top (bottom) line
- * the port draws in the last `limit` bars, read before the far / short lines are removed, as the original does.
+ * of the last `limit` bars (0 without one), read before the far / short lines are removed, as the original does.
+ *
+ * Chart values read: the chart timeframe (`timeframe` of the chart context, else from the bar spacing) and the
+ * current time (`now` of the chart context, else the clock).
  *
  * Reference: "Trend Line - HarryBot" by HarryBot
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LineDrawingData } from '../types';
 import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+import { chartTimeframe } from '../anchor-period';
+import { nowOf, type ChartContext } from '../chart-context';
 
 export interface TrendLineAutoInputs {
   limit: number;
   segment: number;
   term: number;
+  /** Ray Style */
+  ray: 'none' | 'both' | 'left' | 'right';
+  /** Color Top Line */
+  colora: string;
+  /** Color Bottom Line */
+  colorb: string;
 }
 
 export const defaultInputs: TrendLineAutoInputs = {
   limit: 100,
   segment: 55,
   term: 15,
+  ray: 'right',
+  colora: '#00FF00',
+  colorb: '#FFFF00',
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'limit', type: 'int', title: 'Bars Limit', defval: 100, min: 10, step: 2 },
-  { id: 'segment', type: 'int', title: 'Segment Range', defval: 55, min: 1 },
-  { id: 'term', type: 'int', title: 'Fractals Period', defval: 15, min: 3, step: 2 },
+  { id: 'limit', type: 'int', title: 'Bars Limit', defval: 100, min: 10, max: 500, step: 2 },
+  { id: 'segment', type: 'int', title: 'Segment Range', defval: 55, min: 1, max: 200, step: 1 },
+  { id: 'term', type: 'int', title: 'Fractals Period', defval: 15, min: 3, max: 999, step: 2 },
+  { id: 'ray', type: 'string', title: 'Ray Style', defval: 'right', options: ['none', 'both', 'left', 'right'] },
+  { id: 'colora', type: 'color', title: 'Color Top Line', defval: '#00FF00' },
+  { id: 'colorb', type: 'color', title: 'Color Bottom Line', defval: '#FFFF00' },
 ];
 
 export const plotConfig: PlotConfig[] = [
@@ -46,169 +68,138 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TrendLineAutoInputs> = {}): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
-  const { limit, segment, term } = { ...defaultInputs, ...inputs };
-  const n = bars.length;
-  const mid = Math.floor(term / 2) + 1;
+/** Lines kept by default (max_lines_count): the oldest are removed past it */
+const MAX_LINES = 50;
 
-  const highSeries = new Series(bars, (b) => b.high);
-  const lowSeries = new Series(bars, (b) => b.low);
-  const highestArr = ta.highest(highSeries, term).toArray();
-  const lowestArr = ta.lowest(lowSeries, term).toArray();
+interface TrendLine { x1: number; y1: number; x2: number; y2: number; up: boolean; dotted: boolean; deleted: boolean }
+
+/** var ratio: seconds of the chart interval (weekly 7 days, monthly 30.5 days, whatever the multiplier) */
+function ratioOf(tf: string): number {
+  if (!tf) return NaN;
+  const info = timeframe.info(tf);
+  if (info.isseconds) return info.multiplier;
+  if (info.isminutes) return info.multiplier * 60;
+  if (info.isdaily) return info.multiplier * 86400;
+  if (info.isweekly) return 86400 * 7;
+  return 86400 * 30.5;
+}
+
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<TrendLineAutoInputs> = {},
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
+  const { limit, segment, term, ray, colora, colorb } = { ...defaultInputs, ...inputs };
+  const n = bars.length;
+  // var mid = int(term / 2) + 1
+  const mid = Math.trunc(term / 2) + 1;
+
+  const highestArr = ta.highest(new Series(bars, (b) => b.high), term).toArray().map((v) => v ?? NaN);
+  const lowestArr = ta.lowest(new Series(bars, (b) => b.low), term).toArray().map((v) => v ?? NaN);
 
   const closePlot = bars.map((b) => ({ time: b.time, value: NaN }));
-  const lines: LineDrawingData[] = [];
-  /** Bar indexes of the first top / bottom line the port draws (the oldest one), for the alert level */
-  let firstUp: { x1: number; y1: number; x2: number; y2: number } | null = null;
-  let firstDn: { x1: number; y1: number; x2: number; y2: number } | null = null;
 
-  // Angle calculation: atan((y2-y1)/(x2-x1)) * 180/PI
-  function calcAngle(x1: number, y1: number, x2: number, y2: number): number {
-    return Math.atan((y2 - y1) / (x2 - x1)) / Math.PI * 180;
+  // [idx_up, frac_up] = if ta.highest(term) == high[mid] [bar_index[mid], high[mid]] (na otherwise); same for lows
+  const fracUp: number[] = new Array(n).fill(NaN);
+  const fracDn: number[] = new Array(n).fill(NaN);
+  for (let i = mid; i < n; i++) {
+    if (highestArr[i] === bars[i - mid].high) fracUp[i] = bars[i - mid].high;
+    if (lowestArr[i] === bars[i - mid].low) fracDn[i] = bars[i - mid].low;
   }
 
-  // Detect fractals: up fractal when highest(term) == high[mid], down when lowest(term) == low[mid]
-  // Store fractal data: { barIndex, value }
-  const fracUps: { idx: number; value: number }[] = [];
-  const fracDns: { idx: number; value: number }[] = [];
+  // if time > timenow - (limit * ratio * 1000)
+  const ms = n > 0 && bars[0].time >= 1e12;
+  const ratio = ratioOf(chartTimeframe(bars, chart));
+  const since = nowOf(chart) - limit * ratio * 1000;
 
-  for (let i = term - 1; i < n; i++) {
-    const hh = highestArr[i];
-    const ll = lowestArr[i];
-    if (!isNaN(hh) && bars[i - mid + 1] && hh === bars[i - mid + 1].high) {
-      fracUps.push({ idx: i - mid + 1, value: bars[i - mid + 1].high });
-    }
-    if (!isNaN(ll) && bars[i - mid + 1] && ll === bars[i - mid + 1].low) {
-      fracDns.push({ idx: i - mid + 1, value: bars[i - mid + 1].low });
-    }
-  }
+  // cal(x1, y1, x2, y2) = math.atan((y2 - y1) / (x2 - x1)) / (355 / 113) * 180 (x2 == x1: 0 / 0 is na)
+  const cal = (x1: number, y1: number, x2: number, y2: number) => (Math.atan((y2 - y1) / (x2 - x1)) / (355 / 113)) * 180;
 
-  // Only process lines within the last 'limit' bars
-  const limitStart = Math.max(0, n - limit);
-
-  // For upper trend lines: find best angle from recent fractal up to segment prior fractal ups
-  // Pine draw() function: for the most recent fractal, look back through segment previous fractals
-  // and find the one that gives the minimum angle (flattest line connecting two fractals)
-
-  // Process upper fractals (green lines)
-  const recentFracUps = fracUps.filter(f => f.idx >= limitStart);
-  for (const current of recentFracUps) {
-    let minAngle = 90.0;
-    let bestIdx = -1;
-
-    // Look through prior fractals within segment range
-    for (const prior of fracUps) {
-      if (prior.idx >= current.idx) continue;
-      if (current.idx - prior.idx > segment * 2) continue; // too far
-      const ang = calcAngle(prior.idx, prior.value, current.idx, current.value);
-      // For up (top) lines: use positive angle, find minimum
-      if (ang < minAngle) {
-        minAngle = ang;
-        bestIdx = fracUps.indexOf(prior);
+  const created: TrendLine[] = [];
+  /** up_lin / dn_lin: the line created on each bar (null: na) */
+  const upLin: (TrendLine | null)[] = new Array(n).fill(null);
+  const dnLin: (TrendLine | null)[] = new Array(n).fill(null);
+  const draw = (dat: number[], i: number, up: boolean): TrendLine | null => {
+    const t = ms ? bars[i].time : bars[i].time * 1000;
+    if (!(t > since)) return null;
+    let maxv = 90.0;
+    let maxk = 0;
+    for (let k = 0; k <= segment - 1; k++) {
+      if (i - k < 0 || Number.isNaN(dat[i - k])) continue;
+      let ang = cal(i - k, dat[i - k], i, dat[i]);
+      ang = up ? ang : -ang;
+      if (ang < maxv) {
+        maxk = k;
+        maxv = ang;
       }
     }
-
-    if (bestIdx >= 0) {
-      const prior = fracUps[bestIdx];
-      firstUp ??= { x1: prior.idx, y1: prior.value, x2: current.idx, y2: current.value };
-      lines.push({
-        time1: bars[prior.idx].time,
-        price1: prior.value,
-        time2: bars[current.idx].time,
-        price2: current.value,
-        color: '#00FF00', // lime/green for top line
-        width: 1,
-        style: 'solid',
-        extend: 'right',
-      });
+    if (!(maxk > 0)) return null;
+    // line.new(bar_index[maxk] - mid, dat[maxk], bar_index - mid, dat, ...)
+    const line: TrendLine = { x1: i - maxk - mid, y1: dat[i - maxk], x2: i - mid, y2: dat[i], up, dotted: false, deleted: false };
+    created.push(line);
+    // past the line limit the oldest line is removed
+    if (created.filter((l) => !l.deleted).length > MAX_LINES) {
+      const oldest = created.find((l) => !l.deleted);
+      if (oldest) oldest.deleted = true;
     }
+    return line;
+  };
+  for (let i = 0; i < n; i++) {
+    upLin[i] = draw(fracUp, i, true);
+    dnLin[i] = draw(fracDn, i, false);
   }
 
-  // Process lower fractals (yellow/red lines)
-  const recentFracDns = fracDns.filter(f => f.idx >= limitStart);
-  for (const current of recentFracDns) {
-    let minAngle = 90.0;
-    let bestIdx = -1;
-
-    for (const prior of fracDns) {
-      if (prior.idx >= current.idx) continue;
-      if (current.idx - prior.idx > segment * 2) continue;
-      const ang = calcAngle(prior.idx, prior.value, current.idx, current.value);
-      // For down (bottom) lines: negate angle, find minimum
-      const negAng = -ang;
-      if (negAng < minAngle) {
-        minAngle = negAng;
-        bestIdx = fracDns.indexOf(prior);
-      }
+  // care(lin) on the last bar: for the lines of the last `limit` bars (newest first), ref = price on last_bar_index,
+  // gap = |close - ref| / chg; delete when gap > 2 or |x1 - x2| < term, dotted when gap > 1; returns the last ref
+  // (the oldest line's, 0.0 without a line)
+  const priceAt = (l: TrendLine, x: number) => (l.deleted ? NaN : l.y1 + ((l.y2 - l.y1) * (x - l.x1)) / (l.x2 - l.x1));
+  const care = (lin: (TrendLine | null)[]): number => {
+    const last = n - 1;
+    const cls = bars[last].close;
+    const chg = highestArr[last] - lowestArr[last];
+    let ref = 0.0;
+    for (let k = 0; k <= limit - 1 && last - k >= 0; k++) {
+      const l = lin[last - k];
+      if (!l) continue;
+      ref = priceAt(l, last);
+      const gap = Math.abs(cls - ref) / chg;
+      if (gap > 2 || Math.abs(l.x1 - l.x2) < term) l.deleted = true;
+      if (gap > 1) l.dotted = true;
     }
+    return ref;
+  };
 
-    if (bestIdx >= 0) {
-      const prior = fracDns[bestIdx];
-      firstDn ??= { x1: prior.idx, y1: prior.value, x2: current.idx, y2: current.value };
-      lines.push({
-        time1: bars[prior.idx].time,
-        price1: prior.value,
-        time2: bars[current.idx].time,
-        price2: current.value,
-        color: '#FFFF00', // yellow for bottom line
-        width: 1,
-        style: 'solid',
-        extend: 'right',
-      });
-    }
-  }
-
-  // Prune lines that are too far from current price or too short
-  // Pine care() function: delete lines where gap > 2*chg or line length < term
-  const chg = n > term ? (highestArr[n - 1] ?? 0) - (lowestArr[n - 1] ?? 0) : 1;
-  const lastClose = bars[n - 1].close;
-  const filteredLines: LineDrawingData[] = [];
-
-  for (const line of lines) {
-    // Estimate price at last bar by linear extrapolation
-    const dx = line.time2 - line.time1;
-    if (dx === 0) continue;
-    const slope = (line.price2 - line.price1) / dx;
-    const projected = line.price2 + slope * (bars[n - 1].time - line.time2);
-    const gap = Math.abs(lastClose - projected) / (chg || 1);
-
-    // Find bar indices for length check
-    let idx1 = 0, idx2 = 0;
-    for (let j = 0; j < n; j++) {
-      if (bars[j].time === line.time1) idx1 = j;
-      if (bars[j].time === line.time2) idx2 = j;
-    }
-
-    if (gap > 2 || Math.abs(idx1 - idx2) < term) continue;
-
-    // If gap > 1, make dotted
-    if (gap > 1) {
-      filteredLines.push({ ...line, style: 'dotted' });
-    } else {
-      filteredLines.push(line);
-    }
-  }
-
-  // up_lim = care(up_lin), dn_lim = care(dn_lin): on the last bar only, line.get_price(lin, last_bar_index) (by bar
-  // index) of the oldest line; na elsewhere
-  const priceAt = (l: { x1: number; y1: number; x2: number; y2: number } | null, x: number) =>
-    !l || l.x2 === l.x1 ? NaN : l.y1 + ((l.y2 - l.y1) * (x - l.x1)) / (l.x2 - l.x1);
   const alertFlags = new Array<boolean>(n).fill(false);
-  if (n > 1) {
-    const upLim = priceAt(firstUp, n - 1);
-    const dnLim = priceAt(firstDn, n - 1);
-    const c = bars[n - 1].close;
-    const c1 = bars[n - 2].close;
-    // (close[1] < up_lim and close > up_lim) or (close[1] > dn_lim and close < dn_lim)
-    //   or (close[1] > up_lim and close < up_lim) or (close[1] < dn_lim and close > dn_lim)
-    alertFlags[n - 1] = (c1 < upLim && c > upLim) || (c1 > dnLim && c < dnLim)
-      || (c1 > upLim && c < upLim) || (c1 < dnLim && c > dnLim);
+  if (n > 0) {
+    const upLim = care(upLin);
+    const dnLim = care(dnLin);
+    if (n > 1) {
+      const c = bars[n - 1].close;
+      const c1 = bars[n - 2].close;
+      // (close[1] < up_lim and close > up_lim) or (close[1] > dn_lim and close < dn_lim)
+      //   or (close[1] > up_lim and close < up_lim) or (close[1] < dn_lim and close > dn_lim)
+      alertFlags[n - 1] = (c1 < upLim && c > upLim) || (c1 > dnLim && c < dnLim)
+        || (c1 > upLim && c < upLim) || (c1 < dnLim && c > dnLim);
+    }
   }
+
+  // bar index -> time (a point before the first bar is drawn at the first bar)
+  const timeAt = (x: number) => bars[Math.max(0, Math.min(n - 1, x))].time;
+  const lines: LineDrawingData[] = created.filter((l) => !l.deleted).map((l) => ({
+    time1: timeAt(l.x1),
+    price1: l.y1,
+    time2: timeAt(l.x2),
+    price2: l.y2,
+    color: l.up ? colora : colorb,
+    width: 1,
+    style: l.dotted ? 'dotted' : 'solid',
+    extend: ray,
+  }));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': closePlot },
-    lines: filteredLines,
+    lines,
     alerts: alertStates(alertConditions, bars, [alertFlags]),
   };
 }

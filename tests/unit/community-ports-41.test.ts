@@ -118,8 +118,9 @@ describe('declarations equal the spec', () => {
     expect(tsd.TrendStrengthDirection.alertConditions).toBe(tsd.alertConditions);
     expect(tt.TrendTargets.alertConditions).toBe(tt.alertConditions);
   });
-  it('trend-trader is left as it is (the port is another script than the spec original)', () => {
-    expect((trader as Record<string, unknown>).hasAlertFunction).toBeUndefined();
+  it('trend-trader: re-ported to the original, which makes alert() calls', () => {
+    expect(trader.hasAlertFunction).toBe(true);
+    expect(trader.TrendTrader.hasAlertFunction).toBe(true);
   });
 });
 
@@ -213,38 +214,56 @@ describe('alert conditions', () => {
 
   it('trend-line-auto: the close crossing the oldest top / bottom line, on the last bar only', () => {
     const term = 15, segment = 55, limit = 100, mid = Math.floor(term / 2) + 1;
-    /** The port's lines (best angle from each recent fractal), the first one of each side (oldest) */
-    const firstLines = (list: Bar[]) => {
+    /** up_lim / dn_lim of the original: care() of the lines drawn on the last `limit` bars (the oldest one's price) */
+    const levels = (list: Bar[], nowMs: number) => {
       const n = list.length;
       const hh = A(ta.highest(S(list.map((b) => b.high), list), term));
       const ll = A(ta.lowest(S(list.map((b) => b.low), list), term));
-      const ups: { idx: number; v: number }[] = [], dns: { idx: number; v: number }[] = [];
-      for (let i = term - 1; i < n; i++) {
-        const c = i - mid + 1;
-        if (hh[i] === list[c].high) ups.push({ idx: c, v: list[c].high });
-        if (ll[i] === list[c].low) dns.push({ idx: c, v: list[c].low });
-      }
-      const first = (fr: { idx: number; v: number }[], sign: number) => {
-        for (const cur of fr.filter((f) => f.idx >= Math.max(0, n - limit))) {
-          let best: { idx: number; v: number } | null = null, minA = 90;
-          for (const p of fr) {
-            if (p.idx >= cur.idx || cur.idx - p.idx > segment * 2) continue;
-            const a = sign * (Math.atan((cur.v - p.v) / (cur.idx - p.idx)) / Math.PI) * 180;
-            if (a < minA) { minA = a; best = p; }
-          }
-          if (best) return { x1: best.idx, y1: best.v, x2: cur.idx, y2: cur.v };
+      const fu = list.map((_, i) => (i >= mid && hh[i] === list[i - mid].high ? list[i - mid].high : NaN));
+      const fd = list.map((_, i) => (i >= mid && ll[i] === list[i - mid].low ? list[i - mid].low : NaN));
+      type L = { x1: number; y1: number; x2: number; y2: number; del: boolean };
+      const all: L[] = [];
+      // lines only on the bars within `limit` daily intervals of timenow; at most 50 lines
+      const draw = (dat: number[], i: number, up: boolean): L | null => {
+        if (!((list[i].time as number) * 1000 > nowMs - limit * 86400 * 1000)) return null;
+        let maxv = 90, maxk = 0;
+        for (let k = 0; k < segment; k++) {
+          if (i - k < 0 || isNaN(dat[i - k])) continue;
+          const a = (Math.atan((dat[i] - dat[i - k]) / k) / (355 / 113)) * 180;
+          if ((up ? a : -a) < maxv) { maxk = k; maxv = up ? a : -a; }
         }
-        return null;
+        if (maxk <= 0) return null;
+        const l = { x1: i - maxk - mid, y1: dat[i - maxk], x2: i - mid, y2: dat[i], del: false };
+        all.push(l);
+        const live = all.filter((x) => !x.del);
+        if (live.length > 50) live[0].del = true;
+        return l;
       };
-      return [first(ups, 1), first(dns, -1)];
+      const upL: (L | null)[] = [], dnL: (L | null)[] = [];
+      for (let i = 0; i < n; i++) { upL.push(draw(fu, i, true)); dnL.push(draw(fd, i, false)); }
+      const last = n - 1;
+      const care = (lin: (L | null)[]) => {
+        let ref = 0;
+        for (let k = 0; k < limit; k++) {
+          const l = lin[last - k];
+          if (!l) continue;
+          ref = l.del ? NaN : l.y1 + ((l.y2 - l.y1) * (last - l.x1)) / (l.x2 - l.x1);
+          const gap = Math.abs(list[last].close - ref) / (hh[last] - ll[last]);
+          if (gap > 2 || Math.abs(l.x1 - l.x2) < term) l.del = true;
+        }
+        return ref;
+      };
+      const up = care(upL);
+      return [up, care(dnL)];
     };
     let fired = 0;
     for (let n = 300; n <= 1200; n += 3) {
       const list = bars.slice(0, n);
-      const r = tla.calculate(list);
-      const [up, dn] = firstLines(list);
-      const at = (l: typeof up) => (l ? l.y1 + ((l.y2 - l.y1) * (n - 1 - l.x1)) / (l.x2 - l.x1) : NaN);
-      const u = at(up), d = at(dn), c = list[n - 1].close, c1 = list[n - 2].close;
+      // timenow just after the last bar (daily chart): the lines of the last `limit` bars exist
+      const nowMs = ((list[n - 1].time as number) + 3600) * 1000;
+      const r = tla.calculate(list, {}, { timeframe: '1D', now: nowMs } as never);
+      const [u, d] = levels(list, nowMs);
+      const c = list[n - 1].close, c1 = list[n - 2].close;
       const exp = (c1 < u && c > u) || (c1 > d && c < d) || (c1 > u && c < u) || (c1 < d && c > d);
       expect(times(r, 0)).toEqual(exp ? [list[n - 1].time] : []);
       if (exp) fired++;

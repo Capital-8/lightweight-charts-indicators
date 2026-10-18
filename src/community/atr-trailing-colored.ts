@@ -1,15 +1,17 @@
 /**
  * Average True Range Trailing Stops Colored
  *
- * ATR trailing stop with trend coloring.
- * Green in uptrend (price above stop), red in downtrend (price below stop).
- * Stop ratchets in favorable direction only.
+ * ATR trailing stop (Sylvain Vervoort): loss = multiplier x ATR(period). While the close and the previous close
+ * stay on one side of the previous stop, the stop ratchets (max(stop, close - loss) above, min(stop, close + loss)
+ * below); when the close crosses it, the stop restarts at close -/+ loss. A missing previous stop counts as 0, so
+ * the stop exists from the first bar of the ATR.
+ * The line is coloured by the position: green after the close crosses above the stop, red after it crosses below,
+ * blue until the first cross. The original draws only this line (no bar colours, no markers).
  *
- * Reference: "Average True Range Trailing Stops Colored" (community)
+ * Reference: "Average True Range Trailing Stops Strategy, by Sylvain Vervoort" (community, HPotter)
  */
 
-import { ta, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BarColorData } from '../types';
+import { ta, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 
 export interface ATRTrailingColoredInputs {
   length: number;
@@ -17,17 +19,24 @@ export interface ATRTrailingColoredInputs {
 }
 
 export const defaultInputs: ATRTrailingColoredInputs = {
-  length: 14,
-  mult: 2.0,
+  length: 5,
+  mult: 3.5,
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'length', type: 'int', title: 'ATR Length', defval: 14, min: 1 },
-  { id: 'mult', type: 'float', title: 'Multiplier', defval: 2.0, min: 0.1, step: 0.1 },
+  { id: 'length', type: 'int', title: 'ATR Length', defval: 5, min: 1 },
+  { id: 'mult', type: 'float', title: 'Multiplier', defval: 3.5, min: 0.1, step: 0.1 },
 ];
 
+// Colours of the script (red / green / blue constants of Pine version 1) with that version's default plot
+// transparency (35)
+const V1 = (hex: string) => String(color.new(hex, 35));
+const RED = V1('#FF0000');
+const GREEN = V1('#008000');
+const BLUE = V1('#0000FF');
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Trailing Stop', color: '#2962FF', lineWidth: 2 },
+  { id: 'plot0', title: 'ATR Trailing Stop', color: V1('#3BB3E4'), lineWidth: 1 },
 ];
 
 export const metadata = {
@@ -43,73 +52,37 @@ export function calculate(bars: Bar[], inputs: Partial<ATRTrailingColoredInputs>
   const atrArr = ta.atr(bars, length).toArray();
 
   const stopArr: number[] = new Array(n);
-  const dirArr: number[] = new Array(n);
+  const posArr: number[] = new Array(n);
 
   for (let i = 0; i < n; i++) {
-    const nLoss = mult * (atrArr[i] ?? 0);
+    const a = atrArr[i];
+    const nLoss = a == null ? NaN : mult * a;
     const close = bars[i].close;
+    const prevClose = i > 0 ? bars[i - 1].close : NaN;
+    // nz(xATRTrailingStop[1], 0)
+    const prevStop = i > 0 && !isNaN(stopArr[i - 1]) ? stopArr[i - 1] : 0;
 
-    if (i === 0) {
-      stopArr[i] = close - nLoss;
-      dirArr[i] = 1;
-      continue;
-    }
+    let stop: number;
+    if (close > prevStop && prevClose > prevStop) stop = Math.max(prevStop, close - nLoss);
+    else if (close < prevStop && prevClose < prevStop) stop = Math.min(prevStop, close + nLoss);
+    else stop = close > prevStop ? close - nLoss : close + nLoss;
+    stopArr[i] = stop;
 
-    const prevStop = stopArr[i - 1];
-    const prevClose = bars[i - 1].close;
-
-    if (close > prevStop && prevClose > prevStop) {
-      // Uptrend continuation
-      stopArr[i] = Math.max(prevStop, close - nLoss);
-      dirArr[i] = 1;
-    } else if (close < prevStop && prevClose < prevStop) {
-      // Downtrend continuation
-      stopArr[i] = Math.min(prevStop, close + nLoss);
-      dirArr[i] = -1;
-    } else if (close > prevStop) {
-      // Flip to uptrend
-      stopArr[i] = close - nLoss;
-      dirArr[i] = 1;
-    } else {
-      // Flip to downtrend
-      stopArr[i] = close + nLoss;
-      dirArr[i] = -1;
-    }
+    if (prevClose < prevStop && close > prevStop) posArr[i] = 1;
+    else if (prevClose > prevStop && close < prevStop) posArr[i] = -1;
+    else posArr[i] = i > 0 ? posArr[i - 1] : 0;
   }
 
-  const warmup = length;
   const plot0 = stopArr.map((v, i) => {
-    if (i < warmup) return { time: bars[i].time, value: NaN };
-    const color = dirArr[i] === 1 ? '#26A69A' : '#EF5350';
-    return { time: bars[i].time, value: v, color };
+    if (isNaN(v)) return { time: bars[i].time, value: NaN };
+    const c = posArr[i] === -1 ? RED : posArr[i] === 1 ? GREEN : BLUE;
+    return { time: bars[i].time, value: v, color: c };
   });
-
-  // Pine barcolor: green (pos=1), red (pos=-1), blue (neutral)
-  const barColors: BarColorData[] = [];
-  for (let i = warmup; i < n; i++) {
-    barColors.push({
-      time: bars[i].time,
-      color: dirArr[i] === 1 ? '#00FF00' : dirArr[i] === -1 ? '#FF0000' : '#0000FF',
-    });
-  }
-
-  // Markers: buy/sell on trend direction change
-  const markers: MarkerData[] = [];
-  for (let i = warmup + 1; i < n; i++) {
-    if (dirArr[i] === 1 && dirArr[i - 1] !== 1) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#00FF00', text: 'Buy' });
-    }
-    if (dirArr[i] === -1 && dirArr[i - 1] !== -1) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#FF0000', text: 'Sell' });
-    }
-  }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0 },
-    markers,
-    barColors,
-  } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] };
+  } as Omit<IndicatorResult, 'markers'>;
 }
 
 export const ATRTrailingColored = { calculate, metadata, defaultInputs, inputConfig, plotConfig };

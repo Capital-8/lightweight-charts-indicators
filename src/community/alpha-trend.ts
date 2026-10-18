@@ -3,7 +3,9 @@
  *
  * ATR-based adaptive trend indicator.
  * Uses RSI (or MFI if volume available) to determine trend direction,
- * then builds trailing stop levels that only ratchet in trend direction.
+ * then builds trailing stop levels that only ratchet in trend direction. As the original, the previous value is
+ * nz(AlphaTrend[1]): 0 on the first bar with an ATR, so the line can start at 0. BUY / SELL labels at
+ * AlphaTrend[2] * 0.9999 / * 1.0001 on the potential buy / sell signals ('Show Signals?').
  * Alerts (alertcondition, `alerts` of the result): the original's ten conditions — potential / confirmed buy and
  * sell (AlphaTrend crossing its value 2 bars back, filtered by the bars since the opposite signal), price / candle
  * crosses of the AlphaTrend line, and the same crosses one bar later (after bar close).
@@ -19,17 +21,20 @@ export interface AlphaTrendInputs {
   coeff: number;
   period: number;
   useRSI: boolean;
+  showSignals: boolean;
 }
 
 export const defaultInputs: AlphaTrendInputs = {
   coeff: 1,
   period: 14,
   useRSI: false,
+  showSignals: true,
 };
 
 export const inputConfig: InputConfig[] = [
   { id: 'coeff', type: 'float', title: 'Multiplier', defval: 1, min: 0.1, step: 0.1 },
   { id: 'period', type: 'int', title: 'Common Period', defval: 14, min: 1 },
+  { id: 'showSignals', type: 'bool', title: 'Show Signals?', defval: true },
   { id: 'useRSI', type: 'bool', title: 'Use RSI instead of MFI', defval: false },
 ];
 
@@ -48,7 +53,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<AlphaTrendInputs> = {},
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
-  const { coeff, period, useRSI } = { ...defaultInputs, ...inputs };
+  const { coeff, period, useRSI, showSignals } = { ...defaultInputs, ...inputs };
 
   const close = new Series(bars, (b) => b.close);
   const high = new Series(bars, (b) => b.high);
@@ -67,49 +72,8 @@ export function calculate(
   const lowArr = low.toArray();
   const highArr = high.toArray();
 
-  const at: number[] = new Array(bars.length);
-
-  for (let i = 0; i < bars.length; i++) {
-    const atr = atrArr[i] ?? 0;
-    const upT = (lowArr[i] ?? 0) - atr * coeff;
-    const downT = (highArr[i] ?? 0) + atr * coeff;
-    const filt = filterArr[i] ?? 0;
-    const prev = i > 0 ? (at[i - 1] ?? 0) : 0;
-
-    if (filt >= 50) {
-      at[i] = upT < prev ? prev : upT;
-    } else {
-      at[i] = downT > prev ? prev : downT;
-    }
-  }
-
-  const warmup = period;
-  const plot0 = at.map((v, i) => ({ time: bars[i].time, value: i < warmup ? NaN : v }));
-  const plot1 = at.map((_v, i) => ({ time: bars[i].time, value: i < warmup + 2 ? NaN : at[i - 2] }));
-
-  // Markers: buy when AT crosses above AT[2], sell when AT crosses below AT[2]
-  const markers: MarkerData[] = [];
-  for (let i = warmup + 2; i < bars.length; i++) {
-    const cur = at[i];
-    const lag = at[i - 2];
-    const prevCur = at[i - 1];
-    const prevLag = at[i - 3];
-    if (prevCur <= prevLag && cur > lag) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#26A69A', text: 'BUY' });
-    } else if (prevCur >= prevLag && cur < lag) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#EF5350', text: 'SELL' });
-    }
-  }
-
-  // Dynamic fill colors: green when AT > AT[2], red otherwise
-  const fillColors = at.map((v, i) => {
-    if (i < warmup + 2) return 'transparent';
-    return v > at[i - 2] ? 'rgba(38,166,154,0.25)' : 'rgba(239,83,80,0.25)';
-  });
-
   // Alerts on the original's AlphaTrend series: AlphaTrend := (filter >= 50) ? (upT < nz(AlphaTrend[1]) ?
   // nz(AlphaTrend[1]) : upT) : (downT > nz(AlphaTrend[1]) ? nz(AlphaTrend[1]) : downT), na while the ATR is na
-  // (the line drawn above starts from the first ATR value instead of nz(na) = 0)
   const AT: number[] = new Array(bars.length);
   for (let i = 0; i < bars.length; i++) {
     const atr = atrArr[i] ?? NaN;
@@ -155,6 +119,31 @@ export function calculate(
     shift(candleOver, 1, false),
     shift(candleUnder, 1, false),
   ];
+
+  // k1 = plot(AlphaTrend), k2 = plot(AlphaTrend[2]): from the first ATR value; nz(AlphaTrend[1]) = 0 there, so the
+  // line starts at 0 while the filter is below 50
+  const plot0 = AT.map((v, i) => ({ time: bars[i].time, value: v }));
+  const plot1 = AT2.map((v, i) => ({ time: bars[i].time, value: v }));
+  const fillColors = AT.map((v, i) => {
+    if (Number.isNaN(v) || Number.isNaN(AT2[i])) return 'transparent';
+    return v > AT2[i] ? 'rgba(38,166,154,0.25)' : 'rgba(239,83,80,0.25)';
+  });
+
+  // plotshape(buySignalk and showsignalsk and O1 > K2 ? AlphaTrend[2] * 0.9999 : na, 'BUY', location.absolute,
+  //   shape.labelup, size.tiny, color #0022FC, textcolor white); SELL: AlphaTrend[2] * 1.0001, color.maroon
+  const markers: MarkerData[] = [];
+  if (showSignals) {
+    for (let i = 0; i < bars.length; i++) {
+      if (flags[0][i] && !Number.isNaN(AT2[i])) {
+        markers.push({ id: 'shape0', time: bars[i].time as number, position: 'atPriceBottom', price: AT2[i] * 0.9999,
+          shape: 'labelUp', color: '#0022FC', text: 'BUY', textColor: '#FFFFFF', size: 'tiny' });
+      }
+      if (flags[1][i] && !Number.isNaN(AT2[i])) {
+        markers.push({ id: 'shape1', time: bars[i].time as number, position: 'atPriceTop', price: AT2[i] * 1.0001,
+          shape: 'labelDown', color: '#880E4F', text: 'SELL', textColor: '#FFFFFF', size: 'tiny' });
+      }
+    }
+  }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },

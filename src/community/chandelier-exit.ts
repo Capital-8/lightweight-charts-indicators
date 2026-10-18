@@ -1,22 +1,21 @@
 /**
  * Chandelier Exit
  *
- * Long stop:  highest(length) - ATR*mult
- * Short stop: lowest(length)  + ATR*mult
+ * Long stop:  highest(length) - ATR*mult, short stop: lowest(length) + ATR*mult (the highest / lowest close with
+ * "Use Close for Extremums"). The stops ratchet: the long stop never falls while the previous close is above it, the
+ * short stop never rises while the previous close is below it. The direction turns long when the close is above the
+ * previous short stop and short when it is below the previous long stop (it starts long).
+ * As in the original, the long stop is drawn while the direction is long and the short stop while it is short (lines
+ * with breaks); a circle at the stop and a Buy / Sell label ("Show Buy/Sell Labels") mark the bar where the direction
+ * turns; with "Highlight State" the area between ohlc4 and the stop of the direction is filled green / red (85 %
+ * transparent).
  *
- * Both lines are plotted continuously, as in the PineScript
- * `ta.chandelier()` library function. Direction state is still
- * tracked to drive buy/sell markers and the fill colors, but the plotted
- * series are never gated to NaN.
- *
- * Alerts (alertcondition, `alerts` of the result): 'CE Direction Change', 'CE Buy' and 'CE Sell', on the direction of
- * the original: the stops ratchet (the long stop never falls while the previous close is above it, the short stop
- * never rises while the previous close is below it) and the direction turns when the close crosses the previous
- * stop. With "Await Bar Confirmation" (default) an open last bar gives no alert: the state of the last bar is read
+ * Alerts (alertcondition, `alerts` of the result): 'CE Direction Change', 'CE Buy' and 'CE Sell', on the same
+ * direction. With "Await Bar Confirmation" (default) an open last bar gives no alert: the state of the last bar is read
  * from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
@@ -25,6 +24,10 @@ export interface ChandelierExitInputs {
   atrPeriod: number;
   atrMult: number;
   useClose: boolean;
+  /** Show Buy/Sell Labels */
+  showLabels: boolean;
+  /** Highlight State: fill between ohlc4 and the stop of the direction */
+  highlightState: boolean;
   /** The alerts wait for the bar to close */
   awaitBarConfirmation: boolean;
 }
@@ -33,6 +36,8 @@ export const defaultInputs: ChandelierExitInputs = {
   atrPeriod: 22,
   atrMult: 3.0,
   useClose: true,
+  showLabels: true,
+  highlightState: true,
   awaitBarConfirmation: true,
 };
 
@@ -40,12 +45,14 @@ export const inputConfig: InputConfig[] = [
   { id: 'atrPeriod', type: 'int', title: 'ATR Period', defval: 22, min: 1 },
   { id: 'atrMult', type: 'float', title: 'ATR Multiplier', defval: 3.0, min: 0.01, step: 0.1 },
   { id: 'useClose', type: 'bool', title: 'Use Close for Extremums', defval: true },
+  { id: 'showLabels', type: 'bool', title: 'Show Buy/Sell Labels', defval: true },
+  { id: 'highlightState', type: 'bool', title: 'Highlight State', defval: true },
   { id: 'awaitBarConfirmation', type: 'bool', title: 'Await Bar Confirmation', defval: true },
 ];
 
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Long Stop', color: '#26A69A', lineWidth: 2, style: 'linebr' },
-  { id: 'plot1', title: 'Short Stop', color: '#EF5350', lineWidth: 2, style: 'linebr' },
+  { id: 'plot0', title: 'Long Stop', color: '#4CAF50', lineWidth: 2, style: 'linebr' },
+  { id: 'plot1', title: 'Short Stop', color: '#F23645', lineWidth: 2, style: 'linebr' },
   { id: 'plot2', title: 'Mid Price', color: 'transparent', lineWidth: 0, display: 'none' },
 ];
 
@@ -65,127 +72,100 @@ export function calculate(
   inputs: Partial<ChandelierExitInputs> = {},
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
-  const { atrPeriod, atrMult, useClose, awaitBarConfirmation } = { ...defaultInputs, ...inputs };
+  const { atrPeriod, atrMult, useClose, showLabels, highlightState, awaitBarConfirmation } = { ...defaultInputs, ...inputs };
+  const n = bars.length;
 
-  const atrSeries = ta.atr(bars, atrPeriod);
-  const atrArr = atrSeries.toArray();
-
+  // atr = mult * ta.atr(length); ta.highest(close, length) / ta.highest(length) (of the high), lowest: the mirror
+  const atrArr = ta.atr(bars, atrPeriod).toArray();
   const closeSeries = new Series(bars, (bar) => bar.close);
   const highSeries = new Series(bars, (bar) => bar.high);
   const lowSeries = new Series(bars, (bar) => bar.low);
+  const highestArr = (useClose ? ta.highest(closeSeries, atrPeriod) : ta.highest(highSeries, atrPeriod)).toArray();
+  const lowestArr = (useClose ? ta.lowest(closeSeries, atrPeriod) : ta.lowest(lowSeries, atrPeriod)).toArray();
 
-  const highestSrc = useClose ? ta.highest(closeSeries, atrPeriod) : ta.highest(highSeries, atrPeriod);
-  const lowestSrc = useClose ? ta.lowest(closeSeries, atrPeriod) : ta.lowest(lowSeries, atrPeriod);
-  const highestArr = highestSrc.toArray();
-  const lowestArr = lowestSrc.toArray();
+  const longColor = color.green;
+  const shortColor = color.red;
+  const textColor = color.white;
+  const longFill = String(color.new(color.green, 85));
+  const shortFill = String(color.new(color.red, 85));
 
-  const longStopArr: number[] = [];
-  const shortStopArr: number[] = [];
-  const dirArr: number[] = [];
-
-  for (let i = 0; i < bars.length; i++) {
-    const atrVal = (atrArr[i] ?? 0) * atrMult;
-    const longStop = (highestArr[i] ?? bars[i].high) - atrVal;
-    const shortStop = (lowestArr[i] ?? bars[i].low) + atrVal;
-
-    if (i > 0) {
-      const prevLongStop = longStopArr[i - 1];
-      const prevShortStop = shortStopArr[i - 1];
-      const prevDir = dirArr[i - 1];
-      const close = bars[i].close;
-      if (close > prevShortStop) {
-        dirArr.push(1);
-      } else if (close < prevLongStop) {
-        dirArr.push(-1);
-      } else {
-        dirArr.push(prevDir);
-      }
-    } else {
-      dirArr.push(1);
-    }
-
-    longStopArr.push(longStop);
-    shortStopArr.push(shortStop);
-  }
-
-  const warmup = atrPeriod;
-  const longData = longStopArr.map((value, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : value,
-  }));
-
-  const shortData = shortStopArr.map((value, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : value,
-  }));
-
-  // Hidden ohlc4 plot for fills
-  const midData = bars.map((b, i) => ({
-    time: b.time,
-    value: i < warmup ? NaN : (b.open + b.high + b.low + b.close) / 4,
-  }));
-
-  // Markers: buy/sell on direction change, plus circle at stop level
-  const markers: MarkerData[] = [];
-  for (let i = warmup + 1; i < bars.length; i++) {
-    if (dirArr[i] !== dirArr[i - 1]) {
-      if (dirArr[i] === 1) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'circle', color: '#26A69A', text: '' });
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#26A69A', text: 'Buy' });
-      } else {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'circle', color: '#EF5350', text: '' });
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#EF5350', text: 'Sell' });
-      }
-    }
-  }
-
-  // Dynamic fill colors: green when long (dir=1), red when short (dir=-1)
-  const longFillColors = bars.map((_b, i) => {
-    if (i < warmup) return 'transparent';
-    return dirArr[i] === 1 ? 'rgba(38,166,154,0.15)' : 'transparent';
-  });
-  const shortFillColors = bars.map((_b, i) => {
-    if (i < warmup) return 'transparent';
-    return dirArr[i] === -1 ? 'rgba(239,83,80,0.15)' : 'transparent';
-  });
-
-  // Alerts, on the stops and direction of the original:
-  // longStop = highest - atr; longStopPrev = nz(longStop[1], longStop);
-  // longStop := close[1] > longStopPrev ? math.max(longStop, longStopPrev) : longStop (short stop: the mirror rule);
-  // dir := close > shortStopPrev ? 1 : close < longStopPrev ? -1 : dir (var int dir = 1)
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const flags: boolean[][] = [[], [], []];
+  const longData: { time: number; value: number }[] = [];
+  const shortData: { time: number; value: number }[] = [];
+  const midData: { time: number; value: number }[] = [];
+  const longFillColors: string[] = [];
+  const shortFillColors: string[] = [];
+  const markers: MarkerData[] = [];
   let longStopLast = NaN;
   let shortStopLast = NaN;
-  let dir = 1;
-  for (let i = 0; i < bars.length; i++) {
+  let dir = 1; // var int dir = 1
+  for (let i = 0; i < n; i++) {
+    const b = bars[i];
+    const time = b.time as number;
     const atr = atrMult * (atrArr[i] ?? NaN);
     const close1 = i > 0 ? bars[i - 1].close : NaN;
+    // longStop = highest - atr; longStopPrev = nz(longStop[1], longStop);
+    // longStop := close[1] > longStopPrev ? math.max(longStop, longStopPrev) : longStop (short stop: the mirror)
     let longStop = (highestArr[i] ?? NaN) - atr;
     const longStopPrev = isNaN(longStopLast) ? longStop : longStopLast;
     if (gt(close1, longStopPrev)) longStop = Math.max(longStop, longStopPrev);
     let shortStop = (lowestArr[i] ?? NaN) + atr;
     const shortStopPrev = isNaN(shortStopLast) ? shortStop : shortStopLast;
     if (lt(close1, shortStopPrev)) shortStop = Math.min(shortStop, shortStopPrev);
+    // dir := close > shortStopPrev ? 1 : close < longStopPrev ? -1 : dir
     const prevDir = i > 0 ? dir : NaN;
-    const close = bars[i].close;
-    dir = gt(close, shortStopPrev) ? 1 : lt(close, longStopPrev) ? -1 : dir;
+    dir = gt(b.close, shortStopPrev) ? 1 : lt(b.close, longStopPrev) ? -1 : dir;
     longStopLast = longStop;
     shortStopLast = shortStop;
+
+    // buySignal = dir == 1 and dir[1] == -1 (dir[1] is na on the first bar); sellSignal = dir == -1 and dir[1] == 1
+    const buySignal = dir === 1 && prevDir === -1;
+    const sellSignal = dir === -1 && prevDir === 1;
+
+    // plot(dir == 1 ? longStop : na, 'Long Stop', plot.style_linebr) / plot(dir == 1 ? na : shortStop, 'Short Stop')
+    longData.push({ time, value: dir === 1 ? longStop : NaN });
+    shortData.push({ time, value: dir === 1 ? NaN : shortStop });
+    // midPricePlot = plot(ohlc4, display = display.none, editable = false)
+    midData.push({ time, value: (b.open + b.high + b.low + b.close) / 4 });
+    // fill(midPricePlot, longStopPlot, color = highlightState and dir == 1 ? longFillColor : na); the short one with -1
+    longFillColors.push(highlightState && dir === 1 ? longFill : 'transparent');
+    shortFillColors.push(highlightState && dir === -1 ? shortFill : 'transparent');
+
+    // plotshape(buySignal ? longStop : na, 'Long Stop Start', location.absolute, shape.circle, size.tiny)
+    // plotshape(buySignal and showLabels ? longStop : na, 'Buy Label', text = 'Buy', shape.labelup, size.tiny)
+    if (buySignal && !isNaN(longStop)) {
+      markers.push({ id: 'shape0', time, position: 'atPriceMiddle', price: longStop, shape: 'circle', color: longColor,
+        size: 'tiny' });
+      if (showLabels) {
+        markers.push({ id: 'shape1', time, position: 'atPriceBottom', price: longStop, shape: 'labelUp', color: longColor,
+          text: 'Buy', textColor, size: 'tiny' });
+      }
+    }
+    // plotshape(sellSignal ? shortStop : na, 'Short Stop Start', ...) / 'Sell Label' (shape.labeldown)
+    if (sellSignal && !isNaN(shortStop)) {
+      markers.push({ id: 'shape2', time, position: 'atPriceMiddle', price: shortStop, shape: 'circle', color: shortColor,
+        size: 'tiny' });
+      if (showLabels) {
+        markers.push({ id: 'shape3', time, position: 'atPriceTop', price: shortStop, shape: 'labelDown', color: shortColor,
+          text: 'Sell', textColor, size: 'tiny' });
+      }
+    }
+
     // await = awaitBarConfirmation ? barstate.isconfirmed : true
-    const awaitOk = !awaitBarConfirmation || !(lastBarOpen && i === bars.length - 1);
-    // dir != dir[1] (false on the first bar: dir[1] is na); buySignal = dir == 1 and dir[1] == -1; sellSignal mirror
+    const awaitOk = !awaitBarConfirmation || !(lastBarOpen && i === n - 1);
+    // dir != dir[1] (false on the first bar: dir[1] is na)
     flags[0].push(i > 0 && dir !== prevDir && awaitOk);
-    flags[1].push(dir === 1 && prevDir === -1 && awaitOk);
-    flags[2].push(dir === -1 && prevDir === 1 && awaitOk);
+    flags[1].push(buySignal && awaitOk);
+    flags[2].push(sellSignal && awaitOk);
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': longData, 'plot1': shortData, 'plot2': midData },
     fills: [
-      { plot1: 'plot2', plot2: 'plot0', options: { color: 'rgba(38,166,154,0.15)' }, colors: longFillColors },
-      { plot1: 'plot2', plot2: 'plot1', options: { color: 'rgba(239,83,80,0.15)' }, colors: shortFillColors },
+      { plot1: 'plot2', plot2: 'plot0', options: { color: longFill }, colors: longFillColors },
+      { plot1: 'plot2', plot2: 'plot1', options: { color: shortFill }, colors: shortFillColors },
     ],
     markers,
     alerts: alertStates(alertConditions, bars, flags),

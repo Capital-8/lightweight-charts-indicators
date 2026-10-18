@@ -5,8 +5,7 @@
  * default). For each zone: counts the consecutive bars on which the RSI is overbought or oversold (also only
  * overbought for the resistance zone, only oversold for the support zone); once the count reaches the confirmation
  * bars, the high / low of that bar become the zone boundaries, carried forward (fixnan). The zone fill has no colour
- * on the bar where the zone changes. Diamond "S/D" markers (port addition, zone 2) mark the bars where the close
- * enters the zone.
+ * on the bar where the zone changes. No markers: the original draws only the zone plots and fills.
  * Alerts (alertcondition, `alerts` of the result): 'Price Enters S/D Zone 1' to '4' (the close inside the zone, the
  * zone unchanged since the bar before, and not inside on the bar before) and 'Price Enters Any S/D Zone'.
  *
@@ -14,7 +13,6 @@
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
 import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiSupplyDemandInputs {
@@ -204,7 +202,7 @@ function zone(bars: Bar[], rsiLength: number, obLevel: number, osLevel: number, 
 export function calculate(
   bars: Bar[],
   inputs: Partial<RsiSupplyDemandInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
+): Omit<IndicatorResult, 'markers'> & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const c = cfg as unknown as Record<string, number | boolean>;
   const n = bars.length;
@@ -218,8 +216,6 @@ export function calculate(
   const plots: IndicatorResult['plots'] = {};
   const fills: NonNullable<IndicatorResult['fills']> = [];
   const enters: boolean[][] = [];
-  let zone2: ReturnType<typeof zone> | null = null;
-  let warmup2 = 0;
 
   for (const k of ZONES) {
     const key = zoneKeys(k);
@@ -227,10 +223,6 @@ export function calculate(
     const z = zone(bars, len, c[key.obLevel] as number, c[key.osLevel] as number, c[key.confirmationBars] as number);
     enters.push(z.enters);
     const warmup = len + 1;
-    if (k === 2) {
-      zone2 = z;
-      warmup2 = warmup;
-    }
 
     const sdFillColors: string[] = new Array(n).fill(transparent);
     const resFillColors: string[] = new Array(n).fill(transparent);
@@ -258,32 +250,11 @@ export function calculate(
     );
   }
 
-  // Markers when price enters the S/D zone of zone 2 (port addition: the original draws no shape)
-  const markers: MarkerData[] = [];
-  const { sdH, sdL } = zone2!;
-  for (let i = 1; i < n; i++) {
-    if (i < warmup2 || isNaN(sdH[i]) || isNaN(sdL[i])) continue;
-    // Zone must be stable (not just changed)
-    if (sdH[i] !== sdH[i - 1]) continue;
-    const inZone = bars[i].close <= sdH[i] && bars[i].close >= sdL[i];
-    const prevInZone = bars[i - 1].close <= sdH[i - 1] && bars[i - 1].close >= sdL[i - 1];
-    if (inZone && !prevInZone) {
-      markers.push({
-        time: bars[i].time,
-        position: 'inBar',
-        shape: 'diamond',
-        color: '#3366FF',
-        text: 'S/D',
-      });
-    }
-  }
-
   const any = enters[0].map((v, i) => v || enters[1][i] || enters[2][i] || enters[3][i]);
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
     fills,
-    markers,
     alerts: alertStates(alertConditions, bars, [...enters, any]),
   };
 }

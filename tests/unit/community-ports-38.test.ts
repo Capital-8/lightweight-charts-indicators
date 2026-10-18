@@ -100,8 +100,11 @@ describe('declarations equal the spec', () => {
     expect(srInt.SupportResistanceInteractive.hasAlertFunction).toBe(true);
     expect(srSig.SupportResistanceSignalsMtf.hasAlertFunction).toBe(true);
   });
-  it('supertrend-ladder is left as it is (the port is another script than the spec original)', () => {
-    expect((stLadder as Record<string, unknown>).alertConditions).toBeUndefined();
+  it('supertrend-ladder: re-ported to the original, its two alertconditions and alert() calls', () => {
+    expect(stLadder.alertConditions.map((a) => [a.id, a.title])).toEqual([
+      ['alert0', 'Supertrend Bullish Alert'], ['alert1', 'Supertrend Bearish Alert'],
+    ]);
+    expect(stLadder.hasAlertFunction).toBe(true);
   });
 });
 

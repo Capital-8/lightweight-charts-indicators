@@ -54,18 +54,16 @@ describe('Banker Fund Flow Trend Oscillator', () => {
   it('should return valid result structure', () => {
     const result = BankerFundFlow.calculate(bars);
     expect(result).toBeDefined();
-    expect(result.plots).toBeDefined();
-    expect(result.plots['plot0']).toBeDefined();
-    expect(result.plots['plot0'].length).toBe(bars.length);
-    expect(result.plots['plot1']).toBeDefined();
-    expect(result.plots['plot1'].length).toBe(bars.length);
+    // as the original: no line plot, the five plotcandle outputs
+    expect(result.plots).toEqual({});
+    expect(Object.keys(result.plotCandles)).toEqual(['entrySignal', 'green', 'white', 'red', 'blue']);
   });
 
-  it('should produce markers or plot data', () => {
-    const result = BankerFundFlow.calculate(bars) as any;
-    const hasMarkers = Array.isArray(result.markers) && result.markers.length > 0;
-    const hasPlots = Object.values(result.plots).some((p: any) => p.some((v: any) => !isNaN(v.value)));
-    expect(hasMarkers || hasPlots).toBe(true);
+  it('should produce candle data', () => {
+    const result = BankerFundFlow.calculate(bars);
+    const candles = Object.values(result.plotCandles).flat();
+    expect(candles.length).toBeGreaterThan(0);
+    candles.forEach((c) => expect(Number.isFinite(c.open) && Number.isFinite(c.close)).toBe(true));
   });
 
   it('should have correct metadata', () => {

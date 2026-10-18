@@ -1,295 +1,324 @@
 /**
- * RedK EVEREX - Effort Versus Results Explorer v2.0
+ * RedK Effort Versus Results Explorer v3.0 (EVEREX)
  *
- * Compares volume "effort" against price "result" using 6 price strength
- * components (bar closing, spread-to-range, relative spread, 2-bar closing,
- * 2-bar shift-to-range, 2-bar relative shift). Normalizes volume and price
- * via EMA, then computes bulls/bears RSI-like index (RROF).
- * Bias/Sentiment from longer-period RROF. EVEREX equalizer histogram
- * with 4-color scheme. Markers for EoM (Ease of Move) and Compression.
+ * Effort (volume) versus result (price) per bar. The volume is normalized against its lookback average into bands
+ * (10 .. 100; 100 without volume data). The price strength is the average of 6 elements: the close within the bar,
+ * the spread to range ratio, the relative spread (normalized against its average), the close within the 2-bar range,
+ * the close change to the 2-bar range and the relative close change (normalized). The bar flow (price strength *
+ * normalized volume / 100) is split into bulls and bears; their averages give an RSI-like Relative Rate of Flow
+ * RROF = 2 * (100 - 100 / (1 + bulls / bears)) - 100, smoothed by a WMA, with a signal line and an optional longer
+ * Bias / Sentiment area. Stacked "equalizer" candles show the normalized volume and price bands (scaled by the band
+ * scale) with guide levels; markers at zero flag Ease of Move, Compression and MegaBar bars; optional control levels.
  *
- * Reference: "RedK EVEREX v2.0" by RedKTrader
+ * Alerts (alertcondition, `alerts` of the result): RROF Smooth crossing 0 up, down, and either way.
+ *
+ * Reference: "RedK Effort Versus Results Explorer v3.0" by RedKTrader
+ * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
+ * Original notice: © RedKTrader - March 2023
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import { ta, taCore, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type HLineData } from 'oakscriptjs';
+import type { MarkerData, PlotCandleData, OutputValues } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+export type RedkEverexMaType = 'WMA' | 'EMA' | 'SMA' | 'HMA' | 'RMA';
 
 export interface RedkEverexInputs {
+  /** RoF length */
   length: number;
+  /** MA type of the RoF (and of the lookback when 'Same as RRoF') */
+  maType: RedkEverexMaType;
+  /** WMA smoothing of the RROF */
   smooth: number;
   sigLength: number;
+  sigType: RedkEverexMaType;
+  /** Lookback length of the volume / spread / shift averages */
   lookback: number;
+  lookbackCalc: 'Simple' | 'Same as RRoF';
+  showBias: boolean;
   biasLength: number;
+  biasType: RedkEverexMaType;
+  showEverex: boolean;
+  bandScale: '100' | '200' | '400';
+  bandOption: 'Joint' | 'Separate';
   showMarkers: boolean;
+  showLevels: boolean;
+  ctrLevel: number;
 }
 
 export const defaultInputs: RedkEverexInputs = {
   length: 10,
+  maType: 'WMA',
   smooth: 3,
   sigLength: 5,
+  sigType: 'WMA',
   lookback: 20,
+  lookbackCalc: 'Simple',
+  showBias: false,
   biasLength: 30,
+  biasType: 'WMA',
+  showEverex: true,
+  bandScale: '100',
+  bandOption: 'Joint',
   showMarkers: true,
+  showLevels: true,
+  ctrLevel: 25,
 };
 
+const GRP_1 = 'Rate of FLow (RoF)';
+const GRP_2 = 'Lookback Parameters';
+const GRP_3 = 'Bias / Sentiment';
+const GRP_4 = 'EVEREX Bands';
+const MA_TYPES = ['WMA', 'EMA', 'SMA', 'HMA', 'RMA'];
+
+// Untitled inputs keep their variable names as titles
 export const inputConfig: InputConfig[] = [
-  { id: 'length', type: 'int', title: 'RoF Length', defval: 10, min: 1 },
-  { id: 'smooth', type: 'int', title: 'Smooth', defval: 3, min: 1 },
-  { id: 'sigLength', type: 'int', title: 'Signal Length', defval: 5, min: 1 },
-  { id: 'lookback', type: 'int', title: 'Lookback', defval: 20, min: 1 },
-  { id: 'biasLength', type: 'int', title: 'Bias Length', defval: 30, min: 1 },
-  { id: 'showMarkers', type: 'bool', title: 'Show EVEREX Markers', defval: true },
+  { id: 'length', type: 'int', title: 'length', defval: 10, min: 1, inline: 'ROF', group: GRP_1 },
+  { id: 'maType', type: 'string', title: 'MA type', defval: 'WMA', options: MA_TYPES, inline: 'ROF', group: GRP_1 },
+  { id: 'smooth', type: 'int', title: 'Smooth', defval: 3, min: 1, inline: 'ROF', group: GRP_1 },
+  { id: 'sigLength', type: 'int', title: 'Signal Length', defval: 5, min: 1, inline: 'Signal', group: GRP_1 },
+  { id: 'sigType', type: 'string', title: 'Signal Type', defval: 'WMA', options: MA_TYPES, inline: 'Signal', group: GRP_1 },
+  { id: 'lookback', type: 'int', title: 'Length', defval: 20, min: 1, inline: 'Lookback', group: GRP_2 },
+  { id: 'lookbackCalc', type: 'string', title: 'Averaging', defval: 'Simple', options: ['Simple', 'Same as RRoF'], inline: 'Lookback', group: GRP_2 },
+  { id: 'showBias', type: 'bool', title: 'Bias Plot ? -- ', defval: false, inline: 'Bias', group: GRP_3 },
+  { id: 'biasLength', type: 'int', title: 'Length', defval: 30, min: 1, inline: 'Bias', group: GRP_3 },
+  { id: 'biasType', type: 'string', title: 'MA type', defval: 'WMA', options: MA_TYPES, inline: 'Bias', group: GRP_3 },
+  { id: 'showEverex', type: 'bool', title: 'Show EVEREX Bands ? -- ', defval: true, inline: 'EVEREX', group: GRP_4 },
+  { id: 'bandScale', type: 'string', title: 'Band Scale', defval: '100', options: ['100', '200', '400'], inline: 'EVEREX', group: GRP_4 },
+  { id: 'bandOption', type: 'string', title: 'Band Option', defval: 'Joint', options: ['Joint', 'Separate'], group: GRP_4 },
+  { id: 'showMarkers', type: 'bool', title: 'Show EVEREX Markers ?', defval: true },
+  { id: 'showLevels', type: 'bool', title: 'Show Control Levels', defval: true, inline: 'control' },
+  { id: 'ctrLevel', type: 'int', title: '     Level', defval: 25, inline: 'control' },
 ];
 
+const C_UP = color.aqua;
+const C_DN = color.orange;
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'RROF Smooth', color: '#b2b5be', lineWidth: 2 },
-  { id: 'plot1', title: 'Signal', color: '#00FFFF', lineWidth: 3 },
-  { id: 'plot2', title: 'Bias', color: '#00aa00', lineWidth: 4, style: 'area' },
-  { id: 'plot3', title: 'Zero', color: '#1163f6', lineWidth: 1 },
+  { id: 'plot0', title: 'Bulls', color: '#11ff20', lineWidth: 2, display: 'none' },
+  { id: 'plot1', title: 'Bears', color: '#d5180b', lineWidth: 2, display: 'none' },
+  // display = showBias ? display.pane : display.none
+  { id: 'plot2', title: 'Bias / Sentiment', color: String(color.new('#00aa00', 70)), lineWidth: 4, style: 'area', visible: 'showBias' },
+  { id: 'plot3', title: 'RROF Raw', color: String(color.new('#2470f0', 9)), lineWidth: 1, display: 'none' },
+  { id: 'plot4', title: 'Signal Line', color: String(color.new('#b8b8b8', 33)), lineWidth: 2 },
+  { id: 'plot5', title: 'RROF Smooth', color: C_UP, lineWidth: 3 },
+];
+
+/** plotcandle 'Volume Band' and 'Price Band' (display = showEVEREX ? display.pane : display.none) */
+export const plotCandleConfig = [
+  { id: 'candle0', title: 'Volume Band' },
+  { id: 'candle1', title: 'Price Band' },
+];
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '.   RROF Crossing 0 Up', message: 'RROF Up - Buying Action Detected!' },
+  { id: 'alert1', title: '..  RROF Crossing 0 Down', message: 'RROF Down - Selling Action Detected!' },
+  { id: 'alert2', title: '... RROF Crossing 0', message: 'RROF Swing - Possible Reversal' },
 ];
 
 export const metadata = {
-  title: 'RedK EVEREX',
-  shortTitle: 'EVEREX',
+  title: 'RedK Effort Versus Results Explorer v3.0',
+  shortTitle: 'RedK EVEREX v3.0',
   overlay: false,
 };
 
-/**
- * Pine Normalize() equivalent: maps value/avg ratio to discrete bands.
- */
-function normalize(value: number, avg: number): number {
-  if (avg === 0 || isNaN(avg)) return 0.1;
+/** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
+const EPS = 1e-10;
+const gt = (a: number, b: number) => a - b > EPS;
+const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
+
+/** Normalize(_Value, _Avg): the value / average ratio in bands (an na ratio gives 0.1) */
+export function normalize(value: number, avg: number): number {
   const x = value / avg;
-  if (x > 1.50) return 1.00;
-  if (x > 1.20) return 0.90;
-  if (x > 1.00) return 0.80;
-  if (x > 0.80) return 0.70;
-  if (x > 0.60) return 0.60;
-  if (x > 0.40) return 0.50;
-  if (x > 0.20) return 0.25;
-  return 0.1;
+  return gt(x, 1.5) ? 1.0 : gt(x, 1.2) ? 0.9 : gt(x, 1.0) ? 0.8 : gt(x, 0.8) ? 0.7 : gt(x, 0.6) ? 0.6
+    : gt(x, 0.4) ? 0.5 : gt(x, 0.2) ? 0.25 : 0.1;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<RedkEverexInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
-  const { length, smooth, sigLength, lookback, biasLength, showMarkers } = { ...defaultInputs, ...inputs };
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<RedkEverexInputs> = {},
+): Omit<IndicatorResult, 'markers'> & {
+  markers: MarkerData[];
+  plotCandles: Record<string, PlotCandleData[]>;
+  outputValues: OutputValues;
+  alerts: AlertConditionState[];
+} {
+  const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
+  const S = (a: number[]) => Series.fromArray(bars, a);
+  const t = (i: number) => bars[i].time;
 
-  // Extract arrays
-  const openArr = bars.map(b => b.open);
-  const highArr = bars.map(b => b.high);
-  const lowArr = bars.map(b => b.low);
-  const closeArr = bars.map(b => b.close);
-  const volArr = bars.map(b => (b.volume != null && !isNaN(b.volume)) ? b.volume : 1);
-  const noVol = bars.map(b => b.volume == null || isNaN(b.volume));
-
-  // Highest(2) and lowest(2) for 2-bar range
-  const highSeries = new Series(bars, b => b.high);
-  const lowSeries = new Series(bars, b => b.low);
-  const highest2 = ta.highest(highSeries, 2).toArray();
-  const lowest2 = ta.lowest(lowSeries, 2).toArray();
-
-  // SMA of volume over lookback
-  const volSeries = Series.fromArray(bars, volArr);
-  const volAvgArr = ta.sma(volSeries, lookback).toArray();
-
-  // Change of close (1-bar)
-  const closeSeries = new Series(bars, b => b.close);
-  const srcShiftArr = ta.change(closeSeries, 1).toArray();
-
-  // SMA of abs(barSpread) and abs(srcShift) over lookback
-  const barSpreadAbsArr: number[] = new Array(n);
-  const srcShiftAbsArr: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    barSpreadAbsArr[i] = Math.abs(closeArr[i] - openArr[i]);
-    srcShiftAbsArr[i] = Math.abs(srcShiftArr[i] != null ? srcShiftArr[i] : 0);
-  }
-  const barSpreadAbsSeries = Series.fromArray(bars, barSpreadAbsArr);
-  const srcShiftAbsSeries = Series.fromArray(bars, srcShiftAbsArr);
-  const barSpreadAvgArr = ta.sma(barSpreadAbsSeries, lookback).toArray();
-  const srcShiftAvgArr = ta.sma(srcShiftAbsSeries, lookback).toArray();
-
-  // Per-bar: compute 6 price strength components, volume normalization, bar_flow
-  const barFlowArr: number[] = new Array(n);
-  const nPriceArr: number[] = new Array(n);
-  const nVolArr: number[] = new Array(n);
-
-  for (let i = 0; i < n; i++) {
-    const o = openArr[i];
-    const h = highArr[i];
-    const l = lowArr[i];
-    const c = closeArr[i];
-    const barSpread = c - o;
-    const barRange = h - l;
-    const r2 = (highest2[i] ?? h) - (lowest2[i] ?? l);
-    const srcShift = srcShiftArr[i] ?? 0;
-    const signShift = srcShift > 0 ? 1 : srcShift < 0 ? -1 : 0;
-    const signSpread = barSpread > 0 ? 1 : barSpread < 0 ? -1 : 0;
-
-    // 1. Bar closing within bar
-    const barclosing = barRange !== 0 ? 2 * (c - l) / barRange * 100 - 100 : 0;
-
-    // 2. Spread to range ratio
-    const s2r = barRange !== 0 ? barSpread / barRange * 100 : 0;
-
-    // 3. Relative spread
-    const bsAvg = barSpreadAvgArr[i] ?? 0;
-    const barSpreadRatioN = bsAvg !== 0
-      ? normalize(Math.abs(barSpread), bsAvg) * 100 * signSpread
-      : 0;
-
-    // 4. 2-bar closing
-    const barclosing2 = r2 !== 0 ? 2 * (c - (lowest2[i] ?? l)) / r2 * 100 - 100 : 0;
-
-    // 5. 2-bar shift to range
-    const shift2BarToR2 = r2 !== 0 ? srcShift / r2 * 100 : 0;
-
-    // 6. 2-bar relative shift
-    const ssAvg = srcShiftAvgArr[i] ?? 0;
-    const srcShiftRatioN = ssAvg !== 0
-      ? normalize(Math.abs(srcShift), ssAvg) * 100 * signShift
-      : 0;
-
-    // Combined price strength
-    const priceaN = (barclosing + s2r + barSpreadRatioN + barclosing2 + shift2BarToR2 + srcShiftRatioN) / 6;
-
-    // Volume normalization
-    const va = volAvgArr[i] ?? 0;
-    const volaNPre = normalize(volArr[i], va) * 100;
-    const volaN = noVol[i] ? 100 : volaNPre;
-
-    // Bar flow = price strength * volume ratio
-    barFlowArr[i] = priceaN * volaN / 100;
-
-    // Store for markers
-    nPriceArr[i] = Math.max(Math.min(priceaN, 100), -100);
-    nVolArr[i] = Math.max(Math.min(volaN, 100), -100);
-  }
-
-  // Bulls / bears
-  const bullsArr: number[] = new Array(n);
-  const bearsArr: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    bullsArr[i] = Math.max(barFlowArr[i], 0);
-    bearsArr[i] = -1 * Math.min(barFlowArr[i], 0);
-  }
-
-  const bullsSeries = Series.fromArray(bars, bullsArr);
-  const bearsSeries = Series.fromArray(bars, bearsArr);
-
-  // WMA averages for RROF
-  const bullsAvgArr = ta.wma(bullsSeries, length).toArray();
-  const bearsAvgArr = ta.wma(bearsSeries, length).toArray();
-
-  // RROF = 2 * (100 - 100/(1+bulls_avg/bears_avg)) - 100
-  const rrofArr: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const ba = bullsAvgArr[i] ?? 0;
-    const bea = bearsAvgArr[i] ?? 0;
-    if (isNaN(ba) || isNaN(bea) || bea === 0) {
-      rrofArr[i] = ba > 0 ? 100 : 0;
-    } else {
-      const dx = ba / bea;
-      rrofArr[i] = 2 * (100 - 100 / (1 + dx)) - 100;
+  // GetAverage(_data, _len, MAOption)
+  const getAverage = (data: number[], len: number, opt: string): number[] => {
+    const s = S(data);
+    switch (opt) {
+      case 'SMA': return A(ta.sma(s, len));
+      case 'EMA': return A(ta.ema(s, len));
+      case 'HMA': return A(ta.hma(s, len));
+      case 'RMA': return A(ta.rma(s, len));
+      default: return A(ta.wma(s, len));
     }
-  }
+  };
 
-  // WMA smooth of RROF
-  const rrofSeries = Series.fromArray(bars, rrofArr);
-  const rrofSArr = ta.wma(rrofSeries, smooth).toArray();
+  // Volume "effort": v = na(volume) ? 1 : volume
+  const vol = bars.map((b) => b.volume ?? NaN);
+  const v = vol.map((x) => (isNaN(x) ? 1 : x));
+  const lkbkType = cfg.lookbackCalc === 'Simple' ? 'SMA' : cfg.maType;
+  const vola = getAverage(v, cfg.lookback, lkbkType);
+  const volaN = v.map((x, i) => (isNaN(vol[i]) ? 100 : normalize(x, vola[i]) * 100));
 
-  // Signal = WMA of RROF_s
-  const rrofSSeries = Series.fromArray(bars, rrofSArr.map(v => v ?? 0));
-  const signalArr = ta.wma(rrofSSeries, sigLength).toArray();
+  // Price "result"
+  const close = bars.map((b) => b.close);
+  const hh2 = A(ta.highest(S(bars.map((b) => b.high)), 2));
+  const ll2 = A(ta.lowest(S(bars.map((b) => b.low)), 2));
+  const srcShift = close.map((c, i) => (i > 0 ? c - close[i - 1] : NaN));
+  const barSpread = bars.map((b) => b.close - b.open);
+  const barSpreadAbs = barSpread.map(Math.abs);
+  const barSpreadAvg = getAverage(barSpreadAbs, cfg.lookback, lkbkType);
+  const srcShiftAbs = srcShift.map(Math.abs);
+  const srcShiftAvg = getAverage(srcShiftAbs, cfg.lookback, lkbkType);
 
-  // Bias: longer-period bulls/bears
-  const bullsBiasArr = ta.wma(bullsSeries, biasLength).toArray();
-  const bearsBiasArr = ta.wma(bearsSeries, biasLength).toArray();
-
-  const rrofBArr: number[] = new Array(n);
+  const priceaN: number[] = new Array(n);
+  const barFlow: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
-    const ba = bullsBiasArr[i] ?? 0;
-    const bea = bearsBiasArr[i] ?? 0;
-    if (isNaN(ba) || isNaN(bea) || bea === 0) {
-      rrofBArr[i] = ba > 0 ? 100 : 0;
-    } else {
-      const dx = ba / bea;
-      rrofBArr[i] = 2 * (100 - 100 / (1 + dx)) - 100;
-    }
+    const b = bars[i];
+    const barRange = b.high - b.low;
+    const r2 = hh2[i] - ll2[i];
+    // 1. close within the bar, 2. spread to range, 3. relative spread
+    const barclosing = ((2 * (b.close - b.low)) / barRange) * 100 - 100;
+    const s2r = (barSpread[i] / barRange) * 100;
+    const barSpreadRatioN = normalize(barSpreadAbs[i], barSpreadAvg[i]) * 100 * Math.sign(barSpread[i]);
+    // 4. close within the 2-bar range, 5. 2-bar shift to range, 6. 2-bar relative shift
+    const barclosing2 = ((2 * (b.close - ll2[i])) / r2) * 100 - 100;
+    const shift2BarToR2 = (srcShift[i] / r2) * 100;
+    const srcShiftRatioN = normalize(srcShiftAbs[i], srcShiftAvg[i]) * 100 * Math.sign(srcShift[i]);
+    priceaN[i] = (barclosing + s2r + barSpreadRatioN + barclosing2 + shift2BarToR2 + srcShiftRatioN) / 6;
+    barFlow[i] = (priceaN[i] * volaN[i]) / 100;
   }
 
-  const rrofBSeries = Series.fromArray(bars, rrofBArr);
-  const rrofBsArr = ta.wma(rrofBSeries, smooth).toArray();
+  // Bulls / bears (math.max / math.min of na are na)
+  const bulls = barFlow.map((x) => Math.max(x, 0));
+  const bears = barFlow.map((x) => -1 * Math.min(x, 0));
+  const bullsAvg = getAverage(bulls, cfg.length, cfg.maType);
+  const bearsAvg = getAverage(bears, cfg.length, cfg.maType);
+  const rrofOf = (bu: number[], be: number[]) => bu.map((x, i) => 2 * (100 - 100 / (1 + x / be[i])) - 100);
+  const rrof = rrofOf(bullsAvg, bearsAvg);
+  const rrofS = A(ta.wma(S(rrof), cfg.smooth));
+  const signal = getAverage(rrofS, cfg.sigLength, cfg.sigType);
+  // Bias / sentiment on the longer length
+  const rrofB = rrofOf(getAverage(bulls, cfg.biasLength, cfg.biasType), getAverage(bears, cfg.biasLength, cfg.biasType));
+  const rrofBs = A(ta.wma(S(rrofB), cfg.smooth));
+  const bullsPlot = A(ta.wma(S(bullsAvg), cfg.smooth));
+  const bearsPlot = A(ta.wma(S(bearsAvg), cfg.smooth));
 
-  const warmup = Math.max(lookback, length, biasLength) + smooth;
+  const cSup = String(color.new('#00aa00', 70));
+  const cSdn = String(color.new('#ff180b', 70));
+  const cVolGrn = String(color.new('#26a69a', 75));
+  const cVolRed = String(color.new('#ef5350', 75));
+  const cbVolGrn = String(color.new('#26a69a', 20));
+  const cbVolRed = String(color.new('#ef5350', 20));
+  const cPriGrn = String(color.new('#3ed73e', 75));
+  const cPriRed = String(color.new('#ff870a', 75));
+  const cbPriGrn = String(color.new('#3ed73e', 20));
+  const cbPriRed = String(color.new('#ff870a', 20));
+  const green = color.green;
+  const red = color.red;
+  const bandscale = Number(cfg.bandScale);
 
-  // Plot 0: RROF_s (smoothed)
-  const plot0 = rrofSArr.map((v, i) => ({
-    time: bars[i].time,
-    value: (i < warmup || v == null || isNaN(v)) ? NaN : v,
-  }));
-
-  // Plot 1: Signal line colored by direction
-  const plot1 = signalArr.map((v, i) => {
-    const rs = rrofSArr[i];
-    const up = rs != null && !isNaN(rs) && rs >= 0;
-    return {
-      time: bars[i].time,
-      value: (i < warmup || v == null || isNaN(v)) ? NaN : v,
-      color: up ? '#00FFFF' : '#FFA500',
-    };
-  });
-
-  // Plot 2: Bias / Sentiment area
-  const plot2 = rrofBsArr.map((v, i) => ({
-    time: bars[i].time,
-    value: (i < warmup || v == null || isNaN(v)) ? NaN : v,
-    color: (v != null && !isNaN(v) && v >= 0) ? '#00aa0048' : '#ff180b48',
-  }));
-
-  // Plot 3: Zero line
-  const plot3 = bars.map(b => ({ time: b.time, value: 0 }));
-
-  // Markers: EoM and Compression
+  const plots: Record<string, { time: number; value: number; color?: string }[]> = {
+    plot0: [], plot1: [], plot2: [], plot3: [], plot4: [], plot5: [],
+  };
+  const volumeBand: PlotCandleData[] = [];
+  const priceBand: PlotCandleData[] = [];
+  const outputValues: OutputValues = { char0: [], char1: [] };
   const markers: MarkerData[] = [];
-  if (showMarkers) {
-    for (let i = 0; i < n; i++) {
-      if (i < warmup) continue;
-      const nP = nPriceArr[i];
-      const nV = nVolArr[i];
-      if (nV === 0) continue;
-      const evRatio = 100 * Math.abs(nP) / nV;
-      const isPositive = nP > 0;
+  const shape = (on: boolean, id: string, time: number, s: MarkerData['shape'], c: string) => {
+    // plotshape(cond ? 0 : na, ..., location = location.absolute, size = size.auto)
+    if (on) markers.push({ id, time, position: 'atPriceMiddle', price: 0, shape: s, color: c, size: 'auto' });
+  };
 
-      if (evRatio >= 120) {
-        // Ease of Move
-        markers.push({
-          time: bars[i].time,
-          position: isPositive ? 'belowBar' : 'aboveBar',
-          shape: isPositive ? 'triangleUp' : 'triangleDown',
-          color: isPositive ? '#00FF00' : '#FF0000',
-          text: 'EoM',
-        });
-      } else if (evRatio <= 50) {
-        // Compression
-        markers.push({
-          time: bars[i].time,
-          position: 'inBar',
-          shape: 'circle',
-          color: isPositive ? '#00FF00' : '#FF0000',
-          text: 'Comp',
-        });
+  for (let i = 0; i < n; i++) {
+    const time = t(i);
+    plots.plot0.push({ time, value: bullsPlot[i] });
+    plots.plot1.push({ time, value: bearsPlot[i] });
+    plots.plot2.push({ time, value: rrofBs[i], color: ge(rrofBs[i], 0) ? cSup : cSdn });
+    plots.plot3.push({ time, value: rrof[i] });
+    plots.plot4.push({ time, value: signal[i] });
+    plots.plot5.push({ time, value: rrofS[i], color: ge(rrofS[i], 0) ? C_UP : C_DN });
+
+    // Equalizer bands
+    const nPrice = Math.max(Math.min(priceaN[i], 100), -100);
+    const nVol = Math.max(Math.min(volaN[i], 100), -100);
+    const up = gt(barFlow[i], 0);
+    const cVol = up ? cVolGrn : cVolRed;
+    const cPri = up ? cPriGrn : cPriRed;
+    const vcHi = (nVol * bandscale) / 100 / 2;
+    const pcLo = cfg.bandOption === 'Joint' ? vcHi : 0.5 * bandscale;
+    const pcHi = pcLo + (Math.abs(nPrice) * bandscale) / 100 / 2;
+    if (cfg.showEverex) {
+      // plotcandle(vc_lo, vc_hi, vc_lo, vc_hi, 'Volume Band', c_vol, c_vol, bordercolor = cb_vol)
+      if (!isNaN(vcHi)) {
+        volumeBand.push({ time, open: 0, high: vcHi, low: 0, close: vcHi, color: cVol, wickColor: cVol, borderColor: up ? cbVolGrn : cbVolRed });
+      }
+      // plotcandle(pc_lo, pc_hi, pc_lo, pc_hi, 'Price Band', c_pri, c_pri, bordercolor = cb_pri)
+      if (!isNaN(pcLo) && !isNaN(pcHi)) {
+        priceBand.push({ time, open: pcLo, high: pcHi, low: pcLo, close: pcHi, color: cPri, wickColor: cPri, borderColor: up ? cbPriGrn : cbPriRed });
       }
     }
+    // plotchar(nVol / nPrice, 'Normalized Vol' / 'Normalized Price', char = '', display = status line + data window)
+    if (!isNaN(nVol)) outputValues.char0.push({ time, value: nVol });
+    if (!isNaN(nPrice)) outputValues.char1.push({ time, value: nPrice });
+
+    // Markers
+    const nPriceAbs = Math.abs(nPrice);
+    const evRatio = (100 * nPriceAbs) / nVol;
+    const isPositive = gt(nPrice, 0);
+    const isMegaBar = ge(nPriceAbs, 80) && ge(nVol, 80);
+    const isCompression = le(evRatio, 50);
+    const isEoM = ge(evRatio, 120) && !isMegaBar;
+    if (cfg.showMarkers) {
+      shape(isEoM && isPositive, 'shape2', time, 'triangleUp', green);
+      shape(isEoM && !isPositive, 'shape3', time, 'triangleDown', red);
+      shape(isCompression && isPositive, 'shape4', time, 'circle', green);
+      shape(isCompression && !isPositive, 'shape5', time, 'circle', red);
+      shape(isMegaBar && isPositive, 'shape6', time, 'arrowUp', green);
+      shape(isMegaBar && !isPositive, 'shape7', time, 'arrowDown', red);
+    }
   }
+
+  // hlines (display = showhlines for the band levels; the control levels are na when hidden): ids in declaration order
+  // color.new(color.yellow, 40) (Pine color.yellow = #FFEB3B)
+  const cBand = String(color.new('#FFEB3B', 40));
+  const ctrColor = String(color.new('#ffee58', 30));
+  const hlines: HLineData[] = [
+    { id: 'hline0', value: 0, options: { title: 'Zero Line', color: String(color.new('#1163f6', 25)), linestyle: 'solid', linewidth: 1 } },
+  ];
+  if (cfg.showEverex) {
+    ['1/4 Level', '2/4 Level', '3/4 Level', '4/4 Level'].forEach((title, k) => {
+      hlines.push({ id: `hline${k + 1}`, value: 0.25 * (k + 1) * bandscale, options: { title, color: cBand, linestyle: 'dotted', linewidth: 1 } });
+    });
+  }
+  if (cfg.showLevels) {
+    hlines.push({ id: 'hline5', value: cfg.ctrLevel, options: { title: 'Level', color: ctrColor, linestyle: 'dashed', linewidth: 2 } });
+    hlines.push({ id: 'hline6', value: -cfg.ctrLevel, options: { title: 'Level', color: ctrColor, linestyle: 'dashed', linewidth: 2 } });
+  }
+
+  // Alerts: ta.crossover / ta.crossunder / ta.cross of RROF_s and 0
+  const zero = new Array<number>(n).fill(0);
+  const flags = [taCore.crossover(rrofS, zero), taCore.crossunder(rrofS, zero), taCore.cross(rrofS, zero)];
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3 },
-    hlines: [
-      { value: 0, options: { color: '#1163f6', linestyle: 'solid' as const, title: 'Zero' } },
-    ],
+    plots,
+    hlines,
     markers,
+    plotCandles: { candle0: volumeBand, candle1: priceBand },
+    outputValues,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const RedkEverex = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const RedkEverex = { calculate, metadata, defaultInputs, inputConfig, plotConfig, plotCandleConfig, alertConditions };

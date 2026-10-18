@@ -139,9 +139,12 @@ describe('hap-macd', () => {
   const r = hapMacd.calculate(bars);
   it('gives the dots the ids of their plotshape outputs', () => {
     expect(r.markers.length).toBeGreaterThan(0);
-    expect(markerIds(r).sort()).toEqual(['shape0', 'shape1']);
+    // dots (shape0), exit dots (shape1) and the MACD / signal cross triangles (shape2 / shape3, hidden by default)
+    expect(markerIds(r).sort()).toEqual(['shape0', 'shape1', 'shape2', 'shape3']);
     // the exit dot (shape1) is red, on the bar after the last dot of a run
     for (const m of r.markers.filter((m) => m.id === 'shape1')) expect(m.color).toBe('#F23645');
+    for (const m of r.markers.filter((m) => m.id === 'shape2')) expect(m.shape).toBe('triangleUp');
+    for (const m of r.markers.filter((m) => m.id === 'shape3')) expect(m.shape).toBe('triangleDown');
   });
 });
 
@@ -328,17 +331,23 @@ describe('heatmap-volume', () => {
   it.each([610, 100])('fires on the volume tiers (length %i)', (len) => {
     const r = heatmap.calculate(bars, { maLength: len, stdLength: len });
     const vol = bars.map((b) => b.volume ?? 0);
-    const mean = sma(vol, len);
-    const sd = stdev(vol, len);
-    const sb = vol.map((v, i) => (v - mean[i]) / sd[i]);
+    // length := min(length, bar_index + 1): the mean / stdev of all bars so far on the early bars
+    const win = (i: number) => vol.slice(Math.max(0, i - len + 1), i + 1);
+    const mean = vol.map((_, i) => { const w = win(i); return w.reduce((a, v) => a + v, 0) / w.length; });
+    const sd = vol.map((_, i) => { const w = win(i); return Math.sqrt(w.reduce((a, v) => a + (v - mean[i]) ** 2, 0) / w.length); });
+    const sb = vol.map((v, i) => (sd[i] !== 0 ? (v - mean[i]) / sd[i] : NaN));
+    // a stdbar on a threshold up to rounding (bar 1: two values give +/-1 exactly) is left out on both sides
+    const onEdge = new Set(timeAt(bars, sb.map((x) => [4, 2.5, 1].some((t) => Math.abs(x - t) < 1e-9))));
+    const clean = (times: number[]) => times.filter((t) => !onEdge.has(t));
     const tiers = [sb.map((s) => s > 4), sb.map((s) => s <= 4 && s > 2.5), sb.map((s) => s <= 2.5 && s > 1)];
     const upBar = bars.map((b) => b.open < b.close);
     const dnBar = bars.map((b) => b.open > b.close);
     tiers.forEach((t, k) => {
-      expect(r.alerts[3 * k].times).toEqual(timeAt(bars, t));
-      expect(r.alerts[3 * k + 1].times).toEqual(timeAt(bars, t.map((c, i) => c && upBar[i])));
-      expect(r.alerts[3 * k + 2].times).toEqual(timeAt(bars, t.map((c, i) => c && dnBar[i])));
+      expect(clean(r.alerts[3 * k].times)).toEqual(clean(timeAt(bars, t)));
+      expect(clean(r.alerts[3 * k + 1].times)).toEqual(clean(timeAt(bars, t.map((c, i) => c && upBar[i]))));
+      expect(clean(r.alerts[3 * k + 2].times)).toEqual(clean(timeAt(bars, t.map((c, i) => c && dnBar[i]))));
     });
+    expect(onEdge.size).toBeLessThanOrEqual(2);
     expect(r.alerts[3].times.length).toBeGreaterThan(0);
   });
   it('fills the heatmap zones between the hidden level plots, with the titles of the original', () => {

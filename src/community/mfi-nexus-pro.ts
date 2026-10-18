@@ -6,7 +6,8 @@
  * pivots (5 left, 1 right) and price give buy / sell signals: MFI crossing the MA, MFI crossing the lower band up /
  * the upper band down, bullish / bearish divergences. Signals need a minimum number of bars since the last signal of
  * the same side and can be filtered by MFI and RSI zones and by "wait for the opposite signal". Signals are drawn in
- * the pane and on the price chart (each signal, all signals combined by AND, or by OR). Five connector plots give
+ * the pane and on the price chart (each signal, all signals combined by AND, or by OR). The divergences are drawn as
+ * lines between the pivots and "Div" triangles on the pivot bar (hidden by default). Five connector plots give
  * 1 (buy), -1 (sell) or 0.
  * Alerts (alertcondition, `alerts` of the result): the buy / sell signals of the MA, BB and divergence modes, of all
  * three combined by OR and by AND, as the original declares them.
@@ -440,12 +441,27 @@ export function calculate(
   plots.plot9 = P((i) => ({ time: t(i), value: conn(sadBuy(i).some(Boolean), sadSell(i).some(Boolean)), color: NONE_COL }));
   plots.plot10 = P((i) => ({ time: t(i), value: conn(sodBuy(i), sodSell(i)), color: NONE_COL }));
 
-  // Markers (the "Regular Bullish / Bearish Label" plotshapes have display.none in Pine: not drawn)
+  // Markers
   const markers: MarkerData[] = [];
   const green = String(color.new(color.green, 0));
   const red = String(color.new(color.red, 0));
   for (let i = 0; i < n; i++) {
     const time = t(i);
+    // plotshape(bullCond ? mfiLBR : na, offset = -lookbackRight, triangleup, location.absolute, text = "Div") and the
+    // bearish one (display.none: hidden by default, the host shows them from the Style settings); bullCond / bearCond
+    // after the filters; the value of bar i is drawn on bar i - 1
+    const lbr = fin(mfiLBR(i));
+    if (i - lookbackRight >= 0 && !isNaN(lbr)) {
+      const lblTime = barTime(bars, i - lookbackRight, interval);
+      if (bullCond[i]) {
+        markers.push({ time: lblTime, position: 'atPriceMiddle', price: lbr, shape: 'triangleUp', color: green,
+          text: 'Div', textColor: PINE_TEXT, size: 'auto', id: 'shape0' });
+      }
+      if (bearCond[i]) {
+        markers.push({ time: lblTime, position: 'atPriceMiddle', price: lbr, shape: 'triangleDown', color: red,
+          text: 'Div', textColor: PINE_TEXT, size: 'auto', id: 'shape1' });
+      }
+    }
     // id: the Style-settings id of the plotshape (shape<k>, k over the plotshapes in declaration order)
     const pane = (on: boolean, buy: boolean, text: string, id: string) => {
       if (on) {

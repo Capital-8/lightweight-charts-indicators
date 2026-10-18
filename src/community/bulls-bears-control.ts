@@ -1,17 +1,18 @@
 /**
  * CM_TotalConsecutive_Up_Down_V2
  *
- * Overlay=false histogram showing consecutive bars since price moved down or up
- * (relative to midpoint or previous close). Additional optional overlays:
- * - Highest bar lookback period (midpoint and/or close)
- * - Standard deviation bands (midpoint and/or close)
- * - Moving average (midpoint and/or close)
- * Plus an hline at a configurable level.
+ * Histograms of the bars since the close was last above (red, "Price Down") / below (lime, "Price Up") the midpoint
+ * (hl2) of the bar before, or the close of the bar before when "Use Midpoint" is off or the midpoint count is 0 / na.
+ * Optional lines over the four counts (midpoint and close based, down and up): their highest over a lookback, their
+ * standard deviation times a multiple, their moving average (each drawn only where non-zero). A dashed yellow
+ * horizontal line at the "Horizontal Line" level.
  *
- * Reference: "Custom Indicator Clearly Shows If Bulls or Bears are in Control!"
+ * Version 1 plots have a default transparency of 35: the plot colours have an alpha of 0.65.
+ *
+ * Reference: "CM_TotalConsecutive_Up_Down_V2" by ChrisMoody
  */
 
-import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 
 export interface BullsBearsInputs {
   useMidpoint: boolean;
@@ -58,261 +59,109 @@ export const inputConfig: InputConfig[] = [
   { id: 'maLength', type: 'int', title: 'Moving Average length', defval: 20, min: 1 },
 ];
 
-// 14 plots matching Pine source exactly:
-// plot0-1: primary histogram (down/up using midpoint or close based on dopm toggle)
-// plot2-3: highest lookback midpoint (down/up), gated by dohbM
-// plot4-5: highest lookback close (down/up), gated by dohbC
-// plot6-7: stdev midpoint (down/up), gated by dostM
-// plot8-9: stdev close (down/up), gated by dostC
-// plot10-11: MA midpoint (down/up), gated by domaM
-// plot12-13: MA close (down/up), gated by domaC
+// Colour constants of Pine version 1, with the default plot transparency of that version (35)
+const V1 = (hex: string) => String(color.new(hex, 35));
+const RED = V1('#FF0000');
+const LIME = V1('#00FF00');
+
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Price Down Based On Midpoint or Close', color: '#F44336', lineWidth: 3, style: 'histogram' },
-  { id: 'plot1', title: 'Price Up Based On Midpoint or Close', color: '#00FF00', lineWidth: 3, style: 'histogram' },
-  { id: 'plot2', title: 'Highest Down Bar Lookback - Midpoint', color: '#F44336', lineWidth: 4 },
-  { id: 'plot3', title: 'Highest Up Bar Lookback - Midpoint', color: '#00FF00', lineWidth: 4 },
-  { id: 'plot4', title: 'Highest Down Bar Lookback - Close', color: '#F44336', lineWidth: 4 },
-  { id: 'plot5', title: 'Highest Up Bar Lookback - Close', color: '#00FF00', lineWidth: 4 },
-  { id: 'plot6', title: 'StdDev of Down Bars - Midpoint', color: '#F44336', lineWidth: 4 },
-  { id: 'plot7', title: 'StdDev of Up Bars - Midpoint', color: '#00FF00', lineWidth: 4 },
-  { id: 'plot8', title: 'StdDev of Down Bars - Close', color: '#F44336', lineWidth: 4 },
-  { id: 'plot9', title: 'StdDev of Up Bars - Close', color: '#00FF00', lineWidth: 4 },
-  { id: 'plot10', title: 'MA of Down Bars - Midpoint', color: '#F44336', lineWidth: 4 },
-  { id: 'plot11', title: 'MA of Up Bars - Midpoint', color: '#00FF00', lineWidth: 4 },
-  { id: 'plot12', title: 'MA of Down Bars - Close', color: '#F44336', lineWidth: 4 },
-  { id: 'plot13', title: 'MA of Up Bars - Close', color: '#00FF00', lineWidth: 4 },
+  { id: 'plot0', title: 'Price Down Based On Midpoint or Close', color: RED, lineWidth: 3, style: 'histogram' },
+  { id: 'plot1', title: 'Price Up Based On Midpoint or Close', color: LIME, lineWidth: 3, style: 'histogram' },
+  { id: 'plot2', title: 'Highest Down Bar Lookback - Midpoint', color: RED, lineWidth: 4 },
+  { id: 'plot3', title: 'Highest Up Bar Lookback - Midpoint', color: LIME, lineWidth: 4 },
+  { id: 'plot4', title: 'Highest Down Bar Lookback - Close', color: RED, lineWidth: 4 },
+  { id: 'plot5', title: 'Highest Up Bar Lookback - Close', color: LIME, lineWidth: 4 },
+  { id: 'plot6', title: 'StdDev of Down Bars - Midpoint', color: RED, lineWidth: 4 },
+  { id: 'plot7', title: 'StdDev of Up Bars - Midpoint', color: LIME, lineWidth: 4 },
+  { id: 'plot8', title: 'StdDev of Down Bars - Close', color: RED, lineWidth: 4 },
+  { id: 'plot9', title: 'StdDev of Up Bars - Close', color: LIME, lineWidth: 4 },
+  { id: 'plot10', title: 'MA of Down Bars - Midpoint', color: RED, lineWidth: 4 },
+  { id: 'plot11', title: 'MA of Up Bars - Midpoint', color: LIME, lineWidth: 4 },
+  { id: 'plot12', title: 'MA of Down Bars - Close', color: RED, lineWidth: 4 },
+  { id: 'plot13', title: 'MA of Up Bars - Close', color: LIME, lineWidth: 4 },
 ];
 
 export const metadata = {
-  title: 'CM TotalConsecutive Up/Down V2',
+  title: 'CM_TotalConsecutive_Up_Down_V2',
   shortTitle: 'CM_TotalConsec_Up_Down_V2',
   overlay: false,
 };
 
-/**
- * barssince: count bars since condition was last true.
- * Returns 0 on the bar where condition is true, increments each bar after.
- */
-function barssince(condition: boolean[], index: number): number {
-  for (let i = index; i >= 0; i--) {
-    if (condition[i]) return index - i;
+/** barssince(cond): 0 on a bar where it is true, then +1 per bar; na until it is first true */
+function barssince(cond: boolean[]): number[] {
+  const out = new Array<number>(cond.length);
+  let last = -1;
+  for (let i = 0; i < cond.length; i++) {
+    if (cond[i]) last = i;
+    out[i] = last < 0 ? NaN : i - last;
   }
-  return index; // never been true, return distance from start
+  return out;
 }
 
-function highest(arr: number[], len: number, idx: number): number {
-  let max = 0;
-  for (let j = 0; j < len && idx - j >= 0; j++) {
-    max = Math.max(max, arr[idx - j]);
-  }
-  return max;
-}
-
-function smaOf(arr: number[], len: number, idx: number): number {
-  if (idx < len - 1) return NaN;
-  let sum = 0;
-  for (let j = 0; j < len; j++) sum += arr[idx - j];
-  return sum / len;
-}
-
-function stdevOf(arr: number[], len: number, idx: number): number {
-  if (idx < len - 1) return NaN;
-  let sum = 0;
-  for (let j = 0; j < len; j++) sum += arr[idx - j];
-  const mean = sum / len;
-  let sumSq = 0;
-  for (let j = 0; j < len; j++) sumSq += (arr[idx - j] - mean) ** 2;
-  return Math.sqrt(sumSq / len);
-}
+/** A number as a Pine version 1 condition: true when not na and not 0 */
+const truthy = (v: number) => !isNaN(v) && v !== 0;
 
 export function calculate(bars: Bar[], inputs: Partial<BullsBearsInputs> = {}): IndicatorResult {
-  const {
-    useMidpoint, showHighestMidpoint, showHighestClose,
-    showStdevMidpoint, showStdevClose, showMaMidpoint, showMaClose,
-    hlength, lookbackLength, stdevLength, stdevMult, maLength,
-  } = { ...defaultInputs, ...inputs };
+  const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
-  // Pine conditions:
-  // down_BarC = close > close[1]   (price went up from prev close - Pine calls this "down" confusingly)
-  // up_BarC   = close < close[1]
-  // down_BarM = close > hl2[1]
-  // up_BarM   = close < hl2[1]
-  const downBarM: boolean[] = new Array(n);
-  const upBarM: boolean[] = new Array(n);
-  const downBarC: boolean[] = new Array(n);
-  const upBarC: boolean[] = new Array(n);
+  // down_BarC = close > close[1]; up_BarC = close < close[1]; down_BarM = close > hl2[1]; up_BarM = close < hl2[1]
+  // (na on bar 0: the comparisons are false)
+  const downBarC = bars.map((b, i) => i > 0 && b.close > bars[i - 1].close);
+  const upBarC = bars.map((b, i) => i > 0 && b.close < bars[i - 1].close);
+  const hl2Prev = (i: number) => (bars[i - 1].high + bars[i - 1].low) / 2;
+  const downBarM = bars.map((b, i) => i > 0 && b.close > hl2Prev(i));
+  const upBarM = bars.map((b, i) => i > 0 && b.close < hl2Prev(i));
 
-  for (let i = 0; i < n; i++) {
-    if (i === 0) {
-      downBarM[i] = false;
-      upBarM[i] = false;
-      downBarC[i] = false;
-      upBarC[i] = false;
-      continue;
-    }
-    const hl2Prev = (bars[i - 1].high + bars[i - 1].low) / 2;
-    downBarM[i] = bars[i].close > hl2Prev;
-    upBarM[i] = bars[i].close < hl2Prev;
-    downBarC[i] = bars[i].close > bars[i - 1].close;
-    upBarC[i] = bars[i].close < bars[i - 1].close;
-  }
+  const bsDownM = barssince(downBarM);
+  const bsUpM = barssince(upBarM);
+  const bsDownC = barssince(downBarC);
+  const bsUpC = barssince(upBarC);
 
-  // barssince arrays
-  const bsDownM: number[] = new Array(n);
-  const bsUpM: number[] = new Array(n);
-  const bsDownC: number[] = new Array(n);
-  const bsUpC: number[] = new Array(n);
+  const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
+  const S = (a: number[]) => Series.fromArray(bars, a);
+  const sma = (a: number[]) => A(ta.sma(S(a), cfg.maLength));
+  const stdev = (a: number[]) => A(ta.stdev(S(a), cfg.stdevLength)).map((v) => v * cfg.stdevMult);
+  const highest = (a: number[]) => A(ta.highest(S(a), cfg.lookbackLength));
 
-  for (let i = 0; i < n; i++) {
-    bsDownM[i] = barssince(downBarM, i);
-    bsUpM[i] = barssince(upBarM, i);
-    bsDownC[i] = barssince(downBarC, i);
-    bsUpC[i] = barssince(upBarC, i);
-  }
+  const avgDown = sma(bsDownM);
+  const avgUp = sma(bsUpM);
+  const avgDownC = sma(bsDownC);
+  const avgUpC = sma(bsUpC);
+  const stdevdm = stdev(bsDownM);
+  const stdevum = stdev(bsUpM);
+  const stdevdC = stdev(bsDownC);
+  const stdevuC = stdev(bsUpC);
+  const hbDownM = highest(bsDownM);
+  const hbUpM = highest(bsUpM);
+  const hbDownC = highest(bsDownC);
+  const hbUpC = highest(bsUpC);
 
-  // Pre-compute SMA arrays used by Pine: avg_Down, avg_Up, avg_DownC, avg_UpC
-  // Pine: avg_Down = sma(barssince(down_BarM), length3)
-  // These are computed unconditionally in Pine (used by plots gated by domaM/domaC)
-
-  type Point = { time: number; value: number };
-  const plot0: Point[] = new Array(n);
-  const plot1: Point[] = new Array(n);
-  const plot2: Point[] = new Array(n);
-  const plot3: Point[] = new Array(n);
-  const plot4: Point[] = new Array(n);
-  const plot5: Point[] = new Array(n);
-  const plot6: Point[] = new Array(n);
-  const plot7: Point[] = new Array(n);
-  const plot8: Point[] = new Array(n);
-  const plot9: Point[] = new Array(n);
-  const plot10: Point[] = new Array(n);
-  const plot11: Point[] = new Array(n);
-  const plot12: Point[] = new Array(n);
-  const plot13: Point[] = new Array(n);
-
-  for (let i = 0; i < n; i++) {
-    const t = bars[i].time;
-
-    // Pine plot 1: plot(dopm and barssince(down_BarM) ? barssince(down_BarM) : barssince(down_BarC), ...)
-    // When dopm=true: shows midpoint-based barssince; when false: shows close-based
-    const downVal = (useMidpoint && bsDownM[i]) ? bsDownM[i] : bsDownC[i];
-    plot0[i] = { time: t, value: i === 0 ? NaN : downVal };
-
-    // Pine plot 2: plot(dopm and barssince(up_BarM) ? barssince(up_BarM) : barssince(up_BarC), ...)
-    const upVal = (useMidpoint && bsUpM[i]) ? bsUpM[i] : bsUpC[i];
-    plot1[i] = { time: t, value: i === 0 ? NaN : upVal };
-
-    // Pine plot 3: highest down bar lookback - midpoint (gated by dohbM)
-    if (showHighestMidpoint) {
-      const v = highest(bsDownM, lookbackLength, i);
-      plot2[i] = { time: t, value: v || NaN };
-    } else {
-      plot2[i] = { time: t, value: NaN };
-    }
-
-    // Pine plot 4: highest up bar lookback - midpoint (gated by dohbM)
-    if (showHighestMidpoint) {
-      const v = highest(bsUpM, lookbackLength, i);
-      plot3[i] = { time: t, value: v || NaN };
-    } else {
-      plot3[i] = { time: t, value: NaN };
-    }
-
-    // Pine plot 5: highest down bar lookback - close (gated by dohbC)
-    if (showHighestClose) {
-      const v = highest(bsDownC, lookbackLength, i);
-      plot4[i] = { time: t, value: v || NaN };
-    } else {
-      plot4[i] = { time: t, value: NaN };
-    }
-
-    // Pine plot 6: highest up bar lookback - close (gated by dohbC)
-    if (showHighestClose) {
-      const v = highest(bsUpC, lookbackLength, i);
-      plot5[i] = { time: t, value: v || NaN };
-    } else {
-      plot5[i] = { time: t, value: NaN };
-    }
-
-    // Pine plot 7: stdev down - midpoint (gated by dostM)
-    if (showStdevMidpoint) {
-      const sd = stdevOf(bsDownM, stdevLength, i);
-      plot6[i] = { time: t, value: isNaN(sd) ? NaN : sd * stdevMult };
-    } else {
-      plot6[i] = { time: t, value: NaN };
-    }
-
-    // Pine plot 8: stdev up - midpoint (gated by dostM)
-    if (showStdevMidpoint) {
-      const sd = stdevOf(bsUpM, stdevLength, i);
-      plot7[i] = { time: t, value: isNaN(sd) ? NaN : sd * stdevMult };
-    } else {
-      plot7[i] = { time: t, value: NaN };
-    }
-
-    // Pine plot 9: stdev down - close (gated by dostC)
-    if (showStdevClose) {
-      const sd = stdevOf(bsDownC, stdevLength, i);
-      plot8[i] = { time: t, value: isNaN(sd) ? NaN : sd * stdevMult };
-    } else {
-      plot8[i] = { time: t, value: NaN };
-    }
-
-    // Pine plot 10: stdev up - close (gated by dostC)
-    if (showStdevClose) {
-      const sd = stdevOf(bsUpC, stdevLength, i);
-      plot9[i] = { time: t, value: isNaN(sd) ? NaN : sd * stdevMult };
-    } else {
-      plot9[i] = { time: t, value: NaN };
-    }
-
-    // Pine plot 11: MA down - midpoint (gated by domaM)
-    if (showMaMidpoint) {
-      const ma = smaOf(bsDownM, maLength, i);
-      plot10[i] = { time: t, value: isNaN(ma) ? NaN : ma };
-    } else {
-      plot10[i] = { time: t, value: NaN };
-    }
-
-    // Pine plot 12: MA up - midpoint (gated by domaM)
-    if (showMaMidpoint) {
-      const ma = smaOf(bsUpM, maLength, i);
-      plot11[i] = { time: t, value: isNaN(ma) ? NaN : ma };
-    } else {
-      plot11[i] = { time: t, value: NaN };
-    }
-
-    // Pine plot 13: MA down - close (gated by domaC)
-    if (showMaClose) {
-      const ma = smaOf(bsDownC, maLength, i);
-      plot12[i] = { time: t, value: isNaN(ma) ? NaN : ma };
-    } else {
-      plot12[i] = { time: t, value: NaN };
-    }
-
-    // Pine plot 14: MA up - close (gated by domaC)
-    if (showMaClose) {
-      const ma = smaOf(bsUpC, maLength, i);
-      plot13[i] = { time: t, value: isNaN(ma) ? NaN : ma };
-    } else {
-      plot13[i] = { time: t, value: NaN };
-    }
-  }
+  // plot(on and x ? x : na)
+  const gated = (on: boolean, x: number[]) => bars.map((b, i) => ({ time: b.time, value: on && truthy(x[i]) ? x[i] : NaN }));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
-      'plot0': plot0, 'plot1': plot1,
-      'plot2': plot2, 'plot3': plot3,
-      'plot4': plot4, 'plot5': plot5,
-      'plot6': plot6, 'plot7': plot7,
-      'plot8': plot8, 'plot9': plot9,
-      'plot10': plot10, 'plot11': plot11,
-      'plot12': plot12, 'plot13': plot13,
+      // plot(dopm and barssince(down_BarM) ? barssince(down_BarM) : barssince(down_BarC))
+      plot0: bars.map((b, i) => ({ time: b.time, value: cfg.useMidpoint && truthy(bsDownM[i]) ? bsDownM[i] : bsDownC[i] })),
+      plot1: bars.map((b, i) => ({ time: b.time, value: cfg.useMidpoint && truthy(bsUpM[i]) ? bsUpM[i] : bsUpC[i] })),
+      plot2: gated(cfg.showHighestMidpoint, hbDownM),
+      plot3: gated(cfg.showHighestMidpoint, hbUpM),
+      plot4: gated(cfg.showHighestClose, hbDownC),
+      plot5: gated(cfg.showHighestClose, hbUpC),
+      plot6: gated(cfg.showStdevMidpoint, stdevdm),
+      plot7: gated(cfg.showStdevMidpoint, stdevum),
+      plot8: gated(cfg.showStdevClose, stdevdC),
+      plot9: gated(cfg.showStdevClose, stdevuC),
+      plot10: gated(cfg.showMaMidpoint, avgDown),
+      plot11: gated(cfg.showMaMidpoint, avgUp),
+      plot12: gated(cfg.showMaClose, avgDownC),
+      plot13: gated(cfg.showMaClose, avgUpC),
     },
+    // hline(hlength, title="Horizontal Line", linestyle=dashed, linewidth=4, color=yellow)
     hlines: [
-      { value: hlength, options: { color: '#FFFF00', linestyle: 'dashed' as const, title: 'Horizontal Line' } },
+      { value: cfg.hlength, options: { color: '#FFFF00', linestyle: 'dashed', linewidth: 4, title: 'Horizontal Line' } },
     ],
   };
 }

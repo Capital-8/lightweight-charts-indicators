@@ -298,15 +298,13 @@ describe('Order Blocks with signals: alert() calls', () => {
       const a = r.alertCalls[k - 1], b = r.alertCalls[k];
       expect(a.time < b.time || (a.time === b.time && a.message.includes('Bearish') && b.message.includes('Bullish'))).toBe(true);
     }
-    // the port's Sell / Buy markers (inside a block that is not mitigated) are on bars with a call
-    const sellTimes = new Set(sell.map((c) => c.time));
-    const buyTimes = new Set(buy.map((c) => c.time));
-    for (const m of r.markers) expect((m.text === 'Sell' ? sellTimes : buyTimes).has(m.time)).toBe(true);
+    // no Buy / Sell markers: the original draws only the boxes
+    expect((r as Record<string, unknown>).markers).toBeUndefined();
   });
   it('the alert inputs turn the calls off', () => {
     expect(obSignals.calculate(bars, { sensitivity: 10, sellAlert: false }).alertCalls.every((c) => c.message.includes('Bullish'))).toBe(true);
     expect(obSignals.calculate(bars, { sensitivity: 10, buyAlert: false }).alertCalls.every((c) => c.message.includes('Bearish'))).toBe(true);
-    expect(obSignals.calculate(bars, { sensitivity: 10 }).markers).toEqual(r.markers);
+    expect(obSignals.calculate(bars, { sensitivity: 10, sellAlert: false, buyAlert: false }).boxes).toEqual(r.boxes);
   });
 });
 

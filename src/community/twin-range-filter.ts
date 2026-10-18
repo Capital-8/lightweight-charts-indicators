@@ -1,50 +1,47 @@
 /**
  * Twin Range Filter
  *
- * Dual-range smoothing filter combining fast and slow ATR-based ranges.
- * Filter line adapts to price movement within the combined range.
- * Uptrend when filter rises, downtrend when filter falls.
- * Alerts (alertcondition, `alerts` of the result): 'Long' and 'Short', with the original's conditions on the filter
- * line of the port: long condition = source above the filter, source not equal to the source of the bar before and
- * the filter rising (count of rising bars > 0), short condition the mirror; CondIni = 1 on a long condition, -1 on a
- * short one, else the value of the bar before; 'Long' = long condition with CondIni of the bar before -1, 'Short' =
- * short condition with CondIni of the bar before 1 (from the first bar).
+ * As the original: two smooth average ranges of the source, EMA(EMA(|source - source[1]|, t), 2t - 1) * m for the fast
+ * (27, 1.6) and slow (55, 2) settings, averaged; the range filter follows the source but moves only when the source
+ * leaves the range around it (na until the range exists). Long condition = source above the filter, not equal to the
+ * source of the bar before, with the filter rising (count of rising bars > 0); short condition the mirror; CondIni = 1
+ * on a long condition, -1 on a short one, else the value of the bar before. Long label below the bar (shape0) on a
+ * long condition after CondIni -1, Short label above it (shape1) on a short condition after CondIni 1.
+ * Alerts (alertcondition, `alerts` of the result): 'Long' and 'Short' on the bars of the labels.
+ * As the original, only the two labels are drawn (no filter line, fills or bar colours).
  *
  * Reference: "Twin Range Filter" by colinmck
  */
 
-import { ta, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
-import type { BarColorData, MarkerData } from '../types';
+import { taCore, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import type { MarkerData } from '../types';
 import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TwinRangeFilterInputs {
+  src: SourceType;
   fastPeriod: number;
   fastRange: number;
   slowPeriod: number;
   slowRange: number;
-  src: SourceType;
 }
 
 export const defaultInputs: TwinRangeFilterInputs = {
-  fastPeriod: 5,
-  fastRange: 1.6,
-  slowPeriod: 27,
-  slowRange: 1.0,
   src: 'close',
+  fastPeriod: 27,
+  fastRange: 1.6,
+  slowPeriod: 55,
+  slowRange: 2,
 };
 
 export const inputConfig: InputConfig[] = [
-  { id: 'fastPeriod', type: 'int', title: 'Fast Period', defval: 5, min: 1 },
-  { id: 'fastRange', type: 'float', title: 'Fast Range', defval: 1.6, min: 0.1, step: 0.1 },
-  { id: 'slowPeriod', type: 'int', title: 'Slow Period', defval: 27, min: 1 },
-  { id: 'slowRange', type: 'float', title: 'Slow Range', defval: 1.0, min: 0.1, step: 0.1 },
   { id: 'src', type: 'source', title: 'Source', defval: 'close' },
+  { id: 'fastPeriod', type: 'int', title: 'Fast period', defval: 27, min: 1 },
+  { id: 'fastRange', type: 'float', title: 'Fast range', defval: 1.6, min: 0.1 },
+  { id: 'slowPeriod', type: 'int', title: 'Slow period', defval: 55, min: 1 },
+  { id: 'slowRange', type: 'float', title: 'Slow range', defval: 2, min: 0.1 },
 ];
 
-export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Filter', color: '#26A69A', lineWidth: 2 },
-  { id: 'plot1', title: 'OHLC4', color: 'transparent', lineWidth: 0 },
-];
+export const plotConfig: PlotConfig[] = [];
 
 export const metadata = {
   title: 'Twin Range Filter',
@@ -52,149 +49,75 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TwinRangeFilterInputs> = {}): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; markers: MarkerData[] }
+/** smoothrng(x, t, m) of the original */
+export function smoothRange(x: number[], t: number, m: number): number[] {
+  const absChange = x.map((v, i) => (i > 0 ? Math.abs(v - x[i - 1]) : NaN));
+  return taCore.ema(taCore.ema(absChange, t), t * 2 - 1).map((v) => v * m);
+}
+
+/** rngfilt(x, r) of the original: nz() of the filter of the bar before */
+export function rangeFilter(x: number[], r: number[]): number[] {
+  const out: number[] = new Array(x.length);
+  let prevRaw = NaN;
+  for (let i = 0; i < x.length; i++) {
+    const p = Number.isFinite(prevRaw) ? prevRaw : 0;
+    const v = x[i] > p ? (x[i] - r[i] < p ? p : x[i] - r[i]) : (x[i] + r[i] > p ? p : x[i] + r[i]);
+    out[i] = Number.isFinite(v) ? v : NaN;
+    prevRaw = out[i];
+  }
+  return out;
+}
+
+export function calculate(bars: Bar[], inputs: Partial<TwinRangeFilterInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] }
   & { alerts: AlertConditionState[] } {
   const { fastPeriod, fastRange, slowPeriod, slowRange, src } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
-  const srcSeries = getSourceSeries(bars, src);
-  const srcArr = srcSeries.toArray();
+  const source = getSourceSeries(bars, src).toArray().map((v) => v ?? NaN);
+  const smrng1 = smoothRange(source, fastPeriod, fastRange);
+  const smrng2 = smoothRange(source, slowPeriod, slowRange);
+  const smrng = smrng1.map((v, i) => (v + smrng2[i]) / 2);
+  const filt = rangeFilter(source, smrng);
 
-  // True range computed manually
-  const trArr: number[] = new Array(n);
+  // upward / downward: counts of rising / falling filter bars (na comparisons false)
+  const upward: number[] = new Array(n);
+  const downward: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
-    const high = bars[i].high;
-    const low = bars[i].low;
-    if (i === 0) {
-      trArr[i] = high - low;
-    } else {
-      const prevClose = bars[i - 1].close;
-      trArr[i] = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-    }
+    const f = filt[i], f1 = i > 0 ? filt[i - 1] : NaN;
+    const up1 = i > 0 ? upward[i - 1] : 0, dn1 = i > 0 ? downward[i - 1] : 0;
+    upward[i] = f > f1 ? up1 + 1 : f < f1 ? 0 : up1;
+    downward[i] = f < f1 ? dn1 + 1 : f > f1 ? 0 : dn1;
   }
 
-  // Smooth ranges: EMA of (TR * rangeMultiplier)
-  const trFastSeries = new Series(bars, (_b, i) => trArr[i] * fastRange);
-  const trSlowSeries = new Series(bars, (_b, i) => trArr[i] * slowRange);
-
-  const smoothRngFast = ta.ema(trFastSeries, fastPeriod).toArray();
-  const smoothRngSlow = ta.ema(trSlowSeries, slowPeriod).toArray();
-
-  // Combined filter range
-  const filtRng: number[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const fast = isNaN(smoothRngFast[i]) ? 0 : smoothRngFast[i];
-    const slow = isNaN(smoothRngSlow[i]) ? 0 : smoothRngSlow[i];
-    filtRng[i] = (fast + slow) / 2;
-  }
-
-  // Filter line with state
-  const filt: number[] = new Array(n);
-  const upTrend: boolean[] = new Array(n);
-  filt[0] = srcArr[0] ?? 0;
-  upTrend[0] = true;
-
-  for (let i = 1; i < n; i++) {
-    const s = srcArr[i] ?? 0;
-    const prevFilt = filt[i - 1];
-    const rng = filtRng[i];
-
-    if (s > prevFilt - rng) {
-      filt[i] = Math.max(prevFilt, s - rng);
-    } else if (s < prevFilt + rng) {
-      filt[i] = Math.min(prevFilt, s + rng);
-    } else {
-      filt[i] = prevFilt;
-    }
-
-    upTrend[i] = filt[i] > filt[i - 1];
-  }
-
-  const warmup = slowPeriod;
-
-  const plot0 = filt.map((v, i) => ({
-    time: bars[i].time,
-    value: i < warmup ? NaN : v,
-    color: upTrend[i] ? '#26A69A' : '#EF5350',
-  }));
-
-  // OHLC4 plot (hidden, used as fill reference) per Pine Visualized version
-  const plot1 = bars.map((b, i) => ({
-    time: b.time,
-    value: i < warmup ? NaN : (b.open + b.high + b.low + b.close) / 4,
-  }));
-
-  // Fill colors: green when close > filter (uptrend), red when close < filter (downtrend)
-  const fillUpColors = bars.map((b, i) => {
-    if (i < warmup) return 'transparent';
-    return b.close > filt[i] ? 'rgba(76,175,80,0.10)' : 'transparent';
-  });
-  const fillDnColors = bars.map((b, i) => {
-    if (i < warmup) return 'transparent';
-    return b.close < filt[i] ? 'rgba(255,82,82,0.10)' : 'transparent';
-  });
-
-  const barColors: BarColorData[] = [];
-  for (let i = warmup; i < n; i++) {
-    barColors.push({
-      time: bars[i].time,
-      color: upTrend[i] ? '#26A69A' : '#EF5350',
-    });
-  }
-
-  // Markers: Long/Short signals on first direction change
-  const markers: MarkerData[] = [];
-  // Track upward/downward counters and CondIni state per Pine logic
-  const upwardCount: number[] = new Array(n);
-  const downwardCount: number[] = new Array(n);
-  upwardCount[0] = 0;
-  downwardCount[0] = 0;
-  for (let i = 1; i < n; i++) {
-    upwardCount[i] = filt[i] > filt[i - 1] ? (upwardCount[i - 1] + 1) : filt[i] < filt[i - 1] ? 0 : upwardCount[i - 1];
-    downwardCount[i] = filt[i] < filt[i - 1] ? (downwardCount[i - 1] + 1) : filt[i] > filt[i - 1] ? 0 : downwardCount[i - 1];
-  }
-
-  let condIni = 0;
-  for (let i = warmup; i < n; i++) {
-    const s = srcArr[i] ?? 0;
-    const longCond = s > filt[i] && upwardCount[i] > 0;
-    const shortCond = s < filt[i] && downwardCount[i] > 0;
-
-    if (longCond && condIni === -1) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#00E676', text: 'Long' });
-    }
-    if (shortCond && condIni === 1) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#EF5350', text: 'Short' });
-    }
-
-    if (longCond) condIni = 1;
-    else if (shortCond) condIni = -1;
-  }
-
-  // Alerts: longCond := source > filt and source > source[1] and upward > 0 or source > filt and source < source[1]
-  // and upward > 0 (shortCond the mirror); CondIni := longCond ? 1 : shortCond ? -1 : CondIni[1] (na on the first
-  // bar); long = longCond and CondIni[1] == -1, short = shortCond and CondIni[1] == 1
+  // longCond := source > filt and source > source[1] and upward > 0 or source > filt and source < source[1] and
+  // upward > 0 (shortCond the mirror); CondIni := longCond ? 1 : shortCond ? -1 : CondIni[1] (na on the first bar);
+  // long = longCond and CondIni[1] == -1, short = shortCond and CondIni[1] == 1
   const longFlags: boolean[] = [];
   const shortFlags: boolean[] = [];
-  let alertCondIni = NaN;
+  const markers: MarkerData[] = [];
+  let condIni = NaN;
   for (let i = 0; i < n; i++) {
-    const s = srcArr[i] ?? NaN;
-    const s1 = i > 0 ? srcArr[i - 1] ?? NaN : NaN;
-    const longCond = (s > filt[i] && s > s1 && upwardCount[i] > 0) || (s > filt[i] && s < s1 && upwardCount[i] > 0);
-    const shortCond = (s < filt[i] && s < s1 && downwardCount[i] > 0) || (s < filt[i] && s > s1 && downwardCount[i] > 0);
-    longFlags.push(longCond && alertCondIni === -1);
-    shortFlags.push(shortCond && alertCondIni === 1);
-    alertCondIni = longCond ? 1 : shortCond ? -1 : alertCondIni;
+    const s = source[i];
+    const s1 = i > 0 ? source[i - 1] : NaN;
+    const longCond = (s > filt[i] && s > s1 && upward[i] > 0) || (s > filt[i] && s < s1 && upward[i] > 0);
+    const shortCond = (s < filt[i] && s < s1 && downward[i] > 0) || (s < filt[i] && s > s1 && downward[i] > 0);
+    const long = longCond && condIni === -1;
+    const short = shortCond && condIni === 1;
+    longFlags.push(long);
+    shortFlags.push(short);
+    if (long) {
+      markers.push({ id: 'shape0', time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#00E676', text: 'Long', textColor: '#000000', size: 'tiny' });
+    }
+    if (short) {
+      markers.push({ id: 'shape1', time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF5252', text: 'Short', textColor: '#FFFFFF', size: 'tiny' });
+    }
+    condIni = longCond ? 1 : shortCond ? -1 : condIni;
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1 },
-    fills: [
-      { plot1: 'plot1', plot2: 'plot0', colors: fillUpColors },
-      { plot1: 'plot1', plot2: 'plot0', colors: fillDnColors },
-    ],
-    barColors,
+    // the original plots only the two labels
+    plots: {},
     markers,
     alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
