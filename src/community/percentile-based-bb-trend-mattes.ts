@@ -7,6 +7,8 @@
  * EMA and drawn as columns: light blue when above 0 and rising, blue when above 0 and falling, purple when below 0
  * and falling, dark purple when below 0 and rising (the colour is kept when the value does not change). The price
  * candles are redrawn blue when the trend is above 0, purple otherwise.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend Shift' / 'Bearish Trend Shift' when the trend
+ * crosses over / under 0.
  *
  * Reference: "Percentile-Based BB% Trend - Mattes" by Mattes00
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { PlotCandleData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PercentileBasedBbTrendMattesInputs {
   /** Lookback length of the percentiles and medians */
@@ -62,7 +65,7 @@ const div = (x: number, y: number) => (y === 0 ? NaN : x / y);
 export function calculate(
   bars: Bar[],
   inputs: Partial<PercentileBasedBbTrendMattesInputs> = {},
-): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -111,10 +114,19 @@ export function calculate(
       { value: 0, options: { title: 'Midline', color: String(color.new(color.white, 60)), linestyle: 'dotted' } },
     ],
     plotCandles: { BarColor: candles },
+    // alertcondition(ta.crossover(pb_trend, 0)) / alertcondition(ta.crossunder(pb_trend, 0))
+    alerts: alertStates(alertConditions, bars, [crossedOver(pbTrend, 0), crossedUnder(pbTrend, 0)]),
   };
 }
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend Shift', message: 'PBB% Trend crossing above midline' },
+  { id: 'alert1', title: 'Bearish Trend Shift', message: 'PBB% Trend crossing below midline' },
+];
+
 export const PercentileBasedBbTrendMattes = {
+  alertConditions,
   calculate,
   metadata,
   defaultInputs,

@@ -9,6 +9,9 @@
  * The Pine 'Line Width' input is not ported: plot widths are fixed by plotConfig (the Pine default, 3). The Pine
  * 'Color Bars' input is not ported: the script does not use it (the trend candles are always drawn).
  *
+ * Alerts (alertcondition, `alerts` of the result): "NLMS ATR Bullish" (the trail crosses over its previous value)
+ * and "NLMS ATR Bearish" (it crosses under it).
+ *
  * Reference: "NLMS Volatility Trail [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © BackQuant
@@ -16,6 +19,13 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'NLMS ATR Bullish', message: 'NLMS ATR Trend turned bullish on {{ticker}}' },
+  { id: 'alert1', title: 'NLMS ATR Bearish', message: 'NLMS ATR Trend turned bearish on {{ticker}}' },
+];
 
 export interface NlmsVolatilityTrailInputs {
   src: SourceType;
@@ -83,7 +93,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<NlmsVolatilityTrailInputs> = {},
-): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -126,12 +136,16 @@ export function calculate(
   const trendCol: string[] = new Array(n);
   let col = 'transparent'; // var color col = na
   let trendDir = 0;
+  const longFlags: boolean[] = new Array(n).fill(false);
+  const shortFlags: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
     // ta.crossover(trail, trail[1]): trail > trail[1] and trail[1] <= trail[2], compared exactly (no 1e-10 tolerance)
     const a1 = i > 0 ? trail[i - 1] : NaN;
     const a2 = i > 1 ? trail[i - 2] : NaN;
     const long = trail[i] > a1 && a1 <= a2;
     const short = trail[i] < a1 && a1 >= a2;
+    longFlags[i] = long;
+    shortFlags[i] = short;
     if (long) col = cfg.longCol;
     else if (short) col = cfg.shortCol;
     if (long) trendDir = 1;
@@ -186,6 +200,7 @@ export function calculate(
       { plot1: 'plot0', plot2: 'plot3', options: { title: 'Glow Upper' }, colors: glowColors.slice() },
     ],
     plotCandles: { trendCandles: candles },
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
@@ -195,4 +210,5 @@ export const NlmsVolatilityTrail = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

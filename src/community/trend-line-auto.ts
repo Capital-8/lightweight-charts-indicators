@@ -6,11 +6,17 @@
  * the most recent fractal to a prior fractal within a segment range.
  * Lines are colored green (top/upper) and red/yellow (bottom/lower).
  *
+ * Alert (alertcondition, `alerts` of the result): 'HarryBot Alert', the close crossing the top or the bottom "defense
+ * line". The original reads the line levels on the last bar only (care() returns na on the other bars), so the
+ * condition can only be true on the last bar: the level is the price on the last bar of the oldest top (bottom) line
+ * the port draws in the last `limit` bars, read before the far / short lines are removed, as the original does.
+ *
  * Reference: "Trend Line - HarryBot" by HarryBot
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LineDrawingData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendLineAutoInputs {
   limit: number;
@@ -40,7 +46,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TrendLineAutoInputs> = {}): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[] } {
+export function calculate(bars: Bar[], inputs: Partial<TrendLineAutoInputs> = {}): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const { limit, segment, term } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const mid = Math.floor(term / 2) + 1;
@@ -52,6 +58,9 @@ export function calculate(bars: Bar[], inputs: Partial<TrendLineAutoInputs> = {}
 
   const closePlot = bars.map((b) => ({ time: b.time, value: NaN }));
   const lines: LineDrawingData[] = [];
+  /** Bar indexes of the first top / bottom line the port draws (the oldest one), for the alert level */
+  let firstUp: { x1: number; y1: number; x2: number; y2: number } | null = null;
+  let firstDn: { x1: number; y1: number; x2: number; y2: number } | null = null;
 
   // Angle calculation: atan((y2-y1)/(x2-x1)) * 180/PI
   function calcAngle(x1: number, y1: number, x2: number, y2: number): number {
@@ -101,6 +110,7 @@ export function calculate(bars: Bar[], inputs: Partial<TrendLineAutoInputs> = {}
 
     if (bestIdx >= 0) {
       const prior = fracUps[bestIdx];
+      firstUp ??= { x1: prior.idx, y1: prior.value, x2: current.idx, y2: current.value };
       lines.push({
         time1: bars[prior.idx].time,
         price1: prior.value,
@@ -134,6 +144,7 @@ export function calculate(bars: Bar[], inputs: Partial<TrendLineAutoInputs> = {}
 
     if (bestIdx >= 0) {
       const prior = fracDns[bestIdx];
+      firstDn ??= { x1: prior.idx, y1: prior.value, x2: current.idx, y2: current.value };
       lines.push({
         time1: bars[prior.idx].time,
         price1: prior.value,
@@ -178,11 +189,33 @@ export function calculate(bars: Bar[], inputs: Partial<TrendLineAutoInputs> = {}
     }
   }
 
+  // up_lim = care(up_lin), dn_lim = care(dn_lin): on the last bar only, line.get_price(lin, last_bar_index) (by bar
+  // index) of the oldest line; na elsewhere
+  const priceAt = (l: { x1: number; y1: number; x2: number; y2: number } | null, x: number) =>
+    !l || l.x2 === l.x1 ? NaN : l.y1 + ((l.y2 - l.y1) * (x - l.x1)) / (l.x2 - l.x1);
+  const alertFlags = new Array<boolean>(n).fill(false);
+  if (n > 1) {
+    const upLim = priceAt(firstUp, n - 1);
+    const dnLim = priceAt(firstDn, n - 1);
+    const c = bars[n - 1].close;
+    const c1 = bars[n - 2].close;
+    // (close[1] < up_lim and close > up_lim) or (close[1] > dn_lim and close < dn_lim)
+    //   or (close[1] > up_lim and close < up_lim) or (close[1] < dn_lim and close > dn_lim)
+    alertFlags[n - 1] = (c1 < upLim && c > upLim) || (c1 > dnLim && c < dnLim)
+      || (c1 > upLim && c < upLim) || (c1 < dnLim && c > dnLim);
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': closePlot },
     lines: filteredLines,
+    alerts: alertStates(alertConditions, bars, [alertFlags]),
   };
 }
 
-export const TrendLineAuto = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertcondition */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'HarryBot Alert', message: 'Defense line is being crossed' },
+];
+
+export const TrendLineAuto = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -152,11 +152,11 @@ export function calculate(
     // Both plotshape calls use location.belowbar and shape.labelup
     if (agWsBull) {
       markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: color.green, text: 'Long',
-        textColor: color.white });
+        textColor: color.white, id: 'shape0' });
     }
     if (agWsBear) {
       markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: color.red, text: 'Short',
-        textColor: color.white });
+        textColor: color.white, id: 'shape1' });
     }
   }
 

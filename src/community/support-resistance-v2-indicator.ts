@@ -10,6 +10,9 @@
  * the level changes). As in the original, each side starts with a default line at price 0 from the first bar to the
  * bar before its first drawn level. At most 500 lines are kept.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'New S/R line' on the bars where the support or the resistance
+ * level changes (a change from na, the first level, does not count).
+ *
  * Timeframe: the bars of a higher timeframe are built from the chart bars with the calendar rule of the period
  * helper (see anchor-period.ts for its limits). The original reads the higher timeframe with lookahead: the level of
  * a bar of that timeframe is drawn from its first chart bar. A timeframe below the chart timeframe needs data that
@@ -34,6 +37,7 @@ import {
 import type { LineDrawingData } from '../types';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SupportResistanceV2IndicatorInputs {
   /** Timeframe of the levels ('' = chart timeframe) */
@@ -146,7 +150,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceV2IndicatorInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[] } {
+): IndicatorResult & { lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -160,6 +164,8 @@ export function calculate(
   const tf2Line = varDrawing<Line>(); // var tf2_line = line.new(0, 0, 0, 0)
   let tf1Prev = NaN;
   let tf2Prev = NaN;
+  // alertcondition(ta.change(tf1) != 0 or ta.change(tf2) != 0, "New S/R line")
+  const newLine: boolean[] = [];
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === n - 1);
     const tf1 = xup[group[i]];
@@ -171,6 +177,7 @@ export function calculate(
     if (i === 0) tf2Line.value = line.new(0, 0, 0, 0);
     if (truthy(tf2 - tf2Prev)) tf2Line.value = line.new(i, tf2, i, tf2, 'bar_index', undefined, ORANGE, undefined, LINE_WIDTH);
     line.set_x2(tf2Line.value!, i);
+    newLine.push(truthy(tf1 - tf1Prev) || truthy(tf2 - tf2Prev));
     tf1Prev = tf1;
     tf2Prev = tf2;
   }
@@ -180,7 +187,13 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     lines: drawingOutputs(bars).lines ?? [],
+    alerts: alertStates(alertConditions, bars, [newLine]),
   };
 }
 
-export const SupportResistanceV2Indicator = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New S/R line', message: 'New S/R line' },
+];
+
+export const SupportResistanceV2Indicator = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

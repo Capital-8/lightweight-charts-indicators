@@ -6,6 +6,8 @@
  * WMA, EMA, SMA or HMA. Each line is coloured by its slope; the ribbon between them is green when both rise, red when
  * none rises and gray otherwise. Mood and Bias (context) MAs give Tri-View circles on the slow line when the slow line
  * rises and slow >= mood >= bias (or falls and slow <= mood <= bias). Two more optional MAs.
+ * Alerts (alertcondition, `alerts` of the result): the fast / slow line swings up (rises, did not rise on the bar
+ * before) or down (falls, did not fall on the bar before).
  *
  * Reference: "RedK Magic Ribbon" by RedKTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, getSourceSeries, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type RedKMAType = 'RSS_WMA' | 'WMA' | 'EMA' | 'SMA' | 'HMA';
 const MA_TYPES: RedKMAType[] = ['RSS_WMA', 'WMA', 'EMA', 'SMA', 'HMA'];
@@ -134,7 +137,7 @@ type Arr = number[];
 export function calculate(
   bars: Bar[],
   inputs: Partial<RedKMagicRibbonInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series): Arr => s.toArray().map((v) => v ?? NaN);
@@ -213,11 +216,29 @@ export function calculate(
   const ma1Plot: Pt[] = [];
   const ma2Plot: Pt[] = [];
   const ribbon: string[] = [];
+  const fastUpF: boolean[] = [];
+  const fastDnF: boolean[] = [];
+  const slowUpF: boolean[] = [];
+  const slowDnF: boolean[] = [];
+  const swingFastUp: boolean[] = [];
+  const swingFastDn: boolean[] = [];
+  const swingSlowUp: boolean[] = [];
+  const swingSlowDn: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const fastUp = i > 0 && gt(fastLine[i], fastLine[i - 1]);
     const slowUp = i > 0 && gt(slowLine[i], slowLine[i - 1]);
     const slowDn = i > 0 && lt(slowLine[i], slowLine[i - 1]);
+    const fastDn = i > 0 && lt(fastLine[i], fastLine[i - 1]);
+    // Alert_Fastup = Fast_up and not Fast_up[1] (and the same for Fast_dn, Slow_up, Slow_dn)
+    swingFastUp.push(fastUp && !(i > 0 && fastUpF[i - 1]));
+    swingFastDn.push(fastDn && !(i > 0 && fastDnF[i - 1]));
+    swingSlowUp.push(slowUp && !(i > 0 && slowUpF[i - 1]));
+    swingSlowDn.push(slowDn && !(i > 0 && slowDnF[i - 1]));
+    fastUpF.push(fastUp);
+    fastDnF.push(fastDn);
+    slowUpF.push(slowUp);
+    slowDnF.push(slowDn);
     // plot(FastLine, 'Fast Line', color = Fast_up ? c_fup : c_fdn); plot(SlowLine, 'Slow Line', Slow_up ? c_sup : c_sdn)
     fastPlot.push({ time: t, value: fastLine[i], color: fastUp ? cFup : cFdn });
     slowPlot.push({ time: t, value: slowLine[i], color: slowUp ? cSup : cSdn });
@@ -252,8 +273,17 @@ export function calculate(
     },
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Ribbon Fill' }, colors: ribbon }],
     markers: [],
+    alerts: alertStates(alertConditions, bars, [swingFastUp, swingFastDn, swingSlowUp, swingSlowDn]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Fast Line Swings Up', message: 'MagicRibbon - Fast Line Swing Up Detected!' },
+  { id: 'alert1', title: 'Fast Line Swings Down', message: 'MagicRibbon - Fast Line Swing Down Detected!' },
+  { id: 'alert2', title: 'Slow Line Swings Up', message: 'MagicRibbon - Slow Line Swing Up Detected!' },
+  { id: 'alert3', title: 'Slow Line Swings Down', message: 'MagicRibbon - Slow Line Swing Down Detected!' },
+];
 
 export const RedKMagicRibbon = {
   calculate,
@@ -261,4 +291,5 @@ export const RedKMagicRibbon = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -10,6 +10,7 @@
  * The exponential average keeps its value from bar to bar and runs again over the whole list on every bar, as the
  * Pine function (a `var` inside it). As an option, bars are coloured when the average falls.
  * The script runs on the chart timeframe (indicator timeframe = ""); the extra Timeframe setting is not ported.
+ * Alerts (alertcondition, `alerts` of the result): the bullish average crossing over the bearish one, and the mirror.
  *
  * Reference: "Average Bullish & Bearish Percentage Change" by fract
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -17,6 +18,7 @@
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AverageBullishBearishPercentageChangeInputs {
   /** Bar metrics: 'Net Move' (close change) or 'Full Capacity' (move from the low / high, including the gap) */
@@ -106,7 +108,7 @@ const expAvgSite = () => {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AverageBullishBearishPercentageChangeInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const net = cfg.src === 'Net Move';
@@ -132,6 +134,7 @@ export function calculate(
   const plot0: { time: number; value: number; color: string }[] = [];
   const plot1: { time: number; value: number; color: string }[] = [];
   const barColors: BarColorData[] = [];
+  const bavgs: number[] = [], savgs: number[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const prevClose = i > 0 ? bars[i - 1].close : NaN;
@@ -161,6 +164,8 @@ export function calculate(
 
     const bavg = average(bull, cfg.bullCount, bullExp);
     const savg = average(bear, cfg.bearCount, bearExp);
+    bavgs.push(bavg);
+    savgs.push(savg);
 
     if (bl) {
       bullVw1 = bullVw0;
@@ -187,8 +192,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay, format: metadata.format },
     plots: { plot0, plot1 },
     barColors,
+    // alertcondition(ta.crossover(bavg, savg)) / alertcondition(ta.crossover(savg, bavg))
+    alerts: alertStates(alertConditions, bars, [crossedOver(bavgs, savgs), crossedOver(savgs, bavgs)]),
   };
 }
+
+/** The original's alertconditions (no message: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish %𝜟 > Bearish %𝜟', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Bearish %𝜟 > Bullish %𝜟', message: 'Alert Fired!' },
+];
 
 export const AverageBullishBearishPercentageChange = {
   calculate,
@@ -196,4 +209,5 @@ export const AverageBullishBearishPercentageChange = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

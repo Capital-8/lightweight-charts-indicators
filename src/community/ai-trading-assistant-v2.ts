@@ -9,6 +9,9 @@
  * the previous resistance but the close is back below it with a negative delta. A dot marks a volume spike (volume
  * above the SMA of the volume times a multiplier).
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Long Signal', 'Short Signal', 'Trap Long Signal' and 'Trap Short
+ * Signal', true on the bars of each signal.
+ *
  * Timeframes: Pine `ta.vwap` resets on each new trading day (anchor timeframe.change("1D")). When each bar is one
  * trading day or more, it resets on every bar, so the VWAP is hlc3 of the bar (na when the volume is 0 or na). On
  * intraday bars (barInterval, the most frequent gap between bars, below one day) the reset needs the exchange time
@@ -24,6 +27,7 @@ import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, t
 import type { MarkerData } from '../types';
 import { barInterval } from '../bar-time';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { executeScript, ta as scriptTa, hlc3 as scriptHlc3 } from 'oakscriptjs/script';
 
 export interface AiTradingAssistantV2Inputs {
@@ -85,7 +89,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<AiTradingAssistantV2Inputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -119,6 +123,7 @@ export function calculate(
   const sup = A(ta.lowest(S(bars.map((b) => b.low)), cfg.lookback));
 
   const markers: MarkerData[] = [];
+  const flags: boolean[][] = [[], [], [], []];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const t = b.time;
@@ -126,23 +131,27 @@ export function calculate(
     const sup1 = i > 0 ? sup[i - 1] : NaN;
     // isSpike = volume > ta.sma(volume, lookback) * vMult
     if (gt(vol[i], volSma[i] * cfg.vMult)) {
-      markers.push({ time: t, position: 'belowBar', shape: 'circle', color: '#e1b311', size: 'tiny' });
+      markers.push({ id: 'shape0', time: t, position: 'belowBar', shape: 'circle', color: '#e1b311', size: 'tiny' });
     }
     const isL = gt(b.close, res1) && gt(sDelta[i], 0) && gt(b.close, vwap[i]);
     const isS = lt(b.close, res1) && lt(b.close, b.open) && lt(sDelta[i], 0) && lt(b.close, vwap[i]);
     const isTL = lt(b.low, sup1) && gt(b.close, sup1) && gt(sDelta[i], 0);
     const isTS = gt(b.high, res1) && lt(b.close, res1) && lt(sDelta[i], 0);
+    flags[0].push(isL);
+    flags[1].push(isS);
+    flags[2].push(isTL);
+    flags[3].push(isTS);
     if (isL) {
-      markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: '#089981', text: 'LONG', textColor: color.white });
+      markers.push({ id: 'shape1', time: t, position: 'belowBar', shape: 'labelUp', color: '#089981', text: 'LONG', textColor: color.white });
     }
     if (isS) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: '#f23645', text: 'SHORT', textColor: color.white });
+      markers.push({ id: 'shape2', time: t, position: 'aboveBar', shape: 'labelDown', color: '#f23645', text: 'SHORT', textColor: color.white });
     }
     if (isTL) {
-      markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: '#5b9cf6', text: 'TRAP', textColor: color.white });
+      markers.push({ id: 'shape3', time: t, position: 'belowBar', shape: 'labelUp', color: '#5b9cf6', text: 'TRAP', textColor: color.white });
     }
     if (isTS) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: color.orange, text: 'TRAP', textColor: color.white });
+      markers.push({ id: 'shape4', time: t, position: 'aboveBar', shape: 'labelDown', color: color.orange, text: 'TRAP', textColor: color.white });
     }
   }
 
@@ -158,8 +167,18 @@ export function calculate(
       plot2: P(sup, '#089981'),
     },
     markers,
+    // alertcondition(isL) / (isS) / (isTL) / (isTS)
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Signal', message: 'Long' },
+  { id: 'alert1', title: 'Short Signal', message: 'Short' },
+  { id: 'alert2', title: 'Trap Long Signal', message: 'Trap Long' },
+  { id: 'alert3', title: 'Trap Short Signal', message: 'Trap Short' },
+];
 
 export const AiTradingAssistantV2 = {
   calculate,
@@ -167,4 +186,5 @@ export const AiTradingAssistantV2 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

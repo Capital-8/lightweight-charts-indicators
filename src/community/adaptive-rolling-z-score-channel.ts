@@ -8,6 +8,8 @@
  * smoothed and made symmetric, then mapped back to price: band = sma + z * stdev, inner bands at a fraction of z.
  * The basis takes a gradient colour by the z-score; glow plots, gradient zone fills and breakout fills draw the
  * channel. Triangles mark the re-entries (source crossing back over the lower band / under the upper band).
+ * Alerts (alertcondition, `alerts` of the result): the source crosses over the upper band, under the lower band,
+ * back under the upper band, back over the lower band, over and under the basis.
  *
  * Reference: "Rolling Z-Score Channel" by B3AR_Trades
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, BgColorData, MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type ZChannelTheme = 'Modern' | 'Classic' | 'Neon' | 'Monochrome' | 'Sunset' | 'Ocean';
 export type ZChannelSmoothing = 'LinReg' | 'Hull MA' | 'Super Smoother' | 'Two-Pole Gaussian';
@@ -167,7 +170,8 @@ type Point = { time: number; value: number; color: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<AdaptiveRollingZScoreChannelInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -365,6 +369,13 @@ export function calculate(
     { plot1: 'plot0', plot2: 'plot10', options: { title: 'Breakdown Below' }, colors: brkDn },
   ];
 
+  // alertcondition(ta.crossover(src, upper)), (ta.crossunder(src, lower)), (reentry_dn = ta.crossunder(src, upper)),
+  // (reentry_up = ta.crossover(src, lower)), (ta.crossover(src, basis)), (ta.crossunder(src, basis))
+  const alertFlags = [
+    crossedOver(src, upperArr), crossedUnder(src, lowerArr), crossedUnder(src, upperArr), crossedOver(src, lowerArr),
+    crossedOver(src, basisArr), crossedUnder(src, basisArr),
+  ];
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
@@ -372,8 +383,19 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Break Above Upper', message: 'Closed above upper band' },
+  { id: 'alert1', title: 'Break Below Lower', message: 'Closed below lower band' },
+  { id: 'alert2', title: 'Re-Entry From Above', message: 'Closed back inside from above' },
+  { id: 'alert3', title: 'Re-Entry From Below', message: 'Closed back inside from below' },
+  { id: 'alert4', title: 'Basis Cross Up', message: 'Crossed above basis' },
+  { id: 'alert5', title: 'Basis Cross Down', message: 'Crossed below basis' },
+];
 
 export const AdaptiveRollingZScoreChannel = {
   calculate,
@@ -381,4 +403,5 @@ export const AdaptiveRollingZScoreChannel = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

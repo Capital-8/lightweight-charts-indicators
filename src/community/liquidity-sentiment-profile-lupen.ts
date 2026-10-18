@@ -6,6 +6,7 @@
  * LSP = (bull sum - bear sum) / (bull sum + bear sum) * 100 (0 when the total is 0), with an EMA signal line.
  * The LSP is drawn as an area coloured by its sign and its direction, with a fill between the LSP and the signal
  * and a fill between the LSP and zero. Optional triangles mark the crossings of the LSP and its signal.
+ * Alerts (alertcondition, `alerts` of the result): 'LSP Buy' / 'LSP Sell' when the LSP crosses over / under its signal.
  *
  * Reference: "Liquidity Sentiment Profile | LUPEN" by Horazio
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LiquiditySentimentProfileLupenInputs {
   /** Length of the volume weighted sums */
@@ -83,7 +85,7 @@ const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
 export function calculate(
   bars: Bar[],
   inputs: Partial<LiquiditySentimentProfileLupenInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -113,6 +115,9 @@ export function calculate(
     lspRaw[i] = ne(totalFlow, 0) ? ((sumBull - sumBear) / totalFlow) * 100 : 0;
   }
   const lspSignal = A(ta.ema(S(lspRaw), cfg.smooth));
+  // cross_up = ta.crossover(lsp_raw, lsp_signal), cross_down = ta.crossunder(lsp_raw, lsp_signal)
+  const crossUp = crossedOver(lspRaw, lspSignal);
+  const crossDown = crossedUnder(lspRaw, lspSignal);
 
   const plot0 = [];
   const plot1 = [];
@@ -166,8 +171,16 @@ export function calculate(
       { plot1: 'plot2', plot2: 'plot0', options: { title: 'Volume Depth' }, colors: baseColors },
     ],
     markers,
+    // alertcondition(cross_up, 'LSP Buy') / alertcondition(cross_down, 'LSP Sell')
+    alerts: alertStates(alertConditions, bars, [crossUp, crossDown]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'LSP Buy', message: 'LSP Bullish Crossover' },
+  { id: 'alert1', title: 'LSP Sell', message: 'LSP Bearish Crossover' },
+];
 
 export const LiquiditySentimentProfileLupen = {
   calculate,
@@ -176,4 +189,5 @@ export const LiquiditySentimentProfileLupen = {
   inputConfig,
   plotConfig,
   hlineConfig,
+  alertConditions,
 };

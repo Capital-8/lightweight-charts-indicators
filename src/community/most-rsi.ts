@@ -5,11 +5,16 @@
  * Includes RSI, RSI-based MA, MOST line, regular divergence detection on the RSI,
  * OB/OS gradient fills, and Bollinger Bands when the MA type is "Bollinger Bands".
  *
+ * Alerts (alertcondition, `alerts` of the result): 'BUY' / 'SELL' (the RSI MA crossing the MOST line) and 'Regular
+ * Bullish Divergence' / 'Regular Bearish Divergence' (on the bar the divergence is found, whether or not divergences
+ * are shown).
+ *
  * Reference: "MOST on RSI" (community, Pine v5)
  */
 
 import { ta, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type FillData, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type MOSTRSIMaType = 'SMA' | 'Bollinger Bands' | 'EMA' | 'SMMA (RMA)' | 'WMA' | 'VWMA' | 'VAR';
 
@@ -108,7 +113,7 @@ function computeVAR(values: number[], length: number): number[] {
   return result;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<MOSTRSIInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<MOSTRSIInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { rsiLen, src, maType, maLen, percent, bbMult, showDivergence, showSignals } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -201,9 +206,13 @@ export function calculate(bars: Bar[], inputs: Partial<MOSTRSIInputs> = {}): Omi
   // plotshape(..., location.bottom / location.top, shape.labelup / labeldown, size.tiny, color #0F18BF,
   // textcolor white). MarkerData has no pane top / bottom position: below / above the bar.
   const markers: MarkerData[] = [];
+  const croFlags = new Array<boolean>(n).fill(false);
+  const cruFlags = new Array<boolean>(n).fill(false);
   for (let i = 1; i < n; i++) {
     const cro = rsiMaArr[i] > most[i] && rsiMaArr[i - 1] <= most[i - 1];
     const cru = rsiMaArr[i] < most[i] && rsiMaArr[i - 1] >= most[i - 1];
+    croFlags[i] = cro;
+    cruFlags[i] = cru;
     if (showSignals && cro) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#0F18BF', text: 'BUY', textColor: '#FFFFFF', size: 'tiny' });
     }
@@ -237,6 +246,9 @@ export function calculate(bars: Bar[], inputs: Partial<MOSTRSIInputs> = {}): Omi
   // Pine: ta.valuewhen(plFound, rsi[lookbackRight], 1): on a pivot bar, the previous pivot
   let lastPLRsi = NaN, lastPLPrice = NaN;
   let lastPHRsi = NaN, lastPHPrice = NaN;
+  // bullCondAlert / bearCondAlert: the divergence without showDivergence
+  const bullAlert = new Array<boolean>(n).fill(false);
+  const bearAlert = new Array<boolean>(n).fill(false);
 
   for (let i = 0; i < n; i++) {
     if (i > 0 && plFound[i - 1]) plBars = 0;
@@ -251,7 +263,8 @@ export function calculate(bars: Bar[], inputs: Partial<MOSTRSIInputs> = {}): Omi
       const pivotRsi = rsiArr[p];
       const pivotPrice = bars[p].low;
       // Regular Bullish: RSI higher low, price lower low
-      const bullCond = showDivergence && pivotPrice < lastPLPrice && pivotRsi > lastPLRsi && plInRange;
+      bullAlert[i] = pivotPrice < lastPLPrice && pivotRsi > lastPLRsi && plInRange;
+      const bullCond = showDivergence && bullAlert[i];
       bullDivPlot[p] = { time: bars[p].time, value: pivotRsi, color: bullCond ? BULL_COLOR : NONE_COLOR };
       if (bullCond) markers.push({ time: bars[p].time, position: 'atPriceBottom', price: pivotRsi, shape: 'labelUp', color: BULL_COLOR, text: ' Bull ', textColor: TEXT_COLOR });
       lastPLRsi = pivotRsi;
@@ -263,7 +276,8 @@ export function calculate(bars: Bar[], inputs: Partial<MOSTRSIInputs> = {}): Omi
       const pivotRsi = rsiArr[p];
       const pivotPrice = bars[p].high;
       // Regular Bearish: RSI lower high, price higher high
-      const bearCond = showDivergence && pivotPrice > lastPHPrice && pivotRsi < lastPHRsi && phInRange;
+      bearAlert[i] = pivotPrice > lastPHPrice && pivotRsi < lastPHRsi && phInRange;
+      const bearCond = showDivergence && bearAlert[i];
       bearDivPlot[p] = { time: bars[p].time, value: pivotRsi, color: bearCond ? BEAR_COLOR : NONE_COLOR };
       if (bearCond) markers.push({ time: bars[p].time, position: 'atPriceTop', price: pivotRsi, shape: 'labelDown', color: BEAR_COLOR, text: ' Bear ', textColor: TEXT_COLOR });
       lastPHRsi = pivotRsi;
@@ -292,7 +306,17 @@ export function calculate(bars: Bar[], inputs: Partial<MOSTRSIInputs> = {}): Omi
     ],
     fills,
     markers,
+    // alertcondition(cro, 'BUY') / (cru, 'SELL') / (bullCondAlert, ...) / (bearCondAlert, ...)
+    alerts: alertStates(alertConditions, bars, [croFlags, cruFlags, bullAlert, bearAlert]),
   };
 }
 
-export const MOSTRSI = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY', message: 'BUY SIGNAL!' },
+  { id: 'alert1', title: 'SELL', message: 'SELL SIGNAL!' },
+  { id: 'alert2', title: 'Regular Bullish Divergence', message: 'Found a new Regular Bullish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.' },
+  { id: 'alert3', title: 'Regular Bearish Divergence', message: 'Found a new Regular Bearish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.' },
+];
+
+export const MOSTRSI = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

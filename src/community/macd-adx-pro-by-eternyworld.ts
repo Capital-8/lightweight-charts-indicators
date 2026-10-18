@@ -7,12 +7,15 @@
  * with a strong trend (ADX >= threshold) the histogram is green when +DI > -DI (dark while the ADX is not falling,
  * else mid / light green as +DI rises or not) and red otherwise (light while the ADX falls); without a strong trend
  * it is grey (light while the ADX falls); the lines are green when +DI > -DI. The ADX and the threshold can be shown.
+ * Alerts (alertcondition, `alerts` of the result): 'Strong Buy' (the histogram turns positive; in "Filtered" mode also
+ * +DI > -DI) and 'Strong Sell' (it turns negative; in "Filtered" mode also -DI > +DI).
  *
  * Reference: "Macd + Adx Pro by @Eternyworld" by ETERNYWORLD
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type MacdAdxProMode = 'Sensitive' | 'Filtered';
 
@@ -82,7 +85,10 @@ const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 
-export function calculate(bars: Bar[], inputs: Partial<MacdAdxProByEternyworldInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<MacdAdxProByEternyworldInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const close = Series.fromArray(bars, bars.map((b) => b.close));
@@ -107,6 +113,8 @@ export function calculate(bars: Bar[], inputs: Partial<MacdAdxProByEternyworldIn
   const plot2 = [];
   const plot3 = [];
   const plot4 = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
+  const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !gt(a, b);
   for (let i = 0; i < bars.length; i++) {
     const t = bars[i].time;
     const strongTrend = ge(adx[i], cfg.adxThreshold);
@@ -120,6 +128,10 @@ export function calculate(bars: Bar[], inputs: Partial<MacdAdxProByEternyworldIn
         ? (bullish ? (adxWeakening ? (diplusRising ? LIME_MID : LIME_LIGHT) : LIME_DARK) : (adxWeakening ? RED_LIGHT : RED_DARK))
         : (adxWeakening ? grayLight : GRAY_DARK);
     const up = sensitive ? gt(h, 0) : bullish;
+    // alertcondition(hist > 0 and hist[1] <= 0 and (mode == "Sensitive" or bullish_direction), "Strong Buy")
+    buyFlags.push(gt(h, 0) && le(prev(hist, i), 0) && (sensitive || bullish));
+    // alertcondition(hist < 0 and hist[1] >= 0 and (mode == "Sensitive" or bearish_direction), "Strong Sell")
+    sellFlags.push(lt(h, 0) && ge(prev(hist, i), 0) && (sensitive || gt(diminus[i], diplus[i])));
     plot0.push({ time: t, value: h, color: histColor });
     plot1.push({ time: t, value: macdLine[i], color: up ? LIME_DARK : RED_DARK });
     plot2.push({ time: t, value: signalLine[i], color: up ? limeSignal : redSignal });
@@ -130,8 +142,15 @@ export function calculate(bars: Bar[], inputs: Partial<MacdAdxProByEternyworldIn
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2, plot3, plot4 },
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Strong Buy', message: 'MACD Bullish Cross' },
+  { id: 'alert1', title: 'Strong Sell', message: 'MACD Bearish Cross' },
+];
 
 export const MacdAdxProByEternyworld = {
   calculate,
@@ -139,4 +158,5 @@ export const MacdAdxProByEternyworld = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -5,6 +5,8 @@
  * close is above the previous close, the down colour when it is below. Volume highlighter: the bar with the highest
  * volume of the lookback window gets a background (colour of the candle direction, transparency 90) and a circle at
  * the bottom of the chart.
+ * Alerts (alertcondition, `alerts` of the result): volume spike (any, bullish, bearish) and highest volume candle
+ * (any, bullish, bearish).
  *
  * Reference: "FuTech : Volume Spike & Volume Highlighter" by Atmiya_aatubhai
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface FuTechVSpikeVHighlighterInputs {
   /** Volume spike: multiplier of the volume EMA */
@@ -76,7 +79,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<FuTechVSpikeVHighlighterInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const volume = Series.fromArray(bars, bars.map((b) => b.volume ?? NaN));
@@ -89,6 +92,7 @@ export function calculate(
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
+  const flags: boolean[][] = Array.from({ length: 6 }, () => []);
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const v = b.volume ?? NaN;
@@ -113,9 +117,15 @@ export function calculate(
     if (bigVolumeCondition) {
       markers.push({ time: b.time, position: 'bottom', shape: 'circle', color: highlightColor, size: 'small' });
     }
+    // bullishVolumeSpike = volumeSpike and isPriceUp; bearishVolumeSpike = volumeSpike and isPriceDown;
+    // bullishHighestVolume = bigVolumeCondition and close >= open; bearishHighestVolume = ... and close < open
+    flags[0].push(volumeSpike);
+    flags[1].push(volumeSpike && isPriceUp);
+    flags[2].push(volumeSpike && isPriceDown);
+    flags[3].push(bigVolumeCondition);
+    flags[4].push(bigVolumeCondition && ge(b.close, b.open));
+    flags[5].push(bigVolumeCondition && lt(b.close, b.open));
   }
-  // 6 alertconditions (volume spike, bullish / bearish spike, highest volume, bullish / bearish highest volume):
-  // no output
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -123,7 +133,18 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const FuTechVSpikeVHighlighter = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Volume Spike', message: '{{ticker}} Volume Spike detected on {{interval}}' },
+  { id: 'alert1', title: 'Bullish Volume Spike', message: '{{ticker}} Bullish Volume Spike on {{interval}}' },
+  { id: 'alert2', title: 'Bearish Volume Spike', message: '{{ticker}} Bearish Volume Spike on {{interval}}' },
+  { id: 'alert3', title: 'Highest Volume Candle', message: '{{ticker}} Highest Volume candle in lookback period on {{interval}}' },
+  { id: 'alert4', title: 'Bullish Highest Volume Candle', message: '{{ticker}} Bullish Highest Volume candle on {{interval}}' },
+  { id: 'alert5', title: 'Bearish Highest Volume Candle', message: '{{ticker}} Bearish Highest Volume candle on {{interval}}' },
+];
+
+export const FuTechVSpikeVHighlighter = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

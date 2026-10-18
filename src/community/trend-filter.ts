@@ -137,11 +137,11 @@ export function calculate(bars: Bar[], inputs: Partial<TrendFilterInputs> = {}, 
     // plotshape(falling >= ris_fal ? tp_f + atr : na, "Falling", shape.circle, location.absolute, color = color)
     const atr = atrArr[i];
     if (falling >= risFal && !isNaN(atr)) {
-      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: tpf[i] + atr, shape: 'circle', color: col });
+      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: tpf[i] + atr, shape: 'circle', color: col, id: 'shape0' });
     }
     // plotshape(rising >= ris_fal ? tp_f - atr : na, "Rising", shape.circle, location.absolute, color = color)
     if (rising >= risFal && !isNaN(atr)) {
-      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: tpf[i] - atr, shape: 'circle', color: col });
+      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: tpf[i] - atr, shape: 'circle', color: col, id: 'shape1' });
     }
 
     // sig_up = ta.crossover(rising, ris_fal) and barstate.isconfirmed and signals
@@ -152,13 +152,13 @@ export function calculate(bars: Bar[], inputs: Partial<TrendFilterInputs> = {}, 
     if (sigDn && i >= 1 && !isNaN(atr)) {
       markers.push({
         time: bars[i - 1].time, position: 'atPriceMiddle', price: tpf[i - 1] + atr, shape: 'triangleDown',
-        color: col, size: 'tiny',
+        color: col, size: 'tiny', id: 'shape2',
       });
     }
     if (sigUp && i >= 1 && !isNaN(atr)) {
       markers.push({
         time: bars[i - 1].time, position: 'atPriceMiddle', price: tpf[i - 1] - atr, shape: 'triangleUp',
-        color: col, size: 'tiny',
+        color: col, size: 'tiny', id: 'shape3',
       });
     }
 

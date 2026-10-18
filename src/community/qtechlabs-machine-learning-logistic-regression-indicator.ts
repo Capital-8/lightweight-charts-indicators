@@ -6,6 +6,7 @@
  * z = -2 + 2 * normRet + normSynthetic, probability = 1 / (1 + exp(-z)), smoothed by an EMA. The signal is buy above
  * the threshold, sell below 1 - threshold, else hold; BUY / SELL labels mark the bars where the signal changes to
  * buy / sell. The smoothed probability is drawn with lines at 0.5, the threshold and 1 - threshold.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' and 'Sell Signal', true on the bars of the labels.
  *
  * Reference: "Q# ML Logistic Regression Indicator [Lite]" by QTechLabsInfo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,13 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Q# Lite Buy Signal' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Q# Lite Sell Signal' },
+];
 
 export interface QtechlabsMachineLearningLogisticRegressionIndicatorInputs {
   /** Price source */
@@ -59,7 +67,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<QtechlabsMachineLearningLogisticRegressionIndicatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -100,10 +108,14 @@ export function calculate(
   const buyColor = color.green;
   const sellColor = color.red;
   let prevSignal = NaN;
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const signal = gt(sprob[i], cfg.threshold) ? 1 : lt(sprob[i], 1 - cfg.threshold) ? -1 : 0;
     // signal != signal[1]: false when signal[1] is na (bar 0)
     const changed = !isNaN(prevSignal) && signal !== prevSignal;
+    buyFlags.push(signal === 1 && changed);
+    sellFlags.push(signal === -1 && changed);
     // plotshape(..., text = "BUY"): no textcolor, the Pine default text colour (color.blue)
     if (signal === 1 && changed) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: buyColor, text: 'BUY',
@@ -127,6 +139,8 @@ export function calculate(
       { value: 1 - cfg.threshold, options: { title: 'Sell Threshold', color: color.red, linestyle: 'dotted' } },
     ],
     markers,
+    // alertcondition(buy, "Buy Signal") / alertcondition(sell, "Sell Signal")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
 
@@ -136,4 +150,5 @@ export const QtechlabsMachineLearningLogisticRegressionIndicator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -12,6 +12,9 @@
  * the agreement of the oscillators and the signal strength. Gradient fills colour the 3..6 and -3..-6 zones and the
  * area between the oscillator and zero.
  *
+ * Alerts (alertcondition, `alerts` of the result): the oscillator crossing zero (either way) and the bullish /
+ * bearish signals.
+ *
  * Reference: "AI Adaptive Oscillator [PhenLabs]" by PhenLabs
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © PhenLabs
@@ -19,6 +22,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AiAdaptiveOscillatorInputs {
   bullishColor: string;
@@ -88,7 +92,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<AiAdaptiveOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = cfg.baseLength;
@@ -186,6 +190,11 @@ export function calculate(
     return ge(conf, 0.8) ? 3 : ge(conf, 0.6) ? 2 : 1;
   };
   const texts = ['', ' ', '+', '++'];
+  // plotshape ids by confidence (3: High, 2: Medium, 1: Average)
+  const bullIds = ['', 'shape2', 'shape1', 'shape0'];
+  const bearIds = ['', 'shape5', 'shape4', 'shape3'];
+  const bullFlags: boolean[] = new Array(n).fill(false);
+  const bearFlags: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
     barsSinceLastBullish = barsSinceLastBullish + 1;
     barsSinceLastBearish = barsSinceLastBearish + 1;
@@ -198,6 +207,8 @@ export function calculate(
       && (isNaN(lastBullishLevel) || ge(Math.abs(v - lastBullishLevel), cfg.signalMinChange));
     const bearishSignal = bearishPattern && barsSinceLastBearish >= cfg.signalCooldownBars
       && (isNaN(lastBearishLevel) || ge(Math.abs(v - lastBearishLevel), cfg.signalMinChange));
+    bullFlags[i] = bullishSignal;
+    bearFlags[i] = bearishSignal;
     if (bullishSignal) {
       lastBullishLevel = v;
       barsSinceLastBullish = 0;
@@ -212,12 +223,12 @@ export function calculate(
     const bearC = confidence(bearishSignal, false, i, avgScore);
     // plotshape(bullishSignal and bullishConfidence == k ? vf : na, shape.labelup, location.absolute, size.small)
     if (bullishSignal && !isNaN(v)) {
-      markers.push({ time: bars[i].time, position: 'atPriceBottom', price: v, shape: 'labelUp',
+      markers.push({ id: bullIds[bullC], time: bars[i].time, position: 'atPriceBottom', price: v, shape: 'labelUp',
         color: cfg.bullishColor, text: texts[bullC], textColor: white, size: 'small' });
     }
     // plotshape(bearishSignal and bearishConfidence == k ? vf : na, shape.labeldown, location.absolute, size.small)
     if (bearishSignal && !isNaN(v)) {
-      markers.push({ time: bars[i].time, position: 'atPriceTop', price: v, shape: 'labelDown',
+      markers.push({ id: bearIds[bearC], time: bars[i].time, position: 'atPriceTop', price: v, shape: 'labelDown',
         color: cfg.bearishColor, text: texts[bearC], textColor: white, size: 'small' });
     }
   }
@@ -273,8 +284,20 @@ export function calculate(
           topColor: neg.map((p) => (p ? cfg.bearishColor : null)), bottomColor: neg.map((p) => (p ? bear85 : null)) } },
     ],
     markers,
+    // alertcondition(ta.cross(vf, 0)) / (bullishSignal) / (bearishSignal)
+    alerts: (() => {
+      const up = crossedOver(vf, 0), down = crossedUnder(vf, 0);
+      return alertStates(alertConditions, bars, [up.map((u, i) => u || down[i]), bullFlags, bearFlags]);
+    })(),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'AI Oscillator Zero Line Cross', message: 'AI Oscillator crossed the zero line' },
+  { id: 'alert1', title: 'AI Oscillator Bullish Signal', message: 'AI Oscillator shows potential bullish move' },
+  { id: 'alert2', title: 'AI Oscillator Bearish Signal', message: 'AI Oscillator shows potential bearish move' },
+];
 
 export const AiAdaptiveOscillator = {
   calculate,
@@ -283,4 +306,5 @@ export const AiAdaptiveOscillator = {
   inputConfig,
   plotConfig,
   hlineConfig,
+  alertConditions,
 };

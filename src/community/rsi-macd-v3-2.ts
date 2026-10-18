@@ -161,10 +161,10 @@ export function calculate(
       const hiddenBullCond = cfg.plotHiddenBull && gt(low, plPrevLow) && lt(o, plPrevOsc) && inRangeLow;
       // plotshape(cond ? osc[lbR] : na, offset = -lbR, style = shape.labelup, location = location.absolute)
       if (bullCond && !isNaN(o)) {
-        markers.push({ time: t, position: 'atPriceBottom', price: o, shape: 'labelUp', color: BULL_COLOR, text: ' Bull ', textColor: TEXT_COLOR });
+        markers.push({ id: 'shape0', time: t, position: 'atPriceBottom', price: o, shape: 'labelUp', color: BULL_COLOR, text: ' Bull ', textColor: TEXT_COLOR });
       }
       if (hiddenBullCond && !isNaN(o)) {
-        markers.push({ time: t, position: 'atPriceBottom', price: o, shape: 'labelUp', color: BULL_COLOR, text: ' Hidden Bull ', textColor: TEXT_COLOR });
+        markers.push({ id: 'shape1', time: t, position: 'atPriceBottom', price: o, shape: 'labelUp', color: BULL_COLOR, text: ' Hidden Bull ', textColor: TEXT_COLOR });
       }
       plPrevOsc = o;
       plPrevLow = low;
@@ -173,10 +173,10 @@ export function calculate(
       const bearCond = cfg.plotBear && gt(high, phPrevHigh) && lt(o, phPrevOsc) && inRangeHigh;
       const hiddenBearCond = cfg.plotHiddenBear && lt(high, phPrevHigh) && gt(o, phPrevOsc) && inRangeHigh;
       if (bearCond && !isNaN(o)) {
-        markers.push({ time: t, position: 'atPriceTop', price: o, shape: 'labelDown', color: BEAR_COLOR, text: ' Bear ', textColor: TEXT_COLOR });
+        markers.push({ id: 'shape2', time: t, position: 'atPriceTop', price: o, shape: 'labelDown', color: BEAR_COLOR, text: ' Bear ', textColor: TEXT_COLOR });
       }
       if (hiddenBearCond && !isNaN(o)) {
-        markers.push({ time: t, position: 'atPriceTop', price: o, shape: 'labelDown', color: BEAR_COLOR, text: ' Hidden Bear ', textColor: TEXT_COLOR });
+        markers.push({ id: 'shape3', time: t, position: 'atPriceTop', price: o, shape: 'labelDown', color: BEAR_COLOR, text: ' Hidden Bear ', textColor: TEXT_COLOR });
       }
       phPrevOsc = o;
       phPrevHigh = high;

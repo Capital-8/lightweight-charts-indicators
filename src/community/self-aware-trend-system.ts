@@ -27,7 +27,12 @@
  *   card says "current bar provisional". Without it every bar is taken as closed.
  * - `chart.timeframe`: the chart timeframe, for the preset "Auto". Without it, it is taken from the bars.
  *
- * Limit of the port: the alerts (22 alert conditions, the event messages and their trade id) give no output.
+ * Alerts:
+ * - the 22 alertconditions (`alerts` of the result, with "Enable Alert Signals" on): buy / sell signals (all, by score
+ *   grade and by TQI grade), TP1 / TP2 / TP3 / SL hits, timeout and flip exits, confirmed character flips, any signal;
+ * - the alert() call (`alertCalls`, once per bar close) on each closed bar with trade-model events: the readable text
+ *   "SATS <tickerid> <timeframe> | <notes>" or, with "Webhook JSON v2", the JSON packet of the events (event id and
+ *   trade id from the alert instance id, `chart.tickerid` and the chart timeframe, bar time in ms).
  *
  * Reference: "Self-Aware Trend System [WillyAlgoTrader]" by WillyAlgoTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -39,7 +44,11 @@ import {
 } from 'oakscriptjs';
 import type { BgColorData, LabelData, LabelStyle, LineDrawingData, TableCellData, TableData, TablePosition } from '../types';
 import { chartTimeframe } from '../anchor-period';
-import { backgroundColorOf, lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
+import { backgroundColorOf, lastBarConfirmedOf, mintickOf, tickeridOf, timezoneOf, type ChartContext } from '../chart-context';
+import type { AlertCall } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+export const hasAlertFunction = true;
 
 type Preset = 'Auto' | 'Custom' | 'Scalping' | 'Default' | 'Swing' | 'Crypto 24/7';
 type Corner = 'Top Left' | 'Top Right' | 'Bottom Left' | 'Bottom Right' | 'Middle Right';
@@ -424,7 +433,10 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SelfAwareTrendSystemInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[]; bgColors: BgColorData[] } {
+): IndicatorResult & {
+  lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[]; bgColors: BgColorData[];
+  alerts: AlertConditionState[]; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // syminfo.mintick, syminfo.timezone, chart.bg_color (dark: red channel below 128), barstate.isconfirmed
@@ -501,6 +513,7 @@ export function calculate(
   const empty = {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0: [] }, lines: [], labels: [], tables: [], bgColors: [],
+    alerts: alertStates(alertConditions, bars, []), alertCalls: [] as AlertCall[],
   };
   if (n === 0) return empty;
 
@@ -648,7 +661,7 @@ export function calculate(
     dir: 0, side: 0, entryBar: 0, entryTime: 0, cell: -1, epoch: 0,
     entry: NaN, sl: NaN, risk: NaN, tp1: NaN, tp2: NaN, tp3: NaN, r1: NaN, r2: NaN, r3: NaN,
     hit1: false, hit2: false, hit3: false, takenR: 0.0, costR: 0.0, remaining: 0.0,
-    entryTqi: NaN, entryScore: NaN, signalPrice: NaN, reason: '', limitations: '',
+    entryTqi: NaN, entryScore: NaN, signalPrice: NaN, id: '', reason: '', limitations: '',
   };
   const takeFill = (fill: number, fraction: number): void => {
     trade.takenR += fraction * trade.side * (fill - trade.entry) / trade.risk;
@@ -670,6 +683,32 @@ export function calculate(
   let lastRejected = '';
   const slipPrice = cfg.slippageTicks * MINTICK;
   const timeMs = (i: number) => (bars[i].time >= 1e12 ? bars[i].time : bars[i].time * 1000);
+
+  // ── Alerts ──
+  // syminfo.tickerid and timeframe.period (with its multiplier, "1D") of the alert texts and ids
+  const TICKERID = tickeridOf(chart);
+  const PERIOD = chartTf;
+  const jsonNumber = (v: number) => (Number.isNaN(v) ? 'null' : str.tostring(v, '0.################'));
+  const jsonString = (v: string) => '"' + v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r').replace(/\t/g, '\\t') + '"';
+  // One flag array per alertcondition, in the declaration order
+  const alertFlags: boolean[][] = alertConditions.map(() => new Array(n).fill(false));
+  const alertCalls: AlertCall[] = [];
+  let barEvents: string[] = [];
+  let barNotes: string[] = [];
+  // method emitEvent(TradeState this, kind, level, fill, fraction, reason)
+  const emitEvent = (i: number, kind: string, level: number, fill: number, fraction: number, reason: string): void => {
+    const t = str.tostring(timeMs(i));
+    const eventId = INDICATOR_VERSION + ':' + trade.id + ':' + t + ':' + kind;
+    barEvents.push('{"event":' + jsonString(kind) + ',"event_id":' + jsonString(eventId) + ',"trade_id":' + jsonString(trade.id)
+      + ',"side":' + jsonString(trade.side === 1 ? 'long' : 'short') + ',"bar_time":' + t + ',"level_price":' + jsonNumber(level)
+      + ',"fill_price":' + jsonNumber(fill) + ',"close_price":' + jsonNumber(close[i]) + ',"fraction":' + jsonNumber(fraction)
+      + ',"remaining":' + jsonNumber(trade.remaining) + ',"realized_net_r":' + jsonNumber(trade.takenR - trade.costR)
+      + ',"entry":' + jsonNumber(trade.entry) + ',"sl":' + jsonNumber(trade.sl) + ',"tp1":' + jsonNumber(trade.tp1)
+      + ',"tp2":' + jsonNumber(trade.tp2) + ',"tp3":' + jsonNumber(trade.tp3) + ',"score":' + jsonNumber(trade.entryScore)
+      + ',"tqi":' + jsonNumber(cfg.useTqi ? trade.entryTqi : NaN) + ',"reason":' + jsonString(reason) + '}');
+    barNotes.push(kind + ' ' + (trade.side === 1 ? 'LONG' : 'SHORT') + ' @ ' + tickText(fill) + ' (' + reason + ')');
+  };
 
   // ── Drawings ──
   const labels = new LiveLabels();
@@ -767,6 +806,8 @@ export function calculate(
     const flipUp = i > 0 && trend === 1 && stTrend[i - 1] === -1;
     const flipDown = i > 0 && trend === -1 && stTrend[i - 1] === 1;
     flips[i] = flipUp || flipDown ? 1 : 0;
+    // Character-flip event: the flip came from the TQI collapse, not from a price break
+    const charFlipFired = (charFlipUp && !priceFlipUp && flipUp) || (charFlipDown && !priceFlipDown && flipDown);
 
     // Dynamic TP R-multiples
     if (useDynTp) {
@@ -833,11 +874,17 @@ export function calculate(
     let tp1Event = false;
     let tp2Event = false;
     let tp3Event = false;
+    let slEvent = false;
+    let timeoutFlag = false;
+    let flipExitFlag = false;
     let closedThisBar = false;
+    barEvents = [];
+    barNotes = [];
     // barstate.isconfirmed: false on a last bar that is still open
     const isConfirmed = i < n - 1 || lastConfirmed;
     const rawBuy = flipUp && isConfirmed && isWarmedUp;
     const rawSell = flipDown && isConfirmed && isWarmedUp;
+    const confirmedCharFlip = charFlipFired && isConfirmed && isWarmedUp;
     const calculationEpoch = learn.epoch;
 
     // First settle the old trade with the full bar. The stop wins an ambiguous bar.
@@ -846,30 +893,42 @@ export function calculate(
       const opposite = trade.side !== trend;
       const timedOut = i - trade.entryBar >= cfg.tradeMaxAge;
       let exitReason = '';
+      let exitFill = NaN;
       if (stopHit) {
-        const exitFill = (trade.side === 1 ? Math.min(bars[i].open, trade.sl) : Math.max(bars[i].open, trade.sl)) - trade.side * slipPrice;
-        takeFill(exitFill, trade.remaining);
+        exitFill = (trade.side === 1 ? Math.min(bars[i].open, trade.sl) : Math.max(bars[i].open, trade.sl)) - trade.side * slipPrice;
+        const exiting = trade.remaining;
+        takeFill(exitFill, exiting);
+        slEvent = true;
         exitReason = 'SL';
+        emitEvent(i, 'sl_hit', trade.sl, exitFill, exiting, 'Stop/gap; SL first on ambiguous OHLC');
       } else {
         if (!trade.hit1 && (trade.side === 1 ? ge(high[i], trade.tp1) : le(low[i], trade.tp1))) {
           trade.hit1 = true;
           takeFill(trade.tp1, 1.0 / 3.0);
           tp1Event = true;
+          emitEvent(i, 'tp1_hit', trade.tp1, trade.tp1, 1.0 / 3.0, 'Partial limit fill');
         }
         if (!trade.hit2 && (trade.side === 1 ? ge(high[i], trade.tp2) : le(low[i], trade.tp2))) {
           trade.hit2 = true;
           takeFill(trade.tp2, 1.0 / 3.0);
           tp2Event = true;
+          emitEvent(i, 'tp2_hit', trade.tp2, trade.tp2, 1.0 / 3.0, 'Partial limit fill');
         }
         if (!trade.hit3 && (trade.side === 1 ? ge(high[i], trade.tp3) : le(low[i], trade.tp3))) {
           trade.hit3 = true;
           takeFill(trade.tp3, trade.remaining);
           tp3Event = true;
           exitReason = 'TP3';
+          exitFill = trade.tp3;
+          emitEvent(i, 'tp3_hit', trade.tp3, trade.tp3, 1.0 / 3.0, 'Final limit fill');
         } else if (opposite || timedOut) {
-          const exitFill = c - trade.side * slipPrice;
-          takeFill(exitFill, trade.remaining);
+          exitFill = c - trade.side * slipPrice;
+          const exiting = trade.remaining;
+          takeFill(exitFill, exiting);
+          flipExitFlag = opposite;
+          timeoutFlag = !opposite;
           exitReason = opposite ? 'FLIP' : 'TIMEOUT';
+          emitEvent(i, opposite ? 'flip_exit' : 'timeout_exit', c, exitFill, exiting, exitReason);
         }
       }
       if (exitReason !== '') {
@@ -878,6 +937,7 @@ export function calculate(
         lastExitTime = timeMs(i);
         // Never clip losses: a stop gap and costs may exceed one initial R
         record(lastExitR, trade.cell, trade.epoch);
+        emitEvent(i, 'trade_closed', NaN, exitFill, 0.0, exitReason);
         trade.dir = 0;
         closedThisBar = true;
       }
@@ -933,6 +993,7 @@ export function calculate(
         trade.cell = curCellIdx;
         // These bands were calculated before an old-trade exit could change Q
         trade.epoch = calculationEpoch;
+        trade.id = cfg.alertInstance + ':' + TICKERID + ':' + PERIOD + ':' + str.tostring(timeMs(i)) + ':' + str.tostring(direction);
         trade.entryTqi = tqi[i];
         trade.entryScore = bdTotal;
         const viaPrice = direction === 1 ? priceFlipUp : priceFlipDown;
@@ -952,12 +1013,48 @@ export function calculate(
         lastDisplaySide = direction;
         lastSignalBar = i;
         lastRejected = '';
+        emitEvent(i, direction === 1 ? 'buy' : 'sell', c, newEntry, 1.0, trade.reason);
       } else {
         lastRejected = 'Rejected ' + (direction === 1 ? 'BUY' : 'SELL')
           + (!stopLive ? ': SL already breached at signal close after slippage' : ': invalid/sub-tick risk or targets');
       }
     } else if (rawBuy || rawSell) {
       lastRejected = 'Entry skipped: model position is still active';
+    }
+
+    if (confirmedCharFlip) {
+      // Diagnostic event independent of the trade id, also when a new plan is invalid
+      const t = str.tostring(timeMs(i));
+      barEvents.push('{"event":"char_flip","event_id":' + jsonString(INDICATOR_VERSION + ':' + cfg.alertInstance + ':' + TICKERID + ':'
+        + PERIOD + ':' + t + ':char') + ',"bar_time":' + t + ',"side":' + jsonString(trend === 1 ? 'long' : 'short')
+        + ',"tqi":' + jsonNumber(tqi[i]) + '}');
+      barNotes.push('Confirmed character flip');
+    }
+
+    // Ordered event batch of the bar: alert(webhook ? packet : readable, alert.freq_once_per_bar_close)
+    if (cfg.enableAlerts && isConfirmed && barEvents.length > 0) {
+      const packet = '{"schema":"sats.events.v2","version":' + jsonString(INDICATOR_VERSION) + ',"ticker":' + jsonString(TICKERID)
+        + ',"tf":' + jsonString(PERIOD) + ',"bar_time":' + str.tostring(timeMs(i)) + ',"events":[' + barEvents.join(',') + ']}';
+      const readable = 'SATS ' + TICKERID + ' ' + PERIOD + ' | ' + barNotes.join(' | ');
+      alertCalls.push({ time: bars[i].time, message: cfg.webhook ? packet : readable, freq: 'once_per_bar_close' });
+    }
+
+    // alertcondition(enableAlertsInput and (...)): the 22 conditions in the original's order (grades: score 80 / 60 /
+    // 40, TQI 0.70 / 0.50 / 0.35)
+    if (cfg.enableAlerts) {
+      const flags = [
+        confirmedBuy, confirmedSell,
+        confirmedBuy && ge(buyScore, 80), confirmedSell && ge(sellScore, 80),
+        confirmedBuy && ge(buyScore, 60), confirmedSell && ge(sellScore, 60),
+        confirmedBuy && ge(buyScore, 40), confirmedSell && ge(sellScore, 40),
+        cfg.useTqi && confirmedBuy && ge(tqi[i], 0.70), cfg.useTqi && confirmedSell && ge(tqi[i], 0.70),
+        cfg.useTqi && confirmedBuy && ge(tqi[i], 0.50), cfg.useTqi && confirmedSell && ge(tqi[i], 0.50),
+        cfg.useTqi && confirmedBuy && ge(tqi[i], 0.35), cfg.useTqi && confirmedSell && ge(tqi[i], 0.35),
+        tp1Event, tp2Event, tp3Event, slEvent, timeoutFlag, flipExitFlag,
+        confirmedCharFlip,
+        confirmedBuy || confirmedSell,
+      ];
+      flags.forEach((f, k) => { alertFlags[k][i] = f; });
     }
 
     // ── Plots ──
@@ -1323,8 +1420,37 @@ export function calculate(
     labels: outLabels,
     tables,
     bgColors,
+    alerts: alertStates(alertConditions, bars, alertFlags),
+    alertCalls,
   };
 }
+
+const MSG = (what: string) => what + ' on {{ticker}} | TF: {{interval}} | Price: {{close}}';
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '🟢 Buy Signal', message: MSG('🟢 BUY') },
+  { id: 'alert1', title: '🔴 Sell Signal', message: MSG('🔴 SELL') },
+  { id: 'alert2', title: '🟢 Buy Signal (Score A+ only, ≥80)', message: MSG('🟢 BUY A+ (score)') },
+  { id: 'alert3', title: '🔴 Sell Signal (Score A+ only, ≥80)', message: MSG('🔴 SELL A+ (score)') },
+  { id: 'alert4', title: '🟢 Buy Signal (Score A+ and A, ≥60)', message: MSG('🟢 BUY A+/A (score)') },
+  { id: 'alert5', title: '🔴 Sell Signal (Score A+ and A, ≥60)', message: MSG('🔴 SELL A+/A (score)') },
+  { id: 'alert6', title: '🟢 Buy Signal (Score A+/A/B, ≥40)', message: MSG('🟢 BUY A+/A/B (score)') },
+  { id: 'alert7', title: '🔴 Sell Signal (Score A+/A/B, ≥40)', message: MSG('🔴 SELL A+/A/B (score)') },
+  { id: 'alert8', title: '🟢 Buy Signal (TQI A+ only, ≥0.70)', message: MSG('🟢 BUY A+ (TQI)') },
+  { id: 'alert9', title: '🔴 Sell Signal (TQI A+ only, ≥0.70)', message: MSG('🔴 SELL A+ (TQI)') },
+  { id: 'alert10', title: '🟢 Buy Signal (TQI A+ and A, ≥0.50)', message: MSG('🟢 BUY A+/A (TQI)') },
+  { id: 'alert11', title: '🔴 Sell Signal (TQI A+ and A, ≥0.50)', message: MSG('🔴 SELL A+/A (TQI)') },
+  { id: 'alert12', title: '🟢 Buy Signal (TQI A+/A/B, ≥0.35)', message: MSG('🟢 BUY A+/A/B (TQI)') },
+  { id: 'alert13', title: '🔴 Sell Signal (TQI A+/A/B, ≥0.35)', message: MSG('🔴 SELL A+/A/B (TQI)') },
+  { id: 'alert14', title: '🎯 TP1 Hit', message: MSG('🎯 TP1 HIT') },
+  { id: 'alert15', title: '🎯 TP2 Hit', message: MSG('🎯 TP2 HIT') },
+  { id: 'alert16', title: '🏆 TP3 Hit', message: MSG('🏆 TP3 HIT') },
+  { id: 'alert17', title: '🛑 SL Hit', message: MSG('🛑 SL HIT') },
+  { id: 'alert18', title: '⏱ Timeout Exit', message: MSG('⏱ TIMEOUT EXIT') },
+  { id: 'alert19', title: '🔁 Flip Exit', message: MSG('🔁 FLIP EXIT') },
+  { id: 'alert20', title: '🔄 Character-Flip', message: MSG('🔄 CHAR-FLIP') + ' (TQI collapsed)' },
+  { id: 'alert21', title: '⚡ Any Signal (Buy or Sell)', message: MSG('⚡ Signal') },
+];
 
 export const SelfAwareTrendSystem = {
   calculate,
@@ -1332,4 +1458,6 @@ export const SelfAwareTrendSystem = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

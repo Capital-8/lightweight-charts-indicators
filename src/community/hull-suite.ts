@@ -3,12 +3,15 @@
  *
  * Three Hull MA variants: HMA, EHMA (EMA-based), THMA (Triple).
  * Outputs MHULL (current) and SHULL (2-bar lag) for band/cloud display.
+ * Alerts (alertcondition, `alerts` of the result): 'Hull trending up.' (MHULL crosses over SHULL) and
+ * 'Hull trending down.' (SHULL crosses over MHULL).
  *
  * Reference: "Hull Suite by InSilico"
  */
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HullSuiteInputs {
   source: SourceType;
@@ -39,7 +42,16 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<HullSuiteInputs> = {}): IndicatorResult {
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Hull trending up.', message: 'Hull trending up.' },
+  { id: 'alert1', title: 'Hull trending down.', message: 'Hull trending down.' },
+];
+
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<HullSuiteInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const { source, mode, length } = { ...defaultInputs, ...inputs };
   const src = getSourceSeries(bars, source);
   const sqrtLen = Math.round(Math.sqrt(length));
@@ -88,12 +100,18 @@ export function calculate(bars: Bar[], inputs: Partial<HullSuiteInputs> = {}): I
     return v > hullArr[i - 2] ? '#00FF0040' : '#FF000040';
   });
 
+  // alertcondition(crossover(MHULL, SHULL), "Hull trending up.") / alertcondition(crossover(SHULL, MHULL), ...):
+  // MHULL = HULL, SHULL = HULL[2]
+  const sh = hullArr.map((_v, i) => (i >= 2 ? hullArr[i - 2] : NaN));
+  const alerts = alertStates(alertConditions, bars, [crossedOver(hullArr, sh), crossedOver(sh, hullArr)]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': mhull, 'plot1': shull },
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: '#00ff00' }, colors: fillColors }],
     barColors,
-  } as Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] };
+    alerts,
+  } as Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; alerts: AlertConditionState[] };
 }
 
-export const HullSuite = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const HullSuite = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

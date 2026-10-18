@@ -12,7 +12,9 @@
  * "Auto" takes the higher timeframe from the chart timeframe.
  * The periods come from the UTC calendar and the bars (see anchor-period.ts): exact on symbols that trade every day
  * in UTC and on symbols whose trading day is inside the UTC day.
- * The 3 alerts of the original (price in / above / below the POC) are not part of the port.
+ * Alerts (alertcondition, `alerts` of the result): 'Price in POC' (close inside the POC channel of the last profile,
+ * on the current channel grid), 'Price went above POC' and 'Price went below POC' (from in / below, in / above on the
+ * bar before).
  *
  * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
  * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
@@ -30,6 +32,7 @@ import type { LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe, periodStarts } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type ShowWhat = "Don't Show Value Area" | 'Show Value Area High' | 'Show All Channels';
 
@@ -129,7 +132,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<MarketProfileInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[] } {
+): IndicatorResult & { lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const percent = cfg.percent / 100;
   const srate = cfg.sizingRate / 100;
@@ -168,6 +171,21 @@ export function calculate(
   let len = 0;
   let allLines: LineObj[] = [];
 
+  // var int gl_poc_loc = 0; the alert series price_in_poc / price_above_poc / price_below_poc on each bar
+  let glPocLoc = 0;
+  const inPoc: boolean[] = [];
+  const abovePoc: boolean[] = [];
+  const belowPoc: boolean[] = [];
+  const alertsOfBar = (i: number) => {
+    // get_base(x) = lowest + (x - 1) * channel, channel = (highest - lowest) / 20 (the var levels of the last profile)
+    const channel = (highest - lowest) / 20;
+    const base = (x: number) => lowest + (x - 1) * channel;
+    const c = bars[i].close;
+    inPoc.push(compare.ge(c, base(glPocLoc)) && compare.le(c, base(glPocLoc + 1)));
+    abovePoc.push(compare.gt(c, base(glPocLoc + 1)));
+    belowPoc.push(compare.le(c, base(glPocLoc)));
+  };
+
   for (let i = 0; i < n; i++) {
     const bar = bars[i];
     // newbar = change(time(Timeframe)) != 0 (na on the first bar: false)
@@ -184,7 +202,10 @@ export function calculate(
       lowestHtf = pmin(lowestHtf, bar.low);
       barnum += 1;
     }
-    if (!newbar) continue;
+    if (!newbar) {
+      alertsOfBar(i);
+      continue;
+    }
 
     highest = prevHighestHtf;
     lowest = prevLowestHtf;
@@ -213,6 +234,7 @@ export function calculate(
         pocLoc = x;
       }
     }
+    glPocLoc = pocLoc;
 
     // Value area
     let vaVal = pocVal;
@@ -277,7 +299,12 @@ export function calculate(
       const midpoc = (lowest + (pocLoc - 1) * channel + lowest + pocLoc * channel) / 2;
       allLines.push(newLine(i, midpoc, i + 1, midpoc, cfg.pocColor, 'right'));
     }
+    alertsOfBar(i);
   }
+  // alertcondition(price_in_poc), ((price_in_poc[1] or price_below_poc[1]) and price_above_poc),
+  // ((price_in_poc[1] or price_above_poc[1]) and price_below_poc)
+  const wentAbove = abovePoc.map((a, i) => i > 0 && (inPoc[i - 1] || belowPoc[i - 1]) && a);
+  const wentBelow = belowPoc.map((b, i) => i > 0 && (inPoc[i - 1] || abovePoc[i - 1]) && b);
 
   // Outputs: bar indexes to bar times (a line with an na price is not drawn)
   const interval = barInterval(bars);
@@ -293,7 +320,15 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     lines,
+    alerts: alertStates(alertConditions, bars, [inPoc, wentAbove, wentBelow]),
   };
 }
 
-export const MarketProfile = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Price in POC', message: 'Price in POC' },
+  { id: 'alert1', title: 'Price went above POC', message: 'Price went above POC' },
+  { id: 'alert2', title: 'Price went below POC', message: 'Price went below POC' },
+];
+
+export const MarketProfile = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

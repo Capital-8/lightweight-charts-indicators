@@ -4,11 +4,23 @@
  * Swing support/resistance with buy/sell signals.
  * TSL line based on highest/lowest over swing length, colored by direction.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' / 'Sell Signal', true when the close crosses above /
+ * below the original's TSL: res = highest(high, swing), sup = lowest(low, swing); the direction is 1 when the close
+ * is above res[1], -1 below sup[1] (its last non-zero value is kept); TSL = sup in direction 1, else res.
+ *
  * Reference: "Accurate Swing Trading System" (community)
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import {
+  alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState,
+} from '../alert-states';
+
+/** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
+const EPS = 1e-10;
+const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
 
 export interface AccurateSwingTradingInputs {
   swingLength: number;
@@ -38,7 +50,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<AccurateSwingTradingInputs> = {}): Omit<IndicatorResult, 'markers'> {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<AccurateSwingTradingInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { alerts: AlertConditionState[] } {
   const { swingLength, showBarColor, showBgColor } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -104,13 +119,36 @@ export function calculate(bars: Bar[], inputs: Partial<AccurateSwingTradingInput
     }
   }
 
+  // The original's alert expressions: avd = iff(close > res[1], 1, iff(close < sup[1], -1, 0)),
+  // avn = valuewhen(avd != 0, avd, 0), tsl = iff(avn == 1, sup, res); Buy = crossover(close, tsl),
+  // Sell = crossunder(close, tsl)
+  const origTsl: number[] = new Array(n);
+  let avn = NaN;
+  for (let i = 0; i < n; i++) {
+    const c = bars[i].close;
+    const res1 = i > 0 ? hh[i - 1] ?? NaN : NaN;
+    const sup1 = i > 0 ? ll[i - 1] ?? NaN : NaN;
+    const avd = gt(c, res1) ? 1 : lt(c, sup1) ? -1 : 0;
+    if (avd !== 0) avn = avd;
+    origTsl[i] = avn === 1 ? ll[i] ?? NaN : hh[i] ?? NaN;
+  }
+  const closes = bars.map((b) => b.close);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': tslPlot },
     markers,
     barColors,
     bgColors,
-  } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] };
+    alerts: alertStates(alertConditions, bars, [crossedOver(closes, origTsl), crossedUnder(closes, origTsl)]),
+  } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+    & { alerts: AlertConditionState[] };
 }
 
-export const AccurateSwingTrading = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Buy' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Sell' },
+];
+
+export const AccurateSwingTrading = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

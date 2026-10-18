@@ -19,8 +19,12 @@
  * Chart values (optional third argument of calculate): the chart timeframe (`timeframe`; without it, it is read from
  * the bar spacing), the exchange time zone and session for the days and weeks (without them: the UTC calendar and
  * the bars, see src/anchor-period.ts), and the chart foreground / background colours (labels and table; without
- * them: the dark theme colours #DBDBDB / #0F0F0F). The 10 alert conditions and the alerts of the script have no
- * output.
+ * them: the dark theme colours #DBDBDB / #0F0F0F).
+ *
+ * Alerts (alertcondition, `alerts` of the result): 'Bias PDH' / 'Bias PDL' / 'No Daily Bias' on the first bar of a
+ * day with that daily bias, the same three for the weeks, and 'Hit PDH' / 'Hit PDL' / 'Hit PWH' / 'Hit PWL' on the
+ * bars that reach a level. alert() calls (`alertCalls`, once per bar): "Bias P<D|W>H" / "Bias P<D|W>L" when a new
+ * period gets a bias, "Hit P<D|W>H" / "Hit P<D|W>L" when a level is reached.
  *
  * Reference: "TTrades Daily Bias [TFO]" by tradeforopp
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -28,11 +32,15 @@
  */
 
 import { color, str, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { LabelData, LineDrawingData, MarkerData, PineSize, TableCellData, TablePosition } from '../types';
+import type { AlertCall, LabelData, LineDrawingData, MarkerData, PineSize, TableCellData, TablePosition } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { chartTimeframe, periodStarts } from '../anchor-period';
 import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
 
 type Location = 'Top' | 'Bottom';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface TtradesDailyBiasInputs {
   /** Daily Bias */
@@ -194,7 +202,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<TtradesDailyBiasInputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // chart.fg_color, chart.bg_color
@@ -218,6 +226,12 @@ export function calculate(
   const lines: LineDrawingData[] = [];
   const labels: LabelData[] = [];
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
+  const alertCall = (i: number, message: string) => {
+    alertCalls.push({ time: bars[i].time as number, message, freq: 'once_per_bar' });
+  };
+  // alertcondition flags, in the original's order
+  const flags: boolean[][] = Array.from({ length: 10 }, () => []);
   const dInfo = newInfo();
   const wInfo = newInfo();
   let dLevels: Levels = { hitPh: false, hitPl: false };
@@ -257,8 +271,14 @@ export function calculate(
         style: tf === 'D' ? 'label_up' : 'label_down',
       });
     }
-    if (info.bias === 1) info.biasPh += 1;
-    else if (info.bias === -1) info.biasPl += 1;
+    // alert("Bias P" + tf + "H" / "L", alert.freq_once_per_bar)
+    if (info.bias === 1) {
+      info.biasPh += 1;
+      alertCall(i, `Bias P${tf}H`);
+    } else if (info.bias === -1) {
+      info.biasPl += 1;
+      alertCall(i, `Bias P${tf}L`);
+    }
   };
 
   /** update_info(): on a new period the running period becomes the period before */
@@ -306,6 +326,7 @@ export function calculate(
         current.hitPh = true;
         if (canPlot) current.phLine.color = cfg.afterRaidColor;
         hitHigh = true;
+        alertCall(i, `Hit P${tf}H`);
       }
       if (ge(current.plLine.price1, bar.low) && !current.hitPl) {
         if (cfg.stopExt) current.plLine.time2 = bar.time;
@@ -313,6 +334,7 @@ export function calculate(
         current.hitPl = true;
         if (canPlot) current.plLine.color = cfg.afterRaidColor;
         hitLow = true;
+        alertCall(i, `Hit P${tf}L`);
       }
     }
     return [current, hitHigh, hitLow];
@@ -346,20 +368,32 @@ export function calculate(
       [wLevels, wHitHigh, wHitLow] = updateLines(wLevels, wInfo, 'W', newWeek, i);
     }
 
+    // alertcondition(new_day and d_info.bias == 1 / -1 / 0), the same for the weeks, then the hits
+    flags[0].push(newDay && dInfo.bias === 1);
+    flags[1].push(newDay && dInfo.bias === -1);
+    flags[2].push(newDay && dInfo.bias === 0);
+    flags[3].push(newWeek && wInfo.bias === 1);
+    flags[4].push(newWeek && wInfo.bias === -1);
+    flags[5].push(newWeek && wInfo.bias === 0);
+    flags[6].push(dHitHigh);
+    flags[7].push(dHitLow);
+    flags[8].push(wHitHigh);
+    flags[9].push(wHitLow);
+
     // PDH / PDL / PWH / PWL raids
-    if (canPlotD && dHitHigh) markers.push({ time: bar.time, position: 'aboveBar', shape: 'triangleUp', color: cfg.afterRaidColor, size: 'tiny' });
-    if (canPlotD && dHitLow) markers.push({ time: bar.time, position: 'belowBar', shape: 'triangleDown', color: cfg.afterRaidColor, size: 'tiny' });
-    if (canPlotW && wHitHigh) markers.push({ time: bar.time, position: 'aboveBar', shape: 'triangleUp', color: cfg.afterRaidColor, size: 'tiny' });
-    if (canPlotW && wHitLow) markers.push({ time: bar.time, position: 'belowBar', shape: 'triangleDown', color: cfg.afterRaidColor, size: 'tiny' });
+    if (canPlotD && dHitHigh) markers.push({ id: 'shape0', time: bar.time, position: 'aboveBar', shape: 'triangleUp', color: cfg.afterRaidColor, size: 'tiny' });
+    if (canPlotD && dHitLow) markers.push({ id: 'shape1', time: bar.time, position: 'belowBar', shape: 'triangleDown', color: cfg.afterRaidColor, size: 'tiny' });
+    if (canPlotW && wHitHigh) markers.push({ id: 'shape2', time: bar.time, position: 'aboveBar', shape: 'triangleUp', color: cfg.afterRaidColor, size: 'tiny' });
+    if (canPlotW && wHitLow) markers.push({ id: 'shape3', time: bar.time, position: 'belowBar', shape: 'triangleDown', color: cfg.afterRaidColor, size: 'tiny' });
 
     // Daily / weekly bias squares: no colour (nothing drawn) without a bias
     const dCol = biasColor(dInfo.bias);
     if (cfg.dBiasPlot && dCol) {
-      markers.push({ time: bar.time, position: cfg.dBiasLoc === 'Top' ? 'top' : 'bottom', shape: 'square', color: dCol, size: 'tiny' });
+      markers.push({ id: 'shape4', time: bar.time, position: cfg.dBiasLoc === 'Top' ? 'top' : 'bottom', shape: 'square', color: dCol, size: 'tiny' });
     }
     const wCol = biasColor(wInfo.bias);
     if (cfg.wBiasPlot && wCol) {
-      markers.push({ time: bar.time, position: cfg.wBiasLoc === 'Top' ? 'top' : 'bottom', shape: 'square', color: wCol, size: 'tiny' });
+      markers.push({ id: 'shape5', time: bar.time, position: cfg.wBiasLoc === 'Top' ? 'top' : 'bottom', shape: 'square', color: wCol, size: 'tiny' });
     }
 
     dBias.push({ time: bar.time, value: dInfo.bias, color: 'transparent' });
@@ -417,7 +451,23 @@ export function calculate(
     tables: [{
       position, columns: 20, rows: 20, bgColor: chartBg, frameColor: chartFg, frameWidth: 2, borderColor: chartFg, borderWidth: 1, cells,
     }],
+    alerts: alertStates(alertConditions, bars, flags),
+    alertCalls,
   };
 }
 
-export const TtradesDailyBias = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bias PDH', message: 'Bias PDH' },
+  { id: 'alert1', title: 'Bias PDL', message: 'Bias PDL' },
+  { id: 'alert2', title: 'No Daily Bias', message: 'No Daily Bias' },
+  { id: 'alert3', title: 'Bias PWH', message: 'Bias PWH' },
+  { id: 'alert4', title: 'Bias PWL', message: 'Bias PWL' },
+  { id: 'alert5', title: 'No Weekly Bias', message: 'No Weekly Bias' },
+  { id: 'alert6', title: 'Hit PDH', message: 'Hit PDH' },
+  { id: 'alert7', title: 'Hit PDL', message: 'Hit PDL' },
+  { id: 'alert8', title: 'Hit PWH', message: 'Hit PWH' },
+  { id: 'alert9', title: 'Hit PWL', message: 'Hit PWL' },
+];
+
+export const TtradesDailyBias = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction };

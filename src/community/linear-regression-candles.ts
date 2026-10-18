@@ -2,7 +2,8 @@
  * Linear Regression Candles
  *
  * OHLC replaced by linear regression values with optional SMA smoothing.
- * Provides a smoothed candlestick representation of price.
+ * Provides a smoothed candlestick representation of price. Two candle outputs as the original: the rising candles
+ * (open < close) and the others.
  *
  * Reference: "Linear Regression Candles" (community)
  */
@@ -35,8 +36,10 @@ export const plotConfig: PlotConfig[] = [
   { id: 'signal', title: 'Signal', color: '#FFFFFF', lineWidth: 1 },
 ];
 
+/** The original's two plotcandle() outputs: open < close (candle0), the other candles (candle1) */
 export const plotCandleConfig = [
-  { id: 'candle0', title: 'LinReg Candle' },
+  { id: 'candle0', title: 'LinReg Candles' },
+  { id: 'candle1', title: 'LinReg Candles' },
 ];
 
 export const metadata = {
@@ -85,10 +88,13 @@ export function calculate(bars: Bar[], inputs: Partial<LinRegCandlesInputs> = {}
 
   const warmup = length + smoothLen;
   const candles: PlotCandleData[] = [];
+  const downCandles: PlotCandleData[] = [];
+  const none = (t: number): PlotCandleData => ({ time: t, open: NaN, high: NaN, low: NaN, close: NaN });
 
   for (let i = 0; i < n; i++) {
     if (i < warmup || finalO[i] == null || finalC[i] == null) {
-      candles.push({ time: bars[i].time as number, open: NaN, high: NaN, low: NaN, close: NaN });
+      candles.push(none(bars[i].time as number));
+      downCandles.push(none(bars[i].time as number));
       continue;
     }
 
@@ -96,9 +102,10 @@ export function calculate(bars: Bar[], inputs: Partial<LinRegCandlesInputs> = {}
     const h = finalH[i]!;
     const l = finalL[i]!;
     const c = finalC[i]!;
-    const col = c >= o ? '#26A69A' : '#EF5350';
-
-    candles.push({
+    // r = bopen < bclose: the first plotcandle draws the candle when r, the second one otherwise
+    const r = o < c;
+    const col = r ? '#26A69A' : '#EF5350';
+    const candle: PlotCandleData = {
       time: bars[i].time as number,
       open: o,
       high: h,
@@ -107,7 +114,9 @@ export function calculate(bars: Bar[], inputs: Partial<LinRegCandlesInputs> = {}
       color: col,
       borderColor: col,
       wickColor: col,
-    });
+    };
+    candles.push(r ? candle : none(candle.time as number));
+    downCandles.push(r ? none(candle.time as number) : candle);
   }
 
   // Pine: signal = sma_signal ? sma(bclose, signal_length) : ema(bclose, signal_length)
@@ -126,7 +135,7 @@ export function calculate(bars: Bar[], inputs: Partial<LinRegCandlesInputs> = {}
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { signal: signalPlot },
-    plotCandles: { candle0: candles },
+    plotCandles: { candle0: candles, candle1: downCandles },
   };
 }
 

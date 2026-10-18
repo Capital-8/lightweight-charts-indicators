@@ -8,6 +8,7 @@
  * oversold bands turn red / green when the MA is beyond the MA levels. Pivot divergences between price and
  * oscillator give Bull / Bear labels; crosses of the levels, of the midline and of the MA with the midline give
  * triangle signals.
+ * Alerts (alertcondition, `alerts` of the result): the level, midline and MA midline crosses and the divergences.
  *
  * Reference: "Force Pulse" by Uncle_the_shooter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 
 export interface ForcePulseInputs {
@@ -164,7 +166,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<ForcePulseInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -339,31 +341,40 @@ export function calculate(
   // (no 1e-10 tolerance; na compares false)
   const crossover = (a: number[], b: number, i: number) => i > 0 && a[i] > b && a[i - 1] <= b;
   const crossunder = (a: number[], b: number, i: number) => i > 0 && a[i] < b && a[i - 1] >= b;
+  const flags: boolean[][] = Array.from({ length: 8 }, () => []);
   for (let i = 0; i < n; i++) {
     // Signal triangles: location.bottom (long) / location.top (short), size.tiny
-    const buy = (on: boolean) => {
-      if (on) markers.push({ time: t(i), position: 'bottom', shape: 'triangleUp', color: cfg.oversoldColor, size: 'tiny' });
+    // (ids shape0..shape5: the plotshapes in the original's order)
+    const buy = (on: boolean, id: string) => {
+      if (on) markers.push({ time: t(i), position: 'bottom', shape: 'triangleUp', color: cfg.oversoldColor, size: 'tiny', id });
     };
-    const sell = (on: boolean) => {
-      if (on) markers.push({ time: t(i), position: 'top', shape: 'triangleDown', color: cfg.overboughtColor, size: 'tiny' });
+    const sell = (on: boolean, id: string) => {
+      if (on) markers.push({ time: t(i), position: 'top', shape: 'triangleDown', color: cfg.overboughtColor, size: 'tiny', id });
     };
-    buy(showObos && crossover(cpo, cfg.oversold, i));
-    sell(showObos && crossunder(cpo, cfg.overbought, i));
-    buy(showZero && crossover(cpo, 50, i));
-    sell(showZero && crossunder(cpo, 50, i));
-    buy(showMaZero && crossover(maCpo, 50, i));
-    sell(showMaZero && crossunder(maCpo, 50, i));
+    const sig = [
+      crossover(cpo, cfg.oversold, i), crossunder(cpo, cfg.overbought, i), crossover(cpo, 50, i),
+      crossunder(cpo, 50, i), crossover(maCpo, 50, i), crossunder(maCpo, 50, i),
+    ];
+    sig.forEach((on, k) => flags[k].push(on));
+    flags[6].push(bullCond[i]);
+    flags[7].push(bearCond[i]);
+    buy(showObos && sig[0], 'shape0');
+    sell(showObos && sig[1], 'shape1');
+    buy(showZero && sig[2], 'shape2');
+    sell(showZero && sig[3], 'shape3');
+    buy(showMaZero && sig[4], 'shape4');
+    sell(showMaZero && sig[5], 'shape5');
     // plotshape(bullCond ? oscLbr : na, offset = -lookbackRight, text = ' Bull ', shape.labelup, location.absolute,
     //   color.new(bullDivColor, bandTransparency), textcolor = textColor, size.small)
     if (i - pr >= 0) {
       const price = oscLbr(i);
       if (bullCond[i] && !isNaN(price)) {
         markers.push({ time: barTime(bars, i - pr, interval), position: 'atPriceBottom', price, shape: 'labelUp',
-          color: bullLabel, text: ' Bull ', textColor: cfg.textColor, size: 'small' });
+          color: bullLabel, text: ' Bull ', textColor: cfg.textColor, size: 'small', id: 'shape6' });
       }
       if (bearCond[i] && !isNaN(price)) {
         markers.push({ time: barTime(bars, i - pr, interval), position: 'atPriceTop', price, shape: 'labelDown',
-          color: bearLabel, text: ' Bear ', textColor: cfg.textColor, size: 'small' });
+          color: bearLabel, text: ' Bear ', textColor: cfg.textColor, size: 'small', id: 'shape7' });
       }
     }
   }
@@ -378,8 +389,23 @@ export function calculate(
     ],
     fills,
     markers,
+    // alertcondition(longSignalObos / shortSignalObos / longSignalZero / shortSignalZero / longSignalMaZero /
+    // shortSignalMaZero / bullCond / bearCond)
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy – Oversold', message: 'Force Pulse: Price crossed above oversold level' },
+  { id: 'alert1', title: 'Sell – Overbought', message: 'Force Pulse: Price crossed below overbought level' },
+  { id: 'alert2', title: 'Midline Long', message: 'Force Pulse: Oscillator crossed above Midline' },
+  { id: 'alert3', title: 'Midline Short', message: 'Force Pulse: Oscillator crossed below Midline' },
+  { id: 'alert4', title: 'MA Midline Long', message: 'Force Pulse: MA crossed above Midline' },
+  { id: 'alert5', title: 'MA Midline Short', message: 'Force Pulse: MA crossed below Midline' },
+  { id: 'alert6', title: 'Bullish Divergence', message: 'Force Pulse: Bullish divergence detected' },
+  { id: 'alert7', title: 'Bearish Divergence', message: 'Force Pulse: Bearish divergence detected' },
+];
 
 export const ForcePulse = {
   calculate,
@@ -387,4 +413,5 @@ export const ForcePulse = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

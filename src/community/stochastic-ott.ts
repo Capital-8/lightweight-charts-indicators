@@ -4,12 +4,15 @@
  * Optimized Trend Tracker applied to Stochastic oscillator.
  * Smooths raw Stochastic %K with VAR (CMO-based adaptive MA),
  * then applies OTT trailing stop logic to the smoothed value.
+ * Alerts (alertcondition, `alerts` of the result): Price Cross / Crossover / Crossunder of the %K line (+1000) and
+ * the OTT two bars back.
  *
  * Reference: "Stochastic Optimized Trend Tracker" by KivancOzbilgic
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface StochasticOTTInputs {
   kLen: number;
@@ -69,7 +72,7 @@ function varFunc(srcArr: number[], length: number): number[] {
   return result;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<StochasticOTTInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<StochasticOTTInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { kLen, kSmooth, ottPeriod, ottPct, showSupport } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -153,6 +156,11 @@ export function calculate(bars: Bar[], inputs: Partial<StochasticOTTInputs> = {}
     }
   }
 
+  // alertcondition(cross(src, OTT[2])) / crossover(src, OTT[2]) / crossunder(src, OTT[2]), on every bar
+  const ott2 = ott.map((_v, i) => (i >= 2 ? ott[i - 2] : NaN));
+  const upFlags = crossedOver(srcArr, ott2);
+  const downFlags = crossedUnder(srcArr, ott2);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2 },
@@ -165,7 +173,15 @@ export function calculate(bars: Bar[], inputs: Partial<StochasticOTTInputs> = {}
       { value: 1020, options: { color: '#606060', linestyle: 'solid' as const, title: 'Lower Band' } },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, [upFlags.map((u, i) => u || downFlags[i]), upFlags, downFlags]),
   };
 }
 
-export const StochasticOTT = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Price Cross Alert', message: 'OTT - Price Crossing!' },
+  { id: 'alert1', title: 'Price Crossover Alarm', message: 'PRICE OVER OTT - BUY SIGNAL!' },
+  { id: 'alert2', title: 'Price Crossunder Alarm', message: 'PRICE UNDER OTT - SELL SIGNAL!' },
+];
+
+export const StochasticOTT = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

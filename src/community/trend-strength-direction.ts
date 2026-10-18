@@ -4,12 +4,14 @@
  * Six Hull moving averages of the close (lengths 20, 40, 60, 80, 100 and a custom length 5), each computed as
  * wma(2 * wma(close, round(len / 2)) - wma(close, len), round(sqrt(len))). Each line is the angle of its HMA:
  * atan(hma - hma[1]) in degrees. A dotted zero line and a grey fill between the +45 and -45 levels.
+ * Alerts (alertcondition, `alerts` of the result): the angle of HMA 1 above 45 and below -45.
  *
  * Reference: "Trend Strength/Direction" by ddcakez
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendStrengthDirectionInputs {
   hmaLength1: number;
@@ -71,7 +73,7 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TrendStrengthDirectionInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<TrendStrengthDirectionInputs> = {}): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -92,8 +94,10 @@ export function calculate(bars: Bar[], inputs: Partial<TrendStrengthDirectionInp
 
   const lengths = [cfg.hmaLength1, cfg.hmaLength2, cfg.hmaLength3, cfg.hmaLength4, cfg.hmaLength5, cfg.hmaLengthCustom];
   const plots: IndicatorResult['plots'] = {};
+  let angle1: number[] = [];
   lengths.forEach((len, k) => {
     const a = angle(hma(len));
+    if (k === 0) angle1 = a;
     plots[`plot${k}`] = bars.map((b, i) => ({ time: b.time, value: a[i], color: PLOT_COLORS[k] }));
   });
 
@@ -107,8 +111,16 @@ export function calculate(bars: Bar[], inputs: Partial<TrendStrengthDirectionInp
       { plot1: 'hline_upper', plot2: 'hline_lower', options: { title: 'Angle Range Fill' },
         colors: new Array<string>(n).fill(String(color.new(color.gray, 90))) },
     ],
+    // alertcondition(hmaAngle1 > angleLevelUpper) / alertcondition(hmaAngle1 < angleLevelLower), levels 45 / -45
+    alerts: alertStates(alertConditions, bars, [angle1.map((v) => v > 45), angle1.map((v) => v < -45)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'HMA1 Above Upper Angle Level', message: 'HMA Angle 1 is above the upper angle level' },
+  { id: 'alert1', title: 'HMA1 Below Lower Angle Level', message: 'HMA Angle 1 is below the lower angle level' },
+];
 
 export const TrendStrengthDirection = {
   calculate,
@@ -118,4 +130,5 @@ export const TrendStrengthDirection = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

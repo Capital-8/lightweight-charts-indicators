@@ -588,13 +588,13 @@ export function calculate(
     }
     plots.plot10.push({ time: bar.time, value: activeSlow[i], color: isPredef ? rColor(10) : '#FF6D00' });
 
-    const shape = (on: boolean, position: 'aboveBar' | 'belowBar', shapeColor: string) => {
-      if (on) markers.push({ time: bar.time, position, shape: 'xcross', color: shapeColor, size: 'tiny' });
+    const shape = (on: boolean, position: 'aboveBar' | 'belowBar', shapeColor: string, id: string) => {
+      if (on) markers.push({ time: bar.time, position, shape: 'xcross', color: shapeColor, size: 'tiny', id });
     };
-    shape(isLongWin, 'aboveBar', TEAL);
-    shape(isLongLoss, 'aboveBar', RED);
-    shape(isShortWin, 'belowBar', TEAL);
-    shape(isShortLoss, 'belowBar', RED);
+    shape(isLongWin, 'aboveBar', TEAL, 'shape0');
+    shape(isLongLoss, 'aboveBar', RED, 'shape1');
+    shape(isShortWin, 'belowBar', TEAL, 'shape2');
+    shape(isShortLoss, 'belowBar', RED, 'shape3');
   }
 
   // ── Dashboard: var table dash = table.new(position, 24, 30, ...), written on the last bar ──

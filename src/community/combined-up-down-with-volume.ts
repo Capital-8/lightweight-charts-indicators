@@ -64,11 +64,11 @@ export function calculate(
     const roc = ge(Math.abs(r ?? NaN), cfg.per);
     const check = ge(b.volume ?? NaN, cfg.vol);
     // plotshape(not use and roc ? 1 : na, style = shape.circle, location = location.belowbar)
-    if (!cfg.use && roc) markers.push({ time: b.time, position: 'belowBar', shape: 'circle', color: blue });
+    if (!cfg.use && roc) markers.push({ time: b.time, position: 'belowBar', shape: 'circle', color: blue, id: 'shape0' });
     // plotshape(not use and check ? 1 : na, style = shape.circle)  (default location.abovebar)
-    if (!cfg.use && check) markers.push({ time: b.time, position: 'aboveBar', shape: 'circle', color: blue });
+    if (!cfg.use && check) markers.push({ time: b.time, position: 'aboveBar', shape: 'circle', color: blue, id: 'shape1' });
     // plotshape(use and roc and check ? 1 : na, style = shape.circle, color = color.purple, location = location.belowbar)
-    if (cfg.use && roc && check) markers.push({ time: b.time, position: 'belowBar', shape: 'circle', color: purple });
+    if (cfg.use && roc && check) markers.push({ time: b.time, position: 'belowBar', shape: 'circle', color: purple, id: 'shape2' });
   }
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },

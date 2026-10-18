@@ -8,6 +8,9 @@
  * close may cross the straight line between the two points. Each divergence length draws one line on the price, and
  * a label lists the indicators and their count. Until a new pivot comes, the lines and the label of the last signal
  * on that side are replaced by the next signal.
+ * Alerts (alertcondition, `alerts` of the result): positive / negative regular and hidden divergence detected on the
+ * bar (at least the minimum number of divergences), and 'Positive Divergence Detected' / 'Negative Divergence
+ * Detected' for either type.
  *
  * Reference: "Divergence for Many Indicators v4" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +19,7 @@
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LineDrawingData, LabelData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type LineStyleName = 'Solid' | 'Dashed' | 'Dotted';
 
@@ -199,7 +203,8 @@ class Registry<T> {
 export function calculate(
   bars: Bar[],
   inputs: Partial<DivergenceForManyIndicatorsV4Inputs> = {},
-): Omit<IndicatorResult, 'markers' | 'lines' | 'labels'> & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[] } {
+): Omit<IndicatorResult, 'markers' | 'lines' | 'labels'> & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const prd = cfg.pivotPeriod;
@@ -367,6 +372,8 @@ export function calculate(
   let removeLastNegDivs = false;
 
   const markers: MarkerData[] = [];
+  // pos_reg_div_detected / neg_reg_div_detected / pos_hid_div_detected / neg_hid_div_detected per bar
+  const detected: boolean[][] = [[], [], [], []];
   const allDivergences: number[] = new Array(44).fill(NaN); // 11 indicators * 4 divergence types
   const namesShown = cfg.showNames !== "Don't Show";
 
@@ -432,12 +439,14 @@ export function calculate(
     let bottomLabelColor = '#FFFFFF';
     let oldPosDivsCanBeRemoved = true;
     let oldNegDivsCanBeRemoved = true;
+    for (let y = 0; y <= 3; y++) detected[y].push(false);
     for (let x = 0; x <= 10; x++) {
       let divType = -1;
       for (let y = 0; y <= 3; y++) {
         const d = allDivergences[x * 4 + y];
         if (!(d > 0)) continue;
         divType = y;
+        detected[y][i] = true;
         const bottomSide = y % 2 === 0;
         if (bottomSide) {
           numBottom++;
@@ -522,8 +531,22 @@ export function calculate(
     lines: lineRegistry.live.map((l) => l.data),
     // a label with an na price is not drawn
     labels: labelRegistry.live.map((l) => l.data).filter((l) => !isNaN(l.price)),
+    alerts: alertStates(alertConditions, bars, [
+      detected[0], detected[1], detected[2], detected[3],
+      detected[0].map((v, i) => v || detected[2][i]), detected[1].map((v, i) => v || detected[3][i]),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Positive Regular Divergence Detected', message: 'Positive Regular Divergence Detected' },
+  { id: 'alert1', title: 'Negative Regular Divergence Detected', message: 'Negative Regular Divergence Detected' },
+  { id: 'alert2', title: 'Positive Hidden Divergence Detected', message: 'Positive Hidden Divergence Detected' },
+  { id: 'alert3', title: 'Negative Hidden Divergence Detected', message: 'Negative Hidden Divergence Detected' },
+  { id: 'alert4', title: 'Positive Divergence Detected', message: 'Positive Divergence Detected' },
+  { id: 'alert5', title: 'Negative Divergence Detected', message: 'Negative Divergence Detected' },
+];
 
 export const DivergenceForManyIndicatorsV4 = {
   calculate,
@@ -531,4 +554,5 @@ export const DivergenceForManyIndicatorsV4 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

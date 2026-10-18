@@ -7,6 +7,8 @@
  * `zscore_length` bars, with a dead zone near zero (snap to 0 or a soft fade). It is drawn as a histogram coloured by
  * its sign and direction; the same colour paints the candles. Squeeze Pro dots on the zero line show whether the
  * Bollinger Bands are inside the Keltner Channel at three widths (low / mid / high compression).
+ * Alerts (alertcondition, `alerts` of the result): velocity crossing above / below zero, squeeze started / fired
+ * (any compression begins / ends), high squeeze entered / released.
  *
  * Reference: "VEGA (Velocity of Efficient Gain Adaptation)" by B3AR_Trades
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type DeadZoneType = 'Snap' | 'Soft Fade' | 'None';
 
@@ -149,7 +152,10 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 const ne0 = (x: number) => !isNaN(x) && Math.abs(x) > EPS;
 const nz = (x: number) => (isNaN(x) ? 0 : x);
 
-export function calculate(bars: Bar[], inputs: Partial<VegaInputs> = {}): IndicatorResult & { barColors: BarColorData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<VegaInputs> = {},
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -206,12 +212,14 @@ export function calculate(bars: Bar[], inputs: Partial<VegaInputs> = {}): Indica
   const kcBasis = A(ta.sma(closeS, cfg.kcLength));
   const kcRange = A(ta.atr(bars, cfg.kcLength));
   const sqzColor: string[] = new Array(n);
+  const sqzState: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const bbDev = cfg.bbMult * bbStdev[i];
     const bbUpper = bbBasis[i] + bbDev;
     const bbLower = bbBasis[i] - bbDev;
     const inKc = (mult: number) => gt(bbLower, kcBasis[i] - mult * kcRange[i]) && lt(bbUpper, kcBasis[i] + mult * kcRange[i]);
     const state = inKc(cfg.kcMultLow) ? 3 : inKc(cfg.kcMultMid) ? 2 : inKc(cfg.kcMultHigh) ? 1 : 0;
+    sqzState[i] = state;
     sqzColor[i] = state === 3 ? cfg.sqzHighColor : state === 2 ? cfg.sqzMidColor : state === 1 ? cfg.sqzLowColor : cfg.sqzOffColor;
   }
 
@@ -241,8 +249,28 @@ export function calculate(bars: Bar[], inputs: Partial<VegaInputs> = {}): Indica
     plots: { plot0, plot1, plot2, plot3 },
     hlines: [{ value: 0, options: { title: 'Zero', color: String(color.new(color.gray, 50)), linestyle: 'dotted' } }],
     barColors,
+    // alertcondition(ta.crossover(velocity, 0)) / (ta.crossunder(velocity, 0)) and the squeeze state changes
+    // (sqz_state[1] on the first bar is na: its comparisons are false)
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(velocity, 0),
+      crossedUnder(velocity, 0),
+      sqzState.map((st, i) => i > 0 && sqzState[i - 1] === 0 && st > 0),
+      sqzState.map((st, i) => i > 0 && sqzState[i - 1] > 0 && st === 0),
+      sqzState.map((st, i) => i > 0 && st === 3 && sqzState[i - 1] !== 3),
+      sqzState.map((st, i) => i > 0 && sqzState[i - 1] === 3 && st < 3),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Zero Cross', message: 'VEGA crossed above zero' },
+  { id: 'alert1', title: 'Bearish Zero Cross', message: 'VEGA crossed below zero' },
+  { id: 'alert2', title: 'Squeeze Started', message: 'VEGA squeeze started' },
+  { id: 'alert3', title: 'Squeeze Fired', message: 'VEGA squeeze fired (volatility expanding)' },
+  { id: 'alert4', title: 'High Squeeze', message: 'VEGA entered high compression squeeze' },
+  { id: 'alert5', title: 'High Squeeze Released', message: 'VEGA high compression squeeze releasing' },
+];
 
 export const Vega = {
   calculate,
@@ -250,4 +278,5 @@ export const Vega = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

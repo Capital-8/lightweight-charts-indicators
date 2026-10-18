@@ -6,6 +6,7 @@
  * previous bars), Bullish / Bearish Kicker, Hanging Man, Evening / Morning Star, Shooting Star, Hammer and Inverted
  * Hammer. Most patterns also need a trend: the open `trend` bars back above (bullish) or below (bearish) the open.
  * Bullish patterns are drawn below the bar, bearish patterns and the Doji above the bar.
+ * Alerts (alertcondition, `alerts` of the result): one per pattern ('Doji' ... 'Inverted Hammer'), true on its bars.
  *
  * Reference: "Candlestick Patterns Identified" by repo32
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CandlestickPatternsIdentifiedInputs {
   /** Trend in bars: the open this many bars back is compared with the open */
@@ -70,7 +72,7 @@ const eq = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) <
 export function calculate(
   bars: Bar[],
   inputs: Partial<CandlestickPatternsIdentifiedInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const trend = cfg.trend;
@@ -78,6 +80,8 @@ export function calculate(
   const lowest10 = ta.lowest(new Series(bars, (b) => b.low), 10).toArray().map((v) => v ?? NaN);
 
   const markers: MarkerData[] = [];
+  // One flag per bar for each pattern, in the order of the plotshape / alertcondition calls (shape<k> / alert<k>)
+  const flags: boolean[][] = alertConditions.map(() => []);
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const { open, high, low, close } = b;
@@ -92,81 +96,95 @@ export function calculate(
     const high2 = p2 ? p2.high : NaN;
     const openT = i >= trend ? bars[i - trend].open : NaN; // open[trend]
     const t = b.time;
-    const bull = (text: string, on: boolean) => {
-      if (on) markers.push({ time: t, position: 'belowBar', shape: 'arrowUp', color: cfg.bullColor, text, textColor: cfg.bullText, size: 'auto' });
+    const bull = (k: number, text: string, on: boolean) => {
+      flags[k].push(on);
+      if (on) markers.push({ id: `shape${k}`, time: t, position: 'belowBar', shape: 'arrowUp', color: cfg.bullColor, text, textColor: cfg.bullText, size: 'auto' });
     };
-    const bear = (text: string, on: boolean) => {
-      if (on) markers.push({ time: t, position: 'aboveBar', shape: 'arrowDown', color: cfg.bearColor, text, textColor: cfg.bearText, size: 'auto' });
+    const bear = (k: number, text: string, on: boolean) => {
+      flags[k].push(on);
+      if (on) markers.push({ id: `shape${k}`, time: t, position: 'aboveBar', shape: 'arrowDown', color: cfg.bearColor, text, textColor: cfg.bearText, size: 'auto' });
     };
 
     // plotshape(doji, "Doji", shape.cross, location.abovebar (default), dojiColor, textcolor = dojiText, text = "Doji")
     const doji = le(Math.abs(open - close), (high - low) * cfg.dojiSize);
-    if (doji) markers.push({ time: t, position: 'aboveBar', shape: 'cross', color: cfg.dojiColor, text: 'Doji', textColor: cfg.dojiText, size: 'auto' });
+    flags[0].push(doji);
+    if (doji) markers.push({ id: 'shape0', time: t, position: 'aboveBar', shape: 'cross', color: cfg.dojiColor, text: 'Doji', textColor: cfg.dojiText, size: 'auto' });
 
     const bearHarami = gt(close1, open1) && gt(open, close) && le(open, close1) && le(open1, close)
       && lt(open - close, close1 - open1) && lt(openT, open);
-    bear('Bearish\nHarami', bearHarami);
+    bear(1, 'Bearish\nHarami', bearHarami);
 
     const bullHarami = gt(open1, close1) && gt(close, open) && le(close, open1) && le(close1, open)
       && lt(close - open, open1 - close1) && gt(openT, open);
-    bull('Bullish\nHarami', bullHarami);
+    bull(2, 'Bullish\nHarami', bullHarami);
 
     const bearEng = gt(close1, open1) && gt(open, close) && ge(open, close1) && ge(open1, close)
       && gt(open - close, close1 - open1) && lt(openT, open);
-    bear('Bearish\nEngulfing', bearEng);
+    bear(3, 'Bearish\nEngulfing', bearEng);
 
     // The Pine text is "Bullish\nEngulfling"
     const bullEng = gt(open1, close1) && gt(close, open) && ge(close, open1) && ge(close1, open)
       && gt(close - open, open1 - close1) && gt(openT, open);
-    bull('Bullish\nEngulfling', bullEng);
+    bull(4, 'Bullish\nEngulfling', bullEng);
 
     const piercing = lt(close1, open1) && lt(open, low1) && gt(close, close1 + (open1 - close1) / 2) && lt(close, open1)
       && gt(openT, open);
-    bull('Piercing\nLine', piercing);
+    bull(5, 'Piercing\nLine', piercing);
 
     // lower = ta.lowest(10)[1]
     const lower = i >= 1 ? lowest10[i - 1] : NaN;
     const bullBelt = eq(low, open) && lt(open, lower) && lt(open, close) && gt(close, (high1 - low1) / 2 + low1)
       && gt(openT, open);
-    bull('Bullish\nBelt', bullBelt);
+    bull(6, 'Bullish\nBelt', bullBelt);
 
     const bullKick = gt(open1, close1) && ge(open, open1) && gt(close, open) && gt(openT, open);
-    bull('Bullish\nKicker', bullKick);
+    bull(7, 'Bullish\nKicker', bullKick);
 
     const bearKick = lt(open1, close1) && le(open, open1) && le(close, open) && lt(openT, open);
-    bear('Bearish\nKicker', bearKick);
+    bear(8, 'Bearish\nKicker', bearKick);
 
     const hangingMan = gt(high - low, 4 * Math.abs(open - close)) && ge((close - low) / (0.001 + high - low), 0.75)
       && ge((open - low) / (0.001 + high - low), 0.75) && lt(openT, open) && lt(high1, open) && lt(high2, open);
-    bear('Hanging\nMan', hangingMan);
+    bear(9, 'Hanging\nMan', hangingMan);
 
     const eveningStar = gt(close2, open2) && gt(Math.min(open1, close1), close2) && lt(open, Math.min(open1, close1))
       && lt(close, open);
-    bear('Evening\nStar', eveningStar);
+    bear(10, 'Evening\nStar', eveningStar);
 
     const morningStar = lt(close2, open2) && lt(Math.max(open1, close1), close2) && gt(open, Math.max(open1, close1))
       && gt(close, open);
-    bull('Morning\nStar', morningStar);
+    bull(11, 'Morning\nStar', morningStar);
 
     const shootingStar = lt(open1, close1) && gt(open, close1) && ge(high - Math.max(open, close), Math.abs(open - close) * 3)
       && le(Math.min(close, open) - low, Math.abs(open - close));
-    bear('Shooting\nStar', shootingStar);
+    bear(12, 'Shooting\nStar', shootingStar);
 
     // plotshape(hammer, "Hammer", location.belowbar, shape.diamond, dojiColor, textcolor = dojiText, text = "H")
     const hammer = gt(high - low, 3 * Math.abs(open - close)) && gt((close - low) / (0.001 + high - low), 0.6)
       && gt((open - low) / (0.001 + high - low), 0.6);
-    if (hammer) markers.push({ time: t, position: 'belowBar', shape: 'diamond', color: cfg.dojiColor, text: 'H', textColor: cfg.dojiText, size: 'auto' });
+    flags[13].push(hammer);
+    if (hammer) markers.push({ id: 'shape13', time: t, position: 'belowBar', shape: 'diamond', color: cfg.dojiColor, text: 'H', textColor: cfg.dojiText, size: 'auto' });
 
     const invHammer = gt(high - low, 3 * Math.abs(open - close)) && gt((high - close) / (0.001 + high - low), 0.6)
       && gt((high - open) / (0.001 + high - low), 0.6);
-    if (invHammer) markers.push({ time: t, position: 'belowBar', shape: 'diamond', color: cfg.dojiColor, text: 'IH', textColor: cfg.dojiText, size: 'auto' });
+    flags[14].push(invHammer);
+    if (invHammer) markers.push({ id: 'shape14', time: t, position: 'belowBar', shape: 'diamond', color: cfg.dojiColor, text: 'IH', textColor: cfg.dojiText, size: 'auto' });
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    // alertcondition(<pattern>, "<name>", "<name> detected") for each of the 15 patterns
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const CandlestickPatternsIdentified = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  'Doji', 'Bearish Harami', 'Bullish Harami', 'Bearish Engulfing', 'Bullish Engulfing', 'Piercing Line', 'Bullish Belt',
+  'Bullish Kicker', 'Bearish Kicker', 'Hanging Man', 'Evening Star', 'Morning Star', 'Shooting Star', 'Hammer',
+  'Inverted Hammer',
+].map((title, k) => ({ id: `alert${k}`, title, message: `${title} detected` }));
+
+export const CandlestickPatternsIdentified = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

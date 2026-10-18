@@ -19,15 +19,26 @@
  * with the symbol tick (syminfo.mintick): the port reads it from the chart context (third argument of calculate),
  * and uses a tick of 0.01 without it.
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar unless noted), as the original makes them: volume
+ * spike (volume above 4.669 x its 17-bar SMA), new swing high / low (when the swing labels are shown), bullish /
+ * bearish breakout, re-test of a resistance / support zone, test of a zone (once per bar close) and rejection of
+ * lower / higher prices (each when its label size is not "None"). Each message ends with the ticker
+ * (`syminfo.ticker`, from the `tickerid` of the chart context; empty without it), the close with the symbol tick and
+ * the chart timeframe.
+ *
  * Reference: "Support and Resistance Signals MTF [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: (c) LuxAlgo
  */
 
 import { ta, str, compare, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { LabelData, LineDrawingData, BoxData, PineSize } from '../types';
+import type { AlertCall, LabelData, LineDrawingData, BoxData, PineSize } from '../types';
 import { barInterval, barTime } from '../bar-time';
-import { mintickOf, type ChartContext } from '../chart-context';
+import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
+import { chartTimeframe } from '../anchor-period';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type SignalSize = 'Auto' | 'Tiny' | 'Small' | 'Normal' | 'None';
 
@@ -222,7 +233,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceSignalsMtfInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { labels: LabelData[]; lines: LineDrawingData[]; boxes: BoxData[] } {
+): IndicatorResult & { labels: LabelData[]; lines: LineDrawingData[]; boxes: BoxData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   /** syminfo.mintick (0.01 without a chart context) */
   const MINTICK = mintickOf(chart);
@@ -234,8 +245,20 @@ export function calculate(
     labels: [] as LabelData[],
     lines: [] as LineDrawingData[],
     boxes: [] as BoxData[],
+    alertCalls: [] as AlertCall[],
   };
   if (n === 0) return empty;
+  // alert(text + '\n' + syminfo.ticker + ' price (' + str.tostring(b.c, format.mintick) + '), timeframe ' + timeframe.period)
+  // (timeframe.period of this version of the language: "D", "W", "M" for one day / week / month)
+  const ticker = tickerOf(chart);
+  const period = chartTimeframe(bars, chart).replace(/^1([DWM])$/, '$1');
+  const alertCalls = empty.alertCalls;
+  const alertAt = (i: number, text: string, freq: AlertCall['freq'] = 'once_per_bar') => {
+    alertCalls.push({
+      time: bars[i].time, freq,
+      message: text + '\n' + ticker + ' price (' + str.tostring(bars[i].close, 'mintick', MINTICK) + '), timeframe ' + period,
+    });
+  };
 
   // srLN := srLN * tf_m / ch_m keeps the fractional quotient (15 * 15 / 60 = 3.75). The lengths of ta.highest,
   // ta.lowest, ta.pivothigh / pivotlow and the history offset use its integer part; the comparisons of bar indexes
@@ -364,6 +387,8 @@ export function calculate(
     const vST1 = prev ? vST[i - 1] : '';
     const m = (pHST[i] - pLST[i]) / pHST[i];
 
+    if (gt(nzVol[i], vSMA[i] * 4.669)) alertAt(i, 'High trading activity (Volume SPIKE) detected');
+
     // ------------------------------------------------------------------ pivot high: new resistance zone
     if (!Number.isNaN(ppH[i])) {
       pp.h1 = pp.h;
@@ -405,6 +430,7 @@ export function calculate(
           + '\n -Price Change : ↑ %' + str.tostring((pp.h - pp.l) * 100 / pp.l, '#.##')
           + swingVolumeText(i, sts, traded);
         newLabel(pp.x, pp.h, '◈', 'transparent', 'label_down', swHC, swSH, tooltip);
+        alertAt(i, 'New ' + swH + (mss === -1 && lt(pp.h, pp.h1) ? ' (counter-trend move)' : '') + ' formed');
       }
     }
 
@@ -453,6 +479,7 @@ export function calculate(
           + '\n -Price Change : ↓ %' + str.tostring((pp.h - pp.l) * 100 / pp.h, '#.##')
           + swingVolumeText(i, sts, traded);
         newLabel(pp.x, pp.l, '◈', 'transparent', 'label_up', swLC, swSH, tooltip);
+        alertAt(i, 'New ' + swL + (mss === 1 && gt(pp.l, pp.l1) ? ' (counter-trend move)' : '') + ' formed');
       }
     }
 
@@ -474,6 +501,7 @@ export function calculate(
         newLabel(i1, l1 * (1 - z.m * 0.017), '▲\n\nB', srBUC, 'label_up', srBTC, srBS, 'Bullish Breakout' + vST1);
         // The broken resistance becomes a support zone
         S.unshift(newSnR(i1, top(z), i + 1, bottom(z), srSZC, bottom(z), srSLC, z.m));
+        if (srBS !== 'None') alertAt(i, 'Bullish breakout detected');
       };
       if (srFBO && gt(c1, top(z) * (1 + z.m * 0.17)) && !z.b) {
         breakout();
@@ -484,11 +512,13 @@ export function calculate(
         z.r = true;
         extendBox(z, i);
         extendLine(z, i);
+        if (srRS !== 'None') alertAt(i, 'Re-test of resistance zone detected');
       } else if (gt(h1, bottom(z)) && lt(c1, top(z)) && lt(c, top(z)) && !z.t && (!newest || !z.r) && !z.b && !s.b && ne(i1, left(z))) {
         newLabel(i1, h1 * (1 + z.m * 0.017), 'T', srTDC, 'label_down', srTTC, srTS, 'Test of Resistance Zone' + vST1);
         z.t = true;
         extendBox(z, i);
         extendLine(z, i);
+        if (srTS !== 'None') alertAt(i, 'Test of resistance zone detected', 'once_per_bar_close');
       } else if (gt(h, bottom(z) * (1 - z.m * 0.17)) && !z.b) {
         if (gt(h, bottom(z))) extendBox(z, i);
         extendLine(z, i);
@@ -496,6 +526,7 @@ export function calculate(
 
       if (newest && prev && isLLS[i - 1] && isHV[i - 1] && srPS !== 'None') {
         newLabel(i1, l1 * (1 - z.m * 0.017), '', srPUC, 'label_up', WHITE, srPS, 'Rejection of Lower Prices' + vST1);
+        alertAt(i, 'Rejection of lower prices detected');
       }
 
       if (mnSH) {
@@ -541,6 +572,7 @@ export function calculate(
         newLabel(i1, h1 * (1 + z.m * 0.017), 'B\n\n▼', srBDC, 'label_down', srBTC, srBS, 'Bearish Breakout' + vST1);
         // The broken support becomes a resistance zone
         R.unshift(newSnR(i1, top(z), i + 1, bottom(z), srRZC, top(z), srRLC, z.m));
+        if (srBS !== 'None') alertAt(i, 'Bearish breakout detected');
       };
       let done = false;
       if (srFBO && lt(c1, bottom(z) * (1 - z.m * 0.17)) && !z.b) {
@@ -556,11 +588,13 @@ export function calculate(
         z.r = true;
         extendBox(z, i);
         extendLine(z, i);
+        if (srRS !== 'None') alertAt(i, 'Re-test of support zone detected');
       } else if (lt(l1, top(z)) && gt(c1, bottom(z)) && gt(c, bottom(z)) && !z.t && !z.b && !r.b && ne(i1, left(z))) {
         newLabel(i1, l1 * (1 - z.m * 0.017), 'T', srTUC, 'label_up', srTTC, srTS, 'Test of Support Zone' + vST1);
         z.t = true;
         extendBox(z, i);
         extendLine(z, i);
+        if (srTS !== 'None') alertAt(i, 'Test of support zone detected', 'once_per_bar_close');
       } else if (lt(l, top(z) * (1 + z.m * 0.17)) && !z.b) {
         if (lt(l, top(z))) extendBox(z, i);
         extendLine(z, i);
@@ -568,6 +602,7 @@ export function calculate(
 
       if (newest && prev && isLUS[i - 1] && isHV[i - 1] && srPS !== 'None') {
         newLabel(i1, h1 * (1 + z.m * 0.017), '', srPDC, 'label_down', WHITE, srPS, 'Rejection of Higher Prices' + vST1);
+        alertAt(i, 'Rejection of higher prices detected');
       }
 
       if (mnSH) {
@@ -645,4 +680,4 @@ export function calculate(
   return result;
 }
 
-export const SupportResistanceSignalsMtf = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const SupportResistanceSignalsMtf = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

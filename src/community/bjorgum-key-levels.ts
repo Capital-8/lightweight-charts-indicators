@@ -20,7 +20,8 @@
  * it; 0.01 without a context) and the state of the last bar. When the context says that the last bar is still open,
  * no pivot zone is made on it and, with "Wait For Confirmed Bar", no candlestick pattern is detected on it, as in
  * the original. Without a context every bar is a closed bar and "Wait For Confirmed Bar" has no effect.
- * The height of the false break arrows (third "False Break Color" input) is not ported.
+ * False breaks are plotarrow outputs (`arrows` of the result, ids arrow0 / arrow1, value close - open); their
+ * maximum height (third "False Break Color" input) is not read by the port.
  *
  * Alerts: the eight alertcondition() calls of the original (resistance / support break, found support /
  * resistance, false break down / up, breakout, breakdown; raw conditions, without the "Detect" inputs), and the
@@ -33,7 +34,7 @@
  * Original notice: © Bjorgum
  */
 
-import { ta, Series, color, compare, math, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, compare, math, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type ArrowData } from 'oakscriptjs';
 import type { AlertCall, MarkerData, BoxData, LabelData, LineDrawingData } from '../types';
 import { barTime } from '../bar-time';
 import { mintickOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
@@ -426,7 +427,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<BjorgumKeyLevelsInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] }
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; arrows: ArrowData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] }
   & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { left, right, nPiv, mult, per, fut, lookback, reflect } = cfg;
@@ -664,6 +665,7 @@ export function calculate(
   };
 
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   const trackHigh: number[] = new Array(n);
   const trackLows: number[] = new Array(n);
   const isLows: boolean[] = new Array(n);
@@ -867,19 +869,21 @@ export function calculate(
     // plotarrow(plotFalseUp ? coDiff : na, colorup = fBull, colordown = fBear, maxheight = arrowMax), and the same
     // with plotFalseDn: an up arrow below the bar for a positive value, a down arrow above the bar for a negative one
     const coDiff = close[i] - open[i];
-    for (const on of [plotFalseUp, plotFalseDn]) {
-      if (!on) continue;
-      if (coDiff > 0) markers.push({ time, position: 'belowBar', shape: 'arrowUp', color: cfg.fBull });
-      else if (coDiff < 0) markers.push({ time, position: 'aboveBar', shape: 'arrowDown', color: cfg.fBear });
-    }
-    if (plotBreakOut) markers.push({ time, position: 'belowBar', shape: 'arrowUp', color: cfg.upCol, size: 'small' });
-    if (plotBreakDn) markers.push({ time, position: 'aboveBar', shape: 'arrowDown', color: cfg.dnCol, size: 'small' });
-    if (plotResBreak) markers.push({ time, position: 'belowBar', shape: 'arrowUp', color: cfg.supCol, size: 'small' });
-    if (plotSupBreak) markers.push({ time, position: 'aboveBar', shape: 'arrowDown', color: cfg.resCol, size: 'small' });
-    if (plotBullCheck) markers.push({ time, position: 'belowBar', shape: 'triangleUp', color: cfg.moveBullCol });
-    if (plotBearCheck) markers.push({ time, position: 'aboveBar', shape: 'triangleDown', color: cfg.moveBearCol });
-    if (plotCurlBull) markers.push({ time, position: 'belowBar', shape: 'triangleUp', color: cfg.curlBullCol });
-    if (plotCurlBear) markers.push({ time, position: 'aboveBar', shape: 'triangleDown', color: cfg.curlBearCol });
+    // (`arrows` of the result: arrow0 / arrow1; a value of 0 draws no arrow)
+    ([plotFalseUp, plotFalseDn] as const).forEach((on, k) => {
+      if (on && !isNaN(coDiff) && coDiff !== 0) {
+        arrows.push({ time, id: `arrow${k}`, value: coDiff, color: coDiff > 0 ? cfg.fBull : cfg.fBear });
+      }
+    });
+    // plotshape outputs: id = the original's output (shape0..shape7 in declaration order)
+    if (plotBreakOut) markers.push({ time, position: 'belowBar', shape: 'arrowUp', color: cfg.upCol, size: 'small', id: 'shape0' });
+    if (plotBreakDn) markers.push({ time, position: 'aboveBar', shape: 'arrowDown', color: cfg.dnCol, size: 'small', id: 'shape1' });
+    if (plotResBreak) markers.push({ time, position: 'belowBar', shape: 'arrowUp', color: cfg.supCol, size: 'small', id: 'shape2' });
+    if (plotSupBreak) markers.push({ time, position: 'aboveBar', shape: 'arrowDown', color: cfg.resCol, size: 'small', id: 'shape3' });
+    if (plotBullCheck) markers.push({ time, position: 'belowBar', shape: 'triangleUp', color: cfg.moveBullCol, id: 'shape4' });
+    if (plotBearCheck) markers.push({ time, position: 'aboveBar', shape: 'triangleDown', color: cfg.moveBearCol, id: 'shape5' });
+    if (plotCurlBull) markers.push({ time, position: 'belowBar', shape: 'triangleUp', color: cfg.curlBullCol, id: 'shape6' });
+    if (plotCurlBear) markers.push({ time, position: 'aboveBar', shape: 'triangleDown', color: cfg.curlBearCol, id: 'shape7' });
 
     // Pattern labels (library) and boxes: _wrap(cond, boxes, barsBack, borderColor, bgColor)
     const wrap = (cond: boolean, bb: number, bc: string, bgc: string) => {
@@ -997,6 +1001,7 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    arrows,
     boxes,
     labels,
     lines,

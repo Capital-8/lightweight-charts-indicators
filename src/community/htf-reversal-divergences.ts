@@ -14,7 +14,10 @@
  * - "Show HTF PO3" (off by default): on the last bar, the latest `Candles to Show` periods of the timeframe drawn as
  *   candles `Right Offset` bars to the right of the last bar, built from the chart bars (open, high, low, close and
  *   the volume delta of up / down bars), with price markers and labels for the live period.
- * At most 500 lines, boxes and labels are kept. The alerts of the original have no output.
+ * At most 500 lines, boxes and labels are kept.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close), each with its switch of the "Alerts"
+ * group: "Bullish / Bearish RSI Divergence on <ticker>" on the bar a divergence is confirmed, "HTF Bullish / Bearish
+ * Engulfing", "HTF Hammer" and "HTF Shooting Star on <ticker>" on the first bar of a period after such a bar.
  *
  * A `High Timeframe` lower than the chart timeframe needs the bars of that lower timeframe, which the chart bars do
  * not have: the port throws an Error when a pattern type is switched on with such a timeframe (the RSI, the
@@ -33,8 +36,12 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar, type SessionContext,
 } from 'oakscriptjs';
 import {
-  mintickOf, timezoneOf, foregroundColorOf, type ChartContext,
+  mintickOf, timezoneOf, foregroundColorOf, tickerOf, type ChartContext,
 } from '../chart-context';
+import type { AlertCall } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 import { chartTimeframe, periodChanges, higherTimeframeBars, hasCalendar } from '../anchor-period';
 
 export interface HtfReversalDivergencesInputs {
@@ -54,7 +61,7 @@ export interface HtfReversalDivergencesInputs {
   po3OffsetInput: number;
   showPo3LabelsInput: boolean;
   showPo3DeltaInput: boolean;
-  /** Alert switches (no output) */
+  /** Alert switches (alert() calls of the result) */
   alertBullDivInput: boolean;
   alertBearDivInput: boolean;
   alertBullEngInput: boolean;
@@ -189,7 +196,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<HtfReversalDivergencesInputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const tz = timezoneOf(chart);
@@ -204,6 +211,8 @@ export function calculate(
   const htf = cfg.htfInput.trim() === '' ? chartTimeframe(bars, chart) : cfg.htfInput;
   const chartTf = chartTimeframe(bars, chart);
   const patternsOn = cfg.showEngulfingInput || cfg.showPinBarsInput;
+  const ticker = tickerOf(chart);
+  const alertCalls: AlertCall[] = [];
 
   // bool htfNewBar = nz(ta.change(time(htfInput))) != 0
   const htfNewBar = n > 0 ? periodChanges(bars, htf, chart) : [];
@@ -348,11 +357,14 @@ export function calculate(
     const isBearPattern = isBearEngulfing || isShootingStar;
 
     // RSI divergences
+    let bullDivConfirmed = false;
+    let bearDivConfirmed = false;
     const rsiBack = i >= lbR ? rsi[i - lbR] : NaN;
     const back = i >= lbR ? bars[i - lbR] : null;
     if (!isNaN(plRsi[i] ?? NaN)) {
       const lowBack = back ? back.low : NaN;
       if (!isNaN(plPriceMem) && gt(rsiBack, plRsiMem) && lt(lowBack, plPriceMem)) {
+        bullDivConfirmed = true;
         if (cfg.showDivInput) {
           line.new(plIndexMem, plPriceMem, i - lbR, lowBack, 'bar_index', undefined, bullD, undefined, 2, true);
           label.new(i - lbR, lowBack, 'Bull Div', 'bar_index', 'belowbar', '#00000000', 'label_up', bullD, 'small',
@@ -367,6 +379,7 @@ export function calculate(
     if (!isNaN(phRsi[i] ?? NaN)) {
       const highBack = back ? back.high : NaN;
       if (!isNaN(phPriceMem) && lt(rsiBack, phRsiMem) && gt(highBack, phPriceMem)) {
+        bearDivConfirmed = true;
         if (cfg.showDivInput) {
           line.new(phIndexMem, phPriceMem, i - lbR, highBack, 'bar_index', undefined, bearD, undefined, 2, true);
           label.new(i - lbR, highBack, 'Bear Div', 'bar_index', 'abovebar', '#00000000', 'label_down', bearD, 'small',
@@ -389,6 +402,15 @@ export function calculate(
         drawHtfPattern(isBearEngulfing ? 'Bear Engulfing' : 'Shooting Star', hHigh, hLow, hOpen, hClose, hTimeStart, hTimeEnd, bearP, false);
       }
     }
+
+    // Alerts: alert("... on " + syminfo.ticker, alert.freq_once_per_bar_close)
+    const call = (message: string) => alertCalls.push({ time: b.time, message: message + ' on ' + ticker, freq: 'once_per_bar_close' });
+    if (cfg.alertBullDivInput && bullDivConfirmed) call('Bullish RSI Divergence');
+    if (cfg.alertBearDivInput && bearDivConfirmed) call('Bearish RSI Divergence');
+    if (cfg.alertBullEngInput && htfNewBar[i] && isBullEngulfing) call('HTF Bullish Engulfing');
+    if (cfg.alertBearEngInput && htfNewBar[i] && isBearEngulfing) call('HTF Bearish Engulfing');
+    if (cfg.alertHammerInput && htfNewBar[i] && isHammer) call('HTF Hammer');
+    if (cfg.alertStarInput && htfNewBar[i] && isShootingStar) call('HTF Shooting Star');
 
     // PO3 UI (last bar)
     if (i === n - 1 && cfg.showPo3Input) {
@@ -470,6 +492,7 @@ export function calculate(
         } },
     ],
     ...drawingOutputs(bars),
+    alertCalls,
   };
 }
 
@@ -480,4 +503,5 @@ export const HtfReversalDivergences = {
   inputConfig,
   plotConfig,
   hlineConfig,
+  hasAlertFunction,
 };

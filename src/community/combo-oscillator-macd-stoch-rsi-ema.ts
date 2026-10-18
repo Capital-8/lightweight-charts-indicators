@@ -8,6 +8,8 @@
  * - Stochastic: (sma(stoch, smoothK) - 50) * 2
  * The line is lime at or above 0 and red below 0. Labels mark the crosses of the line above and below 0. The
  * component lines are optional.
+ * Alerts (alertcondition, `alerts` of the result): 'Combo Bullish Cross' and 'Combo Bearish Cross', true on the bars
+ * where the line crosses above / below 0 (also with the signals hidden).
  *
  * Reference: "Combo Oscillator - MACD + Stoch + RSI + EMA" by Gauder84
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, callsite, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ComboOscillatorMacdStochRsiEmaInputs {
   emaFastLen: number;
@@ -87,7 +90,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<ComboOscillatorMacdStochRsiEmaInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -131,9 +134,12 @@ export function calculate(
   const markers: MarkerData[] = [];
   const bullSite = callsite.crossover();
   const bearSite = callsite.crossunder();
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const bullCross = bullSite(combo[i], 0);
     const bearCross = bearSite(combo[i], 0);
+    bullFlags.push(!!bullCross);
+    bearFlags.push(!!bearCross);
     if (cfg.showSignals && bullCross) {
       markers.push({ time: t(i), position: 'bottom', shape: 'labelUp', color: color.green, text: '▲',
         textColor: color.white, size: 'tiny' });
@@ -159,8 +165,16 @@ export function calculate(
       { value: -50, options: { title: '-50', color: String(color.new(color.gray, 80)), linestyle: 'dashed' as const } },
     ],
     markers,
+    // alertcondition(bullCross, "Combo Bullish Cross") / alertcondition(bearCross, "Combo Bearish Cross")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Combo Bullish Cross', message: 'Combo Oscillator crossed above zero.' },
+  { id: 'alert1', title: 'Combo Bearish Cross', message: 'Combo Oscillator crossed below zero.' },
+];
 
 export const ComboOscillatorMacdStochRsiEma = {
   calculate,
@@ -168,4 +182,5 @@ export const ComboOscillatorMacdStochRsiEma = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

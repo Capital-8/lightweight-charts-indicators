@@ -151,8 +151,9 @@ export function calculate(
       ? lt(ma2[i], ma3[i]) && lt(slope2[i], 0) && lt(slope3[i], 0)
       : lt(ma2[i], ma3[i]);
     // bgcolor((uptrend and showTrend) ? color.new(color.red, 90) : na); bgcolor((downtrend and showTrend) ? ...blue...)
-    if (cfg.showTrend && downtrend) bgColors.push({ time: t, color: bgDown });
-    else if (cfg.showTrend && uptrend) bgColors.push({ time: t, color: bgUp });
+    // (bgcolor0: the uptrend call, bgcolor1: the downtrend call)
+    if (cfg.showTrend && downtrend) bgColors.push({ id: 'bgcolor1', time: t, color: bgDown });
+    else if (cfg.showTrend && uptrend) bgColors.push({ id: 'bgcolor0', time: t, color: bgUp });
 
     // inRange = math.abs(deviation[rightBars]) < deviationRate
     const devPast = i - cfg.rightBars >= 0 ? deviation[i - cfg.rightBars] : NaN;

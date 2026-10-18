@@ -94,14 +94,15 @@ export function calculate(
     // ta.sma(raw, lookback)[1], ta.stdev(raw, lookback)[1]
     const b = tier(rawBuy[i], smaBuy[i - 1], stdBuy[i - 1]);
     const s = tier(rawSell[i], smaSell[i - 1], stdSell[i - 1]);
-    // plotshape(cond ? math.avg(close, low) : na, shape.circle, location.absolute, c_bt_buy, size)
+    // plotshape(cond ? math.avg(close, low) : na, shape.circle, location.absolute, c_bt_buy, size); id: the original's
+    // output (buys shape0..shape2, sells shape3..shape5 by tier)
     const posBuy = (close + low) / 2;
     const posSell = (close + high) / 2;
     if (b >= 0 && !isNaN(posBuy)) {
-      markers.push({ time, position: 'atPriceMiddle', price: posBuy, shape: 'circle', color: cfg.buyColor, size: sizes[b] });
+      markers.push({ time, position: 'atPriceMiddle', price: posBuy, shape: 'circle', color: cfg.buyColor, size: sizes[b], id: `shape${b}` });
     }
     if (s >= 0 && !isNaN(posSell)) {
-      markers.push({ time, position: 'atPriceMiddle', price: posSell, shape: 'circle', color: cfg.sellColor, size: sizes[s] });
+      markers.push({ time, position: 'atPriceMiddle', price: posSell, shape: 'circle', color: cfg.sellColor, size: sizes[s], id: `shape${3 + s}` });
     }
   }
 

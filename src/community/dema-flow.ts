@@ -5,6 +5,8 @@
  * ATR bands around the smoothed DEMA: + upper multiplier * ATR and - lower multiplier * ATR. The trend turns
  * bullish when the close is above the upper band and bearish when it is below the lower band (it starts neutral).
  * The line, the candles drawn by the indicator and the bar colours take the trend colour.
+ * Alerts (alertcondition, `alerts` of the result): 'DEMA Trend Bullish' / 'DEMA Trend Bearish' when the trend crosses
+ * above / below 0 (ta.crossover / ta.crossunder of the trend signal).
  *
  * Reference: "DEMA Flow [Alpha Extract]" by AlphaExtract
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, PlotCandleData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DemaFlowInputs {
   /** DEMA length */
@@ -72,7 +75,8 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<DemaFlowInputs> = {},
-): IndicatorResult & { barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -104,12 +108,14 @@ export function calculate(
   const candles: PlotCandleData[] = [];
   const barColors: BarColorData[] = [];
   let trendSignal = 0; // var trendSignal = 0
+  const trend: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const upperBand = smooth[i] + cfg.upperAtrMult * atr[i];
     const lowerBand = smooth[i] - cfg.lowerAtrMult * atr[i];
     const c = bars[i].close;
     if (gt(c, upperBand)) trendSignal = 1;
     if (lt(c, lowerBand)) trendSignal = -1;
+    trend[i] = trendSignal;
     const trendColor = trendSignal === 1 ? BULL : trendSignal === -1 ? BEAR : NEUTRAL;
     const t = bars[i].time;
     plot0.push({ time: t, value: smooth[i], color: trendColor });
@@ -127,8 +133,16 @@ export function calculate(
     plots: { plot0 },
     plotCandles: { demaTrendCandles: candles },
     barColors,
+    // bullishSignal = ta.crossover(trendSignal, 0) / bearishSignal = ta.crossunder(trendSignal, 0)
+    alerts: alertStates(alertConditions, bars, [crossedOver(trend, 0), crossedUnder(trend, 0)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'DEMA Trend Bullish', message: 'DEMA Trend: Turned Bullish ▲' },
+  { id: 'alert1', title: 'DEMA Trend Bearish', message: 'DEMA Trend: Turned Bearish ▼' },
+];
 
 export const DemaFlow = {
   calculate,
@@ -136,4 +150,5 @@ export const DemaFlow = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

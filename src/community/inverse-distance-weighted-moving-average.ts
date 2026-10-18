@@ -6,6 +6,8 @@
  * A missing older value (first bars) is replaced by the current source; a flat window (all weights zero) gives the
  * source. The line is green when the IDWMA rises and pink when it falls. Optional bar colours, wick colours and
  * background colours follow the IDWMA direction.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Color Change' / 'Bearish Color Change' when the line turns
+ * green / pink, 'Any Color Change' when its colour changes (from the second bar).
  *
  * Reference: "Inverse Distance Weighted Moving Average" by everget
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, BgColorData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface InverseDistanceWeightedMovingAverageInputs {
   /** Number of bars in the window */
@@ -69,7 +72,8 @@ const ne = (a: number, b: number) => Math.abs(a - b) > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<InverseDistanceWeightedMovingAverageInputs> = {},
-): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = cfg.length;
@@ -108,10 +112,12 @@ export function calculate(
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
   const candles: PlotCandleData[] = [];
+  const maColors: string[] = [];
   for (let b = 0; b < n; b++) {
     const t = bars[b].time;
     const bull = b > 0 && gt(ma[b], ma[b - 1]); // isBullishSlope = ma > ma[1]
     const maColor = cfg.highlightDirection ? (bull ? BULLISH : BEARISH) : NEUTRAL;
+    maColors.push(maColor);
     plot0.push({ time: t, value: Number.isFinite(ma[b]) ? ma[b] : NaN, color: maColor });
     if (cfg.applyBarColors) barColors.push({ time: t, color: bull ? BULLISH_BAR : BEARISH_BAR });
     // plotcandle(open, high, low, close, 'Bar Color', color = na, wickcolor = maWickColor, bordercolor = na,
@@ -125,14 +131,28 @@ export function calculate(
     if (cfg.applyBgColors) bgColors.push({ time: t, color: bull ? BULLISH_BG : BEARISH_BG });
   }
 
+  // bullishColorChangeAlert = maColor[1] != bullishColor and maColor == bullishColor; bearish the same;
+  // anyColorChangeAlert = maColor != maColor[1] (maColor[1] is na on the first bar)
+  const bullFlags = maColors.map((c, b) => b > 0 && maColors[b - 1] !== BULLISH && c === BULLISH);
+  const bearFlags = maColors.map((c, b) => b > 0 && maColors[b - 1] !== BEARISH && c === BEARISH);
+  const anyFlags = maColors.map((c, b) => b > 0 && c !== maColors[b - 1]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     barColors,
     bgColors,
     plotCandles: { wickCandles: candles },
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags, anyFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Color Change', message: 'IDWMA - Bullish Color Change\nSymbol: {{exchange}}:{{ticker}}\nPrice: {{close}}' },
+  { id: 'alert1', title: 'Bearish Color Change', message: 'IDWMA - Bearish Color Change\nSymbol: {{exchange}}:{{ticker}}\nPrice: {{close}}' },
+  { id: 'alert2', title: 'Any Color Change', message: 'IDWMA - Any Color Change\nSymbol: {{exchange}}:{{ticker}}\nPrice: {{close}}' },
+];
 
 export const InverseDistanceWeightedMovingAverage = {
   calculate,
@@ -140,4 +160,5 @@ export const InverseDistanceWeightedMovingAverage = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

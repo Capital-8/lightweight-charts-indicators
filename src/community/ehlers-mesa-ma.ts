@@ -4,11 +4,15 @@
  * John Ehlers' MESA Adaptive Moving Average using Hilbert Transform
  * cycle measurement to derive an adaptive alpha for MAMA/FAMA.
  *
+ * Outputs as the original's: the MAMA / FAMA crossover arrows (`arrows`, plotarrow "Crossover Markers": +1 up when
+ * MAMA crosses above FAMA, -1 down when it crosses below), the region fills "NegativeFill" (MAMA below FAMA) and
+ * "PositiveFill" (MAMA above FAMA) between the two lines, and the bar colours.
+ *
  * Reference: "MESA Adaptive Moving Average" by Ehlers
  */
 
-import { getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
-import type { MarkerData, BarColorData } from '../types';
+import { getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType, type ArrowData } from 'oakscriptjs';
+import type { BarColorData } from '../types';
 
 export interface EhlersMESAMAInputs {
   fastLimit: number;
@@ -39,7 +43,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<EhlersMESAMAInputs> = {}): Omit<IndicatorResult, 'markers'> {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<EhlersMESAMAInputs> = {},
+): IndicatorResult & { arrows: ArrowData[]; barColors: BarColorData[] } {
   const { fastLimit, slowLimit, src } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const srcArr = getSourceSeries(bars, src).toArray();
@@ -150,30 +157,18 @@ export function calculate(bars: Bar[], inputs: Partial<EhlersMESAMAInputs> = {})
     return { time: bars[i].time, value: v };
   });
 
-  // markers: arrows on MAMA/FAMA crossover (Pine: plotarrow(cross(mama,fama) ? mama<fama?-1:1 : na))
-  const markers: MarkerData[] = [];
+  // Arrows on MAMA/FAMA crossover (plotarrow(cross(mama, fama) ? mama < fama ? -1 : 1 : na, title="Crossover Markers"))
+  const arrows: ArrowData[] = [];
   for (let i = warmup + 1; i < n; i++) {
     const prevMamaAbove = mama[i - 1] > fama[i - 1];
     const currMamaAbove = mama[i] > fama[i];
     if (prevMamaAbove !== currMamaAbove) {
       if (mama[i] > fama[i]) {
         // MAMA crossed above FAMA -> bullish arrow up
-        markers.push({
-          time: bars[i].time,
-          position: 'belowBar',
-          shape: 'arrowUp',
-          color: '#26A69A',
-          text: 'Cross',
-        });
+        arrows.push({ time: bars[i].time, id: 'arrow0', value: 1, color: '#26A69A' });
       } else {
         // MAMA crossed below FAMA -> bearish arrow down
-        markers.push({
-          time: bars[i].time,
-          position: 'aboveBar',
-          shape: 'arrowDown',
-          color: '#EF5350',
-          text: 'Cross',
-        });
+        arrows.push({ time: bars[i].time, id: 'arrow0', value: -1, color: '#EF5350' });
       }
     }
   }
@@ -187,23 +182,22 @@ export function calculate(bars: Bar[], inputs: Partial<EhlersMESAMAInputs> = {})
     });
   }
 
-  // Pine: fill(duml, mamal, red, transp=70) -- red when MAMA < FAMA
-  //        fill(duml, famal, green, transp=70) -- green when MAMA > FAMA
-  // Use single fill with per-bar colors array for directional coloring
-  const fillColors = mama.map((v, i) => {
-    if (i < warmup) return 'transparent';
-    return v > fama[i] ? 'rgba(0, 230, 118, 0.3)' : 'rgba(239, 83, 80, 0.3)';
-  });
+  // fill(duml, mamal, red, transp=70, title="NegativeFill") and fill(duml, famal, green, transp=70,
+  // title="PositiveFill"), duml = max(mama, fama) (a hidden helper plot): the negative fill covers MAMA..FAMA when
+  // MAMA is below FAMA, the positive one when it is above; both are drawn between the MAMA and FAMA plots
+  const negativeColors = mama.map((v, i) => (i < warmup || v > fama[i] ? 'transparent' : 'rgba(239, 83, 80, 0.3)'));
+  const positiveColors = mama.map((v, i) => (i < warmup || !(v > fama[i]) ? 'transparent' : 'rgba(0, 230, 118, 0.3)'));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': mamaPlot, 'plot1': famaPlot },
     fills: [
-      { plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(38, 166, 154, 0.2)' }, colors: fillColors },
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'NegativeFill', color: 'rgba(239, 83, 80, 0.3)' }, colors: negativeColors },
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'PositiveFill', color: 'rgba(0, 230, 118, 0.3)' }, colors: positiveColors },
     ],
-    markers,
+    arrows,
     barColors,
-  } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] };
+  };
 }
 
 export const EhlersMESAMA = { calculate, metadata, defaultInputs, inputConfig, plotConfig };

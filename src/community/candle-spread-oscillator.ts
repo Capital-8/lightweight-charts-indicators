@@ -4,6 +4,8 @@
  * The candle body as a share of the bar range, spread = (close - open) / (high - low), smoothed with a Hull moving
  * average. The area line and the background take a gradient colour from fuchsia (-0.1 and below) to aqua
  * (0.2 and above). Midline at 0.
+ * Alerts (alertcondition, `alerts` of the result): 'Cross Up' / 'Cross Down' when the oscillator crosses above /
+ * below the midline.
  *
  * Reference: "Candle Spread Oscillator (CS0)" by RWCS_LTD
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CandleSpreadOscillatorInputs {
   /** Smoothing period of the HMA */
@@ -39,7 +42,7 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<CandleSpreadOscillatorInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   // ta.hma(x, 1) is a Pine runtime error (wma length 0)
@@ -71,8 +74,16 @@ export function calculate(
     plots: { plot0 },
     hlines: [{ value: 0, options: { title: 'Midline', color: color.gray, linestyle: 'dotted' } }],
     bgColors,
+    // crossUp = ta.crossover(smoothedSpread, 0) / crossDown = ta.crossunder(smoothedSpread, 0)
+    alerts: alertStates(alertConditions, bars, [crossedOver(smoothed, 0), crossedUnder(smoothed, 0)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cross Up', message: 'Candle Spread Oscillator crossed above the midline.' },
+  { id: 'alert1', title: 'Cross Down', message: 'Candle Spread Oscillator crossed below the midline.' },
+];
 
 export const CandleSpreadOscillator = {
   calculate,
@@ -80,4 +91,5 @@ export const CandleSpreadOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

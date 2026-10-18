@@ -6,6 +6,8 @@
  * the source leaves the band of that width around it. The filter line, a high and a low target band (filter +-
  * range) and the bars are coloured by the direction of the filter. A Buy label is drawn when the source is above a
  * rising filter after a sell state, a Sell label in the opposite case.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy alert on Range Filter', 'Sell alert on Range Filter' (the bars
+ * of the labels) and 'Buy and Sell alert on Range Filter' (either).
  *
  * Reference: "Range Filter Buy and Sell 5min" by PHVNTOM_TRADER (original script by DonovanWall, adapted by
  * guikroth)
@@ -16,6 +18,14 @@ import {
   ta, compare, color, Series, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy alert on Range Filter', message: 'Buy alert on Range Filter' },
+  { id: 'alert1', title: 'Sell alert on Range Filter', message: 'Sell alert on Range Filter' },
+  { id: 'alert2', title: 'Buy and Sell alert on Range Filter', message: 'Buy and Sell alert on Range Filter' },
+];
 
 export interface RangeFilterBuySell5minInputs {
   /** Source */
@@ -64,7 +74,7 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<RangeFilterBuySell5minInputs> = {},
-): IndicatorResult & { markers: MarkerData[]; barColors: BarColorData[] } {
+): IndicatorResult & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -85,6 +95,8 @@ export function calculate(
   const barColors: BarColorData[] = [];
   const filtColors: string[] = new Array(n);
   let condIni = 0;
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const x = src[i];
     const r = smrng[i];
@@ -118,6 +130,8 @@ export function calculate(
     // CondIni := longCond ? 1 : shortCond ? -1 : CondIni[1]
     const condPrev = condIni;
     condIni = longCond ? 1 : shortCond ? -1 : condPrev;
+    longFlags.push(longCond && condPrev === -1);
+    shortFlags.push(shortCond && condPrev === 1);
     if (longCond && condPrev === -1) {
       markers.push({
         time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: BUY_COLOR, text: 'Buy', textColor: UP_COLOR, size: 'small',
@@ -143,6 +157,8 @@ export function calculate(
     ],
     markers,
     barColors,
+    // alertcondition(longCondition), (shortCondition), (longCondition or shortCondition)
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags, longFlags.map((f, i) => f || shortFlags[i])]),
   };
 }
 
@@ -152,4 +168,5 @@ export const RangeFilterBuySell5min = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

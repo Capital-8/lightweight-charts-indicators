@@ -5,6 +5,8 @@
  * pressure is scaled to -50..50 over its range of the last bars and the histogram is their difference (-100..100),
  * with fixed thresholds at +/- line height. "Raw": the histogram is bulls - bears, with thresholds at a percentile
  * of its rolling range. Dots mark the bars above the upper / below the lower threshold.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Crossover' (above the upper threshold), 'Bearish
+ * Crossover' (below the lower threshold), 'Total Crossover' and 'Bearish Zero Cross' (histogram crosses above / below 0).
  *
  * Reference: "Bulls v Bears" by Mihkel00
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,15 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Crossover', message: 'Bullish overbought' },
+  { id: 'alert1', title: 'Bearish Crossover', message: 'Bearish oversold' },
+  { id: 'alert2', title: 'Total Crossover', message: 'BvB total crossover' },
+  { id: 'alert3', title: 'Bearish Zero Cross', message: 'Bulls v Bears: Bearish zero line cross' },
+];
 
 export interface BullsVBearsInputs {
   /** BvB period (MA length) */
@@ -89,7 +100,7 @@ const div = (a: number, b: number) => (b === 0 ? NaN : a / b);
 export function calculate(
   bars: Bar[],
   inputs: Partial<BullsVBearsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -132,12 +143,15 @@ export function calculate(
   const markers: MarkerData[] = [];
   const raw = cfg.normType === 'Raw' && cfg.showThresholdLines;
   const thresholdColor = String(color.new(color.gray, 50));
+  // bullish_o = total > upper_threshold; bearish_o = total < lower_threshold
+  const bullishO = total.map((v, i) => gt(v, upper[i]));
+  const bearishO = total.map((v, i) => lt(v, lower[i]));
   for (let i = 0; i < n; i++) {
     // plotshape(show_signals and bullish_o, shape.circle, location.top, ...); bearish_o: location.bottom.
-    if (cfg.showSignals && gt(total[i], upper[i])) {
+    if (cfg.showSignals && bullishO[i]) {
       markers.push({ time: bars[i].time, position: 'top', shape: 'circle', color: cfg.bullishDotColor, size: 'auto' });
     }
-    if (cfg.showSignals && lt(total[i], lower[i])) {
+    if (cfg.showSignals && bearishO[i]) {
       markers.push({ time: bars[i].time, position: 'bottom', shape: 'circle', color: cfg.bearishDotColor, size: 'auto' });
     }
   }
@@ -162,6 +176,8 @@ export function calculate(
     },
     hlines,
     markers,
+    // alertcondition(bullish_o) / (bearish_o) / (ta.crossover(total, 0)) / (ta.crossunder(total, 0))
+    alerts: alertStates(alertConditions, bars, [bullishO, bearishO, crossedOver(total, 0), crossedUnder(total, 0)]),
   };
 }
 
@@ -171,4 +187,5 @@ export const BullsVBears = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

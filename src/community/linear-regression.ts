@@ -9,6 +9,8 @@
  * Displacement" is on (then the lines of every bar stay, at most 50 as the original keeps). A BUY label marks a close
  * that crosses below the lower line, a SELL label a close that crosses above the upper line; with "Hide Old Signals"
  * only the labels of the last `length` bars are shown.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Lin Reg' and 'Sell Lin Reg', true on every bar of a BUY /
+ * SELL cross (also the bars before the last `length` ones).
  *
  * Other timeframe ("Resolution" not empty): the bars of that timeframe are built from the chart bars and a chart bar
  * shows the value of the latest completed bar of the timeframe. A timeframe below the chart timeframe needs data that
@@ -29,6 +31,7 @@ import type { LineDrawingData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type SourceName = 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'hlcc4' | 'ohlc4' | 'volume';
 
@@ -142,7 +145,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<LinearRegressionInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers' | 'lines'> & { markers: MarkerData[]; lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'markers' | 'lines'> & { markers: MarkerData[]; lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const length = cfg.length;
@@ -236,8 +239,15 @@ export function calculate(
       time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: String(l.color),
       width: l.width, extend: 'right' as const,
     })),
+    alerts: alertStates(alertConditions, bars, [buy, sell]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Lin Reg', message: 'Crossing On the Lower Regression Channel' },
+  { id: 'alert1', title: 'Sell Lin Reg', message: 'Crossing On the Higher Regression Channel' },
+];
 
 export const LinearRegression = {
   calculate,
@@ -245,4 +255,5 @@ export const LinearRegression = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

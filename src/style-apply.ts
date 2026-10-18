@@ -4,7 +4,7 @@
  * candle colours and drawing kinds. `calculate` then stamps the id of its declaration on the background / bar colours
  * and the fills between plots of its result, so a host can change or hide each of them.
  */
-import type { BarColorConfig, CandleConfig, FillConfig, HLineConfig, PlotConfig } from 'oakscriptjs';
+import type { ArrowConfig, BarColorConfig, CandleConfig, FillConfig, HLineConfig, PlotConfig } from 'oakscriptjs';
 import { STYLE_OUTPUTS, type StudyDrawingKind, type StyleOutputs, type StyleShapeConfig } from './style-outputs';
 
 /** A plotcandle() / plotbar() output of an entry: id of its candles in the result's `plotCandles`, title, colours */
@@ -18,6 +18,8 @@ interface StyleTarget {
   plotCandleConfig?: PlotCandleDecl[];
   shapeConfig?: StyleShapeConfig[];
   barColorConfig?: BarColorConfig[];
+  arrowConfig?: ArrowConfig[];
+  styleOrder?: StyleOutputs['styleOrder'];
   markerDrawing?: StudyDrawingKind;
   drawingKinds?: StudyDrawingKind[];
   /** Style declarations of the hlines of the result (built-ins without hlineConfig): `hline<k>` for the k-th */
@@ -124,6 +126,8 @@ export function withStyleOutputs<T extends StyleTarget>(entry: T): T {
   if (decl.shapes) e.shapeConfig = decl.shapes;
   if (decl.markerDrawing) e.markerDrawing = decl.markerDrawing;
   if (decl.barColors) e.barColorConfig = decl.barColors;
+  if (decl.arrows && !entry.arrowConfig) e.arrowConfig = decl.arrows;
+  if (decl.styleOrder) e.styleOrder = decl.styleOrder;
   if (decl.candles && entry.plotCandleConfig) {
     e.plotCandleConfig = entry.plotCandleConfig.map((c) => (decl.candles![c.id] ? { ...c, ...decl.candles![c.id], id: c.id } as PlotCandleDecl : c));
   } else if (decl.candles) {

@@ -15,6 +15,9 @@
  * and an error cell in a table when the last bar has no volume or when fewer than "Nº Bins" breaks of a side were
  * seen. At most 500 labels are kept.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend' and 'Bearish Trend', true on the bars of the up /
+ * down arrows.
+ *
  * The original imports the `ta` library of its platform; of its functions only supertrend() is called, which is the
  * built-in SuperTrend calculation (close prices, no wicks).
  *
@@ -30,6 +33,7 @@
 import { ta, array, str, color, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, LabelData, MarkerData, TableData } from '../types';
 import { lastBarConfirmedOf, tickeridOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SupertrendRelativeVolumeKernelInputs {
   atrLength: number;
@@ -153,7 +157,7 @@ export function calculate(
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'labels' | 'tables'> & {
   markers: MarkerData[]; labels: LabelData[]; tables: TableData[]; barColors: BarColorData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const steps = Math.trunc(cfg.kdeStep);
@@ -234,6 +238,8 @@ export function calculate(
 
   let volumeProb = NaN;
   let trendUp = false;
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
   const gray = String(color.gray);
   const labelColor = String(color.new(color.blue, 100));
 
@@ -264,6 +270,8 @@ export function calculate(
     const thresholdOk = !cfg.activationThresholdEnabled || ge(volumeProb, threshold);
     const bullCondition = bullishBreak && thresholdOk;
     const bearCondition = bearishBreak && thresholdOk;
+    bullFlags.push(bullCondition);
+    bearFlags.push(bearCondition);
     if (bullCondition) trendUp = true;
     else if (bearCondition) trendUp = false;
 
@@ -339,8 +347,16 @@ export function calculate(
     // a label with an na price is not drawn
     labels: labels.filter((l) => !isNaN(l.price)),
     tables,
+    // alertcondition(bull_condition, "Bullish Trend") / alertcondition(bear_condition, "Bearish Trend")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Bearish Trend', message: 'Alert Fired!' },
+];
 
 export const SupertrendRelativeVolumeKernel = {
   calculate,
@@ -348,4 +364,5 @@ export const SupertrendRelativeVolumeKernel = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

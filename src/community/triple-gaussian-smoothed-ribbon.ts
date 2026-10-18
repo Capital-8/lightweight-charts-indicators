@@ -7,6 +7,8 @@
  * gradient of the normalised distance v2 - v1 over 70 bars (bullish to bearish); the ribbon fill opacity follows the
  * momentum |v1 - v1[5]| relative to its 50-bar high. An ATR glow band, bar colours and triangles at crossings of v2
  * and v1 (away from consolidation) complete the display.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Signal' and 'Bearish Signal', true on the bars of the
+ * triangles (v2 crosses under / over v1 away from consolidation).
  *
  * Reference: "Triple Gaussian Smoothed Ribbon [BOSWaves]" by BOSWaves
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TripleGaussianSmoothedRibbonInputs {
   /** Main smoothing length */
@@ -112,7 +115,7 @@ function gaussian(source: number[], length: number, sig: number): number[] {
 export function calculate(
   bars: Bar[],
   inputs: Partial<TripleGaussianSmoothedRibbonInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -170,10 +173,14 @@ export function calculate(
   const crossUnder = A(ta.crossunder(v2S, v1S));
   const crossOver = A(ta.crossover(v2S, v1S));
   const markers: MarkerData[] = [];
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const signalOffset = atr[i] * 1.5;
     // isConsolidating = rangev1 / v1 < minSeparation
     const isConsolidating = lt((rangeHigh[i] - rangeLow[i]) / v1[i], cfg.minSeparation);
+    // validBullish = ta.crossunder(v2, v1) and not isConsolidating / validBearish = ta.crossover(v2, v1) and ...
+    bullFlags.push(crossUnder[i] === 1 && !isConsolidating);
+    bearFlags.push(crossOver[i] === 1 && !isConsolidating);
     // plotshape(validBullish ? extremeLow - signalOffset : na, shape.triangleup, location.absolute, size.normal)
     if (crossUnder[i] === 1 && !isConsolidating) {
       const price = extremeLow[i] - signalOffset;
@@ -219,8 +226,15 @@ export function calculate(
     ],
     barColors,
     markers,
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions (no message: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Signal', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Bearish Signal', message: 'Alert Fired!' },
+];
 
 export const TripleGaussianSmoothedRibbon = {
   calculate,
@@ -228,4 +242,5 @@ export const TripleGaussianSmoothedRibbon = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

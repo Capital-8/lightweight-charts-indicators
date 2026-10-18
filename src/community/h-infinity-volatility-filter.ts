@@ -5,6 +5,7 @@
  * error of 1. On every bar: error += noise; gain = error / (error + disturbance); state += gain * (source - state);
  * error = (1 - gain) * error. The line is the first state. The trend is 1 when the line rises, -1 when it falls and
  * keeps its value when the line is flat; the line and the candles take the bullish / bearish colour of the trend.
+ * Alerts (alertcondition, `alerts` of the result): the trend crossing over / under 0 (turning bullish / bearish).
  *
  * Reference: "H-Infinity Volatility Filter [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HInfinityVolatilityFilterInputs {
   /** Price source of the filter */
@@ -66,7 +68,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<HInfinityVolatilityFilterInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const order = cfg.inputOrder;
@@ -120,8 +122,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     barColors,
+    // alertcondition(ta.crossover(trend, 0)) / alertcondition(ta.crossunder(trend, 0))
+    alerts: alertStates(alertConditions, bars, [crossedOver(trend, 0), crossedUnder(trend, 0)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend', message: 'H∞ Filter: Bullish Trend Detected' },
+  { id: 'alert1', title: 'Bearish Trend', message: 'H∞ Filter: Bearish Trend Detected' },
+];
 
 export const HInfinityVolatilityFilter = {
   calculate,
@@ -129,4 +139,5 @@ export const HInfinityVolatilityFilter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

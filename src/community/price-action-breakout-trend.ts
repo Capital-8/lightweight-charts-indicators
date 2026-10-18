@@ -7,6 +7,8 @@
  * the stop resets to the prior high. The short side is the mirror. Presets set the lookback and the confirmation.
  * The stop is drawn as a step line with a six-layer fill fading from the stop to the close; triangles mark the
  * trend flips; optional breakout level lines, bar colours and background colours.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Breakout Signal', 'Bearish Breakout Signal' and 'Any
+ * Breakout Signal', true on the bars where the trend turns long, short, or either.
  *
  * Reference: "Price Action Breakout Trend [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PriceActionBreakoutTrendInputs {
   /** Preset: 'Fast Response' (5, Wick) and 'Smooth Trend' (25, Close) override the lookback and confirmation */
@@ -104,7 +107,8 @@ const PRESET_COLORS: Record<string, [string, string]> = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<PriceActionBreakoutTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -192,10 +196,14 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const bullMarker = String(color.new(bullishColor, 0));
   const bearMarker = String(color.new(bearishColor, 0));
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [], changedFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const prev = i > 0 ? trendArr[i - 1] : NaN;
     const turnedBullish = trendArr[i] === 1 && prev === -1;
     const turnedBearish = trendArr[i] === -1 && prev === 1;
+    bullFlags.push(turnedBullish);
+    bearFlags.push(turnedBearish);
+    changedFlags.push(turnedBullish || turnedBearish);
     if (cfg.showMarkers && turnedBullish) {
       markers.push({ time: t(i), position: 'belowBar', shape: 'triangleUp', color: bullMarker, size: 'small' });
     }
@@ -218,8 +226,17 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    // alertcondition(turned_bullish / turned_bearish / trend_changed)
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags, changedFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Breakout Signal', message: 'Price Action Breakout Trend: BULLISH breakout confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Breakout Signal', message: 'Price Action Breakout Trend: BEARISH breakout confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Any Breakout Signal', message: 'Price Action Breakout Trend: Trend direction changed on {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const PriceActionBreakoutTrend = {
   calculate,
@@ -227,4 +244,5 @@ export const PriceActionBreakoutTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -161,8 +161,9 @@ export function calculate(
   const plot2: typeof plot0 = [];
   const plot3: typeof plot0 = [];
   const markers: MarkerData[] = [];
-  const mark = (time: number, shapeColor: string, text: string): void => {
-    markers.push({ time, position: 'belowBar', shape: 'arrowUp', color: shapeColor, text, textColor: TEXT_BLUE });
+  // id: the original's plotshape output (shape0..shape3 in declaration order)
+  const mark = (time: number, shapeColor: string, text: string, id: string): void => {
+    markers.push({ time, position: 'belowBar', shape: 'arrowUp', color: shapeColor, text, textColor: TEXT_BLUE, id });
   };
 
   for (let i = 0; i < n; i++) {
@@ -184,10 +185,10 @@ export function calculate(
     const alert3 = upRange && strength && filtered;
     const alert4 = upRangeAggr && strength && filteredAggr;
 
-    if (cfg.sbcc && alert1) mark(b.time, LIME, 'WVF');
-    if (cfg.sbc && alert2) mark(b.time, AQUA, 'WVF Was True\nNow False');
-    if (cfg.sbcAggr && alert4) mark(b.time, ORANGE, 'Aggressive\nEntry');
-    if (cfg.sbcFilt && alert3) mark(b.time, FUCHSIA, 'Filtered\nEntry');
+    if (cfg.sbcc && alert1) mark(b.time, LIME, 'WVF', 'shape0');
+    if (cfg.sbc && alert2) mark(b.time, AQUA, 'WVF Was True\nNow False', 'shape1');
+    if (cfg.sbcAggr && alert4) mark(b.time, ORANGE, 'Aggressive\nEntry', 'shape2');
+    if (cfg.sbcFilt && alert3) mark(b.time, FUCHSIA, 'Filtered\nEntry', 'shape3');
 
     plot0.push({ time: b.time, value: cfg.sa1 && alert1 ? 1 : 0 });
     plot1.push({ time: b.time, value: cfg.sa2 && alert2 ? 1 : 0 });

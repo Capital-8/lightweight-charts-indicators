@@ -14,6 +14,10 @@
  * period). A timeframe below the chart timeframe needs data that the chart bars do not have: the port throws an
  * Error. The plot widths are inputs in the original; the plots are drawn with their default widths.
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close), each with its switch: MACD crosses up,
+ * MACD crosses down, and (off by default) crosses up with MACD > 0 and crosses down with MACD < 0. The message gives
+ * the symbol (`tickerid` of the chart context), the chart timeframe and the close, as the original builds it.
+ *
  * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
  * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
  * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
@@ -26,12 +30,15 @@
  */
 
 import {
-  ta, Series, color, timeframe, getSourceSeries, mapToChart,
+  ta, Series, color, timeframe, str, getSourceSeries, mapToChart,
   type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
-import type { BarColorData, BgColorData } from '../types';
+import type { AlertCall, BarColorData, BgColorData } from '../types';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
-import type { ChartContext } from '../chart-context';
+import { tickeridOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface CmMacdCustomMtfV5Inputs {
   /** Timeframe of the MACD ('' = chart timeframe) */
@@ -190,7 +197,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<CmMacdCustomMtfV5Inputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } {
+): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -226,6 +233,10 @@ export function calculate(
   let histBIsDown = false;
   let histBIsUp = false;
   const signalColor = opaque(cfg.colSignal);
+  const alertCalls: AlertCall[] = [];
+  // syminfo.tickerid and timeframe.period (the chart timeframe, "D" for 1D) of the alert messages
+  const tickerid = tickeridOf(chart);
+  const period = chartTimeframe(bars, chart).replace(/^1([DWM])$/, '$1');
   for (let i = 0; i < n; i++) {
     const time = bars[i].time;
     const m = macd[i];
@@ -253,10 +264,10 @@ export function calculate(
       : histBIsDown ? cfg.colGrowBelow : histBIsUp ? cfg.colFallBelow : SILVER;
 
     // The two bgcolor calls and the two barcolor calls never colour the same bar
-    if (cfg.showCross && crossUp) bgColors.push({ time, color: cfg.colTrndUp });
-    if (cfg.showCross && crossDn) bgColors.push({ time, color: cfg.colTrndDn });
-    if (cfg.showHB && trendUp) barColors.push({ time, color: cfg.colTrndUp });
-    if (cfg.showHB && trendDn) barColors.push({ time, color: cfg.colTrndDn });
+    if (cfg.showCross && crossUp) bgColors.push({ id: 'bgcolor0', time, color: cfg.colTrndUp });
+    if (cfg.showCross && crossDn) bgColors.push({ id: 'bgcolor1', time, color: cfg.colTrndDn });
+    if (cfg.showHB && trendUp) barColors.push({ id: 'barcolor0', time, color: cfg.colTrndUp });
+    if (cfg.showHB && trendDn) barColors.push({ id: 'barcolor1', time, color: cfg.colTrndDn });
 
     // plot(show and x ? x : na): a value of 0 or na is not drawn
     plot0.push({ time, value: cfg.showHist && truthy(h) ? h : NaN, color: opaque(histCol) });
@@ -264,6 +275,17 @@ export function calculate(
     plot2.push({ time, value: cfg.showMacd && truthy(m) ? m : NaN, color: opaque(trendCol) });
     plot3.push({ time, value: cfg.showDots && crossUp ? m : NaN, color: opaque(trendCol) });
     plot4.push({ time, value: cfg.showDots && crossDn ? m : NaN, color: opaque(trendCol) });
+
+    // if alert_X and cond: alert("Symbol = (" + syminfo.tickerid + ") TimeFrame = (" + timeframe.period
+    //   + ") Current Price (" + str.tostring(close) + ") ...", alert.freq_once_per_bar_close)
+    const alert = (text: string) => alertCalls.push({
+      time, freq: 'once_per_bar_close',
+      message: `Symbol = (${tickerid}) TimeFrame = (${period}) Current Price (${str.tostring(bars[i].close)}) ${text}`,
+    });
+    if (cfg.alertLong && crossUp) alert('MACD Crosses Up.');
+    if (cfg.alertShort && crossDn) alert('MACD Crosses Down.');
+    if (cfg.alertLongA && crossUp && gt(m, 0)) alert('MACD > 0 And Crosses Up.');
+    if (cfg.alertShortB && crossDn && lt(m, 0)) alert('MACD < 0 And Crosses Down.');
   }
 
   return {
@@ -272,7 +294,8 @@ export function calculate(
     hlines: [{ value: 0, options: { title: '0 Line', color: GRAY, linestyle: 'dashed', linewidth: 1 } }],
     barColors,
     bgColors,
+    alertCalls,
   };
 }
 
-export const CmMacdCustomMtfV5 = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig };
+export const CmMacdCustomMtfV5 = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, hasAlertFunction };

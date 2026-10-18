@@ -7,10 +7,14 @@
  * T3 = c1*e6 + c2*e5 + c3*e4 + c4*e3
  * where c1=-a^3, c2=3a^2+3a^3, c3=-6a^2-3a-3a^3, c4=1+3a+a^3+3a^2
  *
+ * Alerts (alertcondition, `alerts` of the result): 'T3 BUY' when T3 crosses over T3[1] (starts rising), 'T3 SELL'
+ * when it crosses under (starts falling), 'Color ALARM' on either cross.
+ *
  * Reference: "Tillson T3" by KivancOzbilgic (fr3762)
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TillsonT3Inputs {
   length: number;
@@ -47,7 +51,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TillsonT3Inputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<TillsonT3Inputs> = {}): IndicatorResult & { alerts: AlertConditionState[] } {
   const { length, volumeFactor, lengthFibo, volumeFactorFibo, showFibo } = { ...defaultInputs, ...inputs };
   const a = volumeFactor;
 
@@ -107,10 +111,24 @@ export function calculate(bars: Bar[], inputs: Partial<TillsonT3Inputs> = {}): I
     });
   }
 
+  // crossover(T3, T3[1]) / crossunder(T3, T3[1]) / cross(T3, T3[1])
+  const t3Now = t3Arr.map((v) => v ?? NaN);
+  const t3Prev = t3Now.map((_v, i) => (i > 0 ? t3Now[i - 1] : NaN));
+  const buy = crossedOver(t3Now, t3Prev);
+  const sell = crossedUnder(t3Now, t3Prev);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
+    alerts: alertStates(alertConditions, bars, [buy, sell, buy.map((b, i) => b || sell[i])]),
   };
 }
 
-export const TillsonT3 = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'T3 BUY', message: 'T3 BUY!' },
+  { id: 'alert1', title: 'T3 SELL', message: 'T3 SELL!' },
+  { id: 'alert2', title: 'Color ALARM', message: 'T3 has changed color!' },
+];
+
+export const TillsonT3 = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

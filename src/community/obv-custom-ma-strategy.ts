@@ -5,11 +5,23 @@
  * previous close, subtracts it when the close is below, and stays the same otherwise. A short-term and a long-term
  * moving average (SMA, EMA or WMA) of the OBV are plotted with it.
  *
+ * Alerts (alertcondition, `alerts` of the result): the short-term MA crossing over / under the long-term MA and the
+ * OBV crossing over / under the short-term MA.
+ *
  * Reference: "OBV + Custom MA Strategy" by Rafiki-is-Trading
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Signal (MA Crossover)', message: 'Bullish signal: Short-term MA crosses above long-term MA' },
+  { id: 'alert1', title: 'Bearish Signal (MA Crossover)', message: 'Bearish signal: Short-term MA crosses below long-term MA' },
+  { id: 'alert2', title: 'Bullish Signal (OBV Crossover)', message: 'Bullish signal: OBV crosses above short-term MA' },
+  { id: 'alert3', title: 'Bearish Signal (OBV Crossover)', message: 'Bearish signal: OBV crosses below short-term MA' },
+];
 
 export type ObvCustomMaType = 'SMA' | 'EMA' | 'WMA';
 
@@ -51,7 +63,10 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<ObvCustomMaStrategyInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<ObvCustomMaStrategyInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -89,6 +104,9 @@ export function calculate(bars: Bar[], inputs: Partial<ObvCustomMaStrategyInputs
       plot1: maShort.map((v, i) => ({ time: t(i), value: v, color: color.red })),
       plot2: maLong.map((v, i) => ({ time: t(i), value: v, color: color.green })),
     },
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(maShort, maLong), crossedUnder(maShort, maLong), crossedOver(obv, maShort), crossedUnder(obv, maShort),
+    ]),
   };
 }
 
@@ -98,4 +116,5 @@ export const ObvCustomMaStrategy = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

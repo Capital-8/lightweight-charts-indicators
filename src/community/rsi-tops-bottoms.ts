@@ -5,13 +5,17 @@
  * finds the extreme RSI value within that zone, then compares consecutive
  * OB/OS events for bearish/bullish divergence (price makes new high but
  * RSI doesn't, or vice versa). Outputs RSI plot with OB/OS bands and
- * optionally colors bars on divergence signals.
+ * optionally colors bars on divergence signals. A divergence is tested on the bar where the RSI leaves the zone
+ * (the original's change(lastlowestrsi) != 0 / change(lasthighestrsi) != 0).
+ * Alerts (alertcondition, `alerts` of the result): 'Divergence at Bottoms' and 'Divergence at Tops', true on the bars
+ * of these divergences.
  *
  * Reference: "RSI Tops and Bottoms" by LonesomeTheBlue
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, LineDrawingData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiTopsBottomsInputs {
   rsiLength: number;
@@ -70,7 +74,8 @@ function getSource(bar: Bar, src: string): number {
   }
 }
 
-export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; lines: LineDrawingData[] } {
+export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; lines: LineDrawingData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -129,7 +134,8 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
     osCount = belowOs ? osCount + 1 : !belowOs ? 0 : osCount;
 
     // When we exit oversold zone
-    if (prevBelowOs && !belowOs && prevOsCount > 0) {
+    const exitOs = prevBelowOs && !belowOs && prevOsCount > 0;
+    if (exitOs) {
       prevLastLowestRsi = lastLowestRsi;
       prevLastLowestPrice = lastLowestPrice;
       prevLastLowestBi = lastLowestBi;
@@ -150,8 +156,8 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
       }
     }
 
-    // Bullish divergence: RSI higher low but price lower low
-    if (!isNaN(lastLowestRsi) && !isNaN(prevLastLowestRsi) &&
+    // Bullish divergence: RSI higher low but price lower low (change(lastlowestrsi) != 0: only on the exit bar)
+    if (exitOs && !isNaN(lastLowestRsi) && !isNaN(prevLastLowestRsi) &&
         lastLowestRsi !== prevLastLowestRsi &&
         lastLowestRsi > prevLastLowestRsi &&
         lastLowestPrice < prevLastLowestPrice &&
@@ -179,7 +185,8 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
     obCount = aboveOb ? obCount + 1 : !aboveOb ? 0 : obCount;
 
     // When we exit overbought zone
-    if (prevAboveOb && !aboveOb && prevObCount > 0) {
+    const exitOb = prevAboveOb && !aboveOb && prevObCount > 0;
+    if (exitOb) {
       prevLastHighestRsi = lastHighestRsi;
       prevLastHighestPrice = lastHighestPrice;
       prevLastHighestBi = lastHighestBi;
@@ -200,8 +207,8 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
       }
     }
 
-    // Bearish divergence: RSI lower high but price higher high
-    if (!isNaN(lastHighestRsi) && !isNaN(prevLastHighestRsi) &&
+    // Bearish divergence: RSI lower high but price higher high (change(lasthighestrsi) != 0: only on the exit bar)
+    if (exitOb && !isNaN(lastHighestRsi) && !isNaN(prevLastHighestRsi) &&
         lastHighestRsi !== prevLastHighestRsi &&
         lastHighestRsi < prevLastHighestRsi &&
         lastHighestPrice > prevLastHighestPrice &&
@@ -254,7 +261,15 @@ export function calculate(bars: Bar[], inputs: Partial<RsiTopsBottomsInputs> = {
     markers,
     barColors,
     lines,
+    // alertcondition(maygoup, ...) / alertcondition(maygodown, ...)
+    alerts: alertStates(alertConditions, bars, [mayGoUp, mayGoDown]),
   };
 }
 
-export const RsiTopsBottoms = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Divergence at Bottoms', message: 'Divergence at Bottom, Price may go UP' },
+  { id: 'alert1', title: 'Divergence at Tops', message: 'Divergence at Bottom, Price may go DOWN' },
+];
+
+export const RsiTopsBottoms = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

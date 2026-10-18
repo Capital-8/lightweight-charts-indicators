@@ -11,6 +11,7 @@
  *   the value did not change.
  * - Signals: "Buy Retrace" when the leg goes up and the bar touches the target level from above (low at or below,
  *   high above), "Sell Retrace" for the mirror. Only the first touch since the end of the leg changed is marked.
+ * - Alerts (alertcondition, `alerts` of the result): 'Buy Retrace' / 'Sell Retrace', true on the bars of each signal.
  *
  * Reference: "Auto Fib Retracement Alerts" by DevLucem
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,6 +20,7 @@
 
 import { callsite, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AutoFibRetracementAlertsInputs {
   /** Minimum move (%) for a new leg */
@@ -136,7 +138,7 @@ interface Leg { x1: number; y1: number; x2: number; y2: number }
 export function calculate(
   bars: Bar[],
   inputs: Partial<AutoFibRetracementAlertsInputs> = {},
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; markers: MarkerData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // depth / 2 is a float division: the history offset truncates it, the loop bound keeps it
@@ -193,6 +195,7 @@ export function calculate(
   const plot1: Array<{ time: number; value: number; color: string }> = [];
   const plot2: Array<{ time: number; value: number; color: string }> = [];
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const { high, low, time } = bars[i];
@@ -237,6 +240,8 @@ export function calculate(
     const sellAlert = sell && gt(prevSinceSell, sinceChangeB);
     prevSinceBuy = nowBuy;
     prevSinceSell = nowSell;
+    buyFlags.push(buyAlert);
+    sellFlags.push(sellAlert);
 
     if (buyAlert) {
       markers.push({ time, position: 'belowBar', shape: 'labelUp', color: LIME, text: 'Buy Retrace', textColor: '#363A45' });
@@ -277,7 +282,15 @@ export function calculate(
     markers,
     lines,
     labels,
+    // alertcondition(buy_alert, "Buy Retrace") / alertcondition(sell_alert, "Sell Retrace")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
 
-export const AutoFibRetracementAlerts = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions (no message: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Retrace', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Sell Retrace', message: 'Alert Fired!' },
+];
+
+export const AutoFibRetracementAlerts = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

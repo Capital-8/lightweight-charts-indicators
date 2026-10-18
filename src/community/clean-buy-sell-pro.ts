@@ -4,6 +4,8 @@
  * Trend from a fast and a slow EMA of the close. A buy condition is a bull trend (fast EMA > slow EMA) with the close
  * above the fast EMA; a sell condition is a bear trend with the close below the fast EMA. With the RSI confirmation,
  * the RSI must also be above 50 (buy) or below 50 (sell). A BUY / SELL label marks the first bar of each condition.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY Signal' and 'SELL Signal', true on the first bar of each
+ * condition (with the labels hidden too).
  *
  * Reference: "Clean Buy Sell Pro [v6]" by JohnsonForexTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +13,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CleanBuySellProInputs {
   /** Fast EMA length */
@@ -58,7 +61,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<CleanBuySellProInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const close = Series.fromArray(bars, bars.map((b) => b.close));
@@ -67,6 +70,7 @@ export function calculate(
   const rsiValue = A(ta.rsi(close, cfg.rsiLength));
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   let buyPrev = false;
   let sellPrev = false;
   for (let i = 0; i < bars.length; i++) {
@@ -88,6 +92,8 @@ export function calculate(
     const sellSignal = sellCondition && !sellPrev;
     buyPrev = buyCondition;
     sellPrev = sellCondition;
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
 
     // plotshape(showLabels and buySignal, "BUY", shape.labelup, location.belowbar, color.lime, text = "BUY",
     //   textcolor = color.black, size = size.tiny)
@@ -103,12 +109,19 @@ export function calculate(
     }
   }
 
-  // alertcondition(buySignal, "BUY Signal") and alertcondition(sellSignal, "SELL Signal"): no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    // alertcondition(buySignal, "BUY Signal") / alertcondition(sellSignal, "SELL Signal")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
 
-export const CleanBuySellPro = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY Signal', message: 'Clean Buy Sell Pro: BUY signal detected.' },
+  { id: 'alert1', title: 'SELL Signal', message: 'Clean Buy Sell Pro: SELL signal detected.' },
+];
+
+export const CleanBuySellPro = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

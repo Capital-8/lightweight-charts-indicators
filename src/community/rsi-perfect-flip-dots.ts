@@ -1,9 +1,10 @@
 /**
  * RSI PERFECT Flip Dots
  *
- * RSI of the source, then a fast EMA (5) and a slow EMA (14) of the RSI. An up arrow below the bar while the fast
- * EMA is above the slow EMA, a down arrow above the bar while it is below. A large green dot below the bar where the
- * fast EMA crosses over the slow EMA, a large red dot above the bar where it crosses under (confirmed bars only).
+ * RSI of the source, then a fast EMA (5) and a slow EMA (14) of the RSI. An up arrow while the fast EMA is above the
+ * slow EMA, a down arrow while it is below (the two plotarrow outputs: `arrows` of the result, value 1 / -1). A large
+ * green dot below the bar where the fast EMA crosses over the slow EMA, a large red dot above the bar where it
+ * crosses under (confirmed bars only).
  *
  * Last bar: a buy / sell dot needs a closed bar. The port reads the state of the last bar from the optional third
  * argument (see src/chart-context.ts); without it every bar is taken as closed.
@@ -14,7 +15,7 @@
 
 import {
   ta, Series, getSourceSeries, color,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType, type ArrowData,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
@@ -52,7 +53,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<RsiPerfectFlipDotsInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; arrows: ArrowData[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -78,29 +79,31 @@ export function calculate(
   const red = String(color.red);
 
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   bars.forEach((b, i) => {
     const bullCond = gt(fast[i], slow[i]);
     const bearCond = lt(fast[i], slow[i]);
 
     // plotarrow(bullCond ? 1 : na, colorup = color.new(bullishColor, 70)): arrow height not ported
-    if (bullCond) markers.push({ time: b.time, position: 'belowBar', shape: 'arrowUp', color: arrowUpColor });
+    if (bullCond) arrows.push({ time: b.time, id: 'arrow0', value: 1, color: arrowUpColor });
     // plotarrow(bearCond ? -1 : na, colordown = color.new(bearishColor, 70))
-    if (bearCond) markers.push({ time: b.time, position: 'aboveBar', shape: 'arrowDown', color: arrowDownColor });
+    if (bearCond) arrows.push({ time: b.time, id: 'arrow1', value: -1, color: arrowDownColor });
 
     const isConfirmed = barIsConfirmed(i); // barstate.isconfirmed
     const buySignal = isConfirmed && bullFlip[i] === 1;
     const sellSignal = isConfirmed && bearFlip[i] === 1;
 
     // plotshape(buySignal, location.belowbar, shape.circle, color.green, size.large, title = "Buy Dot")
-    if (buySignal) markers.push({ time: b.time, position: 'belowBar', shape: 'circle', color: green, size: 'large' });
+    if (buySignal) markers.push({ id: 'shape0', time: b.time, position: 'belowBar', shape: 'circle', color: green, size: 'large' });
     // plotshape(sellSignal, location.abovebar, shape.circle, color.red, size.large, title = "Sell Dot")
-    if (sellSignal) markers.push({ time: b.time, position: 'aboveBar', shape: 'circle', color: red, size: 'large' });
+    if (sellSignal) markers.push({ id: 'shape1', time: b.time, position: 'aboveBar', shape: 'circle', color: red, size: 'large' });
   });
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    arrows,
   };
 }
 

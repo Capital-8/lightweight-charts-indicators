@@ -146,8 +146,8 @@ export function calculate(
     // fill(sharpeplot, h1, sharpe_smooth > thresh_ob ? color.new(pos_col, 80) : na)
     fillOb[i] = above ? posFill : NA;
     // two bgcolor calls (force_overlay): the second one is drawn on top; they never hold on the same bar
-    if (below) bgColors.push({ time: bars[i].time, color: negBg, forceOverlay: true });
-    if (above) bgColors.push({ time: bars[i].time, color: posBg, forceOverlay: true });
+    if (below) bgColors.push({ id: 'bgcolor0', time: bars[i].time, color: negBg, forceOverlay: true });
+    if (above) bgColors.push({ id: 'bgcolor1', time: bars[i].time, color: posBg, forceOverlay: true });
     // plotcandle(open, high, low, close, color = definitecol, wickcolor = definitecol, bordercolor = definitecol, force_overlay = true)
     const b = bars[i];
     candles.push({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close,

@@ -6,6 +6,8 @@
  * The score adds +1 for each bar offset from `Calculation Start` to `Calculation End` where the filter is above its
  * value at that offset, and -1 otherwise. A score above the long threshold sets the trend long, a cross under the
  * short threshold sets it short. The score line, the optional bar colours and background follow the trend.
+ * Alerts (alertcondition, `alerts` of the result): 'Bilateral Filter FL Long' (score above the long threshold and no
+ * cross under the short one) and 'Bilateral Filter FL Short' (score crossing under the short threshold).
  *
  * Reference: "Bilateral Filter For Loop [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,13 @@
 
 import { getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bilateral Filter FL Long', message: 'Bilateral Filter FL Long - {{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bilateral Filter FL Short', message: 'Bilateral Filter FL Short - {{ticker}} - {{interval}}' },
+];
 
 export interface BilateralFilterForLoopInputs {
   /** Price source */
@@ -97,7 +106,7 @@ const gt = (a: number, b: number) => a - b > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<BilateralFilterForLoopInputs> = {},
-): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } {
+): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = getSourceSeries(bars, cfg.src).toArray().map((v) => v ?? NaN);
@@ -139,9 +148,12 @@ export function calculate(
   // L = score > upper; S = ta.crossunder(score, lower) (exact comparison); var out = 0
   const outArr: number[] = new Array(n);
   let out = 0;
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
   for (let b = 0; b < n; b++) {
     const L = gt(score[b], cfg.upper);
     const S = b > 0 && score[b] < cfg.lower && score[b - 1] >= cfg.lower;
+    longFlags.push(L && !S);
+    shortFlags.push(S);
     if (L && !S) out = 1;
     if (S) out = -1;
     outArr[b] = out;
@@ -170,6 +182,8 @@ export function calculate(
     plots: { plot0, plot1, plot2 },
     barColors,
     bgColors,
+    // alertcondition(L and not S, "Bilateral Filter FL Long") / alertcondition(S, "Bilateral Filter FL Short")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
@@ -179,4 +193,5 @@ export const BilateralFilterForLoop = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

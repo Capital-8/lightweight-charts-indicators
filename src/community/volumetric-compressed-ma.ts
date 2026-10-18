@@ -7,6 +7,7 @@
  * ma(compressed volume) over `Comperative Lookback` bars; the second line is ma(close) over the compression
  * lookback (the selected MA type for both). The area between the two lines is teal when the Compressed MA is above,
  * maroon otherwise; circles mark their crossings.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Cross' and 'Bearish Cross' on the bars of the circles.
  *
  * Reference: "Volumetric Compressed MA" by serkany88
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type VolumetricCompressedMAType = 'RMA' | 'SMA' | 'EMA' | 'WMA';
 
@@ -64,7 +66,7 @@ const gt = (a: number, b: number) => a - b > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumetricCompressedMAInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -121,6 +123,8 @@ export function calculate(
   // ta.crossover / ta.crossunder(comp_ma, vwma): exact comparisons with the last bar where both values were not na
   const markers: MarkerData[] = [];
   const overColor = 'rgb(2, 145, 14)';
+  const overFlags = new Array<boolean>(n).fill(false);
+  const underFlags = new Array<boolean>(n).fill(false);
   let pa = NaN;
   let pb = NaN;
   for (let i = 0; i < n; i++) {
@@ -131,13 +135,19 @@ export function calculate(
     const crossUnder = a < b && pa >= pb;
     pa = a;
     pb = b;
+    overFlags[i] = crossOver;
+    underFlags[i] = crossUnder;
     // plotshape(rule ? vwma : na, style = shape.circle, location = location.absolute, size = size.small)
     if (!Number.isFinite(b)) continue;
     if (crossOver) {
-      markers.push({ time: t(i), position: 'atPriceMiddle', price: b, shape: 'circle', color: overColor, size: 'small' });
+      markers.push({
+        id: 'shape0', time: t(i), position: 'atPriceMiddle', price: b, shape: 'circle', color: overColor, size: 'small',
+      });
     }
     if (crossUnder) {
-      markers.push({ time: t(i), position: 'atPriceMiddle', price: b, shape: 'circle', color: color.maroon, size: 'small' });
+      markers.push({
+        id: 'shape1', time: t(i), position: 'atPriceMiddle', price: b, shape: 'circle', color: color.maroon, size: 'small',
+      });
     }
   }
 
@@ -146,8 +156,16 @@ export function calculate(
     plots: { plot0, plot1 },
     fills,
     markers,
+    // alertcondition(crossover_rule, "Bullish Cross") / alertcondition(crossunder_rule, "Bearish Cross")
+    alerts: alertStates(alertConditions, bars, [overFlags, underFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Cross', message: 'Bullish Crossover Happened' },
+  { id: 'alert1', title: 'Bearish Cross', message: 'Bearish Crossunder Happened' },
+];
 
 export const VolumetricCompressedMA = {
   calculate,
@@ -155,4 +173,5 @@ export const VolumetricCompressedMA = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

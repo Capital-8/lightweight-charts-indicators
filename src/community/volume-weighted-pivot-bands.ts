@@ -6,12 +6,16 @@
  * are spaced by (highest high - lowest low over `length` bars) * multiplier above and below the pivot. All lines can
  * be shifted by a plot offset.
  *
+ * Alerts (alertcondition, `alerts` of the result): the close crossing over R1 .. R5 and under S1 .. S5 (the bands
+ * without the plot offset).
+ *
  * Reference: "Volume-Weighted Pivot Bands" by LeafAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolumeWeightedPivotBandsInputs {
   /** Rolling length of the volume-weighted price and of the range */
@@ -71,7 +75,10 @@ const EPS = 1e-10;
 const ne = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) > EPS;
 const nz = (x: number) => (isNaN(x) ? 0 : x);
 
-export function calculate(bars: Bar[], inputs: Partial<VolumeWeightedPivotBandsInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<VolumeWeightedPivotBandsInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { length } = cfg;
@@ -134,12 +141,24 @@ export function calculate(bars: Bar[], inputs: Partial<VolumeWeightedPivotBandsI
   for (let k = 0; k < 5; k++) plots[`plot${k}`] = P(r[k], color.fuchsia);
   for (let k = 0; k < 5; k++) plots[`plot${k + 5}`] = P(s[k], color.lime);
   plots.plot10 = P(pivot, color.gray);
+  const closes = bars.map((b) => b.close);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
+    // alertcondition(ta.crossover(close, r1..r5), ...) / alertcondition(ta.crossunder(close, s1..s5), ...)
+    alerts: alertStates(alertConditions, bars, [
+      ...r.map((band) => crossedOver(closes, band)),
+      ...s.map((band) => crossedUnder(closes, band)),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  ...[1, 2, 3, 4, 5].map((k) => ({ id: `alert${k - 1}`, title: `Cross Above R${k}`, message: `Price crossed above R${k}` })),
+  ...[1, 2, 3, 4, 5].map((k) => ({ id: `alert${k + 4}`, title: `Cross Below S${k}`, message: `Price crossed below S${k}` })),
+];
 
 export const VolumeWeightedPivotBands = {
   calculate,
@@ -147,4 +166,5 @@ export const VolumeWeightedPivotBands = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

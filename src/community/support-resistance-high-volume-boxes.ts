@@ -215,13 +215,14 @@ export function calculate(
     // plotchar(..., "◆", size = size.tiny, offset = -1): drawn on the previous bar
     if (i > 0) {
       const t1 = bars[i - 1].time;
-      const diamond = (position: 'aboveBar' | 'belowBar', col: string) => markers.push({
-        time: t1, position, shape: 'circle', color: 'transparent', text: '◆', textColor: col, size: 'tiny',
+      // id: the plotchar output (char<k>, in declaration order)
+      const diamond = (id: string, position: 'aboveBar' | 'belowBar', col: string) => markers.push({
+        time: t1, position, shape: 'circle', color: 'transparent', text: '◆', textColor: col, size: 'tiny', id,
       });
-      if (resHolds) diamond('aboveBar', '#e92929'); // Resistance Holds
-      if (supHolds) diamond('belowBar', '#20ca26'); // Support Holds
-      if (brekoutRes && prevResIsSup) diamond('belowBar', '#20ca26'); // Resistance as Support Holds
-      if (brekoutSup && prevSupIsRes) diamond('aboveBar', '#e92929'); // Support as Resistance Holds
+      if (resHolds) diamond('char0', 'aboveBar', '#e92929'); // Resistance Holds
+      if (supHolds) diamond('char1', 'belowBar', '#20ca26'); // Support Holds
+      if (brekoutRes && prevResIsSup) diamond('char2', 'belowBar', '#20ca26'); // Resistance as Support Holds
+      if (brekoutSup && prevSupIsRes) diamond('char3', 'aboveBar', '#e92929'); // Support as Resistance Holds
     }
 
     // Break labels: label.new(bar_index[1], level[1], ...)

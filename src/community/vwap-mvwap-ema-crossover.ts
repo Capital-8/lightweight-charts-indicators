@@ -9,6 +9,9 @@
  * the original. Without them the day is the UTC date. While the volume of the day is zero or na the VWAP is na
  * (0 / 0); the averages of the VWAP skip na values, as in Pine.
  *
+ * The four signal shapes of the original ("Buy Alert", "Risky", "WAIT", "Enter Here") are drawn fully transparent,
+ * as the original does (transp 100): they are listed in the Style settings and can be made visible there.
+ *
  * Reference: "VWAP/MVWAP/EMA CROSSOVER" by DerrickLaFlame
  */
 
@@ -71,7 +74,7 @@ export const metadata = {
 
 export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
   const {
-    vwapLength, emaLength1, emaLength2, mvwapLength,
+    vwapLength, emaLength1, emaLength2, mvwapLength, rsiLimit, rsiMinimum,
     conversionLen, baseLineLen, senkouBLen, displacementA, displacementB,
   } = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -100,6 +103,10 @@ export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInpu
   // Conditions
   const buyArr: number[] = new Array(n).fill(0);
   const longArr: number[] = new Array(n).fill(0);
+  // Risky / BuyDip / GreatBuy of the original (transparent shapes)
+  const riskyArr: boolean[] = new Array(n).fill(false);
+  const buyDipArr: boolean[] = new Array(n).fill(false);
+  const greatBuyArr: boolean[] = new Array(n).fill(false);
 
   for (let i = 0; i < n; i++) {
     const e1 = ema1Arr[i] ?? 0;
@@ -118,6 +125,12 @@ export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInpu
 
     buyArr[i] = buy ? 1 : 0;
     longArr[i] = buy ? 1 : 0;
+    // Risky = Crossup and rsi > rsilimit; BuyDip = Crossup and rsi < rsiminimum
+    // GoodBuy = Buy and rsi < rsilimit; GreatBuy = GoodBuy and rsi > rsiminimum
+    const r = rsiArr[i] ?? NaN;
+    riskyArr[i] = crossUp && r > rsiLimit;
+    buyDipArr[i] = crossUp && r < rsiMinimum;
+    greatBuyArr[i] = buy && r < rsiLimit && r > rsiMinimum;
   }
 
   // Senkou spans (volume-weighted Ichimoku-style)
@@ -193,12 +206,19 @@ export function calculate(bars: Bar[], inputs: Partial<VwapMvwapEmaCrossoverInpu
       const curShort = curLong === 0 ? 1 : 0;
 
       if (prevLong <= 0 && curLong > 0) {
-        markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: '#00FF00', text: 'Long' });
+        markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: '#00FF00', text: 'Long', id: 'shape0' });
       }
       if (prevShort <= 0 && curShort > 0) {
-        markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: 'Short' });
+        markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: 'Short', id: 'shape1' });
       }
     }
+    // plotshape(Buy, "Buy Alert", belowbar, white, transp=100, triangleup); plotshape(Risky, "Risky", abovebar, red,
+    // transp=100, triangledown); plotshape(BuyDip, "WAIT", abovebar, orange, transp=100, triangledown);
+    // plotshape(GreatBuy, "Enter Here", belowbar, green, transp=100, triangleup)
+    if (buyArr[i] === 1) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: 'rgba(255, 255, 255, 0)', id: 'shape2' });
+    if (riskyArr[i]) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: 'rgba(255, 0, 0, 0)', id: 'shape3' });
+    if (buyDipArr[i]) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: 'rgba(255, 127, 0, 0)', id: 'shape4' });
+    if (greatBuyArr[i]) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: 'rgba(0, 128, 0, 0)', id: 'shape5' });
 
     // Bar color: green when Long, red when Short
     barColors.push({ time: t, color: longArr[i] === 1 ? '#00FF00' : '#FF0000' });

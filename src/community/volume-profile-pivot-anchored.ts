@@ -10,8 +10,14 @@
  * last bar. Bars are coloured by their volume against its moving average.
  *
  * The prices in the labels are printed with the symbol tick (format.mintick): the port reads it from the chart
- * context (third argument of calculate) and uses a tick of 0.01 without it. The alerts of the original script
- * (their text starts with the ticker name) are not part of the port.
+ * context (third argument of calculate) and uses a tick of 0.01 without it.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): the close crossing the point of control, value
+ * area high or value area low line as the original computes them on each bar (on the bars before the last one: over
+ * the range of the bar and the bar before it, with the value area rows of the last pivot profile), each when its
+ * line is shown, and a volume above its moving average * the bold bars factor when the bars are coloured. The
+ * messages start with syminfo.ticker (from the chart context, empty without it) and end with the close printed with
+ * the symbol tick.
  *
  * Reference: "Volume Profile, Pivot Anchored by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -24,7 +30,8 @@ import {
 } from 'oakscriptjs';
 import type { BarColorData, BoxData, LabelData, LineDrawingData, LinefillData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
-import { mintickOf, type ChartContext } from '../chart-context';
+import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
+import type { AlertCall } from '../types';
 
 export interface VolumeProfilePivotAnchoredInputs {
   pivotLength: number;
@@ -236,7 +243,7 @@ export function calculate(
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'barColors' | 'boxes' | 'labels' | 'lines' | 'linefills' | 'tables'> & {
   barColors: BarColorData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[]; linefills: LinefillData[];
-  tables: TableData[];
+  tables: TableData[]; alertCalls: AlertCall[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -349,6 +356,12 @@ export function calculate(
   const highestSite = callsite.highest();
   const lowestSite = callsite.lowest();
   const noContent = !cfg.showPrice && !cfg.showChange && !cfg.showVolume;
+  // Alerts: var pocLevel = 0 (set on the last bar only), the lines of the bar before, ta.cross(close, line)
+  const alertCalls: AlertCall[] = [];
+  const tickerTxt = tickerOf(chart);
+  let pocVar = 0;
+  let prevClose = NaN;
+  const prevLines = [NaN, NaN, NaN];
   const breakLine = cfg.showPrice || cfg.showChange ? '\n' : '';
 
   for (let i = 0; i < n; i++) {
@@ -493,6 +506,7 @@ export function calculate(
       const tradedVolume1 = getHighLow(i, profileLength, 0)[2];
       addVolume(volumeStorageT, i, 1, profileLength, priceLowest, priceHighest, priceStep);
       const [pocLevel, above, below] = valueAreaOf(volumeStorageT);
+      pocVar = pocLevel;
       levelAbovePoc = above;
       levelBelowPoc = below;
       const vahPrice = priceLowest + (levelAbovePoc + 1.0) * priceStep;
@@ -561,6 +575,24 @@ export function calculate(
           : (up ? '#4CAF50' : '#F23645');
       barColors.push({ time: bar.time, color });
     }
+
+    // alert(tickerTxt + ' : ... price ' + str.tostring(close, format.mintick)) when ta.cross(close, line) and the
+    // line is shown; a high volume alert when nzVolume > vSMA * upThesh and the bars are coloured
+    const linesNow = [
+      priceLowest + (pocVar + 0.5) * priceStep,
+      priceLowest + (levelAbovePoc + 1.0) * priceStep,
+      priceLowest + (levelBelowPoc + 0.0) * priceStep,
+    ];
+    const cross = (k: number) => (bar.close > linesNow[k] && prevClose <= prevLines[k])
+      || (bar.close < linesNow[k] && prevClose >= prevLines[k]);
+    const priceTxt = fmtTick(bar.close);
+    const call = (text: string) => alertCalls.push({ time: bar.time, message: tickerTxt + text + priceTxt, freq: 'once_per_bar' });
+    if (cross(0) && cfg.pointOfControl) call(' : Pivots Volume Profile : Price touches/crosses Point Of Control Line, price ');
+    if (cross(1) && cfg.valueAreaHigh) call(' : Pivots Volume Profile : Price touches/crosses Value Area High Line, price ');
+    if (cross(2) && cfg.valueAreaLow) call(' : Pivots Volume Profile : Price touches/crosses Value Area Low Line, price ');
+    if (gt(nzVolume, vSma[i] * cfg.upperThreshold) && cfg.volumeBars) call(' high volume, price ');
+    prevClose = bar.close;
+    linesNow.forEach((v, k) => { prevLines[k] = v; });
   }
 
   setDrawingBar(null);
@@ -593,8 +625,12 @@ export function calculate(
       position: 'bottom_right', columns: 1, rows: 1,
       cells: [{ column: 0, row: 0, text: '☼☾  ', textSize: 'normal', textColor: '#089981', tooltip: 'SoleMare Analytics' }],
     }] : [],
+    alertCalls,
   };
 }
+
+/** The original makes alert() calls (`alertCalls` of the result) */
+export const hasAlertFunction = true;
 
 export const VolumeProfilePivotAnchored = {
   calculate,
@@ -602,4 +638,5 @@ export const VolumeProfilePivotAnchored = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

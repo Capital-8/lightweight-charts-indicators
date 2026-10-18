@@ -5,12 +5,18 @@
  * orange in range, green/dark green for bullish, red/dark red for bearish.
  * Fill between Di+ and Di- colored by trend. Markers for trend entries/exits.
  * Bar coloring matches ADX color state.
+ * Alerts (alertcondition, `alerts` of the result): the original's trend state (weak / strong bullish or bearish entry,
+ * end of trend) on its ADX / DI rules, on confirmed bars (`barstate.isconfirmed`: the last bar only when the chart
+ * context says it is closed, `lastBarConfirmed`, true without a context): any alert, buy / sell weak, buy / sell
+ * strong, buy / sell close. They use the ADX and DI values the port plots.
  *
  * Reference: "ADX Di+ Di- [Gu5]" by Gu5tavo71
  */
 
 import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface ADXDiGu5Inputs {
   sigLen: number;
@@ -55,7 +61,11 @@ const COLOR_LIGHT_GREEN = '#388E3C';
 const COLOR_DARK_RED = '#8B0000';
 const COLOR_LIGHT_RED = '#B71C1C';
 
-export function calculate(bars: Bar[], inputs: Partial<ADXDiGu5Inputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<ADXDiGu5Inputs> = {},
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const diLen = cfg.diLen;
@@ -222,6 +232,58 @@ export function calculate(bars: Bar[], inputs: Partial<ADXDiGu5Inputs> = {}): Om
     return 'rgba(139,0,0,0.10)';
   });
 
+  // Alerts: the original's rules on the plotted series (na before their warm-up; na compares false)
+  const sigA = adxPlot.map((p) => p.value);
+  const dpA = diPlusPlot.map((p) => p.value);
+  const dmA = diMinusPlot.map((p) => p.value);
+  const lastConfirmed = lastBarConfirmedOf(chart);
+  const prevB = (a: boolean[], i: number) => i > 0 && a[i - 1];
+  const hlRange = sigA.map((v) => v <= cfg.hlRange);
+  const diUpA = dpA.map((v, i) => v >= dmA[i]);
+  const diDnA = dmA.map((v, i) => v > dpA[i]);
+  const alertFlags: boolean[][] = [[], [], [], [], [], [], []];
+  let condPrev = NaN; // condition[1] (na before the first bar)
+  for (let i = 0; i < n; i++) {
+    const sigUp = i > 0 && sigA[i] > sigA[i - 1];
+    const diUp = diUpA[i];
+    const diDn = diDnA[i];
+    const diUpUp = dpA[i] >= cfg.hlTrend;
+    const diDnDn = dmA[i] > cfg.hlTrend;
+    // crossDi = ta.cross(diPlus, diMinus)
+    const crossDi = i > 0 && ((dpA[i] > dmA[i] && dpA[i - 1] <= dmA[i - 1]) || (dpA[i] < dmA[i] && dpA[i - 1] >= dmA[i - 1]));
+    const r = hlRange[i];
+    const entryLong = (!r && diUp && sigUp && !prevB(diUpA, i)) || (!r && diUp && sigUp && sigA[i] > cfg.hlRange && prevB(hlRange, i));
+    const entryShort = (!r && diDn && sigUp && !prevB(diDnA, i)) || (!r && diDn && sigUp && sigA[i] > cfg.hlRange && prevB(hlRange, i));
+    const entryLongStr = !r && diUp && sigUp && diUpUp;
+    const entryShortSt = !r && diDn && sigUp && diDnDn;
+    const exitLong = (crossDi && prevB(diUpA, i)) || (r && !prevB(hlRange, i));
+    const exitShort = (crossDi && prevB(diDnA, i)) || (r && !prevB(hlRange, i));
+    // condition := condition[1] != 1 and entryLongStr ? 1 : ... : nz(condition[1])
+    const ne = (v: number) => !isNaN(condPrev) && condPrev !== v;
+    const cond = ne(1) && entryLongStr ? 1
+      : ne(-1) && entryShortSt ? -1
+        : ne(0.5) && entryLong ? 0.5
+          : ne(-0.5) && entryShort ? -0.5
+            : ne(0) && exitLong ? 0
+              : ne(0) && exitShort ? 0
+                : (isNaN(condPrev) ? 0 : condPrev);
+    const confirmed = i < n - 1 || lastConfirmed;
+    const longE = confirmed && ne(0.5) && cond === 0.5;
+    const shortE = confirmed && ne(-0.5) && cond === -0.5;
+    const longEStr = confirmed && ne(1) && cond === 1;
+    const shortEStr = confirmed && ne(-1) && cond === -1;
+    const longX = confirmed && ((condPrev === 0.5 && cond === 0) || (condPrev === 1 && cond === 0));
+    const shortX = confirmed && ((condPrev === -0.5 && cond === 0) || (condPrev === -1 && cond === 0));
+    condPrev = cond;
+    alertFlags[0].push(longE || shortE || longEStr || shortEStr || longX || shortX);
+    alertFlags[1].push(longE);
+    alertFlags[2].push(shortE);
+    alertFlags[3].push(longEStr);
+    alertFlags[4].push(shortEStr);
+    alertFlags[5].push(longX);
+    alertFlags[6].push(shortX);
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -236,7 +298,19 @@ export function calculate(bars: Bar[], inputs: Partial<ADXDiGu5Inputs> = {}): Om
     fills: [{ plot1: 'diPlus', plot2: 'diMinus', colors: fillColors }],
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
 
-export const ADXDiGu5 = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Any Alert', message: 'Any Alert' },
+  { id: 'alert1', title: 'Buy Weak Alert', message: 'Buy Weak Alert' },
+  { id: 'alert2', title: 'Sell Weak Alert', message: 'Sell Weak Alert' },
+  { id: 'alert3', title: 'Buy Strong Alert', message: 'Buy Strong Alert' },
+  { id: 'alert4', title: 'Sell Strong Alert', message: 'Sell Strong Alert' },
+  { id: 'alert5', title: 'Buy Close Alert', message: 'Buy Close Alert' },
+  { id: 'alert6', title: 'Sell Close Alert', message: 'Sell Close Alert' },
+];
+
+export const ADXDiGu5 = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

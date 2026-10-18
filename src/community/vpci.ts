@@ -6,11 +6,12 @@
  * where VPC = VWMA(long) - SMA(long), VPR = VWMA(short) / SMA(short),
  * VM = SMA(vol, short) / SMA(vol, long)
  *
+ * Breaches of the Bollinger bands are the crosses of the 'Breach' plot (the original draws no shapes).
+ *
  * Reference: "Volume Price Confirmation Indicator [LazyBear]"
  */
 
 import { ta, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
 
 export interface VPCIInputs {
   longLength: number;
@@ -51,7 +52,7 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<VPCIInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<VPCIInputs> = {}): IndicatorResult {
   const { longLength, shortLength, signalLength, bbLength, bbMult } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -142,21 +143,6 @@ export function calculate(bars: Bar[], inputs: Partial<VPCIInputs> = {}): Omit<I
     return { time: b.time, value: pos, color };
   });
 
-  // Also generate markers for breach points (for better visibility)
-  const markers: MarkerData[] = [];
-  for (let i = 0; i < n; i++) {
-    if (i < warmup) continue;
-    const v = vpciArr[i];
-    const upper = upperArr[i];
-    const lower = lowerArr[i];
-    if (isNaN(upper) || isNaN(lower)) continue;
-    if (v >= upper) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'cross', color: '#EF5350', text: 'B' });
-    } else if (v <= lower) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'cross', color: '#26A69A', text: 'B' });
-    }
-  }
-
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3, 'plot4': plot4, 'plot5': plot5 },
@@ -166,7 +152,6 @@ export function calculate(bars: Bar[], inputs: Partial<VPCIInputs> = {}): Omit<I
     fills: [
       { plot1: 'plot2', plot2: 'plot3', options: { color: 'rgba(33, 150, 243, 0.15)' } },
     ],
-    markers,
   };
 }
 

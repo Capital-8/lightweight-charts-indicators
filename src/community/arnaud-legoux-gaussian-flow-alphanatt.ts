@@ -8,12 +8,16 @@
  * momentum factor 1 + |EMA(5) of the momentum| / average * 10; the bands are at average +- 2 * envelope. Ten hidden
  * gradient levels on each side are filled with fading colours. The average is cyan when the close is above it,
  * else magenta.
+ * Alerts (alertcondition, `alerts` of the result): trend long / short (the close crosses the average in a strong up /
+ * down trend: EMA(5) of the trend strength beyond +-0.5), mean reversion long / short (the close beyond the average
+ * -+ 0.95 envelope) and the first bar of a strong up / down trend.
  *
  * Reference: "Arnaud Legoux Gaussian Flow | AlphaNatt" by AlphaNatt
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type AlmaGaussianEnvelopeMode = 'Fixed' | 'Adaptive' | 'Hybrid';
 
@@ -92,11 +96,12 @@ export const metadata = {
 /** Pine float comparison: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
 
 export function calculate(
   bars: Bar[],
   inputs: Partial<ArnaudLegouxGaussianFlowAlphanattInputs> = {},
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -144,13 +149,33 @@ export function calculate(
 
   const upper: number[] = new Array(n);
   const lower: number[] = new Array(n);
+  const finalEnv: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const envelopeWidth = baseWidth[i] * gaussianMult;
     const momentumAdjust = 1 + (Math.abs(momentumNorm[i]) / almaSmooth[i]) * 10;
     const finalEnvelope = envelopeWidth * momentumAdjust;
+    finalEnv[i] = finalEnvelope;
     upper[i] = almaSmooth[i] + 2 * finalEnvelope;
     lower[i] = almaSmooth[i] - 2 * finalEnvelope;
   }
+
+  // Alerts: trendStrength = (almaSmooth - almaSmooth[momentumLength]) / almaSmooth * 100, trendMA = ta.ema(trendStrength, 5)
+  const trendMA = A(ta.ema(S(momentum.map((v, i) => (v / almaSmooth[i]) * 100)), 5));
+  const strongUp = close.map((c, i) => gt(trendMA[i], 0.5) && gt(c, almaSmooth[i]));
+  const strongDown = close.map((c, i) => lt(trendMA[i], -0.5) && lt(c, almaSmooth[i]));
+  const crossUp = crossedOver(close, almaSmooth);
+  const crossDown = crossedUnder(close, almaSmooth);
+  const alertFlags: boolean[][] = [
+    // trendLong = ta.crossover(close, almaSmooth) and strongUptrend / trendShort
+    crossUp.map((f, i) => f && strongUp[i]),
+    crossDown.map((f, i) => f && strongDown[i]),
+    // meanRevLong = close < almaSmooth - finalEnvelope * 0.95 and trendMA > -0.5 / meanRevShort
+    close.map((c, i) => lt(c, almaSmooth[i] - finalEnv[i] * 0.95) && gt(trendMA[i], -0.5)),
+    close.map((c, i) => gt(c, almaSmooth[i] + finalEnv[i] * 0.95) && lt(trendMA[i], 0.5)),
+    // strongUptrend and not strongUptrend[1] (false before the first bar) / the same for the down trend
+    strongUp.map((f, i) => f && !(i > 0 && strongUp[i - 1])),
+    strongDown.map((f, i) => f && !(i > 0 && strongDown[i - 1])),
+  ];
 
   // Plot values: na for na and +-infinity
   const pv = (x: number) => (Number.isFinite(x) ? x : NaN);
@@ -187,8 +212,19 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
     fills,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'ALMA Trend Long', message: 'Price crossed above ALMA in strong uptrend' },
+  { id: 'alert1', title: 'ALMA Trend Short', message: 'Price crossed below ALMA in strong downtrend' },
+  { id: 'alert2', title: 'ALMA Mean Reversion Long', message: 'Price in lower Gaussian zone - potential bounce' },
+  { id: 'alert3', title: 'ALMA Mean Reversion Short', message: 'Price in upper Gaussian zone - potential pullback' },
+  { id: 'alert4', title: 'ALMA Strong Uptrend', message: 'Strong uptrend detected' },
+  { id: 'alert5', title: 'ALMA Strong Downtrend', message: 'Strong downtrend detected' },
+];
 
 export const ArnaudLegouxGaussianFlowAlphanatt = {
   calculate,
@@ -196,4 +232,5 @@ export const ArnaudLegouxGaussianFlowAlphanatt = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

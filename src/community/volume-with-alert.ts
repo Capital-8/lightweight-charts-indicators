@@ -3,12 +3,14 @@
  *
  * Volume columns: yellow when the volume is at or above the threshold, else teal on bars with close >= open and red
  * on the other bars. A blue SMA of the volume and a dashed horizontal line at the threshold.
+ * Alerts (alertcondition, `alerts` of the result): 'Volume exceeds threshold' on the bars with a yellow column.
  *
  * Reference: "Volume with Alert" by BullBearSR
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolumeWithAlertInputs {
   /** Volume level of the yellow columns and of the alert */
@@ -48,16 +50,21 @@ export const metadata = {
 const EPS = 1e-10;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 
-export function calculate(bars: Bar[], inputs: Partial<VolumeWithAlertInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<VolumeWithAlertInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const vol = bars.map((b) => b.volume ?? NaN);
   const maVol = ta.sma(Series.fromArray(bars, vol), cfg.maLength).toArray().map((v) => v ?? NaN);
 
+  const triggeredFlags: boolean[] = [];
   const plot0 = bars.map((b, i) => {
     const isBullish = ge(b.close, b.open);
     const baseColor = isBullish ? color.teal : color.red;
     // triggered = vol >= threshold (alertcondition "Volume exceeds threshold")
     const triggered = ge(vol[i], cfg.threshold);
+    triggeredFlags.push(triggered);
     return { time: b.time, value: vol[i], color: triggered ? color.yellow : baseColor };
   });
   const plot1 = bars.map((b, i) => ({ time: b.time, value: maVol[i] }));
@@ -68,8 +75,14 @@ export function calculate(bars: Bar[], inputs: Partial<VolumeWithAlertInputs> = 
     hlines: [
       { value: cfg.threshold, options: { title: 'Threshold Line', color: String(color.new(color.orange, 40)), linestyle: 'dashed', linewidth: 1 } },
     ],
+    alerts: alertStates(alertConditions, bars, [triggeredFlags]),
   };
 }
+
+/** The original's alertcondition */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Volume exceeds threshold', message: 'High volume on {{ticker}} ({{interval}}): exceeds the configured threshold.' },
+];
 
 export const VolumeWithAlert = {
   calculate,
@@ -77,4 +90,5 @@ export const VolumeWithAlert = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

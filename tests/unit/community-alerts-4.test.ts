@@ -234,8 +234,10 @@ describe('Renko+Moving Average+RMI Alert R3: alertconditions', () => {
     it(`entries and exits on the bars of the arrows and exit crosses (${JSON.stringify(inputs)})`, () => {
       const res = renko.calculate(bars, inputs);
       const [buy, sell, buyExit, sellExit] = res.alerts.map((a) => a.times);
-      expect(buy).toEqual(markerTimes(res.markers, 'belowBar', 'arrowUp'));
-      expect(sell).toEqual(markerTimes(res.markers, 'aboveBar', 'arrowDown'));
+      // the BUY / SELL plotarrows: the result's arrows
+      const arrows = (res as any).arrows as { time: number; id: string }[];
+      expect(buy).toEqual(arrows.filter((a) => a.id === 'arrow0').map((a) => a.time));
+      expect(sell).toEqual(arrows.filter((a) => a.id === 'arrow1').map((a) => a.time));
       expect(buyExit).toEqual(markerTimes(res.markers, 'belowBar', 'xcross'));
       expect(sellExit).toEqual(markerTimes(res.markers, 'aboveBar', 'xcross'));
       expect(buy.length).toBeGreaterThan(0);
@@ -371,15 +373,19 @@ describe('Bjorgum Key Levels: alertconditions and alert() calls', () => {
     { input: 'breakDn', k: 1, text: 'Support break ', pos: 'aboveBar', shape: 'arrowDown' },
     { input: 'supPush', k: 2, text: 'Pushing off key level support on ', pos: 'belowBar', shape: 'triangleUp' },
     { input: 'resPush', k: 3, text: 'Pushing off key level resistance on ', pos: 'aboveBar', shape: 'triangleDown' },
-    { input: 'falseBull', k: 4, text: 'False break down on ', pos: undefined, shape: undefined },
-    { input: 'falseBear', k: 5, text: 'False break up on ', pos: undefined, shape: undefined },
+    // false breaks are plotarrow outputs: the result's arrows (arrow1 down, arrow0 up)
+    { input: 'falseBull', k: 4, text: 'False break down on ', pos: undefined, shape: undefined, arrow: 'arrow1' },
+    { input: 'falseBear', k: 5, text: 'False break up on ', pos: undefined, shape: undefined, arrow: 'arrow0' },
     { input: 'detectBO', k: 6, text: 'Breakout on ', pos: 'belowBar', shape: 'arrowUp' },
     { input: 'detectBD', k: 7, text: 'Breakdown on ', pos: 'aboveBar', shape: 'arrowDown' },
   ] as const;
   for (const s of signals) {
     it(`${s.input}: alertcondition ${s.k} and the "${s.text.trim()}" calls on the signal bars`, () => {
       const res = bjorgum.calculate(bars, { [s.input]: true });
-      const marks = uniq(markerTimes(res.markers, s.pos, s.shape));
+      const arrow = 'arrow' in s ? s.arrow : undefined;
+      const marks = arrow
+        ? uniq((res as any).arrows.filter((a: { id: string }) => a.id === arrow).map((a: { time: number }) => a.time))
+        : uniq(markerTimes(res.markers, s.pos, s.shape));
       expect(marks.length).toBeGreaterThan(0);
       expect(res.alerts[s.k].times).toEqual(marks);
       expect(res.alertCalls.map((c) => c.time)).toEqual(marks);

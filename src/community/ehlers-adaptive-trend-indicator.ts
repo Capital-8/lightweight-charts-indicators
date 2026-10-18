@@ -7,6 +7,8 @@
  * when it rises above the upper band; the trend level trails the lower band in an up trend (highest value) and the
  * upper band in a down trend (lowest value). A fill between the basis and the trend level and the bar colours follow
  * the trend.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' / 'Sell Signal', true on every bar of an up / down
+ * trend.
  *
  * Reference: "Ehlers Adaptive Trend Indicator [Alpha Extract]" by AlphaExtract
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EhlersAdaptiveTrendIndicatorInputs {
   src: SourceType;
@@ -79,7 +82,7 @@ const ne = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) >
 export function calculate(
   bars: Bar[],
   inputs: Partial<EhlersAdaptiveTrendIndicatorInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { p1, p2 } = cfg;
   const n = bars.length;
@@ -156,8 +159,16 @@ export function calculate(
         colors: trendArr.map((tr) => (tr === 1 ? bullFill : bearFill)) },
     ],
     barColors,
+    // buySignal = trend == 1, sellSignal = trend == -1
+    alerts: alertStates(alertConditions, bars, [trendArr.map((tr) => tr === 1), trendArr.map((tr) => tr === -1)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Buy Signal triggered' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Sell Signal triggered' },
+];
 
 export const EhlersAdaptiveTrendIndicator = {
   calculate,
@@ -165,4 +176,5 @@ export const EhlersAdaptiveTrendIndicator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

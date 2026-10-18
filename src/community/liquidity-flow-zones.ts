@@ -6,6 +6,8 @@
  * by more than atrMult * ATR and that closes back below it; a bullish sweep is a bar whose low goes below the last
  * swing low by more than atrMult * ATR and that closes back above it. Sweeps give BUY / SELL triangles and a green /
  * red background.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Liquidity Sweep' and 'Bearish Liquidity Sweep' on the
+ * sweep bars.
  *
  * Reference: "Liquidity Flow Zones (LFZ)" by ReubenMiles
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LiquidityFlowZonesInputs {
   /** Pivot length on each side of a swing */
@@ -62,7 +65,7 @@ const PINE_TEXT = '#2962FF';
 export function calculate(
   bars: Bar[],
   inputs: Partial<LiquidityFlowZonesInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -80,6 +83,7 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   let lastHigh = NaN; // var float lastHigh = na
   let lastLow = NaN;
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const time = b.time;
@@ -90,6 +94,8 @@ export function calculate(
 
     const bearSweep = !isNaN(lastHigh) && gt(b.high, lastHigh + atr[i] * cfg.atrMult) && lt(b.close, lastHigh);
     const bullSweep = !isNaN(lastLow) && lt(b.low, lastLow - atr[i] * cfg.atrMult) && gt(b.close, lastLow);
+    bullFlags.push(bullSweep);
+    bearFlags.push(bearSweep);
     if (bullSweep) {
       markers.push({ time, position: 'belowBar', shape: 'triangleUp', color: color.lime, size: 'small', text: 'BUY',
         textColor: PINE_TEXT });
@@ -107,8 +113,16 @@ export function calculate(
     plots: { plot0, plot1 },
     markers,
     bgColors,
+    // alertcondition(bullSweep, "Bullish Liquidity Sweep") / alertcondition(bearSweep, "Bearish Liquidity Sweep")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Liquidity Sweep', message: 'Bullish Liquidity Sweep detected' },
+  { id: 'alert1', title: 'Bearish Liquidity Sweep', message: 'Bearish Liquidity Sweep detected' },
+];
 
 export const LiquidityFlowZones = {
   calculate,
@@ -116,4 +130,5 @@ export const LiquidityFlowZones = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -7,6 +7,9 @@
  * oscillator pivot low on the same bar, with a lower low in price and a higher oscillator value than 5 bars before
  * the pivot (bearish: the opposite on pivot highs), drawn as circles at the bottom / top of the pane on the pivot
  * bar.
+ * Alerts (alertcondition, `alerts` of the result): 'Oversold Bounce' (the oscillator crosses over the lower band),
+ * 'Overbought Rejection' (crosses under the upper band), 'Bullish Divergence' / 'Bearish Divergence' (on the bar that
+ * confirms the pivot, not shifted back as the circles).
  *
  * Reference: "Quantum Regression Oscillator [ICN]" by abgthecoder
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 
 export interface QuantumRegressionOscillatorInputs {
@@ -65,6 +69,14 @@ export const plotConfig: PlotConfig[] = [
   { id: 'plot2', title: 'Lower Band', color: BAND_COLOR, lineWidth: 1, display: 'none' },
 ];
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Oversold Bounce', message: 'QRO bounced from lower band' },
+  { id: 'alert1', title: 'Overbought Rejection', message: 'QRO rejected from upper band' },
+  { id: 'alert2', title: 'Bullish Divergence', message: 'Bullish Divergence Detected' },
+  { id: 'alert3', title: 'Bearish Divergence', message: 'Bearish Divergence Detected' },
+];
+
 export const metadata = {
   title: 'Quantum Regression Oscillator [ICN]',
   shortTitle: 'QRO [ICN]',
@@ -79,7 +91,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<QuantumRegressionOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -136,6 +148,13 @@ export function calculate(
         colors: oscColor.map((c) => String(color.new(c, 90))) },
     ],
     markers,
+    // alertcondition(ta.crossover(qro, lower_band)), (ta.crossunder(qro, upper_band)), (bull_div), (bear_div)
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(qro, lower),
+      crossedUnder(qro, upper),
+      bars.map((_b, i) => bullDiv(i)),
+      bars.map((_b, i) => bearDiv(i)),
+    ]),
   };
 }
 
@@ -145,4 +164,5 @@ export const QuantumRegressionOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

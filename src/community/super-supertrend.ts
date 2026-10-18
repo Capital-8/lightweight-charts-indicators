@@ -2,12 +2,13 @@
  * Super SuperTrend Three Line
  *
  * Three SuperTrend lines at different ATR multipliers for layered
- * trend confirmation.
+ * trend confirmation. Arrows (the original's plotarrow outputs, `arrows` of the result) on each trend flip, and
+ * shapes at the bottom of the pane where the close crosses each line.
  *
  * Reference: "Super SuperTrend" (community)
  */
 
-import { ta, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type ArrowData } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
 
 export interface SuperSupertrendInputs {
@@ -93,7 +94,7 @@ function calcSuperTrend(bars: Bar[], atrArr: (number | null)[], mult: number): {
   return { st, dir };
 }
 
-export function calculate(bars: Bar[], inputs: Partial<SuperSupertrendInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+export function calculate(bars: Bar[], inputs: Partial<SuperSupertrendInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; arrows: ArrowData[]; plotCandles: Record<string, PlotCandleData[]> } {
   const { atrLen, mult1, mult2, mult3 } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -112,42 +113,39 @@ export function calculate(bars: Bar[], inputs: Partial<SuperSupertrendInputs> = 
       return { time: bars[i].time, value: v, color };
     });
 
-  // Markers: plotarrow for each ST trend flip
-  // Pine: plotarrow(Trend1==1 and Trend1[1]==-1) up arrow lime, plotarrow(Trend1==-1 and Trend1[1]==1) down arrow red
-  // Also plotshape flags/triangles at bottom for cross events
+  // Arrows (the original's plotarrow outputs, `arrows` of the result):
+  // plotarrow(TrendK == 1 and TrendK[1] == -1 ? TrendK : na, "UpSTArrowK", colorup = lime, transp = 0)
+  // plotarrow(TrendK == -1 and TrendK[1] == 1 ? TrendK : na, "DnSTArrowK", colordown = red, transp = 0)
+  // Shapes at the bottom (plotshape outputs): close crossing over (under) each line, ids shape0..shape5 in the
+  // original's order (UpShape1 / DownShape1 for ST1, UpShape2 / DownShape2 for ST2, UpShape1 / DownShape2 for ST3)
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
+  const LIME = '#00FF00', RED = '#FF0000', YELLOW = '#FFFF00', GREEN = '#008000';
   const allSTs = [
-    { data: st1, upColor: '#FFEB3B', label: 'ST1' },
-    { data: st2, upColor: '#26A69A', label: 'ST2' },
-    { data: st3, upColor: '#00E676', label: 'ST3' },
+    { data: st1, up: 'shape0', down: 'shape1', upShape: 'flag' as const, upColor: YELLOW, arrowUp: 'arrow0', arrowDn: 'arrow1' },
+    { data: st2, up: 'shape2', down: 'shape3', upShape: 'triangleUp' as const, upColor: GREEN, arrowUp: 'arrow2', arrowDn: 'arrow3' },
+    { data: st3, up: 'shape4', down: 'shape5', upShape: 'triangleUp' as const, upColor: GREEN, arrowUp: 'arrow4', arrowDn: 'arrow5' },
   ];
 
   for (let i = warmup + 1; i < n; i++) {
-    for (let si = 0; si < allSTs.length; si++) {
-      const { data, upColor, label } = allSTs[si];
+    const time = bars[i].time;
+    for (const { data, up, down, upShape, upColor, arrowUp, arrowDn } of allSTs) {
       // Trend flip arrows
       if (data.dir[i] === 1 && data.dir[i - 1] === -1) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: upColor, text: label });
+        arrows.push({ time, id: arrowUp, value: 1, color: LIME });
       } else if (data.dir[i] === -1 && data.dir[i - 1] === 1) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#EF5350', text: label });
+        arrows.push({ time, id: arrowDn, value: -1, color: RED });
       }
 
-      // Cross detection: close crosses ST line (separate from trend flips)
+      // cross(close, Tsl) and close > Tsl / cross(Tsl, close) and close < Tsl
       const close = bars[i].close;
       const prevClose = bars[i - 1].close;
       const stVal = data.st[i];
       const prevStVal = data.st[i - 1];
       const crossAbove = close > stVal && prevClose <= prevStVal;
       const crossBelow = close < stVal && prevClose >= prevStVal;
-      if (si === 0) {
-        // ST1: flag for cross-above, triangleDown for cross-below
-        if (crossAbove) markers.push({ time: bars[i].time, position: 'belowBar', shape: 'square', color: '#FFEB3B', text: `${label}×` });
-        if (crossBelow) markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowDown', color: '#EF5350', text: `${label}×` });
-      } else {
-        // ST2/ST3: triangleUp for cross-above, triangleDown for cross-below
-        if (crossAbove) markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#00E676', text: `${label}×` });
-        if (crossBelow) markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowDown', color: '#EF5350', text: `${label}×` });
-      }
+      if (crossAbove) markers.push({ time, position: 'bottom', shape: upShape, color: upColor, id: up });
+      if (crossBelow) markers.push({ time, position: 'bottom', shape: 'triangleDown', color: RED, id: down });
     }
   }
 
@@ -174,6 +172,7 @@ export function calculate(bars: Bar[], inputs: Partial<SuperSupertrendInputs> = 
       'plot2': makePlot(st3),
     },
     markers,
+    arrows,
     plotCandles: { candle0: candles },
   };
 }

@@ -7,6 +7,8 @@
  * structure, the structure jumps by a whole number of steps and takes the direction of the move. The structure mean
  * is plotted in the direction colour. On each direction change a VWAP of hlc3 is anchored again, with two standard
  * deviation bands filled around it.
+ * Alerts (alertcondition, `alerts` of the result): structure shifts / reversals, closes crossing the anchored VWAP and
+ * the structure mean, and touches of the four deviation bands (computed whether the bands are shown or not).
  *
  * Reference: "Volatility-Driven VWAP Structure (Zeiierman)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolatilityDrivenVWAPStructureInputs {
   /** Number of bars of the rolling VWAP */
@@ -79,13 +82,15 @@ export const metadata = {
 const gt = (a: number, b: number) => a - b > 1e-10;
 /** Pine a != b: |a - b| > 1e-10 (false with na) */
 const ne = (a: number, b: number) => Math.abs(a - b) > 1e-10;
+/** Pine a >= b: not (b - a > 1e-10) (false with na) */
+const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > 1e-10);
 /** Pine division: x / 0 is na */
 const div = (a: number, b: number) => (b === 0 ? NaN : a / b);
 
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolatilityDrivenVWAPStructureInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { vwapLengthInput, structureMultInput, atrLength, showBand1, showBand2, bandMult1, bandMult2 } = cfg;
   const n = bars.length;
@@ -157,11 +162,13 @@ export function calculate(
   // Reversal anchored VWAP: sums reset when ta.change(direction) != 0 (na on the first bar: false) or na(anchorSumPV)
   const anchoredVwap: number[] = new Array(n);
   const anchoredDev: number[] = new Array(n);
+  const reversed: boolean[] = new Array(n);
   let anchorSumPV = NaN;
   let anchorSumV = NaN;
   let anchorSumP2V = NaN;
   for (let i = 0; i < n; i++) {
     const isReversed = i > 0 && direction[i] - direction[i - 1] !== 0;
+    reversed[i] = isReversed;
     const s = src[i];
     const v = vol[i];
     if (isReversed || isNaN(anchorSumPV)) {
@@ -191,6 +198,25 @@ export function calculate(
       color: c(i, transp),
     }));
 
+  // Alerts: bullishShift / bearishShift = isReversed and direction == 1 / -1; ta.crossover / ta.crossunder of close
+  // with anchoredVwap and structureMid; high >= anchorUpperK, low <= anchorLowerK
+  const closes = bars.map((b) => b.close);
+  const bandAt = (sign: 1 | -1, mult: number, i: number) => anchoredVwap[i] + sign * anchoredDev[i] * mult;
+  const le = (a: number, b: number) => ge(b, a);
+  const flags: boolean[][] = [
+    reversed.map((r, i) => r && direction[i] === 1),
+    reversed.map((r, i) => r && direction[i] === -1),
+    reversed,
+    crossedOver(closes, anchoredVwap),
+    crossedUnder(closes, anchoredVwap),
+    crossedOver(closes, mid),
+    crossedUnder(closes, mid),
+    bars.map((b, i) => ge(b.high, bandAt(1, bandMult1, i))),
+    bars.map((b, i) => le(b.low, bandAt(-1, bandMult1, i))),
+    bars.map((b, i) => ge(b.high, bandAt(1, bandMult2, i))),
+    bars.map((b, i) => le(b.low, bandAt(-1, bandMult2, i))),
+  ];
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -211,8 +237,24 @@ export function calculate(
       { plot1: 'plot4', plot2: 'plot5', colors: bars.map((_, i) => c(i, 95)) },
     ],
     markers: [],
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish VWAP Structure Shift', message: 'Volatility-Driven VWAP Structure shifted bullish.' },
+  { id: 'alert1', title: 'Bearish VWAP Structure Shift', message: 'Volatility-Driven VWAP Structure shifted bearish.' },
+  { id: 'alert2', title: 'Any VWAP Structure Reversal', message: 'VWAP structure reversal detected.' },
+  { id: 'alert3', title: 'Close Crossed Above Anchored VWAP', message: 'Price crossed above the reversal-anchored VWAP.' },
+  { id: 'alert4', title: 'Close Crossed Below Anchored VWAP', message: 'Price crossed below the reversal-anchored VWAP.' },
+  { id: 'alert5', title: 'Close Crossed Above VWAP Structure Mean', message: 'Price crossed above the VWAP structure mean.' },
+  { id: 'alert6', title: 'Close Crossed Below VWAP Structure Mean', message: 'Price crossed below the VWAP structure mean.' },
+  { id: 'alert7', title: 'Price Touched Upper Band 1', message: 'Price touched the first upper anchored VWAP deviation band.' },
+  { id: 'alert8', title: 'Price Touched Lower Band 1', message: 'Price touched the first lower anchored VWAP deviation band.' },
+  { id: 'alert9', title: 'Price Touched Upper Band 2', message: 'Price touched the second upper anchored VWAP deviation band.' },
+  { id: 'alert10', title: 'Price Touched Lower Band 2', message: 'Price touched the second lower anchored VWAP deviation band.' },
+];
 
 export const VolatilityDrivenVWAPStructure = {
   calculate,
@@ -220,4 +262,5 @@ export const VolatilityDrivenVWAPStructure = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

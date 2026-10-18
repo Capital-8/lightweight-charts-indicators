@@ -155,15 +155,15 @@ export function calculate(
     const bull = i > 0 && o > s && osc[i - 1] <= signal[i - 1] && big;
     const bear = i > 0 && o < s && osc[i - 1] >= signal[i - 1] && big;
     const momentum = i > 0 ? o - osc[i - 1] : NaN;
-    if (bull) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: color.green, size: 'small', forceOverlay: true });
-    if (bear) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: color.red, size: 'small', forceOverlay: true });
-    if (bull && momentum > 0) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: color.lime, size: 'normal', forceOverlay: true });
-    if (bear && momentum < 0) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: color.maroon, size: 'normal', forceOverlay: true });
+    if (bull) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: color.green, size: 'small', forceOverlay: true, id: 'shape0' });
+    if (bear) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: color.red, size: 'small', forceOverlay: true, id: 'shape1' });
+    if (bull && momentum > 0) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: color.lime, size: 'normal', forceOverlay: true, id: 'shape2' });
+    if (bear && momentum < 0) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: color.maroon, size: 'normal', forceOverlay: true, id: 'shape3' });
     // bgcolor(bullishSignal ? color.new(color.green, 95) : na); bgcolor(bearishSignal ? color.new(color.red, 95) : na)
-    if (bull) bgColors.push({ time: t, color: String(color.new(color.green, 95)) });
-    if (bear) bgColors.push({ time: t, color: String(color.new(color.red, 95)) });
+    if (bull) bgColors.push({ time: t, color: String(color.new(color.green, 95)), id: 'bgcolor0' });
+    if (bear) bgColors.push({ time: t, color: String(color.new(color.red, 95)), id: 'bgcolor1' });
     // candleColor: green above the signal, red below, gray otherwise (also when a value is na)
-    if (cfg.enableCandleColor) barColors.push({ time: t, color: o > s ? color.green : o < s ? color.red : color.gray });
+    if (cfg.enableCandleColor) barColors.push({ time: t, color: o > s ? color.green : o < s ? color.red : color.gray, id: 'barcolor0' });
   }
 
   return {

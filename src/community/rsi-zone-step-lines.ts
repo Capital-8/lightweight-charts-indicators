@@ -108,11 +108,11 @@ export function calculate(
 
     // plotshape(crossUp ? close : na, "Cross Above Upper", shape.circle, location.absolute, size = size.tiny, color = upperColor)
     if (crossUp) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: close, shape: 'circle', color: cfg.upperColor, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: close, shape: 'circle', color: cfg.upperColor, size: 'tiny', id: 'shape0' });
     }
     // plotshape(crossDown ? close : na, "Cross Below Lower", shape.circle, location.absolute, size = size.tiny, color = lowerColor)
     if (crossDown) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: close, shape: 'circle', color: cfg.lowerColor, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: close, shape: 'circle', color: cfg.lowerColor, size: 'tiny', id: 'shape1' });
     }
   }
 

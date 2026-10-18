@@ -28,11 +28,15 @@
  * Markers:
  *   BUY on NovaWave fast crossover slow, SELL on crossunder
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' / 'Sell Signal', true on the bars where the NovaWave
+ * fast EMA crosses above / below the slow EMA.
+ *
  * Reference: "EMA+Super" by All_in_Traders
  */
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EMASuperTrendInputs {
   ema1Len: number;
@@ -111,7 +115,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<EMASuperTrendInputs> = {}): Omit<IndicatorResult, 'markers'> {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<EMASuperTrendInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const {
     ema1Len, ema2Len, ema3Len, ema4Len, ema5Len, emaSrc,
     atrLen, factor,
@@ -293,7 +300,15 @@ export function calculate(bars: Bar[], inputs: Partial<EMASuperTrendInputs> = {}
       { plot1: 'plot8', plot2: 'plot9', options: { color: 'rgba(0,128,0,0.20)' }, colors: nwFillColors },
     ],
     markers,
-  } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] };
+    // alertcondition(buy_signal = ta.crossover(nw_fast, nw_slow)) / alertcondition(sell_signal = ta.crossunder(...))
+    alerts: alertStates(alertConditions, bars, [crossedOver(nwFastArr, nwSlowArr), crossedUnder(nwFastArr, nwSlowArr)]),
+  } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] };
 }
 
-export const EMASupertrend = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'BUY signal: Fast EMA crossed above Slow EMA' },
+  { id: 'alert1', title: 'Sell Signal', message: 'SELL signal: Fast EMA crossed below Slow EMA' },
+];
+
+export const EMASupertrend = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

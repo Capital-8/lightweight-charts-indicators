@@ -13,6 +13,8 @@
  * until the inversion bar, a box from there to the last bar, a box of 50 bars after the last bar, the dashed middle
  * line of the zone on both parts, and a triangle for each signal. At most 100 gaps and 100 inversions per side are
  * kept in memory; at most 500 boxes, lines and labels are kept.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Signal' on the bars with a signal of a bearish gap turned
+ * bullish (an up triangle), 'Bearish Signal' on the bars with a signal of a bullish gap turned bearish.
  *
  * Reference: "Inversion Fair Value Gaps (IFVG) [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -22,6 +24,7 @@
 import { ta, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface InversionFairValueGapsInputs {
   /** Number of most recent inversions drawn per side */
@@ -94,7 +97,8 @@ interface Fvg {
 export function calculate(
   bars: Bar[],
   inputs: Partial<InversionFairValueGapsInputs> = {},
-): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & { boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & { boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -120,6 +124,8 @@ export function calculate(
   const lines: LineDrawingData[] = [];
   const labels: LabelData[] = [];
   const interval = barInterval(bars);
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -165,8 +171,9 @@ export function calculate(
     fvgManage(bullFvg, bullInv);
     fvgManage(bearFvg, bearInv);
 
-    // inv_manage(): the signals and the end of an inversion (the alert conditions are not an output)
-    const invManage = (ary: Fvg[]) => {
+    // inv_manage(): the signals and the end of an inversion; returns `fire` (a signal on this bar)
+    const invManage = (ary: Fvg[]): boolean => {
+      let fire = false;
       if (ary.length >= BUFFER) ary.shift();
       const ref = (dirUp: boolean) => (wick ? (dirUp ? b.low : b.high) : close1);
       for (let k = ary.length - 1; k >= 0; k--) {
@@ -183,15 +190,19 @@ export function calculate(
         if (st >= 1) value.right = time;
         if (dir === -1 && st === 1 && lt(b.close, bot) && ge(ref(false), bot) && lt(ref(false), top)) {
           value.labs.push({ x: time, y: top, dir: -1 });
+          fire = true;
         }
         if (dir === 1 && st === 1 && gt(b.close, top) && le(ref(true), top) && gt(ref(true), bot)) {
           value.labs.push({ x: time, y: bot, dir: 1 });
+          fire = true;
         }
         if (st >= 1 && ((dir === -1 && gt(cTop, top)) || (dir === 1 && lt(cBot, bot)))) ary.splice(k, 1);
       }
+      return fire;
     };
-    invManage(bullInv);
-    invManage(bearInv);
+    // bear_signal = inv_manage(bull_inv_ary); bull_signal = inv_manage(bear_inv_ary)
+    bearFlags.push(invManage(bullInv));
+    bullFlags.push(invManage(bearInv));
 
     // send_it() on the last bar (the drawings of the bars before are deleted on every bar)
     if (i === last) {
@@ -232,8 +243,16 @@ export function calculate(
     boxes,
     lines,
     labels,
+    // alertcondition(bull_signal, "Bullish Signal"); alertcondition(bear_signal, "Bearish Signal")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Signal', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Bearish Signal', message: 'Alert Fired!' },
+];
 
 export const InversionFairValueGaps = {
   calculate,
@@ -241,4 +260,5 @@ export const InversionFairValueGaps = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

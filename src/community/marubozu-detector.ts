@@ -4,6 +4,7 @@
  * A marubozu is a candle with a long body (at least a percentage of the high - low range) and small shadows (each
  * shadow at most a percentage of the range); optionally the range must be at least a multiple of ATR(14). Bullish
  * (close > open) and bearish (close < open) marubozu candles get a bar colour and a BULL / BEAR MARU label.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Marubozu' and 'Bearish Marubozu', true on those candles.
  *
  * Reference: "Marubozu Detector" by toppermost
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +12,13 @@
 
 import { ta, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Marubozu', message: 'Bullish Marubozu on {{ticker}}' },
+  { id: 'alert1', title: 'Bearish Marubozu', message: 'Bearish Marubozu on {{ticker}}' },
+];
 
 export interface MarubozuDetectorInputs {
   /** Max shadow % of range (0-20) */
@@ -56,7 +64,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<MarubozuDetectorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const shadowTolerance = cfg.shadowTolerance / 100;
   const minBodyPercent = cfg.minBodyPercent / 100;
@@ -66,6 +74,7 @@ export function calculate(
   const bearBar = String(color.new(color.red, 60));
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   bars.forEach((b, i) => {
     const candleRange = b.high - b.low;
     const body = Math.abs(b.close - b.open);
@@ -78,6 +87,8 @@ export function calculate(
 
     const bullishMarubozu = isLongBody && smallShadows && isLargeEnough && gt(b.close, b.open);
     const bearishMarubozu = isLongBody && smallShadows && isLargeEnough && lt(b.close, b.open);
+    bullFlags.push(bullishMarubozu);
+    bearFlags.push(bearishMarubozu);
 
     // barcolor(bullishMarubozu ? color.new(color.green, 60) : bearishMarubozu ? color.new(color.red, 60) : na)
     if (bullishMarubozu) barColors.push({ time: b.time, color: bullBar });
@@ -94,13 +105,14 @@ export function calculate(
     }
   });
 
-  // alertcondition(bullishMarubozu, "Bullish Marubozu") and alertcondition(bearishMarubozu, "Bearish Marubozu"): no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
     barColors,
+    // alertcondition(bullishMarubozu, "Bullish Marubozu") and alertcondition(bearishMarubozu, "Bearish Marubozu")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
 
-export const MarubozuDetector = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const MarubozuDetector = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

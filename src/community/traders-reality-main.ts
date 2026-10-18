@@ -20,6 +20,13 @@
  *   and the low of the session so far, and the name of the session.
  * - Weekly psy levels: the high and the low of the first 8 hours of the week (from Saturday 22:00 for crypto, from
  *   Monday 00:00 for forex), and the open of the day.
+ * - Alerts (alertcondition, `alerts` of the result): the 38 conditions of the original, one flag per bar each: any
+ *   vector candle, each vector colour, the 8 two-candle colour patterns (colour of this bar and of the bar before),
+ *   close crossing over the high / 50 % high and under the low / 50 % low of ADR, AWR, AMR, RD and RW (a level of 0
+ *   does not count), close crossing under / over the psy high and low, and close crossing the daily open. They are
+ *   computed from the same values as the drawings (see the limits below), whether the lines are shown or not; the psy
+ *   levels exist only with "Show: Levels?" on a valid timeframe, as in the original. The day and month ranges are
+ *   built on intraday charts only (the week ranges on intraday and daily charts): elsewhere their alerts are false.
  *
  * Limits of the port:
  * - The day, week and month values are built from the chart bars. The original reads its own daily, weekly and
@@ -59,6 +66,7 @@ import type { BarColorData, BoxData, LabelData, LineDrawingData, TableCellData, 
 import { barsAfterLastBar, chartTimeframe, hasCalendar, periodChanges, periodStarts, securityBars } from '../anchor-period';
 import { barInterval, barTime } from '../bar-time';
 import { currencyOf, mintickOf, symbolTypeOf, timezoneOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TradersRealityMainInputs {
   labelOffset: number;
@@ -757,7 +765,7 @@ interface Htf {
 
 type Result = IndicatorResult & {
   barColors: BarColorData[]; lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[]; tables: TableData[];
-};
+} & { alerts: AlertConditionState[] };
 
 export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs> = {}, chart?: ChartContext): Result {
   const cfg = { ...defaultInputs, ...inputs };
@@ -900,13 +908,20 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
   const flags = new Map<string, number>();
   const pvsraColor: string[] = [];
   const pvsra: number[] = [];
+  // alertFlag of calcPvsra(): the bar is a vector candle (one of the two vector rules)
+  const vectorFlag: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const up = gt(b.close, b.open);
     let c: string;
+    let vector = true;
     if (ge(vol[i], 2 * averageVolume[i]) || ge(volumeSpread[i], highestVolumeSpread[i])) c = up ? cfg.greenVectorColor : cfg.redVectorColor;
     else if (ge(vol[i], 1.5 * averageVolume[i])) c = up ? cfg.blueVectorColor : cfg.violetVectorColor;
-    else c = up ? cfg.regularCandleUpColor : cfg.regularCandleDownColor;
+    else {
+      c = up ? cfg.regularCandleUpColor : cfg.regularCandleDownColor;
+      vector = false;
+    }
+    vectorFlag.push(vector);
     pvsraColor.push(c);
     if (!flags.has(c)) flags.set(c, flagOf(c));
     pvsra.push(flags.get(c)!);
@@ -1206,6 +1221,47 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
     plot12: P((i) => ({ value: shown(psyPlot, psyLoArr[i]), color: cfg.psyColL })),
     plot13: P((i) => ({ value: shown(openPlot, dailyOpen[i]), color: cfg.dailyOpenColor })),
   };
+
+  // Alert conditions, on the values the port draws (the day / week / month values built from the chart bars)
+  const closes = bars.map((b) => b.close);
+  // pvsraColor == <vector colour>: the same colour (a colour input may be written in another format)
+  const isColor = (c: string) => {
+    const key = rgba(c);
+    return pvsraColor.map((pc) => rgba(pc) === key);
+  };
+  const isGreen = isColor(cfg.greenVectorColor);
+  const isRed = isColor(cfg.redVectorColor);
+  const isBlue = isColor(cfg.blueVectorColor);
+  const isViolet = isColor(cfg.violetVectorColor);
+  // pvsraColor == a and pvsraColor[1] == b
+  const pair = (now: boolean[], before: boolean[]) => now.map((v, i) => v && i > 0 && before[i - 1]);
+  const seriesOf = (f: (i: number) => number) => bars.map((_, i) => f(i));
+  // ta.crossover(close, level) and level != 0 / ta.crossunder(close, level) and level != 0 (na is false)
+  const over = (level: number[]) => crossedOver(closes, level).map((v, i) => v && level[i] !== 0);
+  const under = (level: number[]) => crossedUnder(closes, level).map((v, i) => v && level[i] !== 0);
+  /** The four conditions of a range: high, low, 50 % high, 50 % low */
+  const rangeAlerts = (r: ReturnType<typeof adrHiLo>) => {
+    const high = seriesOf(r.high);
+    const low = seriesOf(r.low);
+    const high50 = seriesOf((i) => r.high(i) - r.adr(i) / 2);
+    const low50 = seriesOf((i) => r.low(i) + r.adr(i) / 2);
+    return [over(high), under(low), over(high50), under(low50)];
+  };
+  // Psy levels: crossunder / crossover and not na(level) and level != 0
+  const psyAlerts = [under(psyHiArr), over(psyHiArr), under(psyLoArr), over(psyLoArr)];
+  // ta.cross(close, dailyOpen) and not na(dailyOpen) and dailyOpen != 0
+  const openUp = over(dailyOpen);
+  const openDown = under(dailyOpen);
+  const alertFlags: boolean[][] = [
+    vectorFlag,
+    isGreen, isRed, isBlue, isViolet,
+    pair(isGreen, isRed), pair(isRed, isGreen), pair(isBlue, isRed), pair(isRed, isBlue),
+    pair(isViolet, isGreen), pair(isGreen, isViolet), pair(isViolet, isBlue), pair(isBlue, isViolet),
+    ...rangeAlerts(dayAdr), ...rangeAlerts(weekAdr), ...rangeAlerts(monthAdr), ...rangeAlerts(dayRd), ...rangeAlerts(weekRd),
+    ...psyAlerts,
+    openUp.map((v, i) => v || openDown[i]),
+  ];
+
   const result: Result = {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
@@ -1215,6 +1271,7 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
     labels: [],
     boxes: [],
     tables: [],
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
   if (n === 0) return result;
 
@@ -1510,4 +1567,46 @@ export function calculate(bars: Bar[], inputs: Partial<TradersRealityMainInputs>
   return result;
 }
 
-export const TradersRealityMain = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions, in its declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Alert on Any Vector Candle', message: '{{ticker}} Vector Candle on the {{interval}}' },
+  { id: 'alert1', title: 'Green Vector Candle', message: '{{ticker}} Green Vector Candle on the {{interval}} Note: alert triggers in real time before the candle is closed unless you choose "once per bar close" option - ie the alert might trigger at some point and the pa after that could change the vector color completely. Use with caution.' },
+  { id: 'alert2', title: 'Red Vector Candle', message: '{{ticker}} Red Vector Candle on the {{interval}} Note: alert triggers in real time before the candle is closed unless you choose "once per bar close" option- ie the alert might trigger at some point and the pa after that could change the vector color completely. Use with caution.' },
+  { id: 'alert3', title: 'Blue Vector Candle', message: '{{ticker}} Blue Vector Candle on the {{interval}} Note: alert triggers in real time before the candle is closed unless you choose "once per bar close" option- ie the alert might trigger at some point and the pa after that could change the vector color completely. Use with caution.' },
+  { id: 'alert4', title: 'Purple Vector Candle', message: '{{ticker}} Purple Vector Candle on the {{interval}} Note: alert triggers in real time before the candle is closed unless you choose "once per bar close" option- ie the alert might trigger at some point and the pa after that could change the vector color completely. Use with caution.' },
+  { id: 'alert5', title: 'Red/Green Vector Candle Pattern', message: '{{ticker}} Red/Green Vector Candle Pattern on the {{interval}}' },
+  { id: 'alert6', title: 'Green/Red Vector Candle Pattern', message: '{{ticker}} Green/Red Vector Candle Pattern on the {{interval}}' },
+  { id: 'alert7', title: 'Red/Blue Vector Candle Pattern', message: '{{ticker}} Red/Blue Vector Candle Pattern on the {{interval}}' },
+  { id: 'alert8', title: 'Blue/Red Vector Candle Pattern', message: '{{ticker}} Blue/Red Vector Candle Pattern on the {{interval}}' },
+  { id: 'alert9', title: 'Green/Purple Vector Candle Pattern', message: '{{ticker}} Green/Purple Vector Candle Pattern on the {{interval}}' },
+  { id: 'alert10', title: 'Purple/Green Vector Candle Pattern', message: '{{ticker}} Purple/Green Vector Candle Pattern on the {{interval}}' },
+  { id: 'alert11', title: 'Blue/Purple Vector Candle Pattern', message: '{{ticker}} Blue/Purple Vector Candle Pattern on the {{interval}}' },
+  { id: 'alert12', title: 'Purple/Blue Vector Candle Pattern', message: '{{ticker}} Purple/Blue Vector Candle Pattern on the {{interval}}' },
+  { id: 'alert13', title: 'ADR High reached', message: 'PA has reached the calculated ADR High' },
+  { id: 'alert14', title: 'ADR Low reached', message: 'PA has reached the calculated ADR Low' },
+  { id: 'alert15', title: '50% of ADR High reached', message: 'PA has reached 50% of the calculated ADR High' },
+  { id: 'alert16', title: '50% ADR Low reached', message: 'PA has reached 50% the calculated ADR Low' },
+  { id: 'alert17', title: 'AWR High reached', message: 'PA has reached the calculated AWR High' },
+  { id: 'alert18', title: 'AWR Low reached', message: 'PA has reached the calculated AWR Low' },
+  { id: 'alert19', title: '50% of AWR High reached', message: 'PA has reached 50% of the calculated AWR High' },
+  { id: 'alert20', title: '50% AWR Low reached', message: 'PA has reached 50% of the calculated AWR Low' },
+  { id: 'alert21', title: 'AMR High reached', message: 'PA has reached the calculated AMR High' },
+  { id: 'alert22', title: 'AMR Low reached', message: 'PA has reached the calculated AMR Low' },
+  { id: 'alert23', title: '50% of AMR High reached', message: 'PA has reached 50% of the calculated AMR High' },
+  { id: 'alert24', title: '50% of AMR Low reached', message: 'PA has reached 50% of the calculated AMR Low' },
+  { id: 'alert25', title: 'Range Daily High reached', message: 'PA has reached the calculated Range Daily High' },
+  { id: 'alert26', title: 'Range Daily Low reached', message: 'PA has reached the calculated Range Daily Low' },
+  { id: 'alert27', title: '50% of Range Daily High reached', message: 'PA has reached 50% of the calculated Range Daily High' },
+  { id: 'alert28', title: '50% of Range Daily Low reached', message: 'PA has reached 50% of the calculated Range Daily Low' },
+  { id: 'alert29', title: 'Range Weekly High reached', message: 'PA has reached the calculated Range Weekly High' },
+  { id: 'alert30', title: 'Range Weekly Low reached', message: 'PA has reached the calculated Range Weekly Low' },
+  { id: 'alert31', title: '50% of Range Weekly High reached', message: 'PA has reached 50% of the calculated Range Weekly High' },
+  { id: 'alert32', title: '50% of Range Weekly Low reached', message: 'PA has reached 50% of the calculated Range Weekly Low' },
+  { id: 'alert33', title: 'PA crossed under Psy Hi', message: 'PA has crossed under the Psy Hi' },
+  { id: 'alert34', title: 'PA crossed over Psy Hi', message: 'PA has crossed over the Psy Hi' },
+  { id: 'alert35', title: 'PA crossed under Psy Lo', message: 'PA has crossed under the Psy Lo' },
+  { id: 'alert36', title: 'PA crossed over Psy Lo', message: 'PA has crossed over the Psy Lo' },
+  { id: 'alert37', title: 'PA crossed Daily open', message: 'PA has crossed the Daily open' },
+];
+
+export const TradersRealityMain = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

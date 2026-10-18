@@ -5,6 +5,7 @@
  * VI- = sum(|low - high[1]|, length) / sum(ATR(1), length). VI+ and VI- are drawn where they are above zero (or
  * always with "show values below zero"), with their difference as green / maroon columns, the highest and the
  * lowest of the two lines, a dashed zero line and a green / red background when VI+ is above / not above VI-.
+ * Alerts (alertcondition, `alerts` of the result): VI+ crossing over VI- and VI+ crossing under VI-.
  *
  * Reference: "Long Short dom" by Robin-Hood-trading
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +13,7 @@
 
 import { ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LongShortDomInputs {
   /** Vortex length */
@@ -64,7 +66,7 @@ const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
 export function calculate(
   bars: Bar[],
   inputs: Partial<LongShortDomInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -86,10 +88,14 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const bull = String(color.new(color.green, 85));
   const bear = String(color.new(color.red, 85));
+  const vipArr: number[] = [];
+  const vimArr: number[] = [];
   for (let i = 0; i < n; i++) {
     // A plain division: x / 0 is +-infinity (0 / 0 NaN); comparisons use the infinite value, plots show na
     const vip = vmp[i] / str[i];
     const vim = vmm[i] / str[i];
+    vipArr.push(vip);
+    vimArr.push(vim);
     const finalVip = cfg.showBelowZero ? vip : gt(vip, 0) ? vip : NaN;
     const finalVim = cfg.showBelowZero ? vim : gt(vim, 0) ? vim : NaN;
     plot0.push({ time: t(i), value: fin(finalVip), color: color.green });
@@ -108,8 +114,16 @@ export function calculate(
     plots: { plot0, plot1, plot2, plot3, plot4 },
     hlines: [{ value: 0, options: { title: 'Zero Line', color: color.gray, linestyle: 'dashed', linewidth: 1 } }],
     bgColors,
+    // crossUp = ta.crossover(VIP, VIM), crossDown = ta.crossunder(VIP, VIM)
+    alerts: alertStates(alertConditions, bars, [crossedOver(vipArr, vimArr), crossedUnder(vipArr, vimArr)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'VI+ пересекает VI- вверх', message: 'VI+ пересек VI- вверх (возможный лонг)' },
+  { id: 'alert1', title: 'VI+ пересекает VI- вниз', message: 'VI+ пересек VI- вниз (возможный шорт)' },
+];
 
 export const LongShortDom = {
   calculate,
@@ -117,4 +131,5 @@ export const LongShortDom = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

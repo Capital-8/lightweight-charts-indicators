@@ -6,6 +6,8 @@
  * 100) adds one to the top count, a 0 reading resets it; each new 0 reading adds one to the bottom count, a 100
  * reading resets it. When the RSI is beyond a trigger line and the matching count has reached the exhaustion value,
  * the background is highlighted. Two thick lines above and below the trigger lines show the counts in colour.
+ * Alerts (alertcondition, `alerts` of the result): any exhaustion top or bottom, any top, any bottom, exhaustion top /
+ * bottom and extreme exhaustion top / bottom, true on the bars of each trigger.
  *
  * Reference: "SExI - Super Exhaustion Indicator [Da_Prof]" by Da_Prof
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SExISuperExhaustionIndicatorInputs {
   /** RSI source */
@@ -99,7 +102,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<SExISuperExhaustionIndicatorInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -163,21 +166,49 @@ export function calculate(
   const bgBelow = String(color.rgb(45, 255, 52, 60));
   const bgExtremeAbove = '#ffee00d9';
   const bgExtremeBelow = 'rgb(2, 255, 166)';
+  const flags: boolean[][] = alertConditions.map(() => []);
   for (let i = 0; i < n; i++) {
     const topOk = topA[i] >= ex;
     const bottomOk = bottomA[i] >= ex;
-    if (ge(rsi[i], cfg.topTrigger) && topOk) bgColors.push({ time: t(i), color: bgAbove });
-    if (le(rsi[i], cfg.bottomTrigger) && bottomOk) bgColors.push({ time: t(i), color: bgBelow });
-    if (ge(rsi[i], cfg.topExtremeTrigger) && topOk) bgColors.push({ time: t(i), color: bgExtremeAbove });
-    if (le(rsi[i], cfg.bottomExtremeTrigger) && bottomOk) bgColors.push({ time: t(i), color: bgExtremeBelow });
+    const prxTop = ge(rsi[i], cfg.topTrigger) && topOk;
+    const prxBottom = le(rsi[i], cfg.bottomTrigger) && bottomOk;
+    const prxTopExtreme = ge(rsi[i], cfg.topExtremeTrigger) && topOk;
+    const prxBottomExtreme = le(rsi[i], cfg.bottomExtremeTrigger) && bottomOk;
+    if (prxTop) bgColors.push({ time: t(i), color: bgAbove });
+    if (prxBottom) bgColors.push({ time: t(i), color: bgBelow });
+    if (prxTopExtreme) bgColors.push({ time: t(i), color: bgExtremeAbove });
+    if (prxBottomExtreme) bgColors.push({ time: t(i), color: bgExtremeBelow });
+    // any_top_trigger / any_bottom_trigger: the trigger or the extreme trigger
+    const anyTop = prxTop || prxTopExtreme;
+    const anyBottom = prxBottom || prxBottomExtreme;
+    [anyBottom || anyTop, anyTop, anyBottom, prxTop, prxBottom, prxTopExtreme, prxBottomExtreme]
+      .forEach((f, k) => flags[k].push(f));
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0', title: 'SExI - Any Exhaustion Top or Bottom Triggered',
+    message: '{{ticker}} {{interval}}: SExI - Any Exhaustion Top or Bottom Triggered',
+  },
+  { id: 'alert1', title: 'SExI - Any Exhaustion Top Triggered', message: '{{ticker}} {{interval}}: SExI - Any Exhaustion Top Triggered' },
+  {
+    id: 'alert2', title: 'SExI - Any Exhaustion Bottom Triggered',
+    message: '{{ticker}} {{interval}}: SExI - Any Exhaustion Bottom Triggered',
+  },
+  { id: 'alert3', title: 'SExI - Exhaustion Top', message: 'SExI - Exhaustion Top' },
+  { id: 'alert4', title: 'SExI - Exhaustion Bottom', message: 'SExI - Exhaustion Bottom' },
+  { id: 'alert5', title: 'SExI - Extreme Exhaustion Top', message: 'SExI - Extreme Exhaustion Top' },
+  { id: 'alert6', title: 'SExI - Extreme Exhaustion Bottom', message: 'SExI - Extreme Exhaustion Bottom' },
+];
 
 export const SExISuperExhaustionIndicator = {
   calculate,
@@ -185,4 +216,5 @@ export const SExISuperExhaustionIndicator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

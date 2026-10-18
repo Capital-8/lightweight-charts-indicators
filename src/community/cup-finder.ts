@@ -14,6 +14,9 @@
  *
  * At most 500 lines and 50 labels are kept (the oldest are removed).
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Cup Found', 'Bearish Cup Found' and 'Cup Found' (either),
+ * true on the bars where a cup is kept; the messages read the hidden "included" plot.
+ *
  * Chart values (third argument): the port reads the symbol tick (the radius in the label is rounded to the tick;
  * without it: 0.01).
  *
@@ -25,6 +28,7 @@
 import { ta, str, math, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData } from '../types';
 import { mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CupFinderInputs {
   /** Number of bars to search */
@@ -97,7 +101,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<CupFinderInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const loopback = Math.trunc(cfg.loopback);
@@ -128,6 +132,8 @@ export function calculate(
   const cupLines: Ln[] = []; // var cup_lines
 
   const included: number[] = new Array(n).fill(NaN);
+  const bullishCup: boolean[] = new Array(n).fill(false);
+  const bearishCup: boolean[] = new Array(n).fill(false);
 
   for (let i = 0; i < n; i++) {
     const { high, low, close } = bars[i];
@@ -237,6 +243,8 @@ export function calculate(
     }
 
     included[i] = math.round((100 * inCnt) / (ind + 1));
+    if (bull) bullishCup[i] = true;
+    else bearishCup[i] = true;
   }
 
   return {
@@ -254,7 +262,16 @@ export function calculate(
       style: l.bull ? ('label_lower_right' as const) : ('label_upper_right' as const),
       textAlign: 'left' as const,
     })),
+    // alertcondition(bullish_cup) / alertcondition(bearish_cup) / alertcondition(bullish_cup or bearish_cup)
+    alerts: alertStates(alertConditions, bars, [bullishCup, bearishCup, bullishCup.map((v, i) => v || bearishCup[i])]),
   };
 }
 
-export const CupFinder = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Cup Found', message: 'Bullish Cup Found, Included:{{plot("included")}}' },
+  { id: 'alert1', title: 'Bearish Cup Found', message: 'Bearish Cup Found, Included:{{plot("included")}}' },
+  { id: 'alert2', title: 'Cup Found', message: 'Cup Found, Included:{{plot("included")}}' },
+];
+
+export const CupFinder = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

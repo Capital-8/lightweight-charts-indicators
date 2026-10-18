@@ -6,12 +6,15 @@
  * the position of a smoothed close (signal line) in its range over the signal period. Their mean * 100 is the buy
  * dominance and 100 minus it the sell dominance; both are smoothed over 10 bars and drawn as the bull and bear lines
  * with a 50 level. Smoothing methods: EMA, HMA, zero-lag EMA (ZLA) or a two-pole super smoother (SSE).
+ * Alerts (alertcondition, `alerts` of the result): bull line crossing over the bear line, bear over bull, bull line
+ * crossing over / under 50.
  *
  * Reference: "Market Pulse-X" by Canhoto-Medium
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type MarketPulseSmoothing = 'EMA' | 'HMA' | 'ZLA' | 'SSE';
 
@@ -66,7 +69,10 @@ export const metadata = {
 /** Pine a == b: within 1e-10 (false with na) */
 const eq = (a: number, b: number) => Math.abs(a - b) <= 1e-10;
 
-export function calculate(bars: Bar[], inputs: Partial<MarketPulseProInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<MarketPulseProInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -142,6 +148,12 @@ export function calculate(bars: Bar[], inputs: Partial<MarketPulseProInputs> = {
   const smoothSell = smooth(sellDominance, 10, cfg.normalSmoothingMethod);
 
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
+  // bullCrossOverBear, bearCrossOverBull, buyCross50Up, buyCross50Down
+  const buyLine = smoothBuy.map(fin);
+  const sellLine = smoothSell.map(fin);
+  const flags = [
+    crossedOver(buyLine, sellLine), crossedOver(sellLine, buyLine), crossedOver(buyLine, 50), crossedUnder(buyLine, 50),
+  ];
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -149,8 +161,17 @@ export function calculate(bars: Bar[], inputs: Partial<MarketPulseProInputs> = {
       plot1: bars.map((b, i) => ({ time: b.time, value: fin(smoothSell[i]), color: color.fuchsia })),
     },
     hlines: [{ value: 50, options: { title: '50%', color: color.gray, linestyle: 'dashed' } }],
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bull 🟢 crossed X 🡅 Bear 🔴', message: 'Pulse-X: Bull 🟢 crossed above Bear 🔴' },
+  { id: 'alert1', title: 'Bear 🟠 crossed X 🡅 Bull 🔵', message: 'Pulse-X: Bear 🟠 crossed above Bull 🔵' },
+  { id: 'alert2', title: 'Bull Line rose 🡅 level 50', message: 'Pulse-X: Bull Line rose 🡅 level 50' },
+  { id: 'alert3', title: 'Bear Line fell 🡇 level 50', message: 'Pulse-X: Bear Line fell 🡇 level 50' },
+];
 
 export const MarketPulsePro = {
   calculate,
@@ -158,4 +179,5 @@ export const MarketPulsePro = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

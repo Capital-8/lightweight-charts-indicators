@@ -4,12 +4,23 @@
  * Tillson T3 moving average combined with Parabolic SAR for trend confirmation.
  * T3 uses a 6-stage EMA cascade with volume factor coefficients.
  * PSAR provides additional trend direction via manual computation.
+ * Heikin-Ashi bars (plotbar 'Heikin-Ashi', `plotBars.ha` of the result) on every bar, coloured only with the
+ * Heikin-Ashi overlay input (else transparent).
+ * Alerts (alertcondition, `alerts` of the result): 'Close crosses T3' (close crosses the T3 Slow) and 'T3 crossing T3'
+ * (T3 Slow crosses T3 Fast).
  *
  * Reference: "TKP T3 Trend with PSAR"
  */
 
 import { ta, Series, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
-import type { MarkerData, BarColorData, PlotCandleData } from '../types';
+import type { MarkerData, BarColorData, PlotBarData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Close crosses T3', message: 'Reversal candle is forming!' },
+  { id: 'alert1', title: 'T3 crossing T3', message: 'A new trend may be forming!' },
+];
 
 export interface T3PsarInputs {
   t3Len: number;
@@ -51,17 +62,13 @@ export const plotConfig: PlotConfig[] = [
   { id: 'plot3', title: 'T3 Slow', color: '#FF6D00', lineWidth: 2 },
 ];
 
-export const plotCandleConfig = [
-  { id: 'ha', title: 'Heikin-Ashi' },
-];
-
 export const metadata = {
   title: 'TKP T3 Trend with PSAR',
   shortTitle: 'T3+SAR',
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<T3PsarInputs> = {}): Omit<IndicatorResult, 'markers'> & { plotCandles?: Record<string, PlotCandleData[]> } {
+export function calculate(bars: Bar[], inputs: Partial<T3PsarInputs> = {}): Omit<IndicatorResult, 'markers'> & { plotBars: Record<string, PlotBarData[]> } & { alerts: AlertConditionState[] } {
   const { t3Len, t3SlowLen, t3Factor, sarStart, sarInc, sarMax, src, showHA } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const source = getSourceSeries(bars, src);
@@ -262,9 +269,9 @@ export function calculate(bars: Bar[], inputs: Partial<T3PsarInputs> = {}): Omit
     barColors.push({ time: bars[i].time, color: col });
   }
 
-  // Build HA candle overlay when showHA is enabled (Pine lines 134-161)
-  // habarColor: hauc=bullcol, hadc=bearcol, hadr=bearrev, haur=bullrev, else hadefval
-  const haCandles: PlotCandleData[] | undefined = showHA ? bars.map((b, i) => {
+  // plotbar(haOpen, haHigh, haLow, haClose, 'Heikin-Ashi', color = haover ? habarColor : na) on every bar (Pine lines
+  // 134-161); habarColor: hauc=bullcol, hadc=bearcol, hadr=bearrev, haur=bullrev, else hadefval
+  const haBars: PlotBarData[] = bars.map((b, i) => {
     const t3Fast = t3Arr[i] ?? NaN;
     const t3SlowVal = t3SlowArr[i] ?? NaN;
     const hc = haCloseArr[i];
@@ -291,13 +298,20 @@ export function calculate(bars: Bar[], inputs: Partial<T3PsarInputs> = {}): Omit
       high: haHighArr[i],
       low: haLowArr[i],
       close: hc,
-      color: col,
-      borderColor: col,
-      wickColor: col,
+      color: showHA ? col : 'transparent',
     };
-  }) : undefined;
+  });
 
-  const result: Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; plotCandles?: Record<string, PlotCandleData[]> } = {
+  // c = cross(close, nT3Average) / d = cross(nT3Average, anT3Average) (exact compares, na is false)
+  const closeVals = bars.map((b) => b.close);
+  const slow = t3SlowArr.map((v) => v ?? NaN);
+  const fast = t3Arr.map((v) => v ?? NaN);
+  const closeOver = crossedOver(closeVals, slow);
+  const closeUnder = crossedUnder(closeVals, slow);
+  const slowOver = crossedOver(slow, fast);
+  const slowUnder = crossedUnder(slow, fast);
+
+  const result: Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; plotBars: Record<string, PlotBarData[]> } & { alerts: AlertConditionState[] } = {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3 },
     // Pine: fill between T3 Slow (plot3) and T3 Fast (plot0), colored by T3 relationship
@@ -306,13 +320,14 @@ export function calculate(bars: Bar[], inputs: Partial<T3PsarInputs> = {}): Omit
     ],
     markers,
     barColors,
+    plotBars: { ha: haBars },
+    alerts: alertStates(alertConditions, bars, [
+      closeOver.map((v, i) => v || closeUnder[i]),
+      slowOver.map((v, i) => v || slowUnder[i]),
+    ]),
   };
-
-  if (haCandles) {
-    result.plotCandles = { ha: haCandles };
-  }
 
   return result;
 }
 
-export const T3Psar = { calculate, metadata, defaultInputs, inputConfig, plotConfig, plotCandleConfig };
+export const T3Psar = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

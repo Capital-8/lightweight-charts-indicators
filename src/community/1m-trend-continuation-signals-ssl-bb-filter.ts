@@ -5,6 +5,7 @@
  * above the high SMA and to down when it is below the low SMA) and Bollinger Bands (SMA +- stdev * multiplier).
  * Buy: close above the trend EMA, SSL up line crossing over the SSL down line and close above the upper band.
  * Sell: close below the trend EMA, SSL up line crossing under the SSL down line and close below the lower band.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' and 'Sell Signal', true on the bars of each signal.
  *
  * Reference: "1m Trend Continuation Signals - SSL + BB Filter" by rhariganesh
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +13,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendContinuationSslBbInputs {
   /** Trend EMA length */
@@ -68,7 +70,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendContinuationSslBbInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -100,6 +102,8 @@ export function calculate(
   }
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
   for (let i = 1; i < n; i++) {
     const c = close[i];
     // ta.crossover / ta.crossunder compare exactly (na compares false)
@@ -107,6 +111,8 @@ export function calculate(
     const sslBearish = sslUp[i] < sslDown[i] && sslUp[i - 1] >= sslDown[i - 1];
     const buySignal = gt(c, trendEma[i]) && sslBullish && gt(c, bbUpper[i]);
     const sellSignal = lt(c, trendEma[i]) && sslBearish && lt(c, bbLower[i]);
+    buyFlags[i] = buySignal;
+    sellFlags[i] = sellSignal;
     if (buySignal) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#089981', text: 'BUY',
         textColor: color.white, size: 'small' });
@@ -137,8 +143,16 @@ export function calculate(
       { plot1: 'plot4', plot2: 'plot5', options: { title: 'BB Fill', color: BB_FILL } },
     ],
     markers,
+    // alertcondition(buySignal, "Buy Signal", ...) / alertcondition(sellSignal, "Sell Signal", ...)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'SSL Bullish Signal + Close Above Upper Bollinger Band' },
+  { id: 'alert1', title: 'Sell Signal', message: 'SSL Bearish Signal + Close Below Lower Bollinger Band' },
+];
 
 export const TrendContinuationSslBb = {
   calculate,
@@ -146,4 +160,5 @@ export const TrendContinuationSslBb = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

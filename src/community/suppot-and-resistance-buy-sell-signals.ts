@@ -6,6 +6,7 @@
  * above it, with RSI oversold, ADX above the trend threshold and a liquidity trap (volume above the multiplier times
  * the `length`-bar average volume and a wick longer than the threshold share of the bar range). A SELL label is the
  * mirror case at YPSAR with RSI overbought on a red candle.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY Signal' and 'SELL Signal', true on the bars of each label.
  *
  * Reference: "Suppot and resistance & BUY SELL SIGNALS" by doganayy2
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,13 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY Signal', message: 'BUY signal detected!' },
+  { id: 'alert1', title: 'SELL Signal', message: 'SELL signal detected!' },
+];
 
 export interface SuppotAndResistanceBuySellSignalsInputs {
   /** Channel / volume average period */
@@ -85,7 +93,7 @@ const eq = (a: number, b: number) => Number.isFinite(a) && Number.isFinite(b) &&
 export function calculate(
   bars: Bar[],
   inputs: Partial<SuppotAndResistanceBuySellSignalsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -136,6 +144,8 @@ export function calculate(
   const dpsar = A(ta.lowest(S(close), cfg.length));
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   const plot0: { time: number; value: number }[] = [];
   const plot1: { time: number; value: number }[] = [];
   const plot2: { time: number; value: number }[] = [];
@@ -157,6 +167,8 @@ export function calculate(
     const liquidityTrap = volumeSpike && wickAnomaly;
     const buySignal = liquidityTrap && lt(rsi[i], cfg.rsiOversoldLevel) && strongTrend && touchDpsar && gt(b.close, b.open);
     const sellSignal = liquidityTrap && gt(rsi[i], cfg.rsiOverboughtLevel) && strongTrend && touchYpsar && lt(b.close, b.open);
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
     if (buySignal) {
       markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: color.green, text: 'BUY', textColor: color.blue, size: 'small' });
     }
@@ -175,6 +187,8 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2, plot3, plot4, plot5 },
     markers,
+    // alertcondition(buySignal, 'BUY Signal') / alertcondition(sellSignal, 'SELL Signal')
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
 
@@ -184,4 +198,5 @@ export const SuppotAndResistanceBuySellSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

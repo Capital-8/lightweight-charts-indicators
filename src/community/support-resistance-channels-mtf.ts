@@ -34,7 +34,10 @@
  * - The higher timeframe bars come from the chart bars: when the chart bars cover fewer than 'Loopback Period'
  *   bars of the higher timeframe, the older ones are missing (the original reads them from the full history).
  * - A timeframe lower than the chart timeframe throws the Error of the original ('You should choose Time Frame wisely').
- * - 2 alert conditions of the original (resistance broken, support broken) give no output.
+ *
+ * Alerts (alertcondition, `alerts` of the result): 'Resistance Broken' / 'Support Broken', computed on the last bar
+ * only (as the original): its close, outside every shown channel, crosses above the top / below the bottom of one of
+ * the first 'Maximum Number of S/R' channels.
  *
  * Reference: "Support Resistance Channels/Zones Multi Time Frame" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -48,6 +51,7 @@ import { chartTimeframe, periodStarts, securityBars } from '../anchor-period';
 import { barTime } from '../bar-time';
 import type { BoxData, TableCellData, TableData, TablePosition } from '../types';
 import { mintickOf, visibleRangeOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SupportResistanceChannelsMtfInputs {
   /** Higher Time Frame */
@@ -165,19 +169,22 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceChannelsMtfInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { boxes: BoxData[]; tables: TableData[] } {
+): IndicatorResult & { boxes: BoxData[]; tables: TableData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { prd, loopback, minstrength, showsrfit, showtable } = cfg;
   const maxnumsr = cfg.maxnumsr - 1;
   const boxes: BoxData[] = [];
   const tables: TableData[] = [];
+  const n = bars.length;
+  // resistancebroken / supportbroken: false on every bar but the last one
+  const flags: boolean[][] = [new Array<boolean>(n).fill(false), new Array<boolean>(n).fill(false)];
   const result = () => ({
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     boxes,
     tables,
+    alerts: alertStates(alertConditions, bars, flags),
   });
-  const n = bars.length;
   if (n === 0) return result();
 
   // matrix.rows(hlmatrix) < prd * 10
@@ -360,8 +367,27 @@ export function calculate(
       cells, merges: [{ startColumn: 0, startRow: 0, endColumn: 3, endRow: 0 }],
     });
   }
+
+  // alerts: the close not in a channel, then a channel broken by the close against close[1]
+  let notInChannel = true;
+  for (let x = 0; x <= Math.min(9, maxnumsr); x++) {
+    if (le(close, suportresistance[x * 2]) && ge(close, suportresistance[x * 2 + 1])) notInChannel = false;
+  }
+  if (notInChannel) {
+    const close1 = last > 0 ? bars[last - 1].close : NaN;
+    for (let x = 0; x <= Math.min(9, maxnumsr); x++) {
+      if (le(close1, suportresistance[x * 2]) && gt(close, suportresistance[x * 2])) flags[0][last] = true;
+      if (ge(close1, suportresistance[x * 2 + 1]) && lt(close, suportresistance[x * 2 + 1])) flags[1][last] = true;
+    }
+  }
   return result();
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Resistance Broken', message: 'Resistance Broken' },
+  { id: 'alert1', title: 'Support Broken', message: 'Support Broken' },
+];
 
 export const SupportResistanceChannelsMtf = {
   calculate,
@@ -369,4 +395,5 @@ export const SupportResistanceChannelsMtf = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

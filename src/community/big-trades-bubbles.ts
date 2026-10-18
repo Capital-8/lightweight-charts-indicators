@@ -8,6 +8,7 @@
  * in three sizes by the z-score. Anomalies with a small body and a close that fights the direction give absorption
  * diamonds. Deep pressure dots mark bars where the SMA and the EMA of the net pressure (buy - sell) agree with the
  * close location.
+ * Alerts (alertcondition, `alerts` of the result): big buy / sell, bull / bear absorption, deep buy / sell pressure.
  *
  * Reference: "Real-Time Big Trades Bubbles & Absorbtions & Deep Pressure" by samet_lezki
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, PineSize } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface BigTradesBubblesInputs {
   /** Lookback of the proxy SMA / standard deviation (previous bars) */
@@ -113,7 +115,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<BigTradesBubblesInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -141,9 +143,11 @@ export function calculate(
   const pressureEma = A(ta.ema(S(netPressure), cfg.dpEmaLen));
 
   const markers: MarkerData[] = [];
-  const shape = (time: number, price: number, s: 'circle' | 'diamond', c: string, size: PineSize) => {
+  const flags: boolean[][] = [[], [], [], [], [], []];
+  // id: the plotshape output (shape0..9 in the original's order)
+  const shape = (id: string, time: number, price: number, s: 'circle' | 'diamond', c: string, size: PineSize) => {
     // plotshape(cond ? y : na, location = location.absolute): nothing drawn when y is na
-    if (!isNaN(price)) markers.push({ time, position: 'atPriceMiddle', price, shape: s, color: c, size });
+    if (!isNaN(price)) markers.push({ id, time, position: 'atPriceMiddle', price, shape: s, color: c, size });
   };
   const inside = cfg.posMode === 'Inside Candle';
   const strong = cfg.sigmaBase + 1.5;
@@ -197,16 +201,18 @@ export function calculate(
       && !finalBuy;
 
     // Pine plotshape order: buy small / medium / large, sell small / medium / large, absorptions, deep pressure
-    if (buySmall) shape(t, buyY, 'circle', cfg.buyColor, 'small');
-    if (buyMedium) shape(t, buyY, 'circle', cfg.buyColor, 'normal');
-    if (buyLarge) shape(t, buyY, 'circle', cfg.buyColor, 'large');
-    if (sellSmall) shape(t, sellY, 'circle', cfg.sellColor, 'small');
-    if (sellMedium) shape(t, sellY, 'circle', cfg.sellColor, 'normal');
-    if (sellLarge) shape(t, sellY, 'circle', cfg.sellColor, 'large');
-    if (bullAbsorption) shape(t, b.low - atrVal[i] * 0.08, 'diamond', cfg.absBuyColor, 'tiny');
-    if (bearAbsorption) shape(t, b.high + atrVal[i] * 0.08, 'diamond', cfg.absSellColor, 'tiny');
-    if (deepBuy) shape(t, b.low - atrVal[i] * 0.03, 'circle', cfg.dpBuyColor, 'tiny');
-    if (deepSell) shape(t, b.high + atrVal[i] * 0.03, 'circle', cfg.dpSellColor, 'tiny');
+    if (buySmall) shape('shape0', t, buyY, 'circle', cfg.buyColor, 'small');
+    if (buyMedium) shape('shape1', t, buyY, 'circle', cfg.buyColor, 'normal');
+    if (buyLarge) shape('shape2', t, buyY, 'circle', cfg.buyColor, 'large');
+    if (sellSmall) shape('shape3', t, sellY, 'circle', cfg.sellColor, 'small');
+    if (sellMedium) shape('shape4', t, sellY, 'circle', cfg.sellColor, 'normal');
+    if (sellLarge) shape('shape5', t, sellY, 'circle', cfg.sellColor, 'large');
+    if (bullAbsorption) shape('shape6', t, b.low - atrVal[i] * 0.08, 'diamond', cfg.absBuyColor, 'tiny');
+    if (bearAbsorption) shape('shape7', t, b.high + atrVal[i] * 0.08, 'diamond', cfg.absSellColor, 'tiny');
+    if (deepBuy) shape('shape8', t, b.low - atrVal[i] * 0.03, 'circle', cfg.dpBuyColor, 'tiny');
+    if (deepSell) shape('shape9', t, b.high + atrVal[i] * 0.03, 'circle', cfg.dpSellColor, 'tiny');
+    // alertcondition(finalBuy / finalSell / bullAbsorption / bearAbsorption / deepBuyPressure / deepSellPressure)
+    [finalBuy, finalSell, bullAbsorption, bearAbsorption, deepBuy, deepSell].forEach((f, k) => flags[k].push(f));
   }
 
   return {
@@ -216,8 +222,19 @@ export function calculate(
       plot0: bars.map((b) => ({ time: b.time, value: b.close, color: '#2962FF' })),
     },
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Big Buy', message: 'Big Buy pressure detected' },
+  { id: 'alert1', title: 'Big Sell', message: 'Big Sell pressure detected' },
+  { id: 'alert2', title: 'Bull Absorption', message: 'Bull absorption detected' },
+  { id: 'alert3', title: 'Bear Absorption', message: 'Bear absorption detected' },
+  { id: 'alert4', title: 'Deep Buy Pressure', message: 'Deep buy pressure detected' },
+  { id: 'alert5', title: 'Deep Sell Pressure', message: 'Deep sell pressure detected' },
+];
 
 export const BigTradesBubbles = {
   calculate,
@@ -225,4 +242,5 @@ export const BigTradesBubbles = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

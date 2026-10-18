@@ -132,9 +132,12 @@ export function calculate(
       { value: 70, options: { title: 'High Threshold', color: '#ea00006d', linestyle: 'dashed' } },
       { value: 50, options: { title: 'Mid Threshold', color: '#eb61048b', linestyle: 'dashed' } },
     ],
-    // fill(l1, mid, color.new(rocc, 90), display = d3 ? display.all : display.none): FillData has no display
-    // option, so the fill is returned only when it is shown
-    fills: cfg.showRoc ? [{ plot1: 'plot0', plot2: 'plot1', colors: fillColors }] : [],
+    // fill(l1, mid, color.new(rocc, 90), display = d3 ? display.all : display.none), untitled ("Plots Background"):
+    // FillData has no display option, so the hidden fill is given with transparent colours (listed, draws nothing)
+    fills: [{
+      plot1: 'plot0', plot2: 'plot1', options: { title: 'Plots Background' },
+      colors: cfg.showRoc ? fillColors : fillColors.map(() => 'transparent'),
+    }],
     markers: [],
     barColors,
     plotCandles: { rsiCandles, chartCandles },

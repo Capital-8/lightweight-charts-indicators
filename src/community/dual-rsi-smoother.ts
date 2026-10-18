@@ -6,6 +6,8 @@
  * are drawn 5 points below the first line when both lines are low (or the second line is more than 30 points above
  * the first); sell dots 5 points above it when the first line is high and more than 12 points above the second, or
  * above 95.
+ * Alerts (alertcondition, `alerts` of the result): 'Green Dot Alert' / 'Red Dot Alert', true on the bars with a buy /
+ * sell dot.
  *
  * Reference: "Dual RSI Smoother" by TheUltimator5
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DualRsiSmootherInputs {
   rsiLength1: number;
@@ -76,7 +79,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<DualRsiSmootherInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -91,10 +94,12 @@ export function calculate(
   const plot0: { time: number; value: number; color: string }[] = [];
   const plot1: { time: number; value: number; color: string }[] = [];
   const markers: MarkerData[] = [];
-  // plotchar(series, location = location.absolute, char = "•", size = size.tiny, color = c)
-  const dot = (time: number, price: number, c: string) => {
+  const greenFlags: boolean[] = [], redFlags: boolean[] = [];
+  // plotchar(series, location = location.absolute, char = "•", size = size.tiny, color = c): the 4 plotchar
+  // outputs are char0..char3 in declaration order
+  const dot = (time: number, price: number, c: string, id: string) => {
     markers.push({ time, position: 'atPriceMiddle', price, shape: 'circle', color: 'transparent', text: '•',
-      textColor: c, size: 'tiny' });
+      textColor: c, size: 'tiny', id });
   };
   for (let i = 0; i < n; i++) {
     const a1 = amp1[i];
@@ -110,20 +115,30 @@ export function calculate(
     const highlightCondition2 = gt(a2 - a1, 30);
     const highlightCondition3 = lt(a2, 25) && lt(a1, 22);
     const highlightBackground = highlightCondition1 || highlightCondition2;
-    if (highlightBackground) dot(t, a1 - 5, cfg.buyDotColor);
-    if (highlightCondition3) dot(t, a1 - 5, cfg.buyDotColor);
+    if (highlightBackground) dot(t, a1 - 5, cfg.buyDotColor, 'char0');
+    if (highlightCondition3) dot(t, a1 - 5, cfg.buyDotColor, 'char1');
     const top1 = gt(a1, 75) && gt(a1 - a2, 12);
     const top2 = gt(a1, 95);
-    if (top1) dot(t, a1 + 5, cfg.sellDotColor);
-    if (top2) dot(t, a1 + 5, cfg.sellDotColor);
+    if (top1) dot(t, a1 + 5, cfg.sellDotColor, 'char2');
+    if (top2) dot(t, a1 + 5, cfg.sellDotColor, 'char3');
+    greenFlags.push(highlightBackground || highlightCondition3);
+    redFlags.push(top1 || top2);
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
     markers,
+    // alertcondition(highlightBackground or highlightCondition3) / alertcondition(highlightConditionTop1 or ...Top2)
+    alerts: alertStates(alertConditions, bars, [greenFlags, redFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Green Dot Alert', message: 'Green Dot (Buy) condition triggered' },
+  { id: 'alert1', title: 'Red Dot Alert', message: 'Red Dot (Sell) condition triggered' },
+];
 
 export const DualRsiSmoother = {
   calculate,
@@ -131,4 +146,5 @@ export const DualRsiSmoother = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

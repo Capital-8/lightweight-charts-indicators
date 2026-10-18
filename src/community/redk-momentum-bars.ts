@@ -4,12 +4,15 @@
  * Trading system of 2 short MAs and a long filter MA.
  * Displays momentum as plotcandle bars relative to filter.
  * Custom LazyLine (triple WMA) smoothing function.
+ * Alerts (alertcondition, `alerts` of the result): the bar high crosses over 0, the bar low crosses under 0, and
+ * either of them.
  *
  * Reference: "[dev]RedK Momentum Bars" by RedKTrader
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { PlotCandleData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RedKMomentumBarsInputs {
   fastLength: number;
@@ -73,7 +76,7 @@ function getMA(source: Series, length: number, type: string): Series {
   }
 }
 
-export function calculate(bars: Bar[], inputs: Partial<RedKMomentumBarsInputs> = {}): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]> } {
+export function calculate(bars: Bar[], inputs: Partial<RedKMomentumBarsInputs> = {}): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]> } & { alerts: AlertConditionState[] } {
   const { fastLength, fastType, slowLength, slowType, slowDelay, filterLength, filterType } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -135,6 +138,15 @@ export function calculate(bars: Bar[], inputs: Partial<RedKMomentumBarsInputs> =
     });
   }
 
+  // Alert_up = ta.crossover(h, 0), Alert_dn = ta.crossunder(l, 0), Alert_swing = Alert_up or Alert_dn
+  // (h = math.max(o, c), l = math.min(o, c): na when o or c is na)
+  const relM = relMArr.map((v) => v ?? NaN);
+  const hArr = fastM.map((c, i) => (isNaN(c) || isNaN(relM[i]) ? NaN : Math.max(relM[i], c)));
+  const lArr = fastM.map((c, i) => (isNaN(c) || isNaN(relM[i]) ? NaN : Math.min(relM[i], c)));
+  const alertUp = crossedOver(hArr, 0);
+  const alertDn = crossedUnder(lArr, 0);
+  const alertSwing = alertUp.map((f, i) => f || alertDn[i]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
@@ -142,7 +154,15 @@ export function calculate(bars: Bar[], inputs: Partial<RedKMomentumBarsInputs> =
     hlines: [
       { value: 0, options: { color: '#2962FF', linestyle: 'solid', title: 'Zero Line' } },
     ],
+    alerts: alertStates(alertConditions, bars, [alertUp, alertDn, alertSwing]),
   };
 }
 
-export const RedKMomentumBars = { calculate, metadata, defaultInputs, inputConfig, plotConfig, plotCandleConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '.   MoBars Crossing 0 Up', message: 'MoBars Up - Bullish Mode Detected!' },
+  { id: 'alert1', title: '..  MoBars Crossing 0 Down', message: 'MoBars Down - Bearish Mode Detected!' },
+  { id: 'alert2', title: '... MoBars Crossing 0', message: 'Mobars Swing - Possible Reversal Detected!' },
+];
+
+export const RedKMomentumBars = { calculate, metadata, defaultInputs, inputConfig, plotConfig, plotCandleConfig, alertConditions };

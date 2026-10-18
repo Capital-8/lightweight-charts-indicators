@@ -5,12 +5,14 @@
  * Trend flips bullish when rsi_mfi crosses above pmom with rising EMA(5),
  * bearish when rsi_mfi drops below nmom with falling EMA(5).
  * Overlay: Range-weighted MA band with ATR-derived width, colored candles, and buy/sell labels.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY' (the trend turns positive) and 'SELL' (it turns negative).
  *
  * Reference: "RMI Trend Sniper" by TZack88
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, PlotCandleData, LabelData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RMITrendSniperInputs {
   rmiLen: number;
@@ -48,7 +50,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<RMITrendSniperInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<RMITrendSniperInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const { rmiLen, pmom, nmom, fillShow } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -311,7 +316,20 @@ export function calculate(bars: Bar[], inputs: Partial<RMITrendSniperInputs> = {
     barColors,
     plotCandles: { candle0: candles },
     labels,
-  } as Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]>; labels: LabelData[] };
+    // alertcondition(positive and not positive[1], "BUY") / alertcondition(negative and not negative[1], "SELL")
+    alerts: alertStates(alertConditions, bars, [
+      posArr.map((p, i) => p && !(i > 0 && posArr[i - 1])),
+      negArr.map((v, i) => v && !(i > 0 && negArr[i - 1])),
+    ]),
+  } as Omit<IndicatorResult, 'markers'> & {
+    barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]>; labels: LabelData[]; alerts: AlertConditionState[];
+  };
 }
 
-export const RMITrendSniper = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions (no message given: the default message) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'SELL', message: 'Alert Fired!' },
+];
+
+export const RMITrendSniper = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

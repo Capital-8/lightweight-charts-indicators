@@ -6,6 +6,7 @@
  * the lower band, +50 at the upper band, not clamped), with an SMA signal line. The background is green when the
  * oscillator is above its signal and red when below. Buy: the oscillator crosses over the oversold level. Sell: it
  * crosses under the overbought level.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' and 'Sell Signal', true on the bars of each signal.
  *
  * Reference: "XAUUSD Family Scalping (5min)" by cupra_inc
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface XauusdFamilyScalpingInputs {
   /** SMA length of the midpoint, range and body */
@@ -60,7 +62,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<XauusdFamilyScalpingInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -84,6 +86,8 @@ export function calculate(
   const bear = String(color.new(color.red, 90));
   const bgColors: BgColorData[] = [];
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // bgcolor(osc > sig ? color.new(bullColor, 90) : osc < sig ? color.new(bearColor, 90) : na)
@@ -92,10 +96,12 @@ export function calculate(
     if (i === 0) continue;
     // ta.crossover(osc, oversold) / ta.crossunder(osc, overbought): exact comparisons (no 1e-10 tolerance), a tie on
     // the previous bar counts, na gives false
-    if (osc[i] > cfg.oversold && osc[i - 1] <= cfg.oversold) {
+    buyFlags[i] = osc[i] > cfg.oversold && osc[i - 1] <= cfg.oversold;
+    sellFlags[i] = osc[i] < cfg.overbought && osc[i - 1] >= cfg.overbought;
+    if (buyFlags[i]) {
       markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: color.lime, size: 'large', text: 'BUY', textColor: color.white });
     }
-    if (osc[i] < cfg.overbought && osc[i - 1] >= cfg.overbought) {
+    if (sellFlags[i]) {
       markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: color.red, size: 'large', text: 'SELL', textColor: color.white });
     }
   }
@@ -114,8 +120,15 @@ export function calculate(
     ],
     markers,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** alertcondition(buySignal / sellSignal) of the original */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'BUY: Oscillator crossed above oversold (-58)' },
+  { id: 'alert1', title: 'Sell Signal', message: 'SELL: Oscillator crossed below overbought (58)' },
+];
 
 export const XauusdFamilyScalping = {
   calculate,
@@ -123,4 +136,5 @@ export const XauusdFamilyScalping = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

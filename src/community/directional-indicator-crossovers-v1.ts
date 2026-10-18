@@ -5,6 +5,8 @@
  * smooth(+DM) / smooth(TR), -DI = 100 * smooth(-DM) / smooth(TR), ADX = 100 * smooth(|+DI - -DI| / (+DI + -DI)).
  * The area between +DI and -DI is shaded green while +DI leads and red while -DI leads; dots at the top / bottom of
  * the pane mark the crossings of +DI over -DI and of -DI over +DI (optionally only while ADX is above a threshold).
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish DI Crossover' / 'Bearish DI Crossover' on the bars of
+ * those crossings (with the ADX filter when it is on; whether the dots are shown or not).
  *
  * Reference: "Directional Indicator Crossovers v1[JopAlgo]" by JopAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DirectionalIndicatorCrossoversV1Inputs {
   /** DI length */
@@ -75,7 +78,7 @@ const eq = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS) &&
 export function calculate(
   bars: Bar[],
   inputs: Partial<DirectionalIndicatorCrossoversV1Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -111,6 +114,7 @@ export function calculate(
   const adx = smooth(dx, cfg.adxLen).map((v) => 100.0 * v);
 
   const markers: MarkerData[] = [];
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   // ta.crossover(a, b): a > b and a[1] <= b[1], compared exactly (no 1e-10 tolerance; na compares false)
   const crossover = (a: number[], b: number[], i: number) => i > 0 && a[i] > b[i] && a[i - 1] <= b[i - 1];
   for (let i = 0; i < n; i++) {
@@ -118,6 +122,8 @@ export function calculate(
     const bearX = crossover(minusDI, plusDI, i);
     const sigBull = cfg.useAdxFilt ? bullX && gt(adx[i], cfg.adxThr) : bullX;
     const sigBear = cfg.useAdxFilt ? bearX && gt(adx[i], cfg.adxThr) : bearX;
+    bullFlags.push(sigBull);
+    bearFlags.push(sigBear);
     // plotshape(showMarks and sigBull, "Bullish DI Crossover", location.top, shape.circle, size.tiny, color.lime)
     if (cfg.showMarks && sigBull) {
       markers.push({ time: bars[i].time, position: 'top', shape: 'circle', color: color.lime, size: 'tiny' });
@@ -147,8 +153,16 @@ export function calculate(
         colors: minusDI.map((m, i) => (cfg.showFill && gt(m, plusDI[i]) ? bearFill : 'transparent')) },
     ],
     markers,
+    // alertcondition(sigBull, "Bullish DI Crossover") / alertcondition(sigBear, "Bearish DI Crossover")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish DI Crossover', message: 'Bullish DI crossover (+DI over -DI).' },
+  { id: 'alert1', title: 'Bearish DI Crossover', message: 'Bearish DI crossover (-DI over +DI).' },
+];
 
 export const DirectionalIndicatorCrossoversV1 = {
   calculate,
@@ -156,4 +170,5 @@ export const DirectionalIndicatorCrossoversV1 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

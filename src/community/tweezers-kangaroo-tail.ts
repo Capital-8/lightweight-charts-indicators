@@ -4,12 +4,15 @@
  * Detects tweezer top/bottom and kangaroo tail candlestick patterns.
  * Tweezers compare wick sizes within a lookback window.
  * Kangaroo tails require room (zigzag distance) and wick/body ratio.
+ * Alerts (alertcondition, `alerts` of the result): 'Kangaroo Tail Bearish', 'Kangaroo Tail Bullish', 'Tweezers
+ * Bearish' and 'Tweezers Bullish', true on the bars of the K / T labels of each kind.
  *
  * Reference: "Tweezer and Kangaroo Tail" by LonesomeTheBlue
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TweezersKangarooTailInputs {
   enableTweezer: boolean;
@@ -63,7 +66,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TweezersKangarooTailInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<TweezersKangarooTailInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const {
     enableTweezer, maxRate: maxRatePct, levelDiff: levelDiffPct, tweezPrd, apartPrd,
     enableKangaroo, kangPrd, kangMinPrd, atrMult, wickMult, wickMultAvg,
@@ -113,6 +116,10 @@ export function calculate(bars: Bar[], inputs: Partial<TweezersKangarooTailInput
 
   const markers: MarkerData[] = [];
   const closePlot = bars.map((b) => ({ time: b.time, value: NaN }));
+  const topKangaroo: boolean[] = new Array(n).fill(false);
+  const bottomKangaroo: boolean[] = new Array(n).fill(false);
+  const topTweezer: boolean[] = new Array(n).fill(false);
+  const bottomTweezer: boolean[] = new Array(n).fill(false);
 
   for (let i = 0; i < n; i++) {
     const { open, high, low, close, time } = bars[i];
@@ -127,6 +134,7 @@ export function calculate(bars: Bar[], inputs: Partial<TweezersKangarooTailInput
           const minW = Math.min(topWick[i], topWick[i - x]);
           if (maxW / minW <= maxRate && Math.abs(high - bars[i - x].high) < maxW * levelDiffRate && isHighestBar(i - x)) {
             markers.push({ time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'T' });
+            topTweezer[i] = true;
             break;
           } else if (bars[i - x].high >= high) {
             break;
@@ -142,6 +150,7 @@ export function calculate(bars: Bar[], inputs: Partial<TweezersKangarooTailInput
           const minW = Math.min(bottomWick[i], bottomWick[i - x]);
           if (maxW / minW <= maxRate && Math.abs(low - bars[i - x].low) < maxW * levelDiffRate && isLowestBar(i - x)) {
             markers.push({ time, position: 'belowBar', shape: 'labelUp', color: '#00FF00', text: 'T' });
+            bottomTweezer[i] = true;
             break;
           } else if (bars[i - x].low <= low) {
             break;
@@ -191,6 +200,7 @@ export function calculate(bars: Bar[], inputs: Partial<TweezersKangarooTailInput
         zigzag[0] - zigzag[2] > atrVal * atrMult &&
         zigzag[1] - zigzag[3] > kangMinPrd) {
         markers.push({ time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'K' });
+        topKangaroo[i] = true;
       }
 
       // Bottom kangaroo (bullish)
@@ -202,6 +212,7 @@ export function calculate(bars: Bar[], inputs: Partial<TweezersKangarooTailInput
         zigzag[2] - zigzag[0] > atrVal * atrMult &&
         zigzag[1] - zigzag[3] > kangMinPrd) {
         markers.push({ time, position: 'belowBar', shape: 'labelUp', color: '#00FF00', text: 'K' });
+        bottomKangaroo[i] = true;
       }
     }
   }
@@ -210,7 +221,17 @@ export function calculate(bars: Bar[], inputs: Partial<TweezersKangarooTailInput
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': closePlot },
     markers,
+    // alertcondition(topkangaroo) / (bottomkangaroo) / (top_tweezer) / (bottom_tweezer)
+    alerts: alertStates(alertConditions, bars, [topKangaroo, bottomKangaroo, topTweezer, bottomTweezer]),
   };
 }
 
-export const TweezersKangarooTail = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Kangaroo Tail Bearish', message: 'Kangaroo Tail Bearish' },
+  { id: 'alert1', title: 'Kangaroo Tail Bullish', message: 'Kangaroo Tail Bullish' },
+  { id: 'alert2', title: 'Tweezers Bearish', message: 'Tweezers Bearish' },
+  { id: 'alert3', title: 'Tweezers Bullish', message: 'Tweezers Bullish' },
+];
+
+export const TweezersKangarooTail = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -101,33 +101,33 @@ export function calculate(
 
     // plotchar(show_ii and ii_pattern, 'ii Pattern', 'ii', location.abovebar, color_ii, size = size.normal)
     if (showIi && iiPattern) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: 'transparent', text: 'i', textColor: colorIi,
+      markers.push({ id: 'char0', time: t, position: 'aboveBar', shape: 'circle', color: 'transparent', text: 'i', textColor: colorIi,
         size: 'normal' });
     }
     // plotchar(show_oo and oo_pattern, 'OO Pattern', 'OO', location.abovebar, color_oo, size = size.normal)
     if (showOo && ooPattern) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: 'transparent', text: 'O', textColor: colorOo,
+      markers.push({ id: 'char1', time: t, position: 'aboveBar', shape: 'circle', color: 'transparent', text: 'O', textColor: colorOo,
         size: 'normal' });
     }
     // plotchar(show_ioi and ioi_pattern, 'ioi Pattern', 'ioi', location.abovebar, color_ioi, size = size.small)
     if (showIoi && ioiPattern) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: 'transparent', text: 'i', textColor: colorIoi,
+      markers.push({ id: 'char2', time: t, position: 'aboveBar', shape: 'circle', color: 'transparent', text: 'i', textColor: colorIoi,
         size: 'small' });
     }
 
     // bgcolor(show_ii and ii_pattern ? color.new(color_ii, 90) : na), then OO, then ioi
-    if (showIi && iiPattern) bgColors.push({ time: t, color: bgIi });
-    if (showOo && ooPattern) bgColors.push({ time: t, color: bgOo });
-    if (showIoi && ioiPattern) bgColors.push({ time: t, color: bgIoi });
+    if (showIi && iiPattern) bgColors.push({ id: 'bgcolor0', time: t, color: bgIi });
+    if (showOo && ooPattern) bgColors.push({ id: 'bgcolor1', time: t, color: bgOo });
+    if (showIoi && ioiPattern) bgColors.push({ id: 'bgcolor2', time: t, color: bgIoi });
 
     // plotchar(inside_bar, 'Inside Bar', 'I', location.belowbar, color.blue, size = size.tiny)
     if (insideBar) {
-      markers.push({ time: t, position: 'belowBar', shape: 'circle', color: 'transparent', text: 'I', textColor: color.blue,
+      markers.push({ id: 'char3', time: t, position: 'belowBar', shape: 'circle', color: 'transparent', text: 'I', textColor: color.blue,
         size: 'tiny' });
     }
     // plotchar(outside_bar, 'Outside Bar', 'O', location.belowbar, color.red, size = size.tiny)
     if (outsideBar) {
-      markers.push({ time: t, position: 'belowBar', shape: 'circle', color: 'transparent', text: 'O', textColor: color.red,
+      markers.push({ id: 'char4', time: t, position: 'belowBar', shape: 'circle', color: 'transparent', text: 'O', textColor: color.red,
         size: 'tiny' });
     }
   }

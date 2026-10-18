@@ -99,11 +99,11 @@ export function calculate(
     // dot_color: blue on the first signal bar, else green when macd > macd[1], else orange
     if (buy[i] && !isNaN(macd[i])) {
       const dot = !prevBuy ? color.blue : i > 0 && macd[i] > macd[i - 1] ? color.green : color.orange;
-      markers.push({ time: t, position: 'atPriceMiddle', price: macd[i], shape: 'circle', color: dot, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: macd[i], shape: 'circle', color: dot, size: 'tiny', id: 'shape0' });
     }
     // plotshape(buy_condition[1] and not buy_condition ? macd : na, shape.circle, color.red, size.tiny)
     if (prevBuy && !buy[i] && !isNaN(macd[i])) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: macd[i], shape: 'circle', color: color.red, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: macd[i], shape: 'circle', color: color.red, size: 'tiny', id: 'shape1' });
     }
   }
 

@@ -7,12 +7,15 @@
  * the window. A second weighted pass uses, on each past bar, the first filter value when that bar was an outlier and
  * the close otherwise; a WMA smooths the result. The line is cyan when it rose on the last two bars and the close is
  * above it or its slope is above 1 % of ATR 14, magenta otherwise.
+ * Alerts (alertcondition, `alerts` of the result): 'SG-Hampel Bull Cross' / 'SG-Hampel Bear Cross', the close crossing
+ * above / below the line while its slope is above 1 % of ATR 14.
  *
  * Reference: "Savitzky-Golay Hampel Filter | AlphaNatt" by AlphaNatt
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SavitzkyGolayHampelFilterAlphanattInputs {
   /** Polynomial order (2 = quadratic, 3 = cubic, 4-5 = equal weights) */
@@ -85,7 +88,7 @@ function median(values: number[]): number {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SavitzkyGolayHampelFilterAlphanattInputs> = {},
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -136,11 +139,17 @@ export function calculate(
   const atr = A(ta.atr(bars, 14));
   const ff = (i: number) => (i >= 0 ? finalFilter[i] : NaN);
 
+  const crossUp = crossedOver(close, finalFilter);
+  const crossDown = crossedUnder(close, finalFilter);
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   const plot0 = bars.map((b, i) => {
     const firstDerivative = ff(i) - ff(i - 1);
     // A plain division: ATR 0 gives +-infinity (0 / 0 na), as in Pine
     const trendStrength = (Math.abs(firstDerivative) / atr[i]) * 100;
     const strongTrend = gt(trendStrength, 1.0);
+    // alertcondition(ta.crossover(close, finalFilter) and strongTrend, ...) / ta.crossunder(...) and strongTrend
+    bullFlags.push(crossUp[i] && strongTrend);
+    bearFlags.push(crossDown[i] && strongTrend);
     const priceAbove = gt(b.close, ff(i));
     const rising = gt(ff(i), ff(i - 1)) && gt(ff(i - 1), ff(i - 2));
     const bullish = (rising && priceAbove) || (rising && strongTrend);
@@ -150,8 +159,15 @@ export function calculate(
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'SG-Hampel Bull Cross', message: 'Price crossed above filter with strong trend' },
+  { id: 'alert1', title: 'SG-Hampel Bear Cross', message: 'Price crossed below filter with strong trend' },
+];
 
 export const SavitzkyGolayHampelFilterAlphanatt = {
   calculate,
@@ -159,4 +175,5 @@ export const SavitzkyGolayHampelFilterAlphanatt = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

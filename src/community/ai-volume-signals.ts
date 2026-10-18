@@ -5,12 +5,15 @@
  * the close above the 50 EMA gives a BUY label below the bar; a spike on a bearish candle with the close below the
  * 50 EMA gives a SELL label above the bar. The volume EMA can be drawn.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Alert' and 'Sell Alert', true on the bars of each signal.
+ *
  * Reference: "AI Volume Signals" by szymonsobkowiak
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AiVolumeSignalsInputs {
   /** Volume EMA length */
@@ -51,7 +54,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AiVolumeSignalsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
 
@@ -59,16 +62,22 @@ export function calculate(
   const priceMA = A(ta.ema(new Series(bars, (b) => b.close), 50));
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   bars.forEach((b, i) => {
     const volumeSpike = gt(b.volume ?? NaN, volumeEMA[i] * cfg.volumeMultiplier);
     const trendUp = gt(b.close, priceMA[i]);
     const trendDown = lt(b.close, priceMA[i]);
     // plotshape(buySignal, "Buy Signal", location.belowbar, color.green, shape.labelup, text = "BUY")
-    if (volumeSpike && trendUp && gt(b.close, b.open)) {
+    const buySignal = volumeSpike && trendUp && gt(b.close, b.open);
+    const sellSignal = volumeSpike && trendDown && lt(b.close, b.open);
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
+    if (buySignal) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'labelUp', color: color.green, text: 'BUY', textColor: color.blue });
     }
     // plotshape(sellSignal, "Sell Signal", location.abovebar, color.red, shape.labeldown, text = "SELL")
-    if (volumeSpike && trendDown && lt(b.close, b.open)) {
+    if (sellSignal) {
       markers.push({ time: b.time, position: 'aboveBar', shape: 'labelDown', color: color.red, text: 'SELL', textColor: color.blue });
     }
   });
@@ -79,8 +88,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     markers,
+    // alertcondition(buySignal, "Buy Alert") / alertcondition(sellSignal, "Sell Alert")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'AI Volume Signal: BUY' },
+  { id: 'alert1', title: 'Sell Alert', message: 'AI Volume Signal: SELL' },
+];
 
 export const AiVolumeSignals = {
   calculate,
@@ -88,4 +105,5 @@ export const AiVolumeSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

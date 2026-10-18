@@ -104,6 +104,8 @@ export function calculate(
   const [buyText, sellText] = cfg.signalText === 'B/S' ? ['B', 'S']
     : cfg.signalText === 'BUY/SELL' ? ['BUY', 'SELL'] : ['买', '卖'];
   const known = cfg.signalText === '买/卖' || cfg.signalText === 'B/S' || cfg.signalText === 'BUY/SELL';
+  // Style ids: shape0 .. shape3 for 买/卖, shape4 .. shape7 for B/S, shape8 .. shape11 for BUY/SELL
+  const idBase = cfg.signalText === 'B/S' ? 4 : cfg.signalText === 'BUY/SELL' ? 8 : 0;
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -126,16 +128,16 @@ export function calculate(
 
     // plotshape(..., style = shape.labelup / labeldown, size = size.tiny, location.belowbar / abovebar,
     //   textcolor = color.white); one group of four plotshape calls per signal text style
-    const buy = (on: boolean, c: string) => {
-      if (on) markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: c, size: 'tiny', text: buyText, textColor: color.white });
+    const buy = (on: boolean, c: string, k: number) => {
+      if (on) markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: c, size: 'tiny', text: buyText, textColor: color.white, id: `shape${idBase + k}` });
     };
-    const sell = (on: boolean, c: string) => {
-      if (on) markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: c, size: 'tiny', text: sellText, textColor: color.white });
+    const sell = (on: boolean, c: string, k: number) => {
+      if (on) markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: c, size: 'tiny', text: sellText, textColor: color.white, id: `shape${idBase + k}` });
     };
-    buy(breakout, color.blue);
-    sell(breakdown, color.black);
-    buy(cfg.showReversalSignals && reversalBreakout, color.purple);
-    sell(cfg.showReversalSignals && reversalBreakdown, color.orange);
+    buy(breakout, color.blue, 0);
+    sell(breakdown, color.black, 1);
+    buy(cfg.showReversalSignals && reversalBreakout, color.purple, 2);
+    sell(cfg.showReversalSignals && reversalBreakdown, color.orange, 3);
   }
 
   return {

@@ -28,6 +28,9 @@
  * the exchange time zone and session for the higher timeframe periods. Without it the port uses a tick of 0.01, the
  * dark theme colour #DBDBDB, the timeframe of the bar spacing and the UTC calendar.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Pressure Alert' / 'Sell Pressure Alert' on the buy / sell
+ * pressure bars, 'HTF Buy Zone Alert' / 'HTF Sell Zone Alert' on the bars where a higher timeframe zone appears.
+ *
  * Reference: "Delta Zones Buy/Sell Pressure" by NathanTradeus
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Library: "ZigLib" by DevLucem (Mozilla Public License 2.0), function zigzag()
@@ -41,6 +44,7 @@ import {
 import type { BoxData, LabelData, LineDrawingData, MarkerData } from '../types';
 import { mintickOf, foregroundColorOf, type ChartContext } from '../chart-context';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DeltaZonesBuySellPressureInputs {
   stddevlevel: number;
@@ -377,7 +381,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<DeltaZonesBuySellPressureInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] } {
+): IndicatorResult & { markers: MarkerData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const ms = (t: number) => (t >= 1e12 ? t : t * 1000);
@@ -412,6 +417,9 @@ export function calculate(
   resetDrawings({ line: 500, label: 500, box: 500 });
 
   const markers: MarkerData[] = [];
+  // htfBuyNew / htfSellNew per bar (false without HTF boxes or with an invalid HTF), for the alerts
+  const htfBuyFlags = new Array<boolean>(n).fill(false);
+  const htfSellFlags = new Array<boolean>(n).fill(false);
   const showCurrentBoxes = !(cfg.hideCurrentOnHTF && cfg.showHTFBoxes && htfIsValid);
 
   // pruneBoxes(boxArr, topArr, botArr, maxCount)
@@ -680,6 +688,8 @@ export function calculate(
     if (htf) {
       const htfBuyNew = cfg.showBuyBoxes && htf.hup[i] && !(i > 0 && htf.hup[i - 1]);
       const htfSellNew = cfg.showSellBoxes && htf.hdn[i] && !(i > 0 && htf.hdn[i - 1]);
+      htfBuyFlags[i] = htfBuyNew;
+      htfSellFlags[i] = htfSellNew;
       if (htfBuyNew) {
         htfBuyBoxes.push(box.new(i, htf.buyTop[i], i + 500, htf.buyBot[i], cfg.htfBuyBorderColor, cfg.htfBorderWidth,
           undefined, undefined, undefined, cfg.htfBuyFillColor, undefined, undefined, BOX_TEXT));
@@ -816,7 +826,17 @@ export function calculate(
     boxes: drawn.boxes ?? [],
     labels: drawn.labels ?? [],
     lines: drawn.lines ?? [],
+    // alertcondition(huntingup) / (huntingdn) / (htfBuyNew) / (htfSellNew)
+    alerts: alertStates(alertConditions, bars, [cur.hup, cur.hdn, htfBuyFlags, htfSellFlags]),
   };
 }
 
-export const DeltaZonesBuySellPressure = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Pressure Alert', message: 'Buy pressure detected!' },
+  { id: 'alert1', title: 'Sell Pressure Alert', message: 'Sell pressure detected!' },
+  { id: 'alert2', title: 'HTF Buy Zone Alert', message: 'HTF Buy zone appeared!' },
+  { id: 'alert3', title: 'HTF Sell Zone Alert', message: 'HTF Sell zone appeared!' },
+];
+
+export const DeltaZonesBuySellPressure = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

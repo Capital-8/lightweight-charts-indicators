@@ -20,7 +20,9 @@
  * - `chart.backgroundColor`: the text colour of the signal labels and the background of the table. Without it #0F0F0F.
  * - `chart.foregroundColor`: the text colour of the "TP" label and of the table. Without it #DBDBDB.
  *
- * Limit of the port: the 4 alert conditions give no output.
+ * Alerts (alertcondition, `alerts` of the result): 'Long Alert' / 'Short Alert' on the bars of a cross above / below
+ * the line (the later one when both happen), 'Long TP Alert' / 'Short TP Alert' when the high (low) reaches the
+ * take-profit level ("Take Profit" on).
  *
  * Reference: "SuperBollingerTrend (Expo)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,6 +31,7 @@
 
 import { ta, str, color, array, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LabelStyle, LineDrawingData, TableData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 import { backgroundColorOf, foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
 
@@ -87,6 +90,8 @@ const RED = '#FF5252';
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
+const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
 interface Ln { x1: number; y1: number; x2: number; y2: number; color: string; dashed: boolean }
 interface Lb { x: number; y: number; text: string; color: string; textColor: string; style: LabelStyle; size: 'small' | 'normal' }
@@ -95,7 +100,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SuperBollingerTrendInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // syminfo.mintick, chart.bg_color, chart.fg_color
@@ -138,6 +143,8 @@ export function calculate(
 
   const plot0: Array<{ time: number; value: number; color?: string }> = [];
   let dist = NaN;
+  // alerted = Alerts.new() on every bar: Long, Short, LongTp, ShortTp
+  const flags: boolean[][] = [[], [], [], []];
 
   for (let i = 0; i < n; i++) {
     const bar = bars[i];
@@ -146,6 +153,10 @@ export function calculate(
     const bbdn = (smaLow[i] ?? NaN) - (devLow[i] ?? NaN) * cfg.mult;
 
     // method SBT(): the trailing rule, then the jump on a cross (the cross is read before the rule)
+    let alertLong = false;
+    let alertShort = false;
+    let alertLongTp = false;
+    let alertShortTp = false;
     const step = (cond: boolean, val: number, col: string, p: number, isLong: boolean) => {
       s = Number.isNaN(bbdn) || Number.isNaN(bbup) ? 0.0
         : gt(close, s) ? Math.max(s, bbdn)
@@ -153,6 +164,9 @@ export function calculate(
       if (!cond) return;
       s = val;
       c = col;
+      // alerted.Long := l ? true : false; alerted.Short := l ? false : true
+      alertLong = isLong;
+      alertShort = !isLong;
       if (!cfg.showZigZag) return;
       // method zigzag()
       const y2 = cfg.dev === 'ZigZag' ? s : cfg.dev === 'High/Low' ? p : close;
@@ -193,7 +207,15 @@ export function calculate(
       tp.y2 = y;
       ltp.x = i + 10;
       ltp.y = y;
+      // alerted.LongTp := pos ? high >= y and high[1] < y : false; alerted.ShortTp := pos ? false : low <= y and low[1] > y
+      const prev = i > 0 ? bars[i - 1] : null;
+      alertLongTp = pos ? ge(bar.high, y) && lt(prev ? prev.high : NaN, y) : false;
+      alertShortTp = pos ? false : le(bar.low, y) && gt(prev ? prev.low : NaN, y);
     }
+    flags[0].push(alertLong);
+    flags[1].push(alertShort);
+    flags[2].push(alertLongTp);
+    flags[3].push(alertShortTp);
   }
 
   // Table of the last bar
@@ -221,8 +243,17 @@ export function calculate(
       time: T(l.x), price: l.y, text: l.text, color: l.color, textColor: l.textColor, style: l.style, size: l.size,
     })),
     tables,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Alert', message: 'Long Signal' },
+  { id: 'alert1', title: 'Short Alert', message: 'Short Signal' },
+  { id: 'alert2', title: 'Long TP Alert', message: 'Long TP' },
+  { id: 'alert3', title: 'Short TP Alert', message: 'Short TP' },
+];
 
 export const SuperBollingerTrend = {
   calculate,
@@ -230,4 +261,5 @@ export const SuperBollingerTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

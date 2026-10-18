@@ -8,12 +8,16 @@
  * Bull label; an MFI pivot high with a lower MFI and a higher price high gives a Bear label. The divergence lines and
  * labels are drawn on the pivot bar (Pine offset = -lookbackRight).
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Regular Bullish Divergence' / 'Regular Bearish Divergence', true on
+ * the bar on which the divergence is found (`Pivot Lookback` bars after the pivot).
+ *
  * Reference: "Money Flow Extended" by alexrainman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 
 export type MoneyFlowExtendedMAType = 'SMA' | 'EMA' | 'SMMA (RMA)' | 'WMA' | 'VWMA';
@@ -85,7 +89,7 @@ const lt = (a: number, b: number) => b - a > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<MoneyFlowExtendedInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -211,8 +215,16 @@ export function calculate(
           bottomColor: new Array(n).fill(String(color.new(color.red, 0))) } },
     ],
     markers,
+    // alertcondition(bullCond, 'Regular Bullish Divergence') / alertcondition(bearCond, 'Regular Bearish Divergence')
+    alerts: alertStates(alertConditions, bars, [bullCond, bearCond]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Regular Bullish Divergence', message: 'Found a new Regular Bullish Divergence, `Pivot Lookback` number of bars to the left of the current bar.' },
+  { id: 'alert1', title: 'Regular Bearish Divergence', message: 'Found a new Regular Bearish Divergence, `Pivot Lookback` number of bars to the left of the current bar.' },
+];
 
 export const MoneyFlowExtended = {
   calculate,
@@ -222,4 +234,5 @@ export const MoneyFlowExtended = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

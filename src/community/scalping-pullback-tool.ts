@@ -13,9 +13,10 @@
  * (open = average of the previous Heikin Ashi open and close, close = ohlc4); the fractals always use the chart
  * bars. The Heikin Ashi open starts at the first bar, so the first bars depend on where the bars start.
  *
- * Arrows are markers (arrowUp below the bar, arrowDown above the bar); the arrow height of the original (20 to 50
- * pixels) is not ported. The original also plots two bar counters with an na colour ("barssince(haClose<pacC)" and
- * "barssince(haClose>pacC)"): they draw nothing and are not in the output.
+ * The recovery arrows are the original's plotarrow (`arrows` of the result, value +1 / -1); the arrow height of the
+ * original (20 to 50 pixels) is not ported. The original also plots two bar counters with an na colour
+ * ("barssince(haClose<pacC)" and "barssince(haClose>pacC)", the second counting from close > pacC on the chart
+ * close): they are transparent xcross markers at the bottom on the bars where the count is not 0 or na.
  *
  * Alerts (alertcondition, `alerts` of the result): 'Buy Condition' / 'Sell Condition', true on the bar on which the
  * trading state goes from 0 to 1 / -1 (the bar of the arrow without the closed-candle delay).
@@ -26,6 +27,7 @@
 
 import { ta, Series, color, heikinAshi, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import type { ArrowData } from 'oakscriptjs';
 import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ScalpingPullbackToolInputs {
@@ -132,7 +134,7 @@ const le = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !(a
 export function calculate(
   bars: Bar[],
   inputs: Partial<ScalpingPullbackToolInputs> = {},
-): IndicatorResult & { alerts: AlertConditionState[] } {
+): IndicatorResult & { arrows: ArrowData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -155,6 +157,7 @@ export function calculate(
   const t = (i: number) => bars[i].time;
 
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
   const bgGreen = T(GREEN, 90);
@@ -169,6 +172,7 @@ export function calculate(
   // barssince(haClose < pacC), barssince(haClose > pacC)
   let sinceBelow = NaN;
   let sinceAbove = NaN;
+  let sinceCloseAbove = NaN; // barssince(close > pacC)
   const tradeDirection: number[] = [];
 
   for (let i = 0; i < n; i++) {
@@ -203,17 +207,22 @@ export function calculate(
     // plotshape(..., offset = -2): the shape of bar i is drawn on bar i - 2
     if (i >= 2) {
       const at = t(i - 2);
-      if (cfg.showFractals && topf) markers.push({ time: at, position: 'aboveBar', shape: 'triangleDown', color: RED });
-      if (cfg.showFractals && botf) markers.push({ time: at, position: 'belowBar', shape: 'triangleUp', color: LIME });
-      if (cfg.showHHLL && higherhigh) markers.push({ time: at, position: 'aboveBar', shape: 'square', color: MAROON, text: '[HH]' });
-      if (cfg.showHHLL && lowerhigh) markers.push({ time: at, position: 'aboveBar', shape: 'square', color: MAROON, text: '[LH]' });
-      if (cfg.showHHLL && higherlow) markers.push({ time: at, position: 'belowBar', shape: 'square', color: GREEN, text: '[HL]' });
-      if (cfg.showHHLL && lowerlow) markers.push({ time: at, position: 'belowBar', shape: 'square', color: GREEN, text: '[LL]' });
+      if (cfg.showFractals && topf) markers.push({ time: at, position: 'aboveBar', shape: 'triangleDown', color: RED, id: 'shape0' });
+      if (cfg.showFractals && botf) markers.push({ time: at, position: 'belowBar', shape: 'triangleUp', color: LIME, id: 'shape1' });
+      if (cfg.showHHLL && higherhigh) markers.push({ time: at, position: 'aboveBar', shape: 'square', color: MAROON, text: '[HH]', id: 'shape2' });
+      if (cfg.showHHLL && lowerhigh) markers.push({ time: at, position: 'aboveBar', shape: 'square', color: MAROON, text: '[LH]', id: 'shape3' });
+      if (cfg.showHHLL && higherlow) markers.push({ time: at, position: 'belowBar', shape: 'square', color: GREEN, text: '[HL]', id: 'shape4' });
+      if (cfg.showHHLL && lowerlow) markers.push({ time: at, position: 'belowBar', shape: 'square', color: GREEN, text: '[LL]', id: 'shape5' });
     }
 
     // Pullback recovery
     sinceBelow = lt(haClose[i], pacC[i]) ? 0 : sinceBelow + 1;
     sinceAbove = gt(haClose[i], pacC[i]) ? 0 : sinceAbove + 1;
+    sinceCloseAbove = gt(bars[i].close, pacC[i]) ? 0 : sinceCloseAbove + 1;
+    // plotshape(barssince(haClose<pacC), color=na, location=location.bottom) and plotshape(barssince(close>pacC), ...):
+    // the default xcross, drawn where the count is not 0 / na, with no colour
+    if (sinceBelow > 0) markers.push({ time: t(i), position: 'bottom', shape: 'xcross', color: 'transparent', id: 'shape6' });
+    if (sinceCloseAbove > 0) markers.push({ time: t(i), position: 'bottom', shape: 'xcross', color: 'transparent', id: 'shape7' });
     const pacExitU = lt(haOpen[i], pacU[i]) && gt(haClose[i], pacU[i]) && le(sinceBelow, cfg.lookback);
     const pacExitL = gt(haOpen[i], pacL[i]) && lt(haClose[i], pacL[i]) && le(sinceAbove, cfg.lookback);
     const buy = trendDirection === 1 && pacExitU;
@@ -231,9 +240,7 @@ export function calculate(
       const before = i - delay - 1 >= 0 ? tradeDirection[i - delay - 1] : 0;
       const now = tradeDirection[i - delay];
       if (before === 0 && now !== 0) {
-        markers.push(now > 0
-          ? { time: t(i - delay), position: 'belowBar', shape: 'arrowUp', color: arrowUp }
-          : { time: t(i - delay), position: 'aboveBar', shape: 'arrowDown', color: arrowDown });
+        arrows.push({ time: t(i - delay), id: 'arrow0', value: now, color: now > 0 ? arrowUp : arrowDown });
       }
     }
   }
@@ -256,6 +263,7 @@ export function calculate(
     },
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: T(GRAY, 90), title: 'Fill HiLo PAC' } }],
     markers,
+    arrows,
     barColors,
     bgColors,
     // alertcondition(Long, "Buy Condition") / alertcondition(Short, "Sell Condition")

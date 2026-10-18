@@ -4,7 +4,8 @@
  * MACD with 11 selectable moving average types for fast, slow, and trigger lines.
  * Supports SMA, EMA, WMA, DEMA, TMA, VAR, WWMA, ZLEMA, TSF, HULL, and TILL (Tillson T3).
  *
- * 4-color histogram: bright/faded green/red based on histogram momentum direction.
+ * 4-color histogram (the original's colours): lime / #B2DFDB above zero, #FFCDD2 / #EF5350 below zero, the first
+ * when the histogram rises.
  *
  * Reference: "MACD ReLoaded" by KivancOzbilgic
  */
@@ -41,7 +42,7 @@ export const inputConfig: InputConfig[] = [
 ];
 
 export const plotConfig: PlotConfig[] = [
-  { id: 'histogram', title: 'Histogram', color: '#26A69A', lineWidth: 4, style: 'columns' },
+  { id: 'histogram', title: 'Histogram', color: '#00E676', lineWidth: 4, style: 'columns' },
   { id: 'macd', title: 'MACDRe', color: '#426BE6', lineWidth: 2 },
   { id: 'trigger', title: 'TRIGGER', color: '#E60000', lineWidth: 2 },
 ];
@@ -199,7 +200,6 @@ export function calculate(bars: Bar[], inputs: Partial<MacdReloadedInputs> = {})
   const macdPlot: { time: number | string; value: number }[] = new Array(n);
   const triggerPlot: { time: number | string; value: number }[] = new Array(n);
 
-  let prevHist = NaN;
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     if (i < warmup) {
@@ -210,21 +210,13 @@ export function calculate(bars: Bar[], inputs: Partial<MacdReloadedInputs> = {})
       const h = histArr[i];
       const m = macdArr[i];
       const tr = triggerArr[i];
-      let color: string;
-      if (!isNaN(h) && !isNaN(prevHist)) {
-        // Pine: hist>=0 ? (hist[1]<hist ? lime : #B2DFDB) : (hist[1]<hist ? #FFCDD2 : #EF5350)
-        if (h >= 0) {
-          color = prevHist < h ? '#26A69A' : '#B2DFDB';
-        } else {
-          color = prevHist < h ? '#FFCDD2' : '#EF5350';
-        }
-      } else {
-        color = '#787B86';
-      }
+      // Pine: hist>=0 ? (hist[1]<hist ? color.lime : #B2DFDB) : (hist[1]<hist ? #FFCDD2 : #EF5350); na compares false
+      const prevHist = i > 0 ? histArr[i - 1] : NaN;
+      const rising = prevHist < h;
+      const color = h >= 0 ? (rising ? '#00E676' : '#B2DFDB') : (rising ? '#FFCDD2' : '#EF5350');
       histPlot[i] = { time: t, value: showHistogram ? h : NaN, color };
       macdPlot[i] = { time: t, value: isNaN(m) ? NaN : m };
       triggerPlot[i] = { time: t, value: isNaN(tr) ? NaN : tr };
-      prevHist = h;
     }
   }
 

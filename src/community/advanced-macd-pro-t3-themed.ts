@@ -10,6 +10,9 @@
  * bar under bearish momentum / a bearish bar under bullish momentum. Bull / Bear labels mark classic divergences:
  * a pivot low (high) of price lower (higher) than the previous pivot while the MACD at the pivot is higher (lower).
  * Four colour themes.
+ * Alerts (alertcondition, `alerts` of the result), each gated by its alert input as the original: MACD / signal
+ * crosses (only with the signal line shown), histogram and MACD zero crosses, MACD / extra T3 crosses, the two
+ * divergences and the two bar / momentum disagreements.
  *
  * Reference: "Advanced MACD Pro (WhiteStone_Ibrahim) - T3 Themed" by WhiteStone_Ibrahim
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -21,6 +24,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type Theme = 'Default (Current Settings)' | 'Dark Mode' | 'Light Mode' | 'Neon Night';
 type SmoothType = 'SMA' | 'EMA' | 'WMA' | 'RMA' | 'T3';
@@ -70,7 +74,7 @@ export interface AdvancedMacdProT3ThemedInputs {
   divPivRight: number;
   divBullColor: string;
   divBearColor: string;
-  /** Alert settings (alertcondition only, no output) */
+  /** Alert settings: the conditions of `alerts` are false while their input is off */
   alertSignalCross: boolean;
   alertHistZeroCross: boolean;
   alertMacdZeroCross: boolean;
@@ -263,7 +267,7 @@ function themeColors(cfg: AdvancedMacdProT3ThemedInputs): ThemeColors | null {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AdvancedMacdProT3ThemedInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -416,13 +420,57 @@ export function calculate(
     }
   }
 
+  // Alerts. var macd_cross_above_t3_signal / below: ta.crossover / crossunder run only on the bars where the T3 line
+  // is shown and both values exist (their history is those bars); the flags keep their value on the other bars
+  const t3AlertUp = callsite.crossover();
+  const t3AlertDown = callsite.crossunder();
+  const t3Above: boolean[] = new Array(n);
+  const t3Below: boolean[] = new Array(n);
+  let aboveVar = false;
+  let belowVar = false;
+  for (let i = 0; i < n; i++) {
+    if (cfg.showT3SignalLine && !isNaN(t3Line[i]) && !isNaN(macd[i])) {
+      aboveVar = !!t3AlertUp(macd[i], t3Line[i]);
+      belowVar = !!t3AlertDown(macd[i], t3Line[i]);
+    }
+    t3Above[i] = aboveVar;
+    t3Below[i] = belowVar;
+  }
+  const gate = (on: boolean, f: boolean[]) => f.map((v) => on && v);
+  const sigOn = cfg.alertSignalCross && cfg.showSignalLine;
+  const alertFlags = [
+    gate(sigOn, crossedOver(macd, signal)), gate(sigOn, crossedUnder(macd, signal)),
+    gate(cfg.alertHistZeroCross, crossedOver(hist, 0)), gate(cfg.alertHistZeroCross, crossedUnder(hist, 0)),
+    gate(cfg.alertMacdZeroCross, crossedOver(macd, 0)), gate(cfg.alertMacdZeroCross, crossedUnder(macd, 0)),
+    gate(cfg.alertT3SignalCrossMacd, t3Above), gate(cfg.alertT3SignalCrossMacd, t3Below),
+    gate(cfg.alertBullDiv, bullDiv), gate(cfg.alertBearDiv, bearDiv),
+    gate(cfg.alertDisagreement, bullDis), gate(cfg.alertDisagreement, bearDis),
+  ];
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2, plot3 },
     hlines: [{ value: 0, options: { title: 'Zero Line', color: '#ffffff', linestyle: 'dashed', linewidth: 1 } }],
     markers,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'MACD Crossed Above Signal', message: 'MACD ({{plot("MACD Line")}}) crossed above signal line ({{plot("Signal Line")}}). Value: {{plot("MACD Line")["0"]}}' },
+  { id: 'alert1', title: 'MACD Crossed Below Signal', message: 'MACD ({{plot("MACD Line")}}) crossed below signal line ({{plot("Signal Line")}}). Value: {{plot("MACD Line")["0"]}}' },
+  { id: 'alert2', title: 'MACD Histogram Crossed Above Zero', message: 'MACD Histogram ({{plot("MACD Histogram")}}) crossed above zero line. Value: {{plot("MACD Histogram")["0"]}}' },
+  { id: 'alert3', title: 'MACD Histogram Crossed Below Zero', message: 'MACD Histogram ({{plot("MACD Histogram")}}) crossed below zero line. Value: {{plot("MACD Histogram")["0"]}}' },
+  { id: 'alert4', title: 'MACD Crossed Above Zero', message: 'MACD Line ({{plot("MACD Line")}}) crossed above zero line. Value: {{plot("MACD Line")["0"]}}' },
+  { id: 'alert5', title: 'MACD Crossed Below Zero', message: 'MACD Line ({{plot("MACD Line")}}) crossed below zero line. Value: {{plot("MACD Line")["0"]}}' },
+  { id: 'alert6', title: 'MACD Crossed Above Extra T3 Signal', message: 'MACD ({{plot("MACD Line")}}) crossed above extra T3 signal line ({{plot("Extra T3 Signal Line")}}). Value: {{plot("MACD Line")["0"]}}' },
+  { id: 'alert7', title: 'MACD Crossed Below Extra T3 Signal', message: 'MACD ({{plot("MACD Line")}}) crossed below extra T3 signal line ({{plot("Extra T3 Signal Line")}}). Value: {{plot("MACD Line")["0"]}}' },
+  { id: 'alert8', title: 'Bullish MACD Divergence Detected', message: 'Bullish Divergence detected between Price (LL) and MACD Line (HL).' },
+  { id: 'alert9', title: 'Bearish MACD Divergence Detected', message: 'Bearish Divergence detected between Price (HH) and MACD Line (LH).' },
+  { id: 'alert10', title: 'Bullish Bar/Price Disagreement (MACD)', message: 'Price bar is bullish while MACD momentum is bearish (MACD<Signal).' },
+  { id: 'alert11', title: 'Bearish Bar/Price Disagreement (MACD)', message: 'Price bar is bearish while MACD momentum is bullish (MACD>Signal).' },
+];
 
 export const AdvancedMacdProT3Themed = {
   calculate,
@@ -430,4 +478,5 @@ export const AdvancedMacdProT3Themed = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -7,6 +7,8 @@
  * trend line. Bands: trend +/- (ATR x factor - ATR - EMA(200) of the 100-bar standard deviation of the close).
  * The line and the bands are drawn only when the direction is the same as on the previous bar; the line is bullish
  * after a rise, bearish after a fall. Gradient fills go from the trend line (transparent) to each band.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend Shift' (the trend line rises after a fall on the bar
+ * before) and 'Bearish Trend Shift' (falls after a rise).
  *
  * Reference: "Trend Cylinder (Zeiierman)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendCylinderInputs {
   /** Volatility period (standard deviation length) */
@@ -69,7 +72,10 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<TrendCylinderInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<TrendCylinderInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -110,12 +116,19 @@ export function calculate(bars: Bar[], inputs: Partial<TrendCylinderInputs> = {}
   // var color colorForPlot = bullishTrendColor, then colorForPlot := ... : colorForPlot[1] on every bar: on the first
   // bar colorForPlot[1] is na, so the colour stays na until the first rise or fall of the trend line
   let colorForPlot = 'transparent';
+  const bullShift: boolean[] = [], bearShift: boolean[] = [];
+  let prevBullish = false, prevBearish = false;
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // isTrendConsistent = trendDirection == trendDirection[1] (false on the first bar)
     const consistent = i > 0 && direction[i] === direction[i - 1];
     const isBullishTrend = i > 0 && gt(trend[i], trend[i - 1]);
     const isBearishTrend = i > 0 && lt(trend[i], trend[i - 1]);
+    // bullishShift = isBullishTrend and isBearishTrend[1] / bearishShift = isBearishTrend and isBullishTrend[1]
+    bullShift.push(isBullishTrend && prevBearish);
+    bearShift.push(isBearishTrend && prevBullish);
+    prevBullish = isBullishTrend;
+    prevBearish = isBearishTrend;
     colorForPlot = isBullishTrend ? cfg.bullishTrendColor : isBearishTrend ? cfg.bearishTrendColor : colorForPlot;
     plot0.push({ time: t, value: consistent ? trend[i] : NaN, color: colorForPlot });
     plot1.push({ time: t, value: consistent ? upperBand[i] : NaN, color: BAND_COL });
@@ -146,8 +159,15 @@ export function calculate(bars: Bar[], inputs: Partial<TrendCylinderInputs> = {}
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2 },
     fills,
+    alerts: alertStates(alertConditions, bars, [bullShift, bearShift]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend Shift', message: 'Trend Cylinder: Bullish trend shift detected' },
+  { id: 'alert1', title: 'Bearish Trend Shift', message: 'Trend Cylinder: Bearish trend shift detected' },
+];
 
 export const TrendCylinder = {
   calculate,
@@ -155,4 +175,5 @@ export const TrendCylinder = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

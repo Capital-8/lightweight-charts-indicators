@@ -4,12 +4,16 @@
  * Hull EMA (HEMA) trend indicator with crossover signals.
  * HEMA = EMA of (2*EMA(halfLen) - EMA(fullLen)), smoothed by EMA(sqrt(len)).
  * Two HEMA lines (fast/slow) with fill and bar coloring for trend direction.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Crossover' / 'Bearish Crossunder' (fast HEMA crosses the
+ * slow one), 'Bullish Test' / 'Bearish Test' (a wick into the latest bullish / bearish box with the open and close
+ * beyond its top; the top of a bearish box is high - ATR / 2, as the original creates it).
  *
  * Reference: "HEMA Trend Levels [AlgoAlpha]" by AlgoAlpha
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BoxData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HemaTrendLevelsInputs {
   hemaLengthFast: number;
@@ -55,7 +59,10 @@ function computeHEMA(src: Series, length: number): Series {
   return ta.ema(diff, sqrtLength);
 }
 
-export function calculate(bars: Bar[], inputs: Partial<HemaTrendLevelsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; boxes: BoxData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<HemaTrendLevelsInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; boxes: BoxData[] } & { alerts: AlertConditionState[] } {
   const { hemaLengthFast, hemaLengthSlow, bullColor, bearColor } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -82,6 +89,10 @@ export function calculate(bars: Bar[], inputs: Partial<HemaTrendLevelsInputs> = 
   let bullBoxBot = NaN;
   let bearBoxTop = NaN;
   let bearBoxBot = NaN;
+  // box.new(bar_index, high - vola, bar_index + 5, high): get_top() of the latest bearish box (get_bottom(): its high)
+  let bearBoxGetTop = NaN;
+  const flags: boolean[][] = [[], [], [], []];
+  for (let i = 0; i < Math.min(warmup, n); i++) flags.forEach((f) => f.push(false));
 
   // Detect crossovers
   for (let i = warmup; i < n; i++) {
@@ -125,6 +136,7 @@ export function calculate(bars: Bar[], inputs: Partial<HemaTrendLevelsInputs> = 
       // Bearish resistance box: high - vola to high
       bearBoxTop = bars[i].high;
       bearBoxBot = bars[i].high - vola;
+      bearBoxGetTop = bars[i].high - vola;
       boxes.push({
         time1: bars[i].time, price1: bearBoxTop,
         time2: bars[i].time, price2: bearBoxBot,
@@ -168,6 +180,18 @@ export function calculate(bars: Bar[], inputs: Partial<HemaTrendLevelsInputs> = 
         });
       }
     }
+
+    // alertcondition(ta.crossover(hema1, hema2)) / (ta.crossunder(hema1, hema2)) / (low_test != 0.0) / (high_test != 0.0);
+    // low_test / high_test := get_bottom() of the box on a test
+    const b = bars[i];
+    const lowTest = lastBullBoxIdx >= 0 && b.low < bullBoxTop && b.high > bullBoxTop && b.open > bullBoxTop
+      && b.close > bullBoxTop && bullBoxBot !== 0;
+    const highTest = lastBearBoxIdx >= 0 && b.high > bearBoxGetTop && b.low < bearBoxGetTop && b.open < bearBoxGetTop
+      && b.close < bearBoxGetTop && bearBoxTop !== 0;
+    flags[0].push(isCrossover);
+    flags[1].push(isCrossunder);
+    flags[2].push(lowTest);
+    flags[3].push(highTest);
 
     // Bar colors
     const close = bars[i].close;
@@ -220,7 +244,16 @@ export function calculate(bars: Bar[], inputs: Partial<HemaTrendLevelsInputs> = 
     markers,
     barColors,
     boxes,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const HemaTrendLevels = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Crossover', message: 'HEMA 20 crossed above HEMA 40 - Bullish Trend' },
+  { id: 'alert1', title: 'Bearish Crossunder', message: 'HEMA 20 crossed below HEMA 40 - Bearish Trend' },
+  { id: 'alert2', title: 'Bullish Test', message: 'Price tested bullish box support' },
+  { id: 'alert3', title: 'Bearish Test', message: 'Price tested bearish box resistance' },
+];
+
+export const HemaTrendLevels = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

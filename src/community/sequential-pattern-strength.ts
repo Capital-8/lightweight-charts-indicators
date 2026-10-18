@@ -7,6 +7,8 @@
  * maximum length or the extension passes the reset threshold times the run length. Pattern strength =
  * sequence * quality * (1 + |extension| / 10), plus 10 times the 5-bar SMA momentum in % of close, smoothed by an
  * EMA. Drawn as a histogram and a glowing line; gradient zones between +-2 * max length and +-50.
+ * Alerts (alertcondition, `alerts` of the result): the signal (the previous bar's with the confirmed bars option)
+ * turning positive / negative and crossing above +2 * max length / below -2 * max length.
  *
  * Last bar: with the confirmed bars option the signal plots are na on an open bar. The port reads the state of the
  * last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
@@ -19,6 +21,7 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SequentialPatternStrengthInputs {
   /** Maximum sequence length before the pattern resets */
@@ -84,12 +87,13 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
 export function calculate(
   bars: Bar[],
   inputs: Partial<SequentialPatternStrengthInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -165,6 +169,19 @@ export function calculate(
     plot7: bars.map((b) => ({ time: b.time, value: -50 })),
   };
 
+  // confirmed_signal = use_confirmed_bars ? signal[1] : signal; confirmed_signal_prev = ... ? signal[2] : signal[1]
+  const sig = (i: number) => (i >= 0 ? signal[i] : NaN);
+  const lagK = cfg.useConfirmedBars ? 1 : 0;
+  const longF: boolean[] = [], shortF: boolean[] = [], obF: boolean[] = [], osF: boolean[] = [];
+  for (let i = 0; i < n; i++) {
+    const cs = sig(i - lagK);
+    const cp = sig(i - lagK - 1);
+    longF.push(gt(cs, 0) && le(cp, 0));
+    shortF.push(le(cs, 0) && gt(cp, 0));
+    obF.push(gt(cs, maxThreshold) && le(cp, maxThreshold));
+    osF.push(lt(cs, -maxThreshold) && ge(cp, -maxThreshold));
+  }
+
   const constant = <T>(v: T) => new Array<T>(n).fill(v);
   const barColors: BarColorData[] = cfg.colorCandles
     ? bars.map((b, i) => ({ time: b.time, color: gt(signal[i], 0) ? bull : bear }))
@@ -187,8 +204,17 @@ export function calculate(
       } },
     ],
     barColors,
+    alerts: alertStates(alertConditions, bars, [longF, shortF, obF, osF]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'SPS Long', message: 'Sequential pattern strength turned positive' },
+  { id: 'alert1', title: 'SPS Short', message: 'Sequential pattern strength turned negative' },
+  { id: 'alert2', title: 'SPS Overbought', message: 'Sequential pattern strength crossed above overbought level' },
+  { id: 'alert3', title: 'SPS Oversold', message: 'Sequential pattern strength crossed below oversold level' },
+];
 
 export const SequentialPatternStrength = {
   calculate,
@@ -196,4 +222,5 @@ export const SequentialPatternStrength = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

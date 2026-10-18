@@ -4,12 +4,18 @@
  * Dual-range smoothing filter combining fast and slow ATR-based ranges.
  * Filter line adapts to price movement within the combined range.
  * Uptrend when filter rises, downtrend when filter falls.
+ * Alerts (alertcondition, `alerts` of the result): 'Long' and 'Short', with the original's conditions on the filter
+ * line of the port: long condition = source above the filter, source not equal to the source of the bar before and
+ * the filter rising (count of rising bars > 0), short condition the mirror; CondIni = 1 on a long condition, -1 on a
+ * short one, else the value of the bar before; 'Long' = long condition with CondIni of the bar before -1, 'Short' =
+ * short condition with CondIni of the bar before 1 (from the first bar).
  *
  * Reference: "Twin Range Filter" by colinmck
  */
 
 import { ta, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TwinRangeFilterInputs {
   fastPeriod: number;
@@ -46,7 +52,8 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TwinRangeFilterInputs> = {}): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<TwinRangeFilterInputs> = {}): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; markers: MarkerData[] }
+  & { alerts: AlertConditionState[] } {
   const { fastPeriod, fastRange, slowPeriod, slowRange, src } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -164,6 +171,22 @@ export function calculate(bars: Bar[], inputs: Partial<TwinRangeFilterInputs> = 
     else if (shortCond) condIni = -1;
   }
 
+  // Alerts: longCond := source > filt and source > source[1] and upward > 0 or source > filt and source < source[1]
+  // and upward > 0 (shortCond the mirror); CondIni := longCond ? 1 : shortCond ? -1 : CondIni[1] (na on the first
+  // bar); long = longCond and CondIni[1] == -1, short = shortCond and CondIni[1] == 1
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
+  let alertCondIni = NaN;
+  for (let i = 0; i < n; i++) {
+    const s = srcArr[i] ?? NaN;
+    const s1 = i > 0 ? srcArr[i - 1] ?? NaN : NaN;
+    const longCond = (s > filt[i] && s > s1 && upwardCount[i] > 0) || (s > filt[i] && s < s1 && upwardCount[i] > 0);
+    const shortCond = (s < filt[i] && s < s1 && downwardCount[i] > 0) || (s < filt[i] && s > s1 && downwardCount[i] > 0);
+    longFlags.push(longCond && alertCondIni === -1);
+    shortFlags.push(shortCond && alertCondIni === 1);
+    alertCondIni = longCond ? 1 : shortCond ? -1 : alertCondIni;
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1 },
@@ -173,7 +196,14 @@ export function calculate(bars: Bar[], inputs: Partial<TwinRangeFilterInputs> = 
     ],
     barColors,
     markers,
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
-export const TwinRangeFilter = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long', message: 'Long' },
+  { id: 'alert1', title: 'Short', message: 'Short' },
+];
+
+export const TwinRangeFilter = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

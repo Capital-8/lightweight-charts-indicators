@@ -21,7 +21,10 @@
  *   reversal side of the signal close for "Hold Time" bars in a row. The table shows the totals, the wins and the
  *   win rate per signal type. "Highlight Eval Bars" colours the bars under evaluation.
  *
- * The alerts of the original (zone tested, zone swept, reversal signal) give no output here.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): "Price testing Resistance BSL Zone at <top>" /
+ * "Price testing Support SSL Zone at <bottom>" on the first bar of a run of bars that touch an active zone,
+ * "Resistance BSL Zone Swept at <top>" / "Support SSL Zone Swept at <bottom>" when a zone is swept, and
+ * "Reversal Signal (<type>) detected at <close>" with each reversal label.
  *
  * Reference: "Liquidity Delta Profiler [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,8 +32,11 @@
  */
 
 import { ta, str, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BarColorData, BoxData, LabelData, TableData, TableCellData, TableMergeData } from '../types';
+import type { AlertCall, BarColorData, BoxData, LabelData, TableData, TableCellData, TableMergeData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface LiquidityDeltaProfilerInputs {
   /** Bars on each side of a swing */
@@ -172,7 +178,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<LiquidityDeltaProfilerInputs> = {},
 ): Omit<IndicatorResult, 'boxes' | 'labels' | 'tables' | 'barColors'> & {
-  boxes: BoxData[]; labels: LabelData[]; tables: TableData[]; barColors: BarColorData[];
+  boxes: BoxData[]; labels: LabelData[]; tables: TableData[]; barColors: BarColorData[]; alertCalls: AlertCall[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -227,6 +233,8 @@ export function calculate(
   const totals = { ABS: 0, EXH: 0, DIV: 0, REJ: 0 };
   const wins = { ABS: 0, EXH: 0, DIV: 0, REJ: 0 };
   const barColors: BarColorData[] = [];
+  const alertCalls: AlertCall[] = [];
+  const alert = (i: number, message: string) => alertCalls.push({ time: bars[i].time, message, freq: 'once_per_bar' });
 
   /** A new zone at the pivot of `length` bars ago (top / bottom already known) */
   const createZone = (i: number, isBsl: boolean, zTop: number, zBot: number, capacity: number) => {
@@ -327,6 +335,8 @@ export function calculate(
     if (signalType === '') return;
 
     z.signaled = true;
+    // alert("Reversal Signal (" + signalType + ") detected at " + str.tostring(barC), alert.freq_once_per_bar)
+    alert(i, `Reversal Signal (${signalType}) detected at ${str.tostring(b.close)}`);
     significance = Math.min(Math.max(significance, 0.0), 1.0);
     let size: Lb['size'] = 'tiny';
     let trans = 50;
@@ -415,7 +425,14 @@ export function calculate(
         }
       }
 
-      if (isBsl ? gt(b.high, z.top) : lt(b.low, z.bottom)) z.swept = true;
+      // if hit and not z.wasHit: alert("Price testing Resistance BSL Zone at " + str.tostring(z.top)) (SSL: z.bottom)
+      if (hit && !z.wasHit) {
+        alert(i, isBsl ? `Price testing Resistance BSL Zone at ${str.tostring(z.top)}` : `Price testing Support SSL Zone at ${str.tostring(z.bottom)}`);
+      }
+      if (isBsl ? gt(b.high, z.top) : lt(b.low, z.bottom)) {
+        z.swept = true;
+        alert(i, isBsl ? `Resistance BSL Zone Swept at ${str.tostring(z.top)}` : `Support SSL Zone Swept at ${str.tostring(z.bottom)}`);
+      }
 
       if (!z.swept) {
         if (!z.decayLabel.deleted) {
@@ -563,6 +580,7 @@ export function calculate(
     })),
     tables,
     barColors,
+    alertCalls,
   };
 }
 
@@ -572,4 +590,5 @@ export const LiquidityDeltaProfiler = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

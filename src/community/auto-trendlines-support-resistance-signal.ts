@@ -525,16 +525,19 @@ export function calculate(
       const alertReact = (up && gt(close, p2) && lt(bar.low, p2) && confirmed && c.Permit_set)
         || (!up && lt(close, p2) && gt(bar.high, p2) && confirmed && c.Permit_set);
 
-      // plotshape: an up line breaks downwards (red triangle above the bar), a down line upwards (green below)
+      // plotshape: an up line breaks downwards (red triangle above the bar), a down line upwards (green below).
+      // Output ids: Break / React of each kind in the original's declaration order (shape<2 idx> / shape<2 idx + 1>)
       if (alertBreak) {
+        const id = `shape${2 * idx}`;
         markers.push(up
-          ? { time: bar.time, position: 'aboveBar', shape: 'triangleDown', color: RED, size: 'tiny' }
-          : { time: bar.time, position: 'belowBar', shape: 'triangleUp', color: GREEN, size: 'tiny' });
+          ? { id, time: bar.time, position: 'aboveBar', shape: 'triangleDown', color: RED, size: 'tiny' }
+          : { id, time: bar.time, position: 'belowBar', shape: 'triangleUp', color: GREEN, size: 'tiny' });
       }
       if (alertReact) {
+        const id = `shape${2 * idx + 1}`;
         markers.push(up
-          ? { time: bar.time, position: 'belowBar', shape: 'triangleUp', color: GREEN, size: 'tiny' }
-          : { time: bar.time, position: 'aboveBar', shape: 'triangleDown', color: RED, size: 'tiny' });
+          ? { id, time: bar.time, position: 'belowBar', shape: 'triangleUp', color: GREEN, size: 'tiny' }
+          : { id, time: bar.time, position: 'aboveBar', shape: 'triangleDown', color: RED, size: 'tiny' });
       }
 
       c.prevX0 = X_0;

@@ -23,7 +23,10 @@
  * - "Last Only" keeps the drawings of the latest pattern and trade; "All" keeps up to 400 lines, 200 linefills and
  *   200 labels of history.
  * - Dashboard (14 rows) and a watermark table on the last bar; a background while a channel waits for its breakout
- *   (off by default). The alerts of the original have no output.
+ *   (off by default).
+ * - Alerts (alert() calls, `alertCalls` of the result, once per bar close), text or webhook JSON as the "Webhook JSON
+ *   Format" input says: trade timeout, BUY / SELL on a confirmed breakout (strength, entry, SL, TP1-3), PATTERN
+ *   DETECTED on a new channel, and TP1 / TP2 / TP3 hit, SL hit and BE exit on the bar they first happen.
  *
  * Chart context: `syminfo.mintick` (price texts, ATR fallback), `chart.bg_color` (theme "Auto"),
  * `timeframe.period` (dashboard) and the state of the last bar (`barstate.isconfirmed`).
@@ -38,8 +41,12 @@ import {
   type Table, type BgColorData,
 } from 'oakscriptjs';
 import {
-  mintickOf, backgroundColorOf, lastBarConfirmedOf, type ChartContext,
+  mintickOf, backgroundColorOf, lastBarConfirmedOf, tickeridOf, type ChartContext,
 } from '../chart-context';
+import type { AlertCall } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 import { chartTimeframe } from '../anchor-period';
 
 export interface BreakoutPatternSetupInputs {
@@ -230,7 +237,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<BreakoutPatternSetupInputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const mintick = mintickOf(chart);
@@ -349,7 +356,30 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const lastConfirmed = lastBarConfirmedOf(chart);
   const tfPeriod = chartTimeframe(bars, chart);
-  let prevTp1 = false, prevTp2 = false, prevTp3 = false, prevSl = false;
+  let prevTp1 = false, prevTp2 = false, prevTp3 = false, prevSl = false, prevBe = false;
+
+  // Alert messages: formatAlertMsg() / formatEventMsg() of the original
+  const alertCalls: AlertCall[] = [];
+  const tickerStr = tickeridOf(chart);
+  const pushAlert = (time: number, message: string) => alertCalls.push({ time, message, freq: 'once_per_bar_close' });
+  const formatAlertMsg = (action: string, emoji: string, strLbl: string, close: number, sl: number, tp1: number,
+    tp2: number, tp3: number) => {
+    const priceStr = fmt(close);
+    const slAlStr = fmt(sl);
+    const t1Str = fmt(tp1);
+    const t2Str = fmt(tp2);
+    const t3Str = fmt(tp3);
+    const jsonMsg = '{"action":"' + action + '","ticker":"' + tickerStr + '","price":' + priceStr + ',"sl":' + slAlStr
+      + ',"tp1":' + t1Str + ',"tp2":' + t2Str + ',"tp3":' + t3Str + ',"strength":"' + strLbl + '","tf":"' + tfPeriod + '"}';
+    const textMsg = emoji + ' ' + action.toUpperCase() + ' [' + strLbl + '] | ' + tickerStr + ' | ' + tfPeriod
+      + ' | Entry: ' + priceStr + ' | SL: ' + slAlStr + ' | TP1: ' + t1Str + ' | TP2: ' + t2Str + ' | TP3: ' + t3Str;
+    return cfg.webhook ? jsonMsg : textMsg;
+  };
+  const formatEventMsg = (eventName: string, emoji: string, close: number) => {
+    const pStr = fmt(close);
+    return cfg.webhook ? '{"event":"' + eventName + '","ticker":"' + tickerStr + '","price":' + pStr + '}'
+      : emoji + ' ' + eventName.toUpperCase() + ' | ' + tickerStr + ' | ' + pStr;
+  };
 
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === n - 1);
@@ -694,6 +724,8 @@ export function calculate(
     if (tradeTimedOut) {
       timeoutCount += 1;
       lastTradeResult = tp1Hit ? 'Timeout (TP1 ✓)' : 'Timeout';
+      // alert(formatEventMsg("trade_timeout", "⌛"), alert.freq_once_per_bar_close)
+      pushAlert(b.time, formatEventMsg('trade_timeout', '⌛', b.close));
     }
 
     // Close the trade
@@ -759,10 +791,31 @@ export function calculate(
       const slPctUpd = pct(Math.abs(slPriceOrig - entryPrice) / entryPrice * 100);
       label.set_text(lbSL.value, `SL ✗ ${fmt(slPriceOrig)} (−${slPctUpd})`);
     }
+
+    // Alerts at the end of the bar: breakouts, new pattern, and the hits of this bar (`x and not x[1]`)
+    if (confirmedBullBreak) {
+      pushAlert(b.time, formatAlertMsg('buy', '🟢', breakStrength, b.close, slPrice, tp1Price, tp2Price, tp3Price));
+    }
+    if (confirmedBearBreak) {
+      pushAlert(b.time, formatAlertMsg('sell', '🔴', breakStrength, b.close, slPrice, tp1Price, tp2Price, tp3Price));
+    }
+    if (channelJustDetected) {
+      const priceStr = fmt(b.close);
+      const jsonMsg = '{"action":"pattern","ticker":"' + tickerStr + '","price":' + priceStr + ',"tf":"' + tfPeriod + '"}';
+      const textMsg = '🟡 PATTERN DETECTED | ' + tickerStr + ' | TF: ' + tfPeriod + ' | Price: ' + priceStr;
+      pushAlert(b.time, cfg.webhook ? jsonMsg : textMsg);
+    }
+    if (tp1Hit && !prevTp1) pushAlert(b.time, formatEventMsg('tp1_hit', '🎯', b.close));
+    if (tp2Hit && !prevTp2) pushAlert(b.time, formatEventMsg('tp2_hit', '🎯', b.close));
+    if (tp3Hit && !prevTp3) pushAlert(b.time, formatEventMsg('tp3_hit', '🏆', b.close));
+    if (slHit && !prevSl) pushAlert(b.time, formatEventMsg('sl_hit', '🛑', b.close));
+    if (beExit && !prevBe) pushAlert(b.time, formatEventMsg('be_exit', '⚖️', b.close));
+
     prevTp1 = tp1Hit;
     prevTp2 = tp2Hit;
     prevTp3 = tp3Hit;
     prevSl = slHit;
+    prevBe = beExit;
 
     // Signal labels
     if (cfg.showSignals && confirmedBullBreak) {
@@ -867,7 +920,8 @@ export function calculate(
     labels: out.labels ?? [],
     linefills: out.linefills ?? [],
     tables: out.tables ?? [],
+    alertCalls,
   };
 }
 
-export const BreakoutPatternSetup = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BreakoutPatternSetup = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

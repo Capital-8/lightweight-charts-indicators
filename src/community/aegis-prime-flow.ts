@@ -7,6 +7,9 @@
  * mark the crosses into the overbought (60) / oversold (-60) zones and triangles mark the crosses of tci with the
  * signal below -50 (bullish) or above 50 (bearish).
  *
+ * Alerts (alertcondition, `alerts` of the result): bullish / bearish reversal (the triangles) and the oversold /
+ * overbought entrances (the OS / OB labels).
+ *
  * Reference: "Aegis Prime Flow [wjdtks255]" by wjdtks255
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © wjdtks255
@@ -14,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AegisPrimeFlowInputs {
   /** Oscillator calculation period */
@@ -83,7 +87,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AegisPrimeFlowInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -107,6 +111,8 @@ export function calculate(
   const crossDown = B(ta.crossunder(tciS, S(wt2)));
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
   const fillColors: string[] = new Array(n);
   const plot0 = [];
   const plot1 = [];
@@ -138,10 +144,12 @@ export function calculate(
         textColor: color.black, size: 'tiny' });
     }
     // buy_sig = ta.crossover(tci, wt2) and tci < -50; sell_sig = ta.crossunder(tci, wt2) and tci > 50
-    if (crossUp[i] && lt(v, -50)) {
+    buyFlags[i] = crossUp[i] && lt(v, -50);
+    sellFlags[i] = crossDown[i] && gt(v, 50);
+    if (buyFlags[i]) {
       markers.push({ time: t, position: 'bottom', shape: 'triangleUp', color: TEAL, size: 'small' });
     }
-    if (crossDown[i] && gt(v, 50)) {
+    if (sellFlags[i]) {
       markers.push({ time: t, position: 'top', shape: 'triangleDown', color: RED, size: 'small' });
     }
   }
@@ -158,8 +166,18 @@ export function calculate(
       { plot1: 'plot0', plot2: 'plot1', options: { title: 'Money Flow Cloud Layer' }, colors: fillColors },
     ],
     markers,
+    // alertcondition(buy_sig) / (sell_sig) / (is_os) / (is_ob)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, isOs, isOb]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Reversal (강력 매수 반전)', message: '[Prime Flow] Bullish Reversal Signal Triggered! Capital Inflow Starting. Price: {{close}}' },
+  { id: 'alert1', title: 'Bearish Reversal (강력 매도 반전)', message: '[Prime Flow] Bearish Reversal Signal Triggered! Capital Outflow Starting. Price: {{close}}' },
+  { id: 'alert2', title: 'Oversold Entrance (과매도 진입)', message: '[Prime Flow] Market Entered Oversold Zone. Watch for Reversal. Price: {{close}}' },
+  { id: 'alert3', title: 'Overbought Entrance (과매수 진입)', message: '[Prime Flow] Market Entered Overbought Zone. Watch for Correction. Price: {{close}}' },
+];
 
 export const AegisPrimeFlow = {
   calculate,
@@ -169,4 +187,5 @@ export const AegisPrimeFlow = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

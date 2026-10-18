@@ -6,6 +6,9 @@
  * meter is their sum (optionally smoothed by an EMA), drawn as an area. Its colour is green above zero and red below,
  * with a transparency from the count of advances (declines below zero) since the zero cross relative to the highest
  * count so far. Optional no-trade-zone lines and a circle on 0 inside the zone; a +1 / -1 line gives the sign.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' when the meter crosses up through 0 (through the high
+ * threshold with the no-trade zone), 'Sell Signal' the mirror, 'Neutral Signal' when it falls back below the high
+ * threshold (always, as the original) or rises back above the low threshold (with the no-trade zone).
  *
  * Reference: "TR High/Low meter" by dman103
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrHighLowMeterInputs {
   /** Look-back of the highest / lowest source and length of the true range list */
@@ -77,11 +81,13 @@ export const metadata = {
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
+const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrHighLowMeterInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -160,12 +166,33 @@ export function calculate(
     plot4.push({ time: t, value: cfg.useThreshold && neutral ? 0 : NaN, color: NEUTRAL_COL });
   }
 
+  // long_Condition / short_Condition / neutral_Condition of the original
+  const L = cfg.longThreshold;
+  const S = cfg.shortThreshold;
+  const useT = cfg.useThreshold;
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [], neutralFlags: boolean[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = result[i];
+    const x1 = i > 0 ? result[i - 1] : NaN;
+    longFlags.push((ge(x, 0) && gt(x, L) && lt(x1, L) && useT) || (ge(x, 0) && lt(x1, 0) && !useT));
+    shortFlags.push((le(x, 0) && lt(x, S) && gt(x1, S) && useT) || (le(x, 0) && gt(x1, 0) && !useT));
+    neutralFlags.push((lt(x, L) && gt(x1, L)) || (gt(x, S) && lt(x1, S) && useT));
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2, plot3, plot4 },
     barColors,
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags, neutralFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Buy Signal' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Sell Signal' },
+  { id: 'alert2', title: 'Neutral Signal', message: 'Neutral Signal' },
+];
 
 export const TrHighLowMeter = {
   calculate,
@@ -173,4 +200,5 @@ export const TrHighLowMeter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

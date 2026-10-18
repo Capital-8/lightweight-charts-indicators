@@ -10,6 +10,8 @@
  *   (alpha = 2 / (length + 1)) over `length` bars.
  * The line, the bars and the optional background are green when the filter rises (or the source is above the
  * filter), red otherwise. Triangles mark the filter turning up / down (or crossing the source).
+ * Alerts (alertcondition, `alerts` of the result): trend up / down (the filter crossing its value of the bar before)
+ * and the filter crossing above / below the source.
  *
  * Reference: "PolyFilter [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +20,7 @@
 
 import { getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, BgColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type PolyFilterType = 'Fractional MA' | 'Ehlers 2-Pole' | 'Multi-Kernel';
 
@@ -150,7 +153,8 @@ function multiKernel(src: number[], length: number): number[] {
 export function calculate(
   bars: Bar[],
   inputs: Partial<PolyFilterInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = getSourceSeries(bars, cfg.src).toArray().map((v) => v ?? NaN);
@@ -165,6 +169,7 @@ export function calculate(
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
   const markers: MarkerData[] = [];
+  const flags: boolean[][] = [[], [], [], []];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const s1 = i > 0 ? signal[i - 1] : NaN;
@@ -184,6 +189,10 @@ export function calculate(
     const alertDown = signal[i] < s1 && s1 >= s2;
     const alertAbove = signal[i] > src[i] && s1 <= src1;
     const alertBelow = signal[i] < src[i] && s1 >= src1;
+    flags[0].push(alertUp);
+    flags[1].push(alertDown);
+    flags[2].push(alertAbove);
+    flags[3].push(alertBelow);
     if (cfg.col1or2 ? alertUp : alertAbove) {
       markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: cfg.longColor, text: 'L',
         textColor: cfg.longColor, size: 'tiny' });
@@ -200,8 +209,17 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'PolyFilter Trend Up', message: 'PolyFilter Trend Up - {{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'PolyFilter Trend Down', message: 'PolyFilter Trend Down - {{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'PolyFilter Above Price', message: 'PolyFilter Above Price - {{ticker}} - {{interval}}' },
+  { id: 'alert3', title: 'PolyFilter Below Price', message: 'PolyFilter Below Price - {{ticker}} - {{interval}}' },
+];
 
 export const PolyFilter = {
   calculate,
@@ -209,4 +227,5 @@ export const PolyFilter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -5,7 +5,7 @@
  * colours are the ones the built-in draws (a colour override replaces them). Generated from the reference metadata
  * and one run of each built-in; edit by hand only with that source.
  */
-import type { BarColorConfig, CandleConfig, FillConfig, HLineConfig, ShapeConfig } from 'oakscriptjs';
+import type { ArrowConfig, BarColorConfig, CandleConfig, FillConfig, HLineConfig, ShapeConfig } from 'oakscriptjs';
 import { COMMUNITY_STYLE_OUTPUTS } from './style-outputs-community';
 
 /** Kind of drawing object of a study (`label.new`, `line.new`, ...): one show / hide row per kind */
@@ -34,6 +34,14 @@ export interface StyleOutputs {
   /** Markers not in `shapes` are drawings of this kind (the reference draws them as labels): shown and hidden with them */
   markerDrawing?: StudyDrawingKind;
   barColors?: BarColorConfig[];
+  /**
+   * The order of the outputs in the Style settings (the original's declaration order) when the entry gives no
+   * `outputs`: line plots (plot id), shapes / characters / arrows (their id), candles / bars (plotCandles / plotBars
+   * key). Background / bar colours sit after `outputIndex` of them.
+   */
+  styleOrder?: { kind: 'plot' | 'shape' | 'char' | 'arrow' | 'candle' | 'bar'; id: string }[];
+  /** plotarrow outputs: the result's `arrows` carry their id */
+  arrows?: ArrowConfig[];
   /** plotCandleConfig changes by candle id */
   candles?: Record<string, Partial<CandleConfig>>;
   drawings?: StudyDrawingKind[];

@@ -6,6 +6,7 @@
  * (-50 at the lower band, +50 at the upper band, clamped to -100..100), with an SMA signal line. Glow plots and a
  * five-layer fill to zero draw the oscillator; pivot divergences between price and oscillator give Bull / Bear
  * labels, and crosses of the thresholds, of zero and of the signal with zero give triangle signals.
+ * Alerts (alertcondition, `alerts` of the result): the two divergences and the six crosses (whatever the Signal Type).
  *
  * Reference: "Volatility Channel Oscillator" by Uncle_the_shooter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +16,7 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolatilityChannelOscillatorInputs {
   /** SMA length / volatility window */
@@ -145,7 +147,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolatilityChannelOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -308,6 +310,7 @@ export function calculate(
   // (no 1e-10 tolerance; na compares false)
   const crossover = (a: number[], b: number, i: number) => i > 0 && a[i] > b && a[i - 1] <= b;
   const crossunder = (a: number[], b: number, i: number) => i > 0 && a[i] < b && a[i - 1] >= b;
+  const signalFlags: boolean[][] = [[], [], [], [], [], []];
   for (let i = 0; i < n; i++) {
     // plotshape(bullCond ? oscLbr : na, offset = -lookbackRight, text = ' Bull ', shape.labelup, location.absolute,
     //   color.new(bullDivColor, bandTransparency), textcolor = textColor, display = calculateDivergence ? all : none)
@@ -315,26 +318,32 @@ export function calculate(
       const price = oscLbr(i);
       if (bullCond[i] && !isNaN(price)) {
         markers.push({ time: barTime(bars, i - lb, interval), position: 'atPriceBottom', price, shape: 'labelUp',
-          color: bullLabel, text: ' Bull ', textColor: cfg.textColor });
+          color: bullLabel, text: ' Bull ', textColor: cfg.textColor, id: 'shape0' });
       }
       if (bearCond[i] && !isNaN(price)) {
         markers.push({ time: barTime(bars, i - lb, interval), position: 'atPriceTop', price, shape: 'labelDown',
-          color: bearLabel, text: ' Bear ', textColor: cfg.textColor });
+          color: bearLabel, text: ' Bear ', textColor: cfg.textColor, id: 'shape1' });
       }
     }
     // Signal triangles: location.bottom (buy) / location.top (sell), size.tiny
-    const buy = (on: boolean, v: number) => {
-      if (on && !isNaN(v)) markers.push({ time: t(i), position: 'bottom', shape: 'triangleUp', color: cfg.oversoldColor, size: 'tiny' });
+    // Style ids: shape2 .. shape7 in the original's declaration order
+    const buy = (on: boolean, v: number, id: string) => {
+      if (on && !isNaN(v)) markers.push({ time: t(i), position: 'bottom', shape: 'triangleUp', color: cfg.oversoldColor, size: 'tiny', id });
     };
-    const sell = (on: boolean, v: number) => {
-      if (on && !isNaN(v)) markers.push({ time: t(i), position: 'top', shape: 'triangleDown', color: cfg.overboughtColor, size: 'tiny' });
+    const sell = (on: boolean, v: number, id: string) => {
+      if (on && !isNaN(v)) markers.push({ time: t(i), position: 'top', shape: 'triangleDown', color: cfg.overboughtColor, size: 'tiny', id });
     };
-    buy(showObos && crossover(osc, cfg.oversold, i), osc[i]);
-    sell(showObos && crossunder(osc, cfg.overbought, i), osc[i]);
-    buy(showZero && crossover(osc, 0, i), osc[i]);
-    sell(showZero && crossunder(osc, 0, i), osc[i]);
-    buy(showMaZero && crossover(oscSignal, 0, i), oscSignal[i]);
-    sell(showMaZero && crossunder(oscSignal, 0, i), oscSignal[i]);
+    const sig = [
+      crossover(osc, cfg.oversold, i), crossunder(osc, cfg.overbought, i), crossover(osc, 0, i), crossunder(osc, 0, i),
+      crossover(oscSignal, 0, i), crossunder(oscSignal, 0, i),
+    ];
+    sig.forEach((f, k) => signalFlags[k].push(f));
+    buy(showObos && sig[0], osc[i], 'shape2');
+    sell(showObos && sig[1], osc[i], 'shape3');
+    buy(showZero && sig[2], osc[i], 'shape4');
+    sell(showZero && sig[3], osc[i], 'shape5');
+    buy(showMaZero && sig[4], oscSignal[i], 'shape6');
+    sell(showMaZero && sig[5], oscSignal[i], 'shape7');
   }
 
   return {
@@ -347,8 +356,23 @@ export function calculate(
     ],
     fills,
     markers,
+    // alertcondition(bullCond / bearCond / longSignalObos / shortSignalObos / longSignalZero / shortSignalZero /
+    // longSignalMaZero / shortSignalMaZero)
+    alerts: alertStates(alertConditions, bars, [bullCond, bearCond, ...signalFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Divergence Detected', message: 'Bullish divergence detected at pivot, lookback right bars ago.' },
+  { id: 'alert1', title: 'Bearish Divergence Detected', message: 'Bearish divergence detected at pivot, lookback right bars ago.' },
+  { id: 'alert2', title: 'Buy Signal (Oversold)', message: 'Oscillator crossed above the oversold threshold.' },
+  { id: 'alert3', title: 'Sell Signal (Overbought)', message: 'Oscillator crossed below the overbought threshold.' },
+  { id: 'alert4', title: 'Buy Signal (Zero Line)', message: 'Oscillator crossed above the zero line.' },
+  { id: 'alert5', title: 'Sell Signal (Zero Line)', message: 'Oscillator crossed below the zero line.' },
+  { id: 'alert6', title: 'Buy Signal (MA Zero Line)', message: 'Moving Average crossed above the zero line.' },
+  { id: 'alert7', title: 'Sell Signal (MA Zero Line)', message: 'Moving Average crossed below the zero line.' },
+];
 
 export const VolatilityChannelOscillator = {
   calculate,
@@ -356,4 +380,5 @@ export const VolatilityChannelOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

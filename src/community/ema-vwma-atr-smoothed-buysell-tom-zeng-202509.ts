@@ -6,6 +6,7 @@
  * above the stop and short when it crosses below; Buy / Sell labels mark the first bar of each new position and the
  * bars are coloured by the position. A VWMA of the source and the average of the VWMA and the trailing stop are also
  * drawn.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' and 'Sell Signal', true on the Buy / Sell label bars.
  *
  * Reference: "EMA + ATR Smoothed BuySell (merged) - Modified" by zengtom
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EmaVwmaAtrSmoothedBuysellTomZeng202509Inputs {
   ema1Len: number;
@@ -80,7 +82,7 @@ const nz = (x: number, y: number) => (isNaN(x) ? y : x);
 export function calculate(
   bars: Bar[],
   inputs: Partial<EmaVwmaAtrSmoothedBuysellTomZeng202509Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -99,6 +101,8 @@ export function calculate(
   const posArr: number[] = new Array(n);
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
   let pos = 0; // var int pos = 0
   let isLong = false; // var bool isLong = false
   let isShort = false; // var bool isShort = false
@@ -122,6 +126,8 @@ export function calculate(
 
     const LONG = !isLong && pos === 1;
     const SHORT = !isShort && pos === -1;
+    longFlags.push(LONG);
+    shortFlags.push(SHORT);
     if (LONG) {
       isLong = true;
       isShort = false;
@@ -167,8 +173,16 @@ export function calculate(
     },
     markers,
     barColors,
+    // alertcondition(LONG, "Buy Signal") / alertcondition(SHORT, "Sell Signal")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Buy' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Sell' },
+];
 
 export const EmaVwmaAtrSmoothedBuysellTomZeng202509 = {
   calculate,
@@ -176,4 +190,5 @@ export const EmaVwmaAtrSmoothedBuysellTomZeng202509 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

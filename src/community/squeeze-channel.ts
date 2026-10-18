@@ -9,6 +9,8 @@
  * side within `reversalBars` bars is a failed-breakout reversal. Each breakout also keeps the channel high and low as
  * extended resistance / support levels for `extendedBars` bars, drawn when the close is within atrProximity * ATR;
  * optional retest signals mark a close through a level (breakout) and a close back (reversal, removes the level).
+ * Alerts (alertcondition, `alerts` of the result): the breakouts, reversals, extended level breakouts / reversals and
+ * the start of a squeeze. Each marker has the id of its plotshape output (shape0 to shape7).
  *
  * Reference: "Squeeze Channel" by B3AR_Trades
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SqueezeChannelInputs {
   bbLength: number;
@@ -149,8 +152,10 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<SqueezeChannelInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  // One flag per bar for each alertcondition, in the original's order
+  const flags: boolean[][] = Array.from({ length: alertConditions.length }, () => []);
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -362,18 +367,20 @@ export function calculate(
       plots[`plot${9 + k}`].push({ time: t(i), value: extLevel(extLow, k), color: cfg.extendedColorLow });
     }
 
-    // Shapes
-    const mk = (on: boolean, shape: MarkerData['shape'], position: MarkerData['position'], c: string, size: 'tiny' | 'small') => {
-      if (on) markers.push({ time: t(i), position, shape, color: c, size });
+    // Shapes (id: shape<k>, the plotshape outputs in the original's order)
+    const mk = (on: boolean, id: string, shape: MarkerData['shape'], position: MarkerData['position'], c: string, size: 'tiny' | 'small') => {
+      if (on) markers.push({ time: t(i), position, shape, color: c, size, id });
     };
-    mk(bullBreakout, 'triangleUp', 'belowBar', cfg.bullColor, 'tiny');
-    mk(bearBreakout, 'triangleDown', 'aboveBar', cfg.bearColor, 'tiny');
-    mk(cfg.enableReversal && bullReversal, 'diamond', 'belowBar', cfg.reversalBullColor, 'small');
-    mk(cfg.enableReversal && bearReversal, 'diamond', 'aboveBar', cfg.reversalBearColor, 'small');
-    mk(extBullSignal, 'triangleUp', 'belowBar', extBullColor, 'tiny');
-    mk(extBearSignal, 'triangleDown', 'aboveBar', extBearColor, 'tiny');
-    mk(extBullReversal, 'diamond', 'belowBar', extBullRevColor, 'small');
-    mk(extBearReversal, 'diamond', 'aboveBar', extBearRevColor, 'small');
+    mk(bullBreakout, 'shape0', 'triangleUp', 'belowBar', cfg.bullColor, 'tiny');
+    mk(bearBreakout, 'shape1', 'triangleDown', 'aboveBar', cfg.bearColor, 'tiny');
+    mk(cfg.enableReversal && bullReversal, 'shape2', 'diamond', 'belowBar', cfg.reversalBullColor, 'small');
+    mk(cfg.enableReversal && bearReversal, 'shape3', 'diamond', 'aboveBar', cfg.reversalBearColor, 'small');
+    mk(extBullSignal, 'shape4', 'triangleUp', 'belowBar', extBullColor, 'tiny');
+    mk(extBearSignal, 'shape5', 'triangleDown', 'aboveBar', extBearColor, 'tiny');
+    mk(extBullReversal, 'shape6', 'diamond', 'belowBar', extBullRevColor, 'small');
+    mk(extBearReversal, 'shape7', 'diamond', 'aboveBar', extBearRevColor, 'small');
+    [bullBreakout, bearBreakout, bullReversal, bearReversal, extBullSignal, extBearSignal, extBullReversal, extBearReversal,
+      squeezeEntry].forEach((f, k) => flags[k].push(f));
 
     prevSqueezeOn = squeezeOn;
     prevBreakout = bullBreakout || bearBreakout;
@@ -387,8 +394,22 @@ export function calculate(
     // fill(p_high, p_low, color = showChannelFill ? fillColor : na, title = "Channel Fill")
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Channel Fill' }, colors: fillColors }],
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Breakout', message: 'EDRF: Bullish breakout' },
+  { id: 'alert1', title: 'Bearish Breakout', message: 'EDRF: Bearish breakout' },
+  { id: 'alert2', title: 'Bull Reversal', message: 'EDRF: Failed bear breakout - bull reversal' },
+  { id: 'alert3', title: 'Bear Reversal', message: 'EDRF: Failed bull breakout - bear reversal' },
+  { id: 'alert4', title: 'Ext Bull Breakout', message: 'EDRF: Extended resistance breakout' },
+  { id: 'alert5', title: 'Ext Bear Breakout', message: 'EDRF: Extended support breakdown' },
+  { id: 'alert6', title: 'Ext Bull Reversal', message: 'EDRF: Extended support reclaim' },
+  { id: 'alert7', title: 'Ext Bear Reversal', message: 'EDRF: Extended resistance rejection' },
+  { id: 'alert8', title: 'Squeeze Started', message: 'EDRF: Squeeze detected' },
+];
 
 export const SqueezeChannel = {
   calculate,
@@ -396,4 +417,5 @@ export const SqueezeChannel = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

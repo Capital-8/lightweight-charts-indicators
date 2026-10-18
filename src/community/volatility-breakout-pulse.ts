@@ -12,6 +12,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolatilityBreakoutPulseInputs {
   /** Lookback period of the highest high / lowest low */
@@ -56,7 +57,7 @@ const TEXT_COLOR = '#2962FF';
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolatilityBreakoutPulseInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const high = Series.fromArray(bars, bars.map((b) => b.high));
@@ -69,6 +70,7 @@ export function calculate(
   const bgDn = String(color.new(color.red, 85));
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   bars.forEach((b, i) => {
     const priceRange = highestHigh[i] - lowestLow[i];
     const volatility = atrVal[i] * cfg.mult;
@@ -76,6 +78,8 @@ export function calculate(
     const breakDn = i > 0 && lt(b.close, lowestLow[i - 1]);
     const buySignal = breakUp && gt(priceRange, volatility);
     const sellSignal = breakDn && gt(priceRange, volatility);
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
 
     if (cfg.showZones && breakUp) bgColors.push({ time: b.time, color: bgUp });
     else if (cfg.showZones && breakDn) bgColors.push({ time: b.time, color: bgDn });
@@ -90,7 +94,6 @@ export function calculate(
     }
   });
 
-  // alertcondition(buySignal, "BUY ALERT") and alertcondition(sellSignal, "SELL ALERT"): no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -99,8 +102,16 @@ export function calculate(
     },
     markers,
     bgColors,
+    // alertcondition(buySignal, "BUY ALERT") / alertcondition(sellSignal, "SELL ALERT")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY ALERT', message: 'VBP FIX BUY Signal' },
+  { id: 'alert1', title: 'SELL ALERT', message: 'VBP FIX SELL Signal' },
+];
 
 export const VolatilityBreakoutPulse = {
   calculate,
@@ -108,4 +119,5 @@ export const VolatilityBreakoutPulse = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

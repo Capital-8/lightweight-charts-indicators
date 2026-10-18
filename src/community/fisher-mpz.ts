@@ -8,12 +8,21 @@
  * Fisher transform 0.5 * ln((1 + x) / (1 - x)) followed by a second Kalman filter (or a 0.5 feedback). The trigger
  * is the composite of the previous bar, optionally smoothed by a 2-period EMA. Classic style: cyan composite and
  * white trigger; Filled style: both lines and a fill coloured by the direction (composite >= trigger).
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar), with "Enable Alerts" on: "Fisher MPz: Bullish
+ * Crossover - Composite crossed above Trigger" (with "Alert on Bullish Crossover") and "Fisher MPz: Bearish Crossover -
+ * Composite crossed below Trigger" (with "Alert on Bearish Crossover") on the bars where the composite crosses the
+ * trigger.
  *
  * Reference: "Fisher MPz" by B3AR_Trades
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
+import type { AlertCall } from '../types';
+import { crossedOver, crossedUnder } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface FisherMPzInputs {
   /** Classic: cyan line with white trigger; Filled: directional colours and fill */
@@ -48,7 +57,7 @@ export interface FisherMPzInputs {
   shortColor: string;
   mediumColor: string;
   longColor: string;
-  /** Alert inputs (Pine alert() calls; no output) */
+  /** Alert inputs: the alert() calls (`alertCalls`) */
   enableAlerts: boolean;
   alertOnBullish: boolean;
   alertOnBearish: boolean;
@@ -167,7 +176,7 @@ function kalmanSite(Q: number, R: number): (src: number) => number {
   };
 }
 
-export function calculate(bars: Bar[], inputs: Partial<FisherMPzInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<FisherMPzInputs> = {}): IndicatorResult & { alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -230,7 +239,19 @@ export function calculate(bars: Bar[], inputs: Partial<FisherMPzInputs> = {}): I
   // trigger = smoothTrigger ? ta.ema(composite[1], 2) : composite[1]
   const trigger = cfg.smoothTrigger ? A(ta.ema(S(compositePrev), 2)) : compositePrev;
 
-  // alert() calls on ta.crossover / ta.crossunder of composite and trigger: no output
+  // bullishCross = ta.crossover(composite, trigger); bearishCross = ta.crossunder(composite, trigger)
+  // if enableAlerts and alertOnBullish and bullishCross: alert("...", alert.freq_once_per_bar); bearish alike
+  const bullishCross = crossedOver(composite, trigger);
+  const bearishCross = crossedUnder(composite, trigger);
+  const alertCalls: AlertCall[] = [];
+  for (let i = 0; i < n; i++) {
+    if (cfg.enableAlerts && cfg.alertOnBullish && bullishCross[i]) {
+      alertCalls.push({ time: bars[i].time as number, message: 'Fisher MPz: Bullish Crossover - Composite crossed above Trigger', freq: 'once_per_bar' });
+    }
+    if (cfg.enableAlerts && cfg.alertOnBearish && bearishCross[i]) {
+      alertCalls.push({ time: bars[i].time as number, message: 'Fisher MPz: Bearish Crossover - Composite crossed below Trigger', freq: 'once_per_bar' });
+    }
+  }
 
   const isClassic = cfg.visualStyle === 'Classic';
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
@@ -256,6 +277,7 @@ export function calculate(bars: Bar[], inputs: Partial<FisherMPzInputs> = {}): I
     },
     hlines: [{ value: 0, options: { title: 'Zero Line', color: String(color.new(color.gray, 50)), linestyle: 'dotted' } }],
     fills: [{ plot1: 'plot0', plot2: 'plot1', colors, options: { title: 'Direction Fill' } }],
+    alertCalls,
   };
 }
 
@@ -265,4 +287,5 @@ export const FisherMPz = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

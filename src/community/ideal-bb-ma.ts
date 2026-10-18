@@ -11,6 +11,9 @@
  *   7) Fill between Hull lines (lime when bullish, red when bearish)
  *   8) Buy/Sell markers from Hull crossovers
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Buy' (Hull B crosses above Hull A) and 'Sell' (Hull A crosses
+ * above Hull B), true on the bar of the cross (the markers are drawn one bar back).
+ *
  * VWAP: the original restarts it on each trading day. With the exchange time zone and the session of the symbol in
  * the optional third argument (see src/chart-context.ts) the port does the same (on daily and higher bars: on every
  * bar). Without them the sums never restart.
@@ -20,6 +23,7 @@
 
 import { ta, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import type { ChartContext } from '../chart-context';
 import { hasCalendar, periodChanges } from '../anchor-period';
 import { barInterval } from '../bar-time';
@@ -70,7 +74,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<IdealBbMaInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<IdealBbMaInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { length1, length2, maType, src, hullLength, hullGain, useKahlman } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const source = getSourceSeries(bars, src);
@@ -119,7 +123,11 @@ export function calculate(bars: Bar[], inputs: Partial<IdealBbMaInputs> = {}, ch
 
   // --- Hull MA Trend with Kahlman filter ---
   const hl2Series = new Series(bars, (b) => (b.high + b.low) / 2);
-  const hmaRaw = ta.hma(hl2Series, hullLength).toArray();
+  // hma(src, len) of the original: wma(2 * wma(src, len / 2) - wma(src, len), round(sqrt(len))) (round, not floor)
+  const hmaHalf = ta.wma(hl2Series, Math.max(Math.floor(hullLength / 2), 1)).toArray();
+  const hmaFull = ta.wma(hl2Series, hullLength).toArray();
+  const hmaDiff = hmaHalf.map((v, i) => 2 * (v ?? NaN) - (hmaFull[i] ?? NaN));
+  const hmaRaw = ta.wma(Series.fromArray(bars, hmaDiff), Math.max(Math.round(Math.sqrt(hullLength)), 1)).toArray();
 
   // HMA3: wma(wma(close,p/3)*3 - wma(close,p/2) - wma(close,p), p)
   const p = Math.floor(hullLength / 2);
@@ -225,6 +233,19 @@ export function calculate(bars: Bar[], inputs: Partial<IdealBbMaInputs> = {}, ch
     }
   }
 
+  // alertcondition(crossup, 'Buy', 'Go Long') / alertcondition(crossdn, 'Sell', 'Go Short'), on every bar (na is false)
+  const EPS = 1e-10;
+  const gt = (x: number, y: number) => x - y > EPS;
+  const lt = (x: number, y: number) => y - x > EPS;
+  const crossUp: boolean[] = [];
+  const crossDn: boolean[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = hullA[i], b = hullB[i];
+    const prevA = i > 0 ? hullA[i - 1] : NaN, prevB = i > 0 ? hullB[i - 1] : NaN;
+    crossUp.push(gt(b, a) && lt(prevB, prevA));
+    crossDn.push(gt(a, b) && lt(prevA, prevB));
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -241,7 +262,14 @@ export function calculate(bars: Bar[], inputs: Partial<IdealBbMaInputs> = {}, ch
       { plot1: 'hullA', plot2: 'hullB', options: { color: '#00E67638' }, colors: hullFillColors },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, [crossUp, crossDn]),
   };
 }
 
-export const IdealBbMa = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy', message: 'Go Long' },
+  { id: 'alert1', title: 'Sell', message: 'Go Short' },
+];
+
+export const IdealBbMa = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

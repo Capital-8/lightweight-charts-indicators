@@ -163,8 +163,8 @@ export function calculate(
     const tBand = up ? lBand[i] : hBand[i];
     if (change[i] && !isNaN(tBand)) {
       const mt = barTime(bars, i + 1, interval);
-      markers.push({ time: mt, position: 'atPriceMiddle', price: tBand, shape: 'diamond', color: colorUp, size: 'tiny' });
-      markers.push({ time: mt, position: 'atPriceMiddle', price: tBand, shape: 'diamond', color: upFaded, size: 'small' });
+      markers.push({ time: mt, position: 'atPriceMiddle', price: tBand, shape: 'diamond', color: colorUp, size: 'tiny', id: 'shape0' });
+      markers.push({ time: mt, position: 'atPriceMiddle', price: tBand, shape: 'diamond', color: upFaded, size: 'small', id: 'shape1' });
     }
 
     // plot(change ? na : (direction > 0 ? l_band : h_band), "Trend Band", plot.style_linebr, color_up)

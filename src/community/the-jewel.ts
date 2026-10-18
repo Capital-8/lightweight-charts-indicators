@@ -7,6 +7,8 @@
  * over its normalization lookback. The background is green on a buy signal (K crosses above D, RSI above the buy
  * level, ADX above the threshold, close above the EMA), red on a sell signal (the mirror) and yellow on a caution
  * signal (RSI and scaled K both overbought or both oversold).
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal', 'Sell Signal' and 'Caution Signal', true on the bars
+ * of each signal (a caution signal also on the bars that show a buy / sell background).
  *
  * Reference: "The Jewel" by afonso_77
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TheJewelInputs {
   useEMAFilter: boolean;
@@ -136,7 +139,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TheJewelInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -200,6 +203,7 @@ export function calculate(
   const stochCrossDown = A(ta.crossunder(S(stochK), S(stochD)));
 
   const bgColors: BgColorData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [], cautionFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const c = bars[i].close;
     const buySignalBasic = stochCrossUp[i] === 1 && gt(rsiVal[i], cfg.rsiBuyLevel);
@@ -214,6 +218,9 @@ export function calculate(
         || (lt(rsiVal[i], cfg.rsiCautionLow) && lt(stochK[i], cfg.stochCautionLow)));
     const bg = finalBuySignal ? cfg.buyColor : finalSellSignal ? cfg.sellColor : cautionSignal ? cfg.cautionColor : null;
     if (bg !== null) bgColors.push({ time: bars[i].time, color: bg });
+    buyFlags.push(finalBuySignal);
+    sellFlags.push(finalSellSignal);
+    cautionFlags.push(cautionSignal);
   }
 
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
@@ -234,8 +241,16 @@ export function calculate(
       { value: 100, options: { title: 'Max Line', color: color.gray, linestyle: 'dashed' } },
     ],
     bgColors,
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, cautionFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Buy: Stoch cross up + RSI > level + (Optional ADX/EMA confirm)' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Sell: Stoch cross down + RSI < level + (Optional ADX/EMA confirm)' },
+  { id: 'alert2', title: 'Caution Signal', message: 'Caution: RSI & Stoch both at extreme levels' },
+];
 
 export const TheJewel = {
   calculate,
@@ -244,4 +259,5 @@ export const TheJewel = {
   inputConfig,
   plotConfig,
   hlineConfig,
+  alertConditions,
 };

@@ -6,13 +6,14 @@
  * On MACD crossover signal: lowest low in last 6 bars becomes a SUPPORT level.
  * Levels are removed when price crosses through them. Max 20 levels.
  *
- * Sub-panel indicator (overlay: false) for MACD histogram/signal.
+ * Sub-panel indicator (overlay: false): the signal line, the hidden MACD line, the fill between them in the colour of
+ * MACD vs signal, a diamond on the signal line at each cross ("Macd UP" / "Macd DN") and the 100-bar MACD high / low.
  * S/R lines are output as overlay drawing primitives.
  *
  * Reference: "MACD Support and Resistance [ChartPrime]" by ChartPrime
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LineDrawingData, LabelData } from '../types';
 
 export interface MacdSupportResistanceInputs {
@@ -40,6 +41,8 @@ export const inputConfig: InputConfig[] = [
 ];
 
 export const plotConfig: PlotConfig[] = [
+  // pm = plot(macd, title = "MACD", color = macd_col, display = display.none): hidden, one side of the fill
+  { id: 'macd', title: 'MACD', color: '#2962FF', lineWidth: 1, display: 'none' },
   { id: 'signal', title: 'Signal', color: '#FF6D00', lineWidth: 2 },
   { id: 'localHigh', title: 'Local High', color: '#787B86', lineWidth: 1 },
   { id: 'localLow', title: 'Local Low', color: '#787B86', lineWidth: 1 },
@@ -124,13 +127,16 @@ export function calculate(
       }
       levels.push({ isSupport: false, price: maxHigh, startIdx: maxIdx });
 
+      // plotshape(ta.crossunder(macd, signal) ? signal : na, "Macd DN", shape.diamond, location.absolute, size.tiny,
+      //   color = macd_col)
       markers.push({
         time: bars[i].time,
-        position: 'inBar',
+        position: 'atPriceMiddle',
+        price: curSignal,
         shape: 'diamond',
         color: curMacd > curSignal ? colUp : colDn,
-        text: 'DN',
-        size: 1,
+        size: 'tiny',
+        id: 'shape1',
       });
     }
 
@@ -146,13 +152,16 @@ export function calculate(
       }
       levels.push({ isSupport: true, price: minLow, startIdx: minIdx });
 
+      // plotshape(ta.crossover(macd, signal) ? signal : na, "Macd UP", shape.diamond, location.absolute, size.tiny,
+      //   color = macd_col)
       markers.push({
         time: bars[i].time,
-        position: 'inBar',
+        position: 'atPriceMiddle',
+        price: curSignal,
         shape: 'diamond',
         color: curMacd > curSignal ? colUp : colDn,
-        text: 'UP',
-        size: 1,
+        size: 'tiny',
+        id: 'shape0',
       });
     }
 
@@ -213,6 +222,14 @@ export function calculate(
     color: macdArr[i] > v ? colUp : colDn,
   }));
 
+  const macdPlot = macdArr.map((v, i) => ({
+    time: bars[i].time,
+    value: i < warmup ? NaN : v,
+    color: v > signalArr[i] ? colUp : colDn,
+  }));
+  // fill(pm, ps, color.new(macd_col, 70))
+  const fillColors = macdArr.map((v, i) => String(color.new(v > signalArr[i] ? colUp : colDn, 70)));
+
   // Local high/low as dashed lines (skip every bar where i%5==0 || i%4==0 || i%3==0 to create dashes)
   const localHighPlot = macdHighArr.map((v, i) => {
     const skip = i % 5 === 0 || i % 4 === 0 || i % 3 === 0;
@@ -226,10 +243,12 @@ export function calculate(
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
+      macd: macdPlot,
       signal: signalPlot,
       localHigh: localHighPlot,
       localLow: localLowPlot,
     },
+    fills: [{ plot1: 'macd', plot2: 'signal', options: { title: 'Plots Background' }, colors: fillColors }],
     lines,
     labels,
     markers,

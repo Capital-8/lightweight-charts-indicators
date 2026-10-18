@@ -45,9 +45,10 @@ export function calculate(
   const outsideColor = color.fuchsia;
 
   const markers: MarkerData[] = [];
-  // plotchar(cond, char, location.belowbar, color): the char as text in the colour, no shape
-  const char = (time: number, text: string, c: string) =>
-    markers.push({ time, position: 'belowBar', shape: 'circle', color: 'transparent', text, textColor: c });
+  // plotchar(cond, char, location.belowbar, color): the char as text in the colour, no shape; `id`: the plotchar
+  // output (char0 to char3 in declaration order)
+  const char = (time: number, text: string, c: string, id: string) =>
+    markers.push({ time, position: 'belowBar', shape: 'circle', color: 'transparent', text, textColor: c, id });
 
   for (let i = 0; i < bars.length; i++) {
     const { time, high, low } = bars[i];
@@ -60,10 +61,10 @@ export function calculate(
     const isTwoDownBar = lt(low, low1) && le(high, high1);
     const isThreeBar = gt(high, high1) && lt(low, low1);
 
-    if (isInsideBar) char(time, '1', insideColor);
-    if (isTwoUpBar) char(time, '2', bullColor);
-    if (isTwoDownBar) char(time, '2', bearColor);
-    if (isThreeBar) char(time, '3', outsideColor);
+    if (isInsideBar) char(time, '1', insideColor, 'char0');
+    if (isTwoUpBar) char(time, '2', bullColor, 'char1');
+    if (isTwoDownBar) char(time, '2', bearColor, 'char2');
+    if (isThreeBar) char(time, '3', outsideColor, 'char3');
   }
 
   return {

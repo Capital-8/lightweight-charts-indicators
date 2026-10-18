@@ -7,6 +7,8 @@
  * crosses over -trigger (under +trigger) while the medium RCI rises (falls). Alignment: the three RCIs above (below)
  * zero; a marker on the first bar of a new alignment. Zones beyond the extreme levels are shaded; the background can
  * show the alignment.
+ * Alerts (alertcondition, `alerts` of the result): the early bullish / bearish reversals and the new bullish / bearish
+ * alignments, true on the bars of these signals (also when their markers are hidden).
  *
  * Last bar: with 'Confirmer uniquement à la clôture' the reversal and alignment signals need a closed bar. The port
  * reads the state of the last bar from the optional third argument (see src/chart-context.ts); without it every bar
@@ -20,6 +22,7 @@
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EqualhighJapaneseTripleRciInputs {
   /** Short RCI length */
@@ -159,7 +162,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<EqualhighJapaneseTripleRciInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -181,6 +184,7 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   let prevBull = false;
   let prevBear = false;
+  const flags: boolean[][] = [[], [], [], []];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const medPrev = i > 0 ? rciMedium[i - 1] : NaN;
@@ -193,6 +197,10 @@ export function calculate(
     const newBear = barConfirmed && bear && !prevBear;
     prevBull = bull;
     prevBear = bear;
+    flags[0].push(earlyBull);
+    flags[1].push(earlyBear);
+    flags[2].push(newBull);
+    flags[3].push(newBear);
 
     if (cfg.showReversals && earlyBull) {
       markers.push({ time: t, position: 'bottom', shape: 'triangleUp', color: color.lime, text: 'R+', textColor: PINE_TEXT, size: 'tiny' });
@@ -236,8 +244,18 @@ export function calculate(
     ],
     markers,
     bgColors,
+    // alertcondition(earlyBullishReversal / earlyBearishReversal / newBullishAlignment / newBearishAlignment)
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RCI — retournement haussier précoce', message: 'RCI 9 quitte la zone basse et RCI 26 remonte sur {{ticker}} ({{interval}}).' },
+  { id: 'alert1', title: 'RCI — retournement baissier précoce', message: 'RCI 9 quitte la zone haute et RCI 26 baisse sur {{ticker}} ({{interval}}).' },
+  { id: 'alert2', title: 'RCI — nouvel alignement haussier', message: 'Les RCI 9/26/52 passent en alignement haussier sur {{ticker}} ({{interval}}).' },
+  { id: 'alert3', title: 'RCI — nouvel alignement baissier', message: 'Les RCI 9/26/52 passent en alignement baissier sur {{ticker}} ({{interval}}).' },
+];
 
 export const EqualhighJapaneseTripleRci = {
   calculate,
@@ -247,4 +265,5 @@ export const EqualhighJapaneseTripleRci = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

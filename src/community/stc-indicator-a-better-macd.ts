@@ -5,12 +5,18 @@
  * (kept when the range is 0) is smoothed by a factor AAA, then a second stochastic of that smoothed line over
  * `Length` bars is smoothed again: the STC line, green when it rises and red otherwise. Two lines at 25 and 75
  * with a fill between them.
+ * alert() calls (`alertCalls`, once per bar): "Red" when the line turned down two bars back and is above 75, "Green"
+ * when it turned up two bars back and is below 25.
  *
  * Reference: "STC Indicator - A Better MACD [SHK]" by shayankm
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import type { AlertCall } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface StcIndicatorABetterMacdInputs {
   /** Stochastic length */
@@ -57,8 +63,11 @@ export const metadata = {
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
+const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
-export function calculate(bars: Bar[], inputs: Partial<StcIndicatorABetterMacdInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<StcIndicatorABetterMacdInputs> = {}): IndicatorResult & { alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { length, fastLength, slowLength, factor } = cfg;
   const n = bars.length;
@@ -100,6 +109,16 @@ export function calculate(bars: Bar[], inputs: Partial<StcIndicatorABetterMacdIn
     prevE = stc[i];
   }
 
+  // if m[3] <= m[2] and m[2] > m[1] and m > 75: alert("Red", alert.freq_once_per_bar)
+  // if m[3] >= m[2] and m[2] < m[1] and m < 25: alert("Green", alert.freq_once_per_bar)
+  const alertCalls: AlertCall[] = [];
+  const m = (i: number) => (i >= 0 ? stc[i] : NaN);
+  for (let i = 0; i < n; i++) {
+    const t = bars[i].time as number;
+    if (le(m(i - 3), m(i - 2)) && gt(m(i - 2), m(i - 1)) && gt(m(i), 75)) alertCalls.push({ time: t, message: 'Red', freq: 'once_per_bar' });
+    if (ge(m(i - 3), m(i - 2)) && lt(m(i - 2), m(i - 1)) && lt(m(i), 25)) alertCalls.push({ time: t, message: 'Green', freq: 'once_per_bar' });
+  }
+
   const plot0 = bars.map((b, i) => ({
     time: b.time,
     value: Number.isFinite(stc[i]) ? stc[i] : NaN,
@@ -112,6 +131,7 @@ export function calculate(bars: Bar[], inputs: Partial<StcIndicatorABetterMacdIn
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2 },
     fills: [{ plot1: 'plot1', plot2: 'plot2', options: { color: FILL_COLOR } }],
+    alertCalls,
   };
 }
 
@@ -121,4 +141,5 @@ export const StcIndicatorABetterMacd = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

@@ -9,6 +9,8 @@
  * - Pivot ("PIVOT", two bars back): the RSI maximum (minimum) is the same as two bars ago and changed on that bar.
  * - One label per bar at most, in this order: BEAR, BULL, pivot high, pivot low. The last 50 labels are kept.
  * - "Hide labels and color background" replaces the labels by background colours on the same bars.
+ * Alerts (alertcondition, `alerts` of the result): 'Bear div', 'Bull div', 'Pivot high' and 'Pivot low', true on the
+ * bars on which each is found (the bar of the BEAR / BULL / PIVOT label decision, before its offset).
  *
  * Reference: "Relative Strength Index - Divergences - Libertus" by Libertus
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,6 +21,7 @@ import {
   ta, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar,
 } from 'oakscriptjs';
 import type { BgColorData, LabelData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RelativeStrengthIndexDivergencesLibertusInputs {
   /** RSI Length */
@@ -119,7 +122,8 @@ interface Lb {
 export function calculate(
   bars: Bar[],
   inputs: Partial<RelativeStrengthIndexDivergencesLibertusInputs> = {},
-): Omit<IndicatorResult, 'labels' | 'bgColors'> & { labels: LabelData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'labels' | 'bgColors'> & { labels: LabelData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const close = new Series(bars, (b) => b.close);
@@ -142,6 +146,10 @@ export function calculate(
   const bearBg = String(color.new(RED, 50));
   const bullBg = String(color.new(GREEN, 50));
   const pivotBg = String(color.new(BLUE, 50));
+  const bearF: boolean[] = [];
+  const bullF: boolean[] = [];
+  const pivHF: boolean[] = [];
+  const pivLF: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const c = bars[i].close;
@@ -164,6 +172,11 @@ export function calculate(
     const r1 = at(rsi, i - 1);
     const divbear = gt(at(max, i - 1), at(max, i - 2)) && lt(r1, maxRsi[i]) && le(r, r1);
     const divbull = lt(at(min, i - 1), at(min, i - 2)) && gt(r1, minRsi[i]) && ge(r, r1);
+
+    bearF.push(divbear);
+    bullF.push(divbull);
+    pivHF.push(pivoth);
+    pivLF.push(pivotl);
 
     let l: Lb | null = null;
     if (divbear) l = { x: i - 1, y: r1 + 1, text: 'BEAR', color: RED, style: 'label_down' };
@@ -220,8 +233,17 @@ export function calculate(
     labels: labels.filter((l) => l.x >= 0 && !isNaN(l.y)).map((l) => ({
       time: bars[l.x].time, price: l.y, text: l.text, color: l.color, textColor: WHITE, style: l.style, size: 'small',
     })),
+    alerts: alertStates(alertConditions, bars, [bearF, bullF, pivHF, pivLF]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bear div', message: 'Bear div' },
+  { id: 'alert1', title: 'Bull div', message: 'Bull div' },
+  { id: 'alert2', title: 'Pivot high', message: 'Pivot high' },
+  { id: 'alert3', title: 'Pivot low', message: 'Pivot low' },
+];
 
 export const RelativeStrengthIndexDivergencesLibertus = {
   calculate,
@@ -231,4 +253,5 @@ export const RelativeStrengthIndexDivergencesLibertus = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

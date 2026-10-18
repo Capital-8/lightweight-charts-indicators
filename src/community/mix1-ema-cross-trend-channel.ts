@@ -13,7 +13,9 @@
  *   "Position Type" limits the sides, "Period" the time range (with a grey background outside it).
  * Plots: the two EMAs with a fill, the MA Trend and the optional channel (trend colours), the stop loss line; labels
  * Long / Short, crosses Close / SL, optional Golden / Death Cross labels on the EMA Medium / MA Trend cross; bar
- * colours by trend. The seven alerts of the original have no output.
+ * colours by trend.
+ * Alerts (alertcondition, `alerts` of the result): the seven of the original ('Any Alert', 'Buy', 'Sell', 'Buy Close',
+ * 'Sell Close', 'Stop Loss Long', 'Stop Loss Short'), true on the bars of the entries, closes and stop losses.
  *
  * A higher timeframe is built from the chart bars (the exchange calendar comes from the chart context); a timeframe
  * below the chart timeframe needs data the chart bars do not have: the port throws an Error.
@@ -30,6 +32,18 @@ import {
 import type { BarColorData, BgColorData, MarkerData } from '../types';
 import type { ChartContext } from '../chart-context';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Any Alert', message: 'Any Alert' },
+  { id: 'alert1', title: 'Buy', message: 'Buy' },
+  { id: 'alert2', title: 'Sell', message: 'Sell' },
+  { id: 'alert3', title: 'Buy Close', message: 'Buy Close' },
+  { id: 'alert4', title: 'Sell Close', message: 'Sell Close' },
+  { id: 'alert5', title: 'Stop Loss Long', message: 'Stop Loss Long' },
+  { id: 'alert6', title: 'Stop Loss Short', message: 'Stop Loss Short' },
+];
 
 export interface Mix1EmaCrossTrendChannelInputs {
   maSrc: 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4' | 'hlcc4';
@@ -161,7 +175,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<Mix1EmaCrossTrendChannelInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): IndicatorResult & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -315,22 +329,22 @@ export function calculate(
     if (cfg.alertOn) {
       // the series of Long / Short (high / low) is read as a bool: na and 0 draw nothing
       if (longE[i] && !isNaN(b.high) && b.high !== 0) {
-        markers.push({ time, position: 'belowBar', shape: 'labelUp', color: C(C_GREEN, 0), text: 'Long', textColor: WHITE, size: 'normal' });
+        markers.push({ time, position: 'belowBar', shape: 'labelUp', color: C(C_GREEN, 0), text: 'Long', textColor: WHITE, size: 'normal', id: 'shape0' });
       }
       if (shortE[i] && !isNaN(b.low) && b.low !== 0) {
-        markers.push({ time, position: 'aboveBar', shape: 'labelDown', color: C(C_RED, 0), text: 'Short', textColor: WHITE, size: 'normal' });
+        markers.push({ time, position: 'aboveBar', shape: 'labelDown', color: C(C_RED, 0), text: 'Short', textColor: WHITE, size: 'normal', id: 'shape1' });
       }
       if ((longX[i] || shortX[i]) && !isNaN(b.close)) {
-        markers.push({ time, position: 'atPriceMiddle', price: b.close, shape: 'xcross', color: C(YELLOW, 0), text: 'Close', textColor: C(YELLOW, 0), size: 'small' });
+        markers.push({ time, position: 'atPriceMiddle', price: b.close, shape: 'xcross', color: C(YELLOW, 0), text: 'Close', textColor: C(YELLOW, 0), size: 'small', id: 'shape2' });
       }
       if ((longSL[i] || shortSL[i]) && !isNaN(slLine[i])) {
-        markers.push({ time, position: 'atPriceMiddle', price: slLine[i], shape: 'xcross', color: C(YELLOW, 0), text: 'SL', textColor: C(YELLOW, 0), size: 'small' });
+        markers.push({ time, position: 'atPriceMiddle', price: slLine[i], shape: 'xcross', color: C(YELLOW, 0), text: 'SL', textColor: C(YELLOW, 0), size: 'small', id: 'shape3' });
       }
       if (cfg.goldenOn && gCross[i] === 1 && !isNaN(mt)) {
-        markers.push({ time, position: 'atPriceBottom', price: mt, shape: 'labelUp', color: C(ORANGE, 0), text: 'Golden\nCross', textColor: WHITE, size: 'normal' });
+        markers.push({ time, position: 'atPriceBottom', price: mt, shape: 'labelUp', color: C(ORANGE, 0), text: 'Golden\nCross', textColor: WHITE, size: 'normal', id: 'shape4' });
       }
       if (cfg.goldenOn && dCross[i] === 1 && !isNaN(mt)) {
-        markers.push({ time, position: 'atPriceTop', price: mt, shape: 'labelDown', color: C(ORANGE, 0), text: 'Death\nCross', textColor: WHITE, size: 'normal' });
+        markers.push({ time, position: 'atPriceTop', price: mt, shape: 'labelDown', color: C(ORANGE, 0), text: 'Death\nCross', textColor: WHITE, size: 'normal', id: 'shape5' });
       }
     }
     if (cfg.barColOn) barColors.push({ time, color: cBar });
@@ -347,6 +361,10 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [
+      longE.map((v, i) => v || shortE[i] || longX[i] || shortX[i] || longSL[i] || shortSL[i]),
+      longE, shortE, longX, shortX, longSL, shortSL,
+    ]),
   };
 }
 
@@ -356,4 +374,5 @@ export const Mix1EmaCrossTrendChannel = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

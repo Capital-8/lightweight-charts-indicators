@@ -4,6 +4,8 @@
  * RSI (7) colours the bars: yellow at or above the overbought level, purple at or below the oversold level. A BUY
  * label shows when the close is above the EMA (200) on a yellow bar, a SELL label when the close is below the EMA on
  * a purple bar; a new label of the same side needs at least `signalCooldown` bars since the last one.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY Signal', 'SELL Signal' and 'BUY and SELL' (either), true on
+ * the bars of the labels.
  *
  * Reference: "CHN BUY SELL with EMA 200" by CHNTeam
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +13,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ChnBuySellWithEma200Inputs {
   /** RSI length */
@@ -61,7 +64,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<ChnBuySellWithEma200Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -72,6 +75,7 @@ export function calculate(
 
   const barColors: BarColorData[] = [];
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   // var int last_buy_bar = 0, var int last_sell_bar = 0 (bar_index of the last signal)
   let lastBuyBar = 0;
   let lastSellBar = 0;
@@ -87,6 +91,8 @@ export function calculate(
     const sell = lt(bars[i].close, ema200[i]) && isPurple && i - lastSellBar >= cfg.signalCooldown;
     if (buy) lastBuyBar = i;
     if (sell) lastSellBar = i;
+    buyFlags.push(buy);
+    sellFlags.push(sell);
     if (buy) {
       markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: color.green, text: 'BUY',
         textColor: color.white, size: 'normal' });
@@ -104,8 +110,17 @@ export function calculate(
     plots: { plot0 },
     markers,
     barColors,
+    // alertcondition(buy_condition), (sell_condition), (buy_condition or sell_condition)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, buyFlags.map((b, i) => b || sellFlags[i])]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY Signal', message: 'CHN BUY SELL: BUY signal' },
+  { id: 'alert1', title: 'SELL Signal', message: 'CHN BUY SELL: SELL signal' },
+  { id: 'alert2', title: 'BUY and SELL', message: 'CHN BUY SELL: Trading signal generated' },
+];
 
 export const ChnBuySellWithEma200 = {
   calculate,
@@ -113,4 +128,5 @@ export const ChnBuySellWithEma200 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

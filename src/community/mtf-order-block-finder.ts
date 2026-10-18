@@ -25,7 +25,9 @@
  * Chart values read (optional third argument of calculate): the chart timeframe (else taken from the bar spacing)
  * and, for the close time of a bar and the candles of the higher timeframe, the exchange time zone and session.
  * Without them the close time of a bar is its time plus the timeframe, and the periods follow the UTC calendar.
- * The 3 alert conditions of the script have no output.
+ *
+ * Alerts (alertcondition, `alerts` of the result): 'New Order Block' (bullish or bearish), 'New Bullish Order Block'
+ * and 'New Bearish Order Block', true on the bar where the pattern is found.
  *
  * Reference: "MTF Order Block Finder" by DasanC
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -38,6 +40,7 @@ import {
 import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { chartTimeframe, hasCalendar, periodStarts, securityBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MtfOrderBlockFinderInputs {
   /** Hover over ( ! ) for Intro (no effect) */
@@ -210,12 +213,17 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<MtfOrderBlockFinderInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { threshold, doji, fuzzy, style } = cfg;
   const n = bars.length;
+  // OB_bull / OB_bear per bar (false on the bars where the pattern is not read)
+  const bullFlags = new Array<boolean>(n).fill(false);
+  const bearFlags = new Array<boolean>(n).fill(false);
   const result = (lines: LineDrawingData[], boxes: BoxData[], labels: LabelData[]) => ({
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay }, plots: {}, lines, boxes, labels,
+    // alertcondition(OB_bull or OB_bear) / alertcondition(OB_bull) / alertcondition(OB_bear)
+    alerts: alertStates(alertConditions, bars, [bullFlags.map((v, i) => v || bearFlags[i]), bullFlags, bearFlags]),
   });
   const chartTf = chartTimeframe(bars, chart);
   if (n === 0 || chartTf === '') return result([], [], []);
@@ -397,6 +405,8 @@ export function calculate(
     if (dojiCandle && relmove && nastate) {
       obBull = bullishOB && upcandles === obPeriod - 1;
       obBear = bearishOB && downcandles === obPeriod - 1;
+      bullFlags[i] = obBull;
+      bearFlags[i] = obBear;
       for (const lowSide of [true, false]) {
         if (lowSide ? !obBull : !obBear) continue;
         let high = NaN;
@@ -489,4 +499,11 @@ export function calculate(
   );
 }
 
-export const MtfOrderBlockFinder = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New Order Block', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'New Bullish Order Block', message: 'Alert Fired!' },
+  { id: 'alert2', title: 'New Bearish Order Block', message: 'Alert Fired!' },
+];
+
+export const MtfOrderBlockFinder = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -6,6 +6,8 @@
  * and histogram take a bear-to-bull gradient colour from the lower to the upper band; a gradient fill to zero.
  * Circles mark crosses of the oscillator above the lower band (buy) and below the upper band (sell).
  *
+ * Alerts (alertcondition, `alerts` of the result): "Buy Signal" and "Sell Signal" (the crosses of the circles).
+ *
  * Reference: "Nova Statistical Filtering Oscillator [Pineify]" by Pineify
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Pineify
@@ -13,6 +15,13 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Bullish momentum is returning from an oversold statistical extreme.' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Bearish momentum is returning from an overbought statistical extreme.' },
+];
 
 export interface NovaStatisticalFilteringOscillatorInputs {
   /** Statistical window (mean and stdev of the z-score, stdev of the bands) */
@@ -63,7 +72,7 @@ const eq = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) <
 export function calculate(
   bars: Bar[],
   inputs: Partial<NovaStatisticalFilteringOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -122,10 +131,10 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     // plotshape(bullSignal ? smoothedStat : na, "Buy Signal", shape.circle, location.absolute, bullColor, size = size.tiny)
     if (bull[i] && !isNaN(sm[i])) {
-      markers.push({ time: t(i), position: 'atPriceMiddle', price: sm[i], shape: 'circle', color: cfg.bullColor, size: 'tiny' });
+      markers.push({ time: t(i), position: 'atPriceMiddle', price: sm[i], shape: 'circle', color: cfg.bullColor, size: 'tiny', id: 'shape0' });
     }
     if (bear[i] && !isNaN(sm[i])) {
-      markers.push({ time: t(i), position: 'atPriceMiddle', price: sm[i], shape: 'circle', color: cfg.bearColor, size: 'tiny' });
+      markers.push({ time: t(i), position: 'atPriceMiddle', price: sm[i], shape: 'circle', color: cfg.bearColor, size: 'tiny', id: 'shape1' });
     }
   }
 
@@ -134,6 +143,7 @@ export function calculate(
     plots,
     fills,
     markers,
+    alerts: alertStates(alertConditions, bars, [bull.map((v) => !!v), bear.map((v) => !!v)]),
   };
 }
 
@@ -143,4 +153,5 @@ export const NovaStatisticalFilteringOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

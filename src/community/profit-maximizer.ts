@@ -3,12 +3,15 @@
  *
  * ATR-based trailing stop applied to a moving average (not raw close).
  * SuperTrend-style logic on the MA value determines trend direction.
+ * Alerts (alertcondition, `alerts` of the result): the original's six conditions, crosses of the MA and of the price
+ * (close) with PMax (any cross, crossover, crossunder), on the plotted values.
  *
  * Reference: "Profit Maximizer PMax"
  */
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ProfitMaximizerInputs {
   atrPeriod: number;
@@ -45,7 +48,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<ProfitMaximizerInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<ProfitMaximizerInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { atrPeriod, atrMult, maLength, maType, showSignalsC } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -117,11 +123,11 @@ export function calculate(bars: Bar[], inputs: Partial<ProfitMaximizerInputs> = 
     const pmaxPrev = pmaxArr[i - 1];
     // crossover: prev MA <= prev PMax and cur MA > cur PMax
     if (maPrev <= pmaxPrev && maCur > pmaxCur) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#26A69A', text: 'Buy' });
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#26A69A', text: 'Buy', id: 'shape0' });
     }
     // crossunder: prev MA >= prev PMax and cur MA < cur PMax
     if (maPrev >= pmaxPrev && maCur < pmaxCur) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#EF5350', text: 'Sell' });
+      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#EF5350', text: 'Sell', id: 'shape1' });
     }
 
     // Pine: buySignalc = crossover(src, PMax), sellSignalc = crossunder(src, PMax)
@@ -129,23 +135,22 @@ export function calculate(bars: Bar[], inputs: Partial<ProfitMaximizerInputs> = 
       const closeCur = bars[i].close;
       const closePrev = bars[i - 1].close;
       if (closePrev <= pmaxPrev && closeCur > pmaxCur) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#0F18BF', text: 'Buy' });
+        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#0F18BF', text: 'Buy', id: 'shape2' });
       }
       if (closePrev >= pmaxPrev && closeCur < pmaxCur) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#0F18BF', text: 'Sell' });
+        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#0F18BF', text: 'Sell', id: 'shape3' });
       }
     }
   }
 
   // Fill between ohlc4 (price) and PMax: green when MAvg>PMax, red when MAvg<PMax
-  // Pine: fill(mPlot, pALL, color=MAvg>PMax ? color.green : MAvg<PMax ? color.red : na)
-  const fillColors: string[] = [];
+  // Pine: fill(mPlot, pALL, title="UpTrend Highligter", color=longFillColor) and the "DownTrend Highligter" fill
+  const upFillColors: string[] = [];
+  const downFillColors: string[] = [];
   for (let i = 0; i < n; i++) {
-    if (i < warmup) {
-      fillColors.push('rgba(0,0,0,0)');
-    } else {
-      fillColors.push(dirArr[i] === 1 ? 'rgba(38,166,154,0.15)' : 'rgba(239,83,80,0.15)');
-    }
+    const on = i >= warmup;
+    upFillColors.push(on && dirArr[i] === 1 ? 'rgba(38,166,154,0.15)' : 'rgba(0,0,0,0)');
+    downFillColors.push(on && dirArr[i] !== 1 ? 'rgba(239,83,80,0.15)' : 'rgba(0,0,0,0)');
   }
 
   const plot0 = pmaxArr.map((v, i) => {
@@ -159,12 +164,36 @@ export function calculate(bars: Bar[], inputs: Partial<ProfitMaximizerInputs> = 
     value: (i < warmup || v == null) ? NaN : v,
   }));
 
+  // Alerts on the plotted values (na before the warm-up compares false): cross(a, b) = crossover or crossunder
+  const maVals = plot1.map((p) => p.value);
+  const pmaxVals = plot0.map((p) => p.value);
+  const closeVals = bars.map((b) => b.close);
+  const maOver = crossedOver(maVals, pmaxVals), maUnder = crossedUnder(maVals, pmaxVals);
+  const pxOver = crossedOver(closeVals, pmaxVals), pxUnder = crossedUnder(closeVals, pmaxVals);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1 },
-    fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(38,166,154,0.15)' }, colors: fillColors }],
+    fills: [
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'UpTrend Highligter', color: 'rgba(38,166,154,0.15)' }, colors: upFillColors },
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'DownTrend Highligter', color: 'rgba(239,83,80,0.15)' }, colors: downFillColors },
+    ],
     markers,
+    alerts: alertStates(alertConditions, bars, [
+      maOver.map((v, i) => v || maUnder[i]), maOver, maUnder,
+      pxOver.map((v, i) => v || pxUnder[i]), pxOver, pxUnder,
+    ]),
   };
 }
 
-export const ProfitMaximizer = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cross Alert', message: 'PMax - Moving Avg Crossing!' },
+  { id: 'alert1', title: 'Crossover Alarm', message: 'Moving Avg BUY SIGNAL!' },
+  { id: 'alert2', title: 'Crossunder Alarm', message: 'Moving Avg SELL SIGNAL!' },
+  { id: 'alert3', title: 'Price Cross Alert', message: 'PMax - Price Crossing!' },
+  { id: 'alert4', title: 'Price Crossover Alarm', message: 'PRICE OVER PMax - BUY SIGNAL!' },
+  { id: 'alert5', title: 'Price Crossunder Alarm', message: 'PRICE UNDER PMax - SELL SIGNAL!' },
+];
+
+export const ProfitMaximizer = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

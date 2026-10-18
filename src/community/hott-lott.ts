@@ -3,13 +3,17 @@
  *
  * Applies OTT (Optimized Trend Tracker) to highest-high and lowest-low
  * with selectable MA types. HOTT tracks upper trend, LOTT tracks lower trend.
- * Bar colors indicate breakout direction.
+ * Bar colors indicate breakout direction. VAR (the default MA) follows the original: na values count as 0 (nz), the
+ * up / down moves are those of the source and their 9-bar sums are na before the 9th bar.
+ * Alerts (alertcondition, `alerts` of the result): 'Price Crossover Alarm' when the close crosses over HOTT[2],
+ * 'Price Crossunder Alarm' when it crosses under LOTT[2].
  *
  * Reference: "HOTT-LOTT" by KivancOzbilgic
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HottLottInputs {
   ottPeriod: number;
@@ -85,31 +89,33 @@ function computeMA(bars: Bar[], srcArr: number[], length: number, maType: string
       const vUD: number[] = new Array(n);
       const vDD: number[] = new Array(n);
 
+      // Var_Func: vud1 = src > src[1] ? src - src[1] : 0 (na compares false); vUD = math.sum(vud1, 9) (na before 9
+      // bars); vCMO = nz((vUD - vDD) / (vUD + vDD));
+      // VAR := nz(valpha * abs(vCMO) * src) + (1 - valpha * abs(vCMO)) * nz(VAR[1])
+      const nz = (v: number) => (Number.isFinite(v) ? v : 0);
       for (let i = 0; i < n; i++) {
         const s = srcArr[i];
-        const prev = i > 0 ? result[i - 1] : s;
+        const s1 = i > 0 ? srcArr[i - 1] : NaN;
 
-        vud1[i] = s > prev ? s - prev : 0;
-        vdd1[i] = s < prev ? prev - s : 0;
+        vud1[i] = s > s1 ? s - s1 : 0;
+        vdd1[i] = s < s1 ? s1 - s : 0;
 
-        // Sum over 9 bars
-        let sumUD = 0;
-        let sumDD = 0;
-        for (let j = 0; j < 9 && i - j >= 0; j++) {
-          sumUD += vud1[i - j];
-          sumDD += vdd1[i - j];
+        let sumUD = NaN;
+        let sumDD = NaN;
+        if (i >= 8) {
+          sumUD = 0;
+          sumDD = 0;
+          for (let j = 0; j < 9; j++) {
+            sumUD += vud1[i - j];
+            sumDD += vdd1[i - j];
+          }
         }
         vUD[i] = sumUD;
         vDD[i] = sumDD;
 
-        const total = vUD[i] + vDD[i];
-        const vCMO = total !== 0 ? (vUD[i] - vDD[i]) / total : 0;
-
-        if (i === 0) {
-          result[i] = s;
-        } else {
-          result[i] = valpha * Math.abs(vCMO) * s + (1 - valpha * Math.abs(vCMO)) * prev;
-        }
+        const vCMO = nz((vUD[i] - vDD[i]) / (vUD[i] + vDD[i]));
+        const prev = i > 0 ? result[i - 1] : NaN;
+        result[i] = nz(valpha * Math.abs(vCMO) * s) + (1 - valpha * Math.abs(vCMO)) * nz(prev);
       }
       return result;
     }
@@ -217,7 +223,10 @@ function computeOTT(maArr: number[], percent: number): number[] {
   return OTT;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<HottLottInputs> = {}): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<HottLottInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const { ottPeriod, percent, hlLength, maType } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -269,12 +278,24 @@ export function calculate(bars: Bar[], inputs: Partial<HottLottInputs> = {}): Om
     }
   }
 
+  // alertcondition(ta.crossover(close, HOTT[2])) / alertcondition(ta.crossunder(close, LOTT[2]))
+  const closes = bars.map((b) => b.close);
+  const hott2 = hottRaw.map((_v, i) => (i >= 2 ? hottRaw[i - 2] : NaN));
+  const lott2 = lottRaw.map((_v, i) => (i >= 2 ? lottRaw[i - 2] : NaN));
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { hott: hottPlot, lott: lottPlot },
     fills: [{ plot1: 'hott', plot2: 'lott', options: { color: 'rgba(153,21,255,0.5)' }, colors: fillColors }],
     barColors,
+    alerts: alertStates(alertConditions, bars, [crossedOver(closes, hott2), crossedUnder(closes, lott2)]),
   };
 }
 
-export const HottLott = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Price Crossover Alarm', message: 'PRICE OVER HOTT - BUY SIGNAL!' },
+  { id: 'alert1', title: 'Price Crossunder Alarm', message: 'PRICE UNDER LOTT - SELL SIGNAL!' },
+];
+
+export const HottLott = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -7,6 +7,7 @@
  * down when it falls, else unchanged. The line colour goes from the trend colour at transparency 50 to the full
  * trend colour with the slope relative to the highest slope of the last 100 bars (optional neutral colour on flat
  * bars). Bars and the background can take the line colour.
+ * Alerts (alertcondition, `alerts` of the result): the trend turns from down to up, from up to down, or either.
  *
  * Reference: "Adaptive Friction Filter (AFF) [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +16,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AdaptiveFrictionFilterInputs {
   /** Preset: 'Default' uses the three inputs below; the others replace them */
@@ -107,7 +109,7 @@ const PRESET_COLORS: Record<string, [string, string, string]> = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AdaptiveFrictionFilterInputs> = {},
-): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } {
+): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -152,6 +154,9 @@ export function calculate(
   const slopeNorm = A(ta.highest(Series.fromArray(bars, slope), 100));
   const bullDim = String(color.new(bullishColor, 50));
   const bearDim = String(color.new(bearishColor, 50));
+  // turned_bullish = trend_dir == 1 and trend_dir[1] == -1; turned_bearish = trend_dir == -1 and trend_dir[1] == 1
+  const turnedBull = trendDir.map((d, i) => d === 1 && i > 0 && trendDir[i - 1] === -1);
+  const turnedBear = trendDir.map((d, i) => d === -1 && i > 0 && trendDir[i - 1] === 1);
 
   const plot0: { time: number; value: number; color: string }[] = [];
   const plot1: { time: number; value: number; color: string }[] = [];
@@ -179,8 +184,17 @@ export function calculate(
     plots: { plot0, plot1 },
     barColors,
     bgColors,
+    // alertcondition(turned_bullish / turned_bearish / trend_changed, ...)
+    alerts: alertStates(alertConditions, bars, [turnedBull, turnedBear, turnedBull.map((v, i) => v || turnedBear[i])]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend Signal', message: 'Adaptive Friction Filter: BULLISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Trend Signal', message: 'Adaptive Friction Filter: BEARISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Any Trend Change', message: 'Adaptive Friction Filter: Trend direction changed on {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const AdaptiveFrictionFilter = {
   calculate,
@@ -188,4 +202,5 @@ export const AdaptiveFrictionFilter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

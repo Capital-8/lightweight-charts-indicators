@@ -8,6 +8,9 @@
  * Optional divergence channel: 5-bar fractals of the difference factor, offset by a multiple of its 20-bar standard
  * deviation, with regular / hidden divergence labels (fractal against the high / low two bars back).
  *
+ * Alerts (alertcondition, `alerts` of the result): "OCC BothCond" (either cross), "OCC LongCond" (close average
+ * crossing over the open average) and "OCC ShortCond" (crossing under it).
+ *
  * MA types: SMA, EMA, DEMA, TEMA, WMA, VWMA, SMMA, HullMA, ZEMA (zero-lag EMA), SSMA (Ehlers super smoother), TMA.
  *
  * Reference: "Open Close Cross Alerts NoRepaint Version by JustUncleL" by JustUncleL
@@ -18,6 +21,14 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'OCC BothCond', message: 'OCC BothCond' },
+  { id: 'alert1', title: 'OCC LongCond', message: 'OCC LongCond' },
+  { id: 'alert2', title: 'OCC ShortCond', message: 'OCC ShortCond' },
+];
 
 export type OccMaType = 'SMA' | 'EMA' | 'DEMA' | 'TEMA' | 'WMA' | 'VWMA' | 'SMMA' | 'HullMA' | 'ZEMA' | 'SSMA' | 'TMA';
 
@@ -100,7 +111,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<OpenCloseCrossAlertsNRPInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => (v === null || v === undefined ? NaN : v));
@@ -266,19 +277,19 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     // plotshape(alert, "OCC Alert Plot", color = trendColour, style = shape.circle, location = location.bottom, size = size.auto)
     if (xlong[i] || xshort[i]) {
-      markers.push({ time: t(i), position: 'bottom', shape: 'circle', color: trendColour(i), size: 'auto' });
+      markers.push({ time: t(i), position: 'bottom', shape: 'circle', color: trendColour(i), size: 'auto', id: 'shape0' });
     }
     if (i < 2) continue;
     // plotshape(cond ? price : na, text, style, location.absolute, color, textcolor = color.white, offset = -2)
-    const label = (on: boolean, price: number, text: string, down: boolean, col: string) => {
+    const label = (on: boolean, price: number, text: string, down: boolean, col: string, id: string) => {
       if (!on || isNaN(price)) return;
       markers.push({ time: back2(i), position: down ? 'atPriceTop' : 'atPriceBottom', price,
-        shape: down ? 'labelDown' : 'labelUp', color: col, text, textColor: WHITE });
+        shape: down ? 'labelDown' : 'labelUp', color: col, text, textColor: WHITE, id });
     };
-    label(regBear[i] && uReg, at(i - 2) + offset[i], 'Regular', true, MAROON);
-    label(hidBear[i] && uHid, at(i - 2) + offset[i], 'hidden', true, MAROON);
-    label(regBull[i] && uReg, at(i - 2) - offset[i], 'Regular', false, GREEN);
-    label(hidBull[i] && uHid, at(i - 2) - offset[i], 'hidden', false, GREEN);
+    label(regBear[i] && uReg, at(i - 2) + offset[i], 'Regular', true, MAROON, 'shape1');
+    label(hidBear[i] && uHid, at(i - 2) + offset[i], 'hidden', true, MAROON, 'shape2');
+    label(regBull[i] && uReg, at(i - 2) - offset[i], 'Regular', false, GREEN, 'shape3');
+    label(hidBull[i] && uHid, at(i - 2) - offset[i], 'hidden', false, GREEN, 'shape4');
   }
 
   return {
@@ -286,6 +297,10 @@ export function calculate(
     plots,
     hlines: [{ value: 0, options: { color: GRAY, linestyle: 'dashed' } }],
     markers,
+    // alert = longCond or shortCond; longCond = xlong; shortCond = xshort
+    alerts: alertStates(alertConditions, bars, [
+      xlong.map((v, i) => !!v || !!xshort[i]), xlong.map((v) => !!v), xshort.map((v) => !!v),
+    ]),
   };
 }
 
@@ -296,4 +311,5 @@ export const OpenCloseCrossAlertsNRP = {
   inputConfig,
   plotConfig,
   hlineConfig,
+  alertConditions,
 };

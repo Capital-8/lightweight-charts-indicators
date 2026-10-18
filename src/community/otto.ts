@@ -7,12 +7,15 @@
  *
  * Pine: overlay=false, two line plots + fill + buy/sell markers.
  * Supports 10 MA types: SMA, EMA, WMA, DEMA, TMA, VAR, WWMA, ZLEMA, TSF, HULL.
+ * Alerts (alertcondition, `alerts` of the result): 'Crossover Alarm' when HOTT[2] crosses under LOTT (buy),
+ * 'Crossunder Alarm' when HOTT[2] crosses over LOTT (sell).
  *
  * Reference: "Optimized Trend Tracker Oscillator OTTO" by KivancOzbilgic
  */
 
 import { getSourceSeries, ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface OTTOInputs {
   period: number;
@@ -94,7 +97,10 @@ function wwmaFunc(srcArr: number[], length: number): number[] {
   return out;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<OTTOInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<OTTOInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { period, percent, fastVidyaLen, slowVidyaLen, correctingConst, src, showSignals, highlighting, mav } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -230,12 +236,23 @@ export function calculate(bars: Bar[], inputs: Partial<OTTOInputs> = {}): Omit<I
     }
   }
 
+  // HOTT[2] (na on the first two bars) and LOTT = src
+  const hott2 = ott.map((_v, i) => (i >= 2 ? ott[i - 2] : NaN));
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'hott': hottPlot, 'lott': lottPlot },
     fills: [{ plot1: 'hott', plot2: 'lott', options: { color: '#008000' }, colors: fillColors }],
     markers,
+    // alertcondition(ta.crossunder(HOTT[2], LOTT), 'Crossover Alarm') / alertcondition(ta.crossover(HOTT[2], LOTT), 'Crossunder Alarm')
+    alerts: alertStates(alertConditions, bars, [crossedUnder(hott2, normalizedSrc), crossedOver(hott2, normalizedSrc)]),
   };
 }
 
-export const OTTO = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Crossover Alarm', message: 'OTTO - BUY SIGNAL!' },
+  { id: 'alert1', title: 'Crossunder Alarm', message: 'OTTO - SELL SIGNAL!' },
+];
+
+export const OTTO = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

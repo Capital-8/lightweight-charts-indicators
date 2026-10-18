@@ -8,6 +8,8 @@
  *
  * The pivot price of a label is printed with the symbol tick (format.mintick). The port reads the tick from the
  * optional third argument (see src/chart-context.ts); without it the tick is 0.01 (2 decimals).
+ * Alerts (alertcondition, `alerts` of the result): 'Fractal Break Arrow' (either break), 'Fractal Break Long' (close
+ * above the last pivot high with the open at or below it) and 'Fractal Break Short' (the mirror at the pivot low).
  *
  * Reference: "Pivot Points High Low (HH/HL/LH/LL) [Anan]" (Pine v6)
  */
@@ -15,6 +17,7 @@
 import { ta, str, math, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, LabelData } from '../types';
 import { mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PivotHhHlLhLlInputs {
   /** Pivot high source */
@@ -138,7 +141,7 @@ const EPS = 1e-10;
 const lt = (a: number, b: number) => b - a > EPS;
 const differs = (a: number, b: number) => Math.abs(a - b) > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<PivotHhHlLhLlInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; labels: LabelData[] } {
+export function calculate(bars: Bar[], inputs: Partial<PivotHhHlLhLlInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; labels: LabelData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { leftBars: leftLenH, rightBars: rightLenH, leftLenL, rightLenL, colorH, colorL } = cfg;
   const n = bars.length;
@@ -183,6 +186,7 @@ export function calculate(bars: Bar[], inputs: Partial<PivotHhHlLhLlInputs> = {}
   let pvtL = NaN;
   let pvtHighToShow = NaN;
   let pvtLowToShow = NaN;
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
 
   const shape = (bar: number, text: string, high: boolean, color: string) => {
     if (bar < 0) return;
@@ -278,6 +282,8 @@ export function calculate(bars: Bar[], inputs: Partial<PivotHhHlLhLlInputs> = {}
     // Fractal break: buy = close > pvtH and open <= pvtH, sell = close < pvtL and open >= pvtL
     const buy = lt(pvtH, bars[i].close) && !Number.isNaN(pvtH) && !lt(pvtH, bars[i].open);
     const sell = lt(bars[i].close, pvtL) && !Number.isNaN(pvtL) && !lt(bars[i].open, pvtL);
+    buyFlags.push(buy);
+    sellFlags.push(sell);
     if (cfg.showFB && buy && inRange(i)) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: colorH, text: '↑↑' });
     }
@@ -306,7 +312,16 @@ export function calculate(bars: Bar[], inputs: Partial<PivotHhHlLhLlInputs> = {}
     },
     markers,
     labels: labels.slice(-MAX_LABELS),
+    // alertcondition(buy or sell) / alertcondition(buy) / alertcondition(sell)
+    alerts: alertStates(alertConditions, bars, [buyFlags.map((b, i) => b || sellFlags[i]), buyFlags, sellFlags]),
   };
 }
 
-export const PivotHhHlLhLl = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Fractal Break Arrow', message: 'Alert' },
+  { id: 'alert1', title: 'Fractal Break Long', message: 'Long' },
+  { id: 'alert2', title: 'Fractal Break Short', message: 'Short' },
+];
+
+export const PivotHhHlLhLl = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -144,15 +144,16 @@ export function calculate(
       // a polyline with an na price (no ATR yet) is created but not drawn
       if (!isNaN(atr[i])) sabre(i, low1, 1, cfg.colUp, colUp50);
       // plotshape(up ? low[1] : na, location.absolute, shape.circle, size tiny / small / normal, offset = -1)
-      markers.push({ time, position: 'atPriceMiddle', price: low1, shape: 'circle', color: cfg.colUp, size: 'tiny' });
-      markers.push({ time, position: 'atPriceMiddle', price: low1, shape: 'circle', color: colUp50, size: 'small' });
-      markers.push({ time, position: 'atPriceMiddle', price: low1, shape: 'circle', color: colUp65, size: 'normal' });
+      // ids: the plotshape outputs shape0-2 (up) and shape3-5 (down), in declaration order
+      markers.push({ time, position: 'atPriceMiddle', price: low1, shape: 'circle', color: cfg.colUp, size: 'tiny', id: 'shape0' });
+      markers.push({ time, position: 'atPriceMiddle', price: low1, shape: 'circle', color: colUp50, size: 'small', id: 'shape1' });
+      markers.push({ time, position: 'atPriceMiddle', price: low1, shape: 'circle', color: colUp65, size: 'normal', id: 'shape2' });
     }
     if (dn) {
       if (!isNaN(atr[i])) sabre(i, high1, -1, cfg.colDn, colDn50);
-      markers.push({ time, position: 'atPriceMiddle', price: high1, shape: 'circle', color: cfg.colDn, size: 'tiny' });
-      markers.push({ time, position: 'atPriceMiddle', price: high1, shape: 'circle', color: colDn50, size: 'small' });
-      markers.push({ time, position: 'atPriceMiddle', price: high1, shape: 'circle', color: colDn65, size: 'normal' });
+      markers.push({ time, position: 'atPriceMiddle', price: high1, shape: 'circle', color: cfg.colDn, size: 'tiny', id: 'shape3' });
+      markers.push({ time, position: 'atPriceMiddle', price: high1, shape: 'circle', color: colDn50, size: 'small', id: 'shape4' });
+      markers.push({ time, position: 'atPriceMiddle', price: high1, shape: 'circle', color: colDn65, size: 'normal', id: 'shape5' });
     }
   }
 

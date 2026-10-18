@@ -26,7 +26,11 @@
  * Session and killzone use the current time of the chart context (the clock of the computer without it); on a
  * chart whose last bar is older than one bar length they use the time of the last bar, as the original.
  * The previous day / week / month levels on a chart timeframe above theirs need lower-timeframe data: the port
- * throws an Error when such lines are switched on. The alert inputs are kept; alerts give no output.
+ * throws an Error when such lines are switched on.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar) for the alert inputs that are on, on every bar as
+ * the original makes them: per timeframe from its reading on that bar, current timeframe swing / volume /
+ * volatility, session / killzone of the bar time, trend bias, previous day / week / month level breaks and sweeps
+ * (no level alerts on a chart timeframe above the level's timeframe).
  *
  * Reference: "Market Structure Dashboard | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -40,7 +44,11 @@ import {
 import { barTime } from '../bar-time';
 import { chartTimeframe, hasCalendar, periodStarts, securityPeriods } from '../anchor-period';
 import { mintickOf, nowOf, tickerOf, type ChartContext } from '../chart-context';
-import type { BoxData, LabelData, LineDrawingData, TableCellData, TableData, TablePosition } from '../types';
+import type { AlertCall, BoxData, LabelData, LineDrawingData, TableCellData, TableData, TablePosition } from '../types';
+import { crossedOver, crossedUnder } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type LineStyleOption = '────' | '- - -' | '····';
 
@@ -478,6 +486,13 @@ const rep = (s: string, count: number) => (count > 0 ? s.repeat(count) : '');
 
 const ATR_LENGTH = 3;
 const VOLUME_LENGTH = 20;
+/** The inputs that switch alert() calls on */
+const ALERT_INPUTS = [
+  'alertMsdSwingBreak', 'alertMsdSwingSweep', 'alertMsdStruct', 'alertMsdOBEnter', 'alertMsdOBChange', 'alertMsdFVGEnter',
+  'alertMsdFVGChange', 'alertMsdEma', 'alertCtfSwingBreak', 'alertCtfSwingSweep', 'alertCtfVolume', 'alertCtfVolatility',
+  'alertSession', 'alertKillzone', 'alertBiasChange', 'alertHtfPDBreak', 'alertHtfPDSweep', 'alertHtfPWBreak',
+  'alertHtfPWSweep', 'alertHtfPMBreak', 'alertHtfPMSweep',
+] as const;
 /** Start value of the nearest-zone search of the original */
 const FAR = 100000.0;
 
@@ -525,6 +540,8 @@ const NA_READING: Reading = {
 /** State of the structure functions after bar `upto` of a series of bars */
 interface Analysis {
   reading: Reading;
+  /** The reading after each bar 0 .. upto (only with `perBar`) */
+  readings: Reading[];
   ema: number[];
   currH: number;
   currL: number;
@@ -558,9 +575,10 @@ function nearestZone(zones: Zone[], close: number): [number, number] {
 /**
  * The swing, structure, order block and fair value gap functions of the original, run on bars 0 to `upto` of one
  * timeframe. Every call of these functions in the original keeps its own state with the same rules, so one run
- * gives the dashboard row of the timeframe and, on the chart bars, the drawings.
+ * gives the dashboard row of the timeframe and, on the chart bars, the drawings. With `perBar`, also the reading
+ * after every bar (for the alerts).
  */
-function analyse(bars: Bar[], upto: number, cfg: AnalysisSettings): Analysis {
+function analyse(bars: Bar[], upto: number, cfg: AnalysisSettings, perBar = false): Analysis {
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const open = bars.map((b) => b.open);
   const high = bars.map((b) => b.high);
@@ -600,6 +618,49 @@ function analyse(bars: Bar[], upto: number, cfg: AnalysisSettings): Analysis {
   const swingLabels: SwingLabel[] = [];
   let lastHBar = NaN;
   let lastLBar = NaN;
+
+  // calcAll() after the bar `idx` that the loop has just run: the real-time structure override and the nearest zones
+  const readingAt = (idx: number): Reading => {
+    const c = close[idx];
+    // Real-time structure override: a close beyond the previous swing
+    let rtHighType = highType;
+    let rtLowType = lowType;
+    let rtStruct1 = struct1;
+    let rtStruct2 = struct2;
+    let rtStruct3 = struct3;
+    if (!isNaN(prevL) && lt(c, prevL)) {
+      rtLowType = -1;
+      rtStruct3 = struct2;
+      rtStruct2 = struct1;
+      rtStruct1 = 'LL';
+    }
+    if (!isNaN(prevH) && gt(c, prevH)) {
+      rtHighType = 1;
+      rtStruct3 = struct2;
+      rtStruct2 = struct1;
+      rtStruct1 = 'HH';
+    }
+    const structBias = rtHighType === 1 && rtLowType === 1 ? 1 : rtHighType === -1 && rtLowType === -1 ? -1 : 0;
+    const [obNearDir, obNearDist] = nearestZone(obs, c);
+    const [fvgNearDir, fvgNearDist] = nearestZone(fvgs, c);
+    return {
+      trendDir: gt(c, ema[idx]) ? 1 : -1,
+      trendDist: c - ema[idx],
+      swingH: currH,
+      swingL: currL,
+      structBias,
+      struct1: rtStruct1,
+      struct2: rtStruct2,
+      struct3: rtStruct3,
+      obNearDir,
+      obNearDist,
+      fvgNearDir,
+      fvgNearDist,
+      reclaimLow,
+      reclaimHigh,
+    };
+  };
+  const readings: Reading[] = [];
 
   for (let i = 0; i <= upto; i++) {
     const c = close[i];
@@ -724,50 +785,11 @@ function analyse(bars: Bar[], upto: number, cfg: AnalysisSettings): Analysis {
       const fvg = fvgs[k];
       if ((fvg.dir === 1 && lt(low[i], fvg.bottom)) || (fvg.dir === -1 && gt(high[i], fvg.top))) fvgs.splice(k, 1);
     }
+    if (perBar) readings.push(readingAt(i));
   }
 
-  let reading = NA_READING;
-  if (upto >= 0) {
-    const c = close[upto];
-    // Real-time structure override: a close beyond the previous swing
-    let rtHighType = highType;
-    let rtLowType = lowType;
-    let rtStruct1 = struct1;
-    let rtStruct2 = struct2;
-    let rtStruct3 = struct3;
-    if (!isNaN(prevL) && lt(c, prevL)) {
-      rtLowType = -1;
-      rtStruct3 = struct2;
-      rtStruct2 = struct1;
-      rtStruct1 = 'LL';
-    }
-    if (!isNaN(prevH) && gt(c, prevH)) {
-      rtHighType = 1;
-      rtStruct3 = struct2;
-      rtStruct2 = struct1;
-      rtStruct1 = 'HH';
-    }
-    const structBias = rtHighType === 1 && rtLowType === 1 ? 1 : rtHighType === -1 && rtLowType === -1 ? -1 : 0;
-    const [obNearDir, obNearDist] = nearestZone(obs, c);
-    const [fvgNearDir, fvgNearDist] = nearestZone(fvgs, c);
-    reading = {
-      trendDir: gt(c, ema[upto]) ? 1 : -1,
-      trendDist: c - ema[upto],
-      swingH: currH,
-      swingL: currL,
-      structBias,
-      struct1: rtStruct1,
-      struct2: rtStruct2,
-      struct3: rtStruct3,
-      obNearDir,
-      obNearDist,
-      fvgNearDir,
-      fvgNearDist,
-      reclaimLow,
-      reclaimHigh,
-    };
-  }
-  return { reading, ema, currH, currL, obs, fvgs, swingLabels, lastHBar, lastLBar };
+  const reading = upto >= 0 ? readingAt(upto) : NA_READING;
+  return { reading, readings, ema, currH, currL, obs, fvgs, swingLabels, lastHBar, lastLBar };
 }
 
 /** The periods of a timeframe above the chart timeframe on the chart bars */
@@ -778,6 +800,8 @@ interface Periods {
   skip: boolean[];
   /** Index of the latest completed period at the last chart bar (-1: none) */
   done: number;
+  /** Index of the latest completed period at each chart bar (-1: none) */
+  latest: number[];
 }
 
 /**
@@ -789,13 +813,13 @@ function periodsOf(bars: Bar[], tf: string, chart?: ChartContext): Periods {
   const n = bars.length;
   if (hasCalendar(chart)) {
     const sp = securityPeriods(bars, tf, chart);
-    if (sp) return { group: sp.group, skip: sp.after, done: n > 0 ? sp.latest[n - 1] : -1 };
+    if (sp) return { group: sp.group, skip: sp.after, done: n > 0 ? sp.latest[n - 1] : -1, latest: sp.latest };
   }
   const starts = periodStarts(bars, tf, chart);
   const group: number[] = [];
   for (let i = 0; i < n; i++) group.push(i === 0 ? 0 : group[i - 1] + (starts[i] !== starts[i - 1] ? 1 : 0));
   const skip = bars.map(() => false);
-  if (n === 0) return { group, skip, done: -1 };
+  if (n === 0) return { group, skip, done: -1, latest: [] };
 
   // Symbols that trade every day follow the UTC calendar: the last bar completes its period when its close time is
   // in another period. Other symbols: when the next possible bar is in another period (the next bar is on the same
@@ -827,7 +851,10 @@ function periodsOf(bars: Bar[], tf: string, chart?: ChartContext): Periods {
   }
   const withNext = periodStarts([...bars.slice(Math.max(0, n - 3000)), { time: fromMs(next) }], tf, chart);
   const lastCompletes = withNext[withNext.length - 1] !== withNext[withNext.length - 2];
-  return { group, skip, done: lastCompletes ? group[n - 1] : group[n - 1] - 1 };
+  const done = lastCompletes ? group[n - 1] : group[n - 1] - 1;
+  // a bar before the last one completes its period when the next bar is in another period
+  const latest = group.map((g, i) => (i === n - 1 ? done : group[i + 1] !== g ? g : g - 1));
+  return { group, skip, done, latest };
 }
 
 /** The bars of the periods (open of the first chart bar, highest high, lowest low, close of the last chart bar) */
@@ -854,7 +881,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<MarketStructureDashboardFluxChartsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[] }
+  & { alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -862,6 +890,7 @@ export function calculate(
   const boxes: BoxData[] = [];
   const labels: LabelData[] = [];
   const tables: TableData[] = [];
+  const alertCalls: AlertCall[] = [];
   const plot0: Array<{ time: number; value: number; color: string }> = [];
   const result = () => ({
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -870,6 +899,7 @@ export function calculate(
     boxes,
     labels,
     tables,
+    alertCalls,
   });
   if (n === 0) return result();
 
@@ -900,7 +930,9 @@ export function calculate(
     labelMax: cfg.swingLabelLookback,
   };
   // The chart timeframe: the current swing range, the zones and the swing labels of the drawings
-  const own = analyse(bars, last, settings);
+  // The alert() calls need the readings of every bar
+  const alertsOn = ALERT_INPUTS.some((k) => cfg[k]);
+  const own = analyse(bars, last, settings, alertsOn);
 
   // tfActive(): an enabled timeframe that is not below the chart timeframe
   const timeframes = [
@@ -1128,15 +1160,11 @@ export function calculate(
   const showPMHL = cfg.showPMHL && chartSeconds <= 86400 * 31;
   interface Level { high: number; low: number; reclaimLow: boolean; reclaimHigh: boolean }
   const NA_LEVEL: Level = { high: NaN, low: NaN, reclaimLow: false, reclaimHigh: false };
-  const levelOf = (tf: string, name: string, needed: boolean, drawn: boolean): Level => {
-    if (!needed) return NA_LEVEL;
+  /** Per bar: the level of the previous period and its sweeps; null when the chart timeframe is above `tf` */
+  interface LevelSeries { high: number[]; low: number[]; reclaimLow: boolean[]; reclaimHigh: boolean[] }
+  const levelSeries = (tf: string): LevelSeries | null => {
     const tfSeconds = timeframe.in_seconds(tf);
-    if (!(chartSeconds <= tfSeconds)) {
-      if (drawn) {
-        throw new Error(`The previous ${name} high / low need bars of a timeframe below the chart timeframe "${chartTf}": the chart bars do not have that data`);
-      }
-      return NA_LEVEL;
-    }
+    if (!(chartSeconds <= tfSeconds)) return null;
     // request.security(syminfo.tickerid, tf, [high[1], low[1]], lookahead = barmerge.lookahead_on)
     let levelHigh: number[];
     let levelLow: number[];
@@ -1153,6 +1181,8 @@ export function calculate(
     const starts = periodStarts(bars, tf, chart);
     let lowBroken = false;
     let highBroken = false;
+    const reclaimLow: boolean[] = [];
+    const reclaimHigh: boolean[] = [];
     for (let i = 0; i < n; i++) {
       if (i > 0 && starts[i] !== starts[i - 1]) {
         lowBroken = false;
@@ -1160,12 +1190,25 @@ export function calculate(
       }
       if (lt(low[i], levelLow[i])) lowBroken = true;
       if (gt(high[i], levelHigh[i])) highBroken = true;
+      reclaimLow.push(lowBroken && gt(close[i], levelLow[i]));
+      reclaimHigh.push(highBroken && lt(close[i], levelHigh[i]));
+    }
+    return { high: levelHigh, low: levelLow, reclaimLow, reclaimHigh };
+  };
+  const levelOf = (tf: string, name: string, needed: boolean, drawn: boolean): Level => {
+    if (!needed) return NA_LEVEL;
+    const series = levelSeries(tf);
+    if (!series) {
+      if (drawn) {
+        throw new Error(`The previous ${name} high / low need bars of a timeframe below the chart timeframe "${chartTf}": the chart bars do not have that data`);
+      }
+      return NA_LEVEL;
     }
     return {
-      high: levelHigh[last],
-      low: levelLow[last],
-      reclaimLow: lowBroken && gt(lastClose, levelLow[last]),
-      reclaimHigh: highBroken && lt(lastClose, levelHigh[last]),
+      high: series.high[last],
+      low: series.low[last],
+      reclaimLow: series.reclaimLow[last],
+      reclaimHigh: series.reclaimHigh[last],
     };
   };
   const pd = levelOf('D', 'day', cfg.plotPDHL || (cfg.showHTFLevels && showPDHL), cfg.plotPDHL);
@@ -1510,7 +1553,204 @@ export function calculate(
     }
   }
 
+  // ---- Alerts: fireAlert(msg, dir) = alert(msg, alert.freq_once_per_bar), on every bar the original runs it ----
+  if (alertsOn) {
+    const call = (i: number, message: string) => alertCalls.push({ time: bars[i].time, message, freq: 'once_per_bar' });
+    // `a != b` of the original: false when one side is na
+    const ne = (a: number, b: number) => !isNaN(a) && !isNaN(b) && a !== b;
+    const swingPctAt = (i: number, swingH: number, swingL: number) => pct(close[i] - swingL, Math.max(swingH - swingL, MINTICK));
+    const swingState = (p: number, reclaimLow: boolean, reclaimHigh: boolean) =>
+      reclaimLow ? 2 : reclaimHigh ? -2 : lt(p, 0) ? -1 : gt(p, 100) ? 1 : 0;
+    const zoneInState = (nearDir: number, nearDist: number) =>
+      nearDir === 1 && ge(nearDist, 0) ? 1 : nearDir === -1 && le(nearDist, 0) ? -1 : 0;
+
+    // The reading of each timeframe on each chart bar: its latest completed bar (the bar in progress on a last bar
+    // that receives live updates)
+    const ownReadings = own.readings;
+    const perBarReadings = timeframes.map((t): Reading[] | null => {
+      if (!t.active) return null;
+      if (secondsOf(t.tf) === chartSeconds) return ownReadings;
+      const periods = periodsOf(bars, t.tf, chart);
+      const htf = periodBars(bars, periods);
+      const htfReadings = analyse(htf, htf.length - 1, settings, true).readings;
+      return bars.map((_b, i) => {
+        const idx = i === last && chart?.realtime ? periods.group[last] : periods.latest[i];
+        return idx >= 0 ? htfReadings[idx] ?? NA_READING : NA_READING;
+      });
+    });
+    const readingOf = (k: number, i: number): Reading => perBarReadings[k]?.[i] ?? NA_READING;
+
+    // var TfAlertState prevTfN = TfAlertState.new() (all fields 0)
+    const prevStates = timeframes.map(() => ({ swingSt: 0, structSt: 0, obIn: 0, obDir: 0, fvgIn: 0, fvgDir: 0, ema: 0 }));
+    let prevCtfSwingState = 0;
+
+    // Volume and volatility states per bar
+    const avgVolumeArr = A(ta.sma(volume, VOLUME_LENGTH));
+    const volumePctArr = bars.map((b, i) => pct(b.volume ?? NaN, avgVolumeArr[i]));
+    const volumeStateOf = (v: number) => (gt(v, 200) ? 'EXTREME' : gt(v, 120) ? 'HIGH' : gt(v, 80) ? 'NORMAL' : gt(v, 50) ? 'LOW' : 'VERY LOW');
+    const atrArr = A(atrSeries);
+    const avgAtrArr = A(ta.sma(atrSeries, cfg.atrAvgLength));
+    const volatilityStateOf = (i: number) => {
+      const p = pct(atrArr[i], avgAtrArr[i]);
+      return gt(p, 130) ? 'HIGH' : gt(p, 70) ? 'NORMAL' : 'LOW';
+    };
+    // Session and killzone of the bar time (New York)
+    const barMs = (i: number) => (ms ? bars[i].time : bars[i].time * 1000);
+    const sessionNameOf = (i: number) => getSession(pineTime.hour(barMs(i), 'America/New_York')).name;
+    const killzoneNameOf = (i: number) =>
+      getKillzone(pineTime.hour(barMs(i), 'America/New_York'), pineTime.minute(barMs(i), 'America/New_York')).name;
+    // Trend bias per bar
+    const biasOf = (i: number): { label: string; score: string } => {
+      let maxS = 0;
+      let points = 0;
+      timeframes.forEach((t, k) => {
+        if (!(t.active && t.weight > 0)) return;
+        const r = readingOf(k, i);
+        const swingRange = Math.max(r.swingH - r.swingL, MINTICK);
+        const sp = (close[i] - r.swingL) / swingRange * 100;
+        const swingDir = lt(sp, 0) ? -1 : gt(sp, 100) ? 1 : lt(sp, 30) ? 1 : gt(sp, 70) ? -1 : 0;
+        let score = 0;
+        if (cfg.biasUseStruct) score += dirScore(r.structBias);
+        if (cfg.biasUseOB) score += dirScore(r.obNearDir);
+        if (cfg.biasUseFVG) score += dirScore(r.fvgNearDir);
+        if (cfg.biasUseEMA) score += dirScore(r.trendDir);
+        if (cfg.biasUseSwing) score += swingDir;
+        maxS += t.weight * factorCount;
+        points += score * t.weight;
+      });
+      const p = maxS > 0 ? (points / maxS) * 100 : 0;
+      return {
+        label: maxS === 0 ? 'N/A' : gt(p, 50) ? 'BULLISH ↑' : gt(p, 20) ? 'LEAN BULL ↑' : lt(p, -50) ? 'BEARISH ↓' : lt(p, -20) ? 'LEAN BEAR ↓' : 'NEUTRAL →',
+        score: maxS === 0 ? '--' : `${points >= 0 ? '+' : ''}${str.tostring(points)}/${str.tostring(maxS)}`,
+      };
+    };
+    // HTF levels: computed only for the alerts that are on (none when the chart timeframe is above the level's)
+    const levelAlerts = [
+      { tf: 'D', brk: cfg.alertHtfPDBreak, sweep: cfg.alertHtfPDSweep, h: 'PDH', l: 'PDL' },
+      { tf: 'W', brk: cfg.alertHtfPWBreak, sweep: cfg.alertHtfPWSweep, h: 'PWH', l: 'PWL' },
+      { tf: 'M', brk: cfg.alertHtfPMBreak, sweep: cfg.alertHtfPMSweep, h: 'PMH', l: 'PML' },
+    ].map((x) => {
+      const series = x.brk || x.sweep ? levelSeries(x.tf) : null;
+      // ta.crossover(close, pdHigh) / ta.crossunder(close, pdLow)
+      return { ...x, series, up: series ? crossedOver(close, series.high) : [], down: series ? crossedUnder(close, series.low) : [] };
+    });
+
+    let prevVolumeState = '';
+    let prevVolatilityState = '';
+    let prevSession = '';
+    let prevKillzone = '';
+    let prevBias = '';
+    for (let i = 0; i < n; i++) {
+      // Market structure dashboard: msdAlerts() of each timeframe
+      timeframes.forEach((t, k) => {
+        const r = readingOf(k, i);
+        const prev = prevStates[k];
+        const label = fmtTF(t.tf);
+        const newSwingSt = swingState(swingPctAt(i, r.swingH, r.swingL), r.reclaimLow, r.reclaimHigh);
+        const newOBIn = zoneInState(r.obNearDir, r.obNearDist);
+        const newFVGIn = zoneInState(r.fvgNearDir, r.fvgNearDist);
+        if (t.active) {
+          if (cfg.alertMsdSwingBreak && newSwingSt !== prev.swingSt) {
+            if (newSwingSt === 1) call(i, `⚡ [${label}] Swing High Broken`);
+            if (newSwingSt === -1) call(i, `⚡ [${label}] Swing Low Broken`);
+          }
+          if (cfg.alertMsdSwingSweep && newSwingSt !== prev.swingSt) {
+            if (newSwingSt === 2) call(i, `🔄 [${label}] Swing Low Swept & Reclaimed ⤴`);
+            if (newSwingSt === -2) call(i, `🔄 [${label}] Swing High Swept & Reclaimed ⤵`);
+          }
+          if (cfg.alertMsdStruct && ne(r.structBias, prev.structSt)) {
+            const biasStr = r.structBias === 1 ? 'Bullish ↑' : r.structBias === -1 ? 'Bearish ↓' : 'Neutral →';
+            call(i, `📊 [${label}] Structure → ${biasStr}`);
+          }
+          if (cfg.alertMsdOBEnter && newOBIn !== prev.obIn && newOBIn !== 0) {
+            call(i, `🟧 [${label}] ${newOBIn === 1 ? 'IN BULL OB ↑' : 'IN BEAR OB ↓'}`);
+          }
+          if (cfg.alertMsdOBChange && ne(r.obNearDir, prev.obDir)) {
+            const obDirStr = r.obNearDir === 1 ? 'Bull OB ↑' : r.obNearDir === -1 ? 'Bear OB ↓' : 'None';
+            call(i, `🟧 [${label}] Nearest OB → ${obDirStr}`);
+          }
+          if (cfg.alertMsdFVGEnter && newFVGIn !== prev.fvgIn && newFVGIn !== 0) {
+            call(i, `🟪 [${label}] ${newFVGIn === 1 ? 'IN BULL FVG ↑' : 'IN BEAR FVG ↓'}`);
+          }
+          if (cfg.alertMsdFVGChange && ne(r.fvgNearDir, prev.fvgDir)) {
+            const fvgDirStr = r.fvgNearDir === 1 ? 'Bull FVG ↑' : r.fvgNearDir === -1 ? 'Bear FVG ↓' : 'None';
+            call(i, `🟪 [${label}] Nearest FVG → ${fvgDirStr}`);
+          }
+          if (cfg.alertMsdEma && ne(r.trendDir, prev.ema) && ne(prev.ema, 0)) {
+            call(i, `📈 [${label}] EMA Trend → ${r.trendDir === 1 ? 'Bullish ↑' : 'Bearish ↓'}`);
+          }
+        }
+        prev.swingSt = newSwingSt;
+        prev.structSt = r.structBias;
+        prev.obIn = newOBIn;
+        prev.obDir = r.obNearDir;
+        prev.fvgIn = newFVGIn;
+        prev.fvgDir = r.fvgNearDir;
+        prev.ema = r.trendDir;
+      });
+
+      // Current timeframe swing
+      const o = ownReadings[i];
+      const currSwingSt = swingState(swingPctAt(i, o.swingH, o.swingL), o.reclaimLow, o.reclaimHigh);
+      if (cfg.alertCtfSwingBreak && currSwingSt !== prevCtfSwingState) {
+        if (currSwingSt === 1) call(i, '⚡ [CTF] Swing High Broken');
+        if (currSwingSt === -1) call(i, '⚡ [CTF] Swing Low Broken');
+      }
+      if (cfg.alertCtfSwingSweep && currSwingSt !== prevCtfSwingState) {
+        if (currSwingSt === 2) call(i, '🔄 [CTF] Swing Low Swept & Reclaimed ⤴');
+        if (currSwingSt === -2) call(i, '🔄 [CTF] Swing High Swept & Reclaimed ⤵');
+      }
+      prevCtfSwingState = currSwingSt;
+
+      // Volume / volatility state changes (not on the first bar: the state of the bar before is na)
+      const volumeState = volumeStateOf(volumePctArr[i]);
+      if (cfg.alertCtfVolume && i > 0 && volumeState !== prevVolumeState) {
+        call(i, `🔊 Volume → ${volumeState} (${str.tostring(volumePctArr[i], '#')}% of avg)`);
+      }
+      prevVolumeState = volumeState;
+      const volatilityState = volatilityStateOf(i);
+      if (cfg.alertCtfVolatility && i > 0 && volatilityState !== prevVolatilityState) {
+        call(i, `📉 Volatility → ${volatilityState}`);
+      }
+      prevVolatilityState = volatilityState;
+
+      // Session / killzone changes of the bar time
+      const sessionName = sessionNameOf(i);
+      if (cfg.alertSession && i > 0 && sessionName !== prevSession) {
+        if (sessionName === 'OFF HOURS') call(i, `🕐 ${prevSession} Session Ended`);
+        else if (prevSession === 'OFF HOURS') call(i, `🕐 ${sessionName} Session Started`);
+        else call(i, `🕐 ${prevSession} → ${sessionName}`);
+      }
+      prevSession = sessionName;
+      const killzoneName = killzoneNameOf(i);
+      if (cfg.alertKillzone && i > 0 && killzoneName !== prevKillzone) {
+        call(i, killzoneName === 'NO KILLZONE' ? `🎯 ${prevKillzone} Ended` : `🎯 ${killzoneName} Started`);
+      }
+      prevKillzone = killzoneName;
+
+      // Trend bias changes
+      if (cfg.alertBiasChange) {
+        const bias = biasOf(i);
+        if (i > 0 && bias.label !== prevBias) call(i, `📊 Trend Bias → ${bias.label} (${bias.score})`);
+        prevBias = bias.label;
+      }
+
+      // HTF level breaks and sweeps
+      for (const lv of levelAlerts) {
+        if (!lv.series) continue;
+        if (lv.brk) {
+          if (lv.up[i]) call(i, `⚡ ${lv.h} Broken`);
+          if (lv.down[i]) call(i, `⚡ ${lv.l} Broken`);
+        }
+        if (lv.sweep) {
+          if (lv.series.reclaimLow[i] && !(i > 0 && lv.series.reclaimLow[i - 1])) call(i, `🔄 ${lv.l} Swept & Reclaimed ⤴`);
+          if (lv.series.reclaimHigh[i] && !(i > 0 && lv.series.reclaimHigh[i - 1])) call(i, `🔄 ${lv.h} Swept & Reclaimed ⤵`);
+        }
+      }
+    }
+  }
+
   return result();
 }
 
-export const MarketStructureDashboardFluxCharts = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const MarketStructureDashboardFluxCharts = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

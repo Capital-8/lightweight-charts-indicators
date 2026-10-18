@@ -6,12 +6,15 @@
  * band is entry - (entry - TP) * upper % / 100 and the lower band is entry + (SL - entry) * lower % / 100. A band
  * is na when its distance is not positive. The close is plotted as a reference line; the entry, TP and SL lines are
  * optional.
+ * Alerts (alertcondition, `alerts` of the result): 'Upper Alert Crossed' (close crosses over the upper band), 'Lower
+ * Alert Crossed' (close crosses under the lower band) and 'Any Alert Crossed' (either).
  *
  * Reference: "Entry / TP / SL Alert Bands (Simple & Stable)" by drlicht1
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EntryTpSlAlertBandsInputs {
   entry: number;
@@ -70,7 +73,10 @@ export const metadata = {
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const gt = (a: number, b: number) => a - b > 1e-10;
 
-export function calculate(bars: Bar[], inputs: Partial<EntryTpSlAlertBandsInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<EntryTpSlAlertBandsInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { entry, takeProfit, stopLoss, upperPct, lowerPct } = cfg;
 
@@ -88,6 +94,12 @@ export function calculate(bars: Bar[], inputs: Partial<EntryTpSlAlertBandsInputs
     if (gt(downDist, 0.0)) lowerAlert = entry + (downDist * lowerPct) / 100.0;
   }
 
+  // crossAbove = ta.crossover(close, upperAlert); crossBelow = ta.crossunder(close, lowerAlert)
+  const close = bars.map((b) => b.close);
+  const crossAbove = crossedOver(close, upperAlert);
+  const crossBelow = crossedUnder(close, lowerAlert);
+  const crossAny = crossAbove.map((v, i) => v || crossBelow[i]);
+
   const line = (value: number, c: string) => bars.map((b) => ({ time: b.time, value, color: c }));
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -99,8 +111,16 @@ export function calculate(bars: Bar[], inputs: Partial<EntryTpSlAlertBandsInputs
       plot4: line(upperAlert, color.green),
       plot5: line(lowerAlert, color.fuchsia),
     },
+    alerts: alertStates(alertConditions, bars, [crossAbove, crossBelow, crossAny]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Upper Alert Crossed', message: 'Price crossed ABOVE the upper alert band.' },
+  { id: 'alert1', title: 'Lower Alert Crossed', message: 'Price crossed BELOW the lower alert band.' },
+  { id: 'alert2', title: 'Any Alert Crossed', message: 'Price crossed an alert band (upper or lower).' },
+];
 
 export const EntryTpSlAlertBands = {
   calculate,
@@ -108,4 +128,5 @@ export const EntryTpSlAlertBands = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

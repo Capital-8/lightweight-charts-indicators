@@ -22,11 +22,22 @@
  *   break_down -> arrowDown aboveBar red "Sell"
  *   break_up   -> arrowUp belowBar green "Buy"
  *
+ * Alerts (alertcondition, `alerts` of the result): 'BBAWE Alert' (break down or break up), 'BBAWE Sell' (break down),
+ * 'BBAWE Buy' (break up), from the original's expressions on every bar.
+ *
  * Reference: "Bollinger Awesome Alert R1.1 by JustUncleL"
  */
 
-import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BBAWE Alert', message: 'BBAWE Alert close={{close}}' },
+  { id: 'alert1', title: 'BBAWE Sell', message: 'SELL close={{close}}' },
+  { id: 'alert2', title: 'BBAWE Buy', message: 'BUY close={{close}}' },
+];
 
 export interface BollingerAwesomeAlertInputs {
   bbUseEma: boolean;
@@ -82,7 +93,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<BollingerAwesomeAlertInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<BollingerAwesomeAlertInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { bbUseEma, bbFilter, sqzFilter, bbLength, bbMult, fastMaLen, aoSlow, aoFast, sqzLength, sqzThreshold } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -236,6 +250,25 @@ export function calculate(bars: Bar[], inputs: Partial<BollingerAwesomeAlertInpu
     }
   }
 
+  // Alert conditions, the original's break_down / break_up on every bar (AO direction with an na previous value: 2 /
+  // -2; bb_squeeze = spread / sma(spread, sqz_length) * 100, na until the average exists)
+  const num = (v: number | null | undefined) => v ?? NaN;
+  const avgSpreadPine = ta.sma(Series.fromArray(bars, upperArr.map((u, i) => num(u) - num(lowerArr[i]))), sqzLength)
+    .toArray().map(num);
+  const aoAbs = (i: number) => {
+    const cur = num(aoArr[i]);
+    if (isNaN(cur)) return NaN;
+    const rising = i > 0 && cur > num(aoArr[i - 1]);
+    return rising ? 1 : 2;
+  };
+  const squeezeOk = (i: number) => !sqzFilter || ((num(upperArr[i]) - num(lowerArr[i])) / avgSpreadPine[i]) * 100 > sqzThreshold;
+  const xUnder = crossedUnder(fastArr, basisArr);
+  const xOver = crossedOver(fastArr, basisArr);
+  const breakDown = bars.map((b, i) => xUnder[i] && b.close < num(basisArr[i]) && aoAbs(i) === 2
+    && (!bbFilter || b.close > num(lowerArr[i])) && squeezeOk(i));
+  const breakUp = bars.map((b, i) => xOver[i] && b.close > num(basisArr[i]) && aoAbs(i) === 1
+    && (!bbFilter || b.close < num(upperArr[i])) && squeezeOk(i));
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3, 'plot4': plot4, 'plot5': plot5 },
@@ -248,7 +281,9 @@ export function calculate(bars: Bar[], inputs: Partial<BollingerAwesomeAlertInpu
       { plot1: 'plot2', plot2: 'plot4', options: { color: 'rgba(33,150,243,0.50)' }, colors: sqzFillColors },
     ],
     markers,
+    // alertcondition(break_down or break_up, "BBAWE Alert"), (break_down, "BBAWE Sell"), (break_up, "BBAWE Buy")
+    alerts: alertStates(alertConditions, bars, [breakDown.map((d, i) => d || breakUp[i]), breakDown, breakUp]),
   };
 }
 
-export const BollingerAwesomeAlert = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BollingerAwesomeAlert = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

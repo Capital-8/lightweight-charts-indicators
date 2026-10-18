@@ -7,6 +7,8 @@
  * the previous dn line and turns down when it goes below the previous up line. The up line is drawn in an up trend,
  * the dn line in a down trend, with circles and Buy / Sell labels where the trend turns. A fill between OHLC4 and
  * the trend line is green in an up trend, red in a down trend (white when the highlighter is off).
+ * Alerts (alertcondition, `alerts` of the result): 'SuperTrend Buy' and 'SuperTrend Sell' on the bars where the trend
+ * turns up / down, 'SuperTrend Direction Change' on both.
  *
  * Reference: "Alpha Trading Signal _ Up side Down" by giaodichdsmart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AlphaTradingSignalUpSideDownInputs {
   /** ATR period */
@@ -76,7 +79,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AlphaTradingSignalUpSideDownInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: { toArray(): (number | null | undefined)[] }) => s.toArray().map((v) => v ?? NaN);
@@ -106,24 +109,29 @@ export function calculate(
 
   const t = (i: number) => bars[i].time;
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [], changeFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const prev = i > 0 ? trendArr[i - 1] : NaN;
     const buySignal = trendArr[i] === 1 && prev === -1;
     const sellSignal = trendArr[i] === -1 && prev === 1;
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
+    // changeCond = trend != trend[1] (na on the first bar: false)
+    changeFlags.push(i > 0 && trendArr[i] !== prev);
     if (buySignal && !isNaN(up[i])) {
       // plotshape(buySignal ? up : na, 'UpTrend Begins', location.absolute, shape.circle, size.tiny)
-      markers.push({ time: t(i), position: 'atPriceMiddle', price: up[i], shape: 'circle', color: GREEN, size: 'tiny' });
+      markers.push({ time: t(i), position: 'atPriceMiddle', price: up[i], shape: 'circle', color: GREEN, size: 'tiny', id: 'shape0' });
       // plotshape(buySignal and showsignals ? up : na, 'Buy', text 'Buy', location.absolute, shape.labelup, size.tiny)
       if (cfg.showSignals) {
         markers.push({ time: t(i), position: 'atPriceBottom', price: up[i], shape: 'labelUp', color: GREEN,
-          size: 'tiny', text: 'Buy', textColor: WHITE });
+          size: 'tiny', text: 'Buy', textColor: WHITE, id: 'shape1' });
       }
     }
     if (sellSignal && !isNaN(dn[i])) {
-      markers.push({ time: t(i), position: 'atPriceMiddle', price: dn[i], shape: 'circle', color: RED, size: 'tiny' });
+      markers.push({ time: t(i), position: 'atPriceMiddle', price: dn[i], shape: 'circle', color: RED, size: 'tiny', id: 'shape2' });
       if (cfg.showSignals) {
         markers.push({ time: t(i), position: 'atPriceTop', price: dn[i], shape: 'labelDown', color: RED,
-          size: 'tiny', text: 'Sell', textColor: WHITE });
+          size: 'tiny', text: 'Sell', textColor: WHITE, id: 'shape3' });
       }
     }
   }
@@ -155,8 +163,17 @@ export function calculate(
       },
     ],
     markers,
+    // alertcondition(buySignal) / alertcondition(sellSignal) / alertcondition(changeCond)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, changeFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'SuperTrend Buy', message: 'SuperTrend Buy!' },
+  { id: 'alert1', title: 'SuperTrend Sell', message: 'SuperTrend Sell!' },
+  { id: 'alert2', title: 'SuperTrend Direction Change', message: 'SuperTrend has changed direction!' },
+];
 
 export const AlphaTradingSignalUpSideDown = {
   calculate,
@@ -164,4 +181,5 @@ export const AlphaTradingSignalUpSideDown = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

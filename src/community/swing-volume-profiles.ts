@@ -18,6 +18,10 @@
  * - A label at the swing (or at the profile / value area high and low) with the profile statistics as tooltip, and
  *   optionally the price, the price change and the volume as text.
  * - On the last bar, the same profile for the bars since the last swing.
+ * - alert() calls (`alertCalls`, once per bar) when the close crosses the original's point of control, value area
+ *   high or value area low level of the bar (each with its Show input). As in the original these levels are, before
+ *   the last bar, the rows of the last profile (POC: row 0, the POC row is only kept on the last bar) over the range
+ *   of the bar and the bar before it.
  * "Present" mode only draws the profiles confirmed in the last `back` bars. At most 500 boxes, 500 lines and 500
  * labels are kept (the oldest are removed, by the rules of the library drawing registry).
  *
@@ -33,9 +37,12 @@ import {
   ta, str, array, callsite, Series, box, line, label, linefill, resetDrawings, setDrawingBar, holdDrawing,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { BoxData, LabelData, LineDrawingData, LinefillData } from '../types';
+import type { AlertCall, BoxData, LabelData, LineDrawingData, LinefillData } from '../types';
 import { barInterval, barTime } from '../bar-time';
-import { foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
+import { foregroundColorOf, mintickOf, tickerOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface SwingVolumeProfilesInputs {
   mode: 'Present' | 'Historical';
@@ -188,7 +195,9 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SwingVolumeProfilesInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[] } {
+): IndicatorResult & {
+  boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { vpShw, vpTVC, vpVVC, vpB, vpBC, pcShw, pcC, dpcS, dpcC, pcE, vhShw, vaHC, vlShw, vaLC, vaB, vaBC, liqUF, liqC, ppLev, ppP,
@@ -237,6 +246,11 @@ export function calculate(
   let dPCa: Ln[] = [];
   let laP = 0;
   let lbP = 0;
+  // var dpcL = 0: only set on the last bar; the alert levels of every bar (POC, VAH, VAL)
+  let dpcLVar = 0;
+  const pocLevel: number[] = [];
+  const vahLevel: number[] = [];
+  const valLevel: number[] = [];
   let ersten = NaN;
   // var aLIQ = array.new<liquidity>(1, ...)
   const aLIQ: Liquidity[] = [{ b: new Array<boolean>(vpLev).fill(false), bx: [] }];
@@ -517,6 +531,7 @@ export function calculate(
 
       const vsMax = array.max(aVPvs);
       const dpcL = array.indexof(aVPvs, vsMax);
+      dpcLVar = dpcL;
       valueArea(aVPvs, dpcL);
 
       const flags: boolean[] = [];
@@ -591,9 +606,37 @@ export function calculate(
           'Profile Low : ' + tick(pLst) + '\n %' + pct(((pHst - pLst) / pHst) * 100) + ' lower than the Profile High' + statTip));
       }
     }
+
+    // Alert levels: pLst + (dpcL + 0.50) * pStp, pLst + (laP + 1.00) * pStp, pLst + (lbP + 0.00) * pStp
+    pocLevel.push(pLst + (dpcLVar + 0.5) * pStp);
+    vahLevel.push(pLst + (laP + 1.0) * pStp);
+    valLevel.push(pLst + (lbP + 0.0) * pStp);
   }
 
   setDrawingBar(null);
+
+  // if ta.cross(close, level) and show: alert(syminfo.ticker + ' : Swings Volume Profile : ...' + str.tostring(close,
+  // format.mintick)); ta.cross compares exactly, na is false
+  const tickerTxt = tickerOf(chart);
+  const alertCalls: AlertCall[] = [];
+  const crossed = (lv: number[], t: number) => {
+    if (t < 1) return false;
+    const c = C(t), c1 = C(t - 1), v = lv[t], v1 = lv[t - 1];
+    return (c > v && c1 <= v1) || (c < v && c1 >= v1);
+  };
+  for (let t = 0; t < n; t++) {
+    const tail = ', price ' + tick(C(t));
+    const time = bars[t].time as number;
+    if (crossed(pocLevel, t) && pcShw) {
+      alertCalls.push({ time, message: tickerTxt + ' : Swings Volume Profile : Price touches/crosses Point Of Control Line' + tail, freq: 'once_per_bar' });
+    }
+    if (crossed(vahLevel, t) && vhShw) {
+      alertCalls.push({ time, message: tickerTxt + ' : Swings Volume Profile : Price touches/crosses Value Area High Line' + tail, freq: 'once_per_bar' });
+    }
+    if (crossed(valLevel, t) && vlShw) {
+      alertCalls.push({ time, message: tickerTxt + ' : Swings Volume Profile : Price touches/crosses Value Area Low Line' + tail, freq: 'once_per_bar' });
+    }
+  }
 
   const interval = barInterval(bars);
   const T = (index: number) => barTime(bars, index, interval);
@@ -617,6 +660,7 @@ export function calculate(
     })),
     linefills: linefill.all().filter((f) => drawn(f.line1) && drawn(f.line2))
       .map((f) => ({ line1: lineData(f.line1), line2: lineData(f.line2), color: vaBC })),
+    alertCalls,
   };
 }
 
@@ -626,4 +670,5 @@ export const SwingVolumeProfiles = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

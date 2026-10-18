@@ -5,6 +5,8 @@
  * a deviation of 0). Each zone is filled with a vertical gradient. The transparency of the zone edges follows an
  * inverted sigmoid of the distance in deviations (0, 1, 2, 3): clear near the basis, more solid at the outer
  * edges. Red zones above the basis (premium), green zones below (discount).
+ * Alerts (alertcondition, `alerts` of the result): 'Hit Premium Wall' (high at or above basis + 2 deviations) and
+ * 'Hit Discount Wall' (low at or below basis - 2 deviations).
  *
  * Reference: "SMC Statistical Liquidity Walls [PhenLabs]" by PhenLabs
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
  */
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SmcStatisticalLiquidityWallsInputs {
   /** Range period (SMA / stdev length) */
@@ -77,6 +80,8 @@ export const metadata = {
 /** Pine float comparisons: a == b within 1e-10 (na compares false) */
 const EPS = 1e-10;
 const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
+const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
 /** get_inverted_sigmoid(x, k, x0, start_a, end_a): transparency for a distance of x deviations */
 function invertedSigmoid(x: number, k: number, x0: number, startA: number, endA: number): number {
@@ -85,7 +90,10 @@ function invertedSigmoid(x: number, k: number, x0: number, startA: number, endA:
   return Math.min(Math.max(alpha, 0), 100);
 }
 
-export function calculate(bars: Bar[], inputs: Partial<SmcStatisticalLiquidityWallsInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<SmcStatisticalLiquidityWallsInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -144,8 +152,19 @@ export function calculate(bars: Bar[], inputs: Partial<SmcStatisticalLiquidityWa
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
     fills,
+    // alertcondition(high >= u2, 'Hit Premium Wall') / alertcondition(low <= l2, 'Hit Discount Wall')
+    alerts: alertStates(alertConditions, bars, [
+      bars.map((b, i) => ge(b.high, u2[i])),
+      bars.map((b, i) => le(b.low, l2[i])),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Hit Premium Wall', message: 'Price touched the solid Premium Liquidity Wall' },
+  { id: 'alert1', title: 'Hit Discount Wall', message: 'Price touched the solid Discount Liquidity Wall' },
+];
 
 export const SmcStatisticalLiquidityWalls = {
   calculate,
@@ -153,4 +172,5 @@ export const SmcStatisticalLiquidityWalls = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

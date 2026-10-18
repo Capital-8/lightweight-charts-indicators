@@ -9,6 +9,9 @@
  * falls; the line is green in an up trend, red otherwise. BUY / SELL labels on trend changes and a light green /
  * red background by trend.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Alert' / 'Sell Alert', true on the bars of the BUY / SELL
+ * labels.
+ *
  * Reference: "Multi-Band Trend Line" by Mr_Rakun
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Mr_Rakun
@@ -16,6 +19,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MultiBandTrendLineInputs {
   bandType: 'Bollinger Bands' | 'Keltner Channels' | 'Donchian Channels' | 'Moving Average Envelopes' | 'ATR Bands';
@@ -86,7 +90,7 @@ const min = (a: number, b: number) => (isNaN(a) || isNaN(b) ? NaN : Math.min(a, 
 export function calculate(
   bars: Bar[],
   inputs: Partial<MultiBandTrendLineInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -156,7 +160,11 @@ export function calculate(
   const sellCol = String(color.new(color.red, 60));
   const bgUp = String(color.new(color.green, 95));
   const bgDn = String(color.new(color.red, 95));
+  const buyFlags = new Array<boolean>(n).fill(false);
+  const sellFlags = new Array<boolean>(n).fill(false);
   for (let i = 0; i < n; i++) {
+    buyFlags[i] = i > 0 && trendArr[i - 1] < 0 && trendArr[i] > 0;
+    sellFlags[i] = i > 0 && trendArr[i - 1] > 0 && trendArr[i] < 0;
     // buy_condition = trend[1] < 0 and trend > 0; sell_condition = trend[1] > 0 and trend < 0
     if (i > 0 && trendArr[i - 1] < 0 && trendArr[i] > 0) {
       markers.push({ time: t(i), position: 'belowBar', shape: 'labelUp', color: buyCol, text: 'BUY', textColor: color.teal, size: 'small' });
@@ -178,8 +186,16 @@ export function calculate(
     },
     markers,
     bgColors,
+    // alertcondition(buy_condition, "Buy Alert") / alertcondition(sell_condition, "Sell Alert")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'Buy Signal Generated' },
+  { id: 'alert1', title: 'Sell Alert', message: 'Sell Signal Generated' },
+];
 
 export const MultiBandTrendLine = {
   calculate,
@@ -187,4 +203,5 @@ export const MultiBandTrendLine = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

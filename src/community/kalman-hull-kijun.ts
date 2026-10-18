@@ -8,6 +8,8 @@
  * line is the Donchian midpoint (average of the lowest and highest value) of that result over the Kijun period.
  * Long when the source is above the base, short when below. Gradient fills between the close and the base, a thin
  * "rim" fill of 0.08 * ATR(14) on the close, and optional candle colouring.
+ * Alerts (alertcondition, `alerts` of the result): 'Kalman Hull Kijun Long' / 'Kalman Hull Kijun Short' on the bars
+ * where the source is above / below the base.
  *
  * Reference: "Kalman Hull Kijun [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface KalmanHullKijunInputs {
   /** Kijun base period (Donchian length) */
@@ -81,7 +84,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<KalmanHullKijunInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -190,8 +193,19 @@ export function calculate(
       { plot1: 'plot1', plot2: 'plot3', colors: dnRim },
     ],
     barColors,
+    // long = pricesource > base; short = pricesource < base
+    alerts: alertStates(alertConditions, bars, [
+      base.map((v, i) => gt(price[i], v)),
+      base.map((v, i) => lt(price[i], v)),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Kalman Hull Kijun Long', message: 'Kalman Hull Kijun Long {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Kalman Hull Kijun Short', message: 'Kalman Hull Kijun Short {{exchange}}:{{ticker}}' },
+];
 
 export const KalmanHullKijun = {
   calculate,
@@ -199,4 +213,5 @@ export const KalmanHullKijun = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

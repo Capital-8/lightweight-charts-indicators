@@ -4,12 +4,15 @@
  * Pivot-based trendline indicator. Detects swing highs/lows, then
  * calculates slope-adjusted trendlines that update on each new pivot.
  * Breakout signals fire when price crosses through a trendline.
+ * Alerts (alertcondition, `alerts` of the result): 'Upward Breakout' and 'Downward Breakout', true on the bars on which
+ * the close breaks the upper / lower trendline (upos > upos[1], dnos > dnos[1]).
  *
  * Reference: "Trendlines with Breaks [LuxAlgo]" by LuxAlgo
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LineDrawingData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendlinesWithBreaksInputs {
   length: number;
@@ -40,7 +43,8 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TrendlinesWithBreaksInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; lines: LineDrawingData[] } {
+export function calculate(bars: Bar[], inputs: Partial<TrendlinesWithBreaksInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; lines: LineDrawingData[] }
+  & { alerts: AlertConditionState[] } {
   const { length, mult, calcMethod } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -173,6 +177,10 @@ export function calculate(bars: Bar[], inputs: Partial<TrendlinesWithBreaksInput
     }
   }
 
+  // alertcondition(upos > upos[1], 'Upward Breakout') / alertcondition(dnos > dnos[1], 'Downward Breakout')
+  const upFlags = upos.map((v, i) => i > 0 && v > upos[i - 1]);
+  const downFlags = dnos.map((v, i) => i > 0 && v > dnos[i - 1]);
+
   // Extended projection lines (dashed, extend right) from last pivot high/low
   const lines: LineDrawingData[] = [];
   if (lastPhBar >= 0 && lastPhBar < n - 1) {
@@ -199,7 +207,14 @@ export function calculate(bars: Bar[], inputs: Partial<TrendlinesWithBreaksInput
     plots: { 'plot0': plot0, 'plot1': plot1 },
     markers,
     lines,
+    alerts: alertStates(alertConditions, bars, [upFlags, downFlags]),
   };
 }
 
-export const TrendlinesWithBreaks = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Upward Breakout', message: 'Price broke the down-trendline upward' },
+  { id: 'alert1', title: 'Downward Breakout', message: 'Price broke the up-trendline downward' },
+];
+
+export const TrendlinesWithBreaks = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -7,6 +7,8 @@
  * is above lowest low + ATR * mult, -1 when it is below highest high - ATR * mult, else unchanged. BUY when the risk
  * direction rises while the sentiment is above 50, SELL when it falls while the sentiment is below 50.
  *
+ * Alerts (alertcondition, `alerts` of the result): "Nexus Buy Signal" (BUY) and "Nexus Sell Signal" (SELL).
+ *
  * Reference: "Nexus Sentiment & Risk Matrix [Pineify]" by Pineify
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Pineify
@@ -14,6 +16,13 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Nexus Buy Signal', message: 'Risk-On: Bullish Sentiment & Risk metrics aligned.' },
+  { id: 'alert1', title: 'Nexus Sell Signal', message: 'Risk-Off: Bearish Sentiment & Risk metrics aligned.' },
+];
 
 export interface NexusSentimentRiskMatrixInputs {
   /** Shared length of RSI, Stochastic and CCI */
@@ -59,7 +68,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<NexusSentimentRiskMatrixInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -107,6 +116,8 @@ export function calculate(
   const plot0: { time: number; value: number; color: string }[] = [];
   const plot1: { time: number; value: number; color: string }[] = [];
   const markers: MarkerData[] = [];
+  const buySignal: boolean[] = new Array(n).fill(false);
+  const sellSignal: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
     const t = bars[i].time as number;
     const s = sentiment[i];
@@ -114,6 +125,8 @@ export function calculate(
     plot1.push({ time: t, value: s, color: color.from_gradient(s, 0, 100, BEAR, BULL) });
     // ta.change(riskDir) > 0 and sentiment > 50 / ta.change(riskDir) < 0 and sentiment < 50 (na on bar 0)
     const ch = i > 0 ? riskDir[i] - riskDir[i - 1] : NaN;
+    buySignal[i] = gt(ch, 0) && gt(s, 50);
+    sellSignal[i] = lt(ch, 0) && lt(s, 50);
     if (gt(ch, 0) && gt(s, 50)) {
       markers.push({ time: t, position: 'bottom', shape: 'triangleUp', color: BULL, text: 'BUY', textColor: BULL, size: 'small' });
     }
@@ -147,6 +160,7 @@ export function calculate(
     plots: { plot0, plot1 },
     fills,
     markers,
+    alerts: alertStates(alertConditions, bars, [buySignal, sellSignal]),
   };
 }
 
@@ -156,4 +170,5 @@ export const NexusSentimentRiskMatrix = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -53,7 +53,7 @@ export function summarize(result: any): Record<string, unknown> {
     plots[id] = points.filter((p) => Number.isFinite(p.value)).length;
   }
   const summary: Record<string, unknown> = { plots };
-  for (const key of ['markers', 'barColors', 'bgColors', 'lines', 'boxes', 'labels', 'linefills', 'polylines', 'tables', 'fills', 'hlines']) {
+  for (const key of ['markers', 'arrows', 'barColors', 'bgColors', 'lines', 'boxes', 'labels', 'linefills', 'polylines', 'tables', 'fills', 'hlines']) {
     const items = result[key];
     if (Array.isArray(items) && items.length) summary[key] = items.length;
   }

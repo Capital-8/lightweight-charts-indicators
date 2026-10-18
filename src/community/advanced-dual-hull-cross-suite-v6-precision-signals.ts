@@ -5,14 +5,18 @@
  * round(sqrt(len))), EHMA = the same with EMAs, THMA = WMA(3 * WMA(src, l / 3) - WMA(src, l / 2) - WMA(src, l), l)
  * with l = len / 2. Fractional lengths are truncated by the moving averages. Each line is coloured up when it rises,
  * down otherwise. BUY / SELL labels are drawn at the line of suite 2 when it crosses over / under the line of
- * suite 1.
+ * suite 1. Alerts (alert() calls, `alertCalls` of the result, once per bar close): "Bullish Cross at <suite 2 line>"
+ * and "Bearish Cross at <suite 2 line>" on the crosses.
  *
  * Reference: "Advanced Dual Hull Cross Suite v6 - Precision Signals" by NitMan279
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import { ta, Series, getSourceSeries, color, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import type { AlertCall, MarkerData } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type HullMode = 'Hma' | 'Thma' | 'Ehma';
 
@@ -89,7 +93,7 @@ const gt = (a: number, b: number) => a - b > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AdvancedDualHullCrossSuiteInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -131,7 +135,11 @@ export function calculate(
   // plotshape(buySignal ? mhull2 : na, "Buy", shape.labelup, location.absolute, color.green, 0, "BUY", color.white,
   // size = size.small); plotshape(sellSignal ? mhull2 : na, "Sell", shape.labeldown, ...)
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
   for (let i = 0; i < n; i++) {
+    // if buySignal: alert("Bullish Cross at " + str.tostring(mhull2), alert.freq_once_per_bar_close); sell alike
+    if (buy[i]) alertCalls.push({ time: bars[i].time, message: 'Bullish Cross at ' + str.tostring(mhull2[i]), freq: 'once_per_bar_close' });
+    if (sell[i]) alertCalls.push({ time: bars[i].time, message: 'Bearish Cross at ' + str.tostring(mhull2[i]), freq: 'once_per_bar_close' });
     const price = val(mhull2[i]);
     if (Number.isNaN(price)) continue;
     if (buy[i]) {
@@ -148,6 +156,7 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
     markers,
+    alertCalls,
   };
 }
 
@@ -157,4 +166,5 @@ export const AdvancedDualHullCrossSuite = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

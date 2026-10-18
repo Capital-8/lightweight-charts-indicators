@@ -6,6 +6,8 @@
  * smoothing constants. The trend turns up when the close goes above KAMA + ATR * multiplier and down when it goes
  * below KAMA - ATR * multiplier (or, as an option, when the close crosses KAMA). The KAMA line and a shadow fill to
  * hl2 take the trend colour; a ⦿ mark on the line and an arrow show each trend change.
+ * Alerts (alertcondition, `alerts` of the result): 'Uptrend Started' and 'Downtrend Started', true on the trend
+ * changes to up / down.
  *
  * Reference: "Q KAMA Clarity Trend " by Quantora
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface QKamaClarityTrendInputs {
   upTrendColor: string;
@@ -80,7 +83,7 @@ const nz = (v: number, r = 0) => (isNaN(v) ? r : v);
 export function calculate(
   bars: Bar[],
   inputs: Partial<QKamaClarityTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = getSourceSeries(bars, cfg.src).toArray().map((v) => v ?? NaN);
@@ -134,6 +137,9 @@ export function calculate(
 
   const trendColor = trend.map((t) => (t === 1 ? cfg.upTrendColor : t === -1 ? cfg.downTrendColor : color.gray));
   const markers: MarkerData[] = [];
+  // alertcondition(trendChanged and trend == 1 / trend == -1)
+  const upFlags: boolean[] = bars.map((_b, i) => i > 0 && trend[i] !== trend[i - 1] && trend[i] === 1);
+  const downFlags: boolean[] = bars.map((_b, i) => i > 0 && trend[i] !== trend[i - 1] && trend[i] === -1);
   for (let i = 1; i < n; i++) {
     // trendChanged = ta.change(trend) != 0 (na on the first bar)
     if (trend[i] === trend[i - 1]) continue;
@@ -165,8 +171,15 @@ export function calculate(
       { plot1: 'plot0', plot2: 'plot1', colors: trendColor.map((c) => String(color.new(c, cfg.showShadow ? 80 : 100))) },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, [upFlags, downFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Uptrend Started', message: 'Uptrend started on {{ticker}}' },
+  { id: 'alert1', title: 'Downtrend Started', message: 'Downtrend started on {{ticker}}' },
+];
 
 export const QKamaClarityTrend = {
   calculate,
@@ -174,4 +187,5 @@ export const QKamaClarityTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

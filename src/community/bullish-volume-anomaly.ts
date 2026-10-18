@@ -6,6 +6,7 @@
  * bars (s and p); c is the 480-bar change of p divided by its 480-bar stdev. Bands around an EMA of the close:
  * ema * (1 +- mean(|open - close| / open over the band length) * band multiplier), drawn one bar late. A triangle
  * below the bar marks s - p > 2, c < 1, s > 0 and a high below the previous lower band.
+ * Alert (alertcondition, `alerts` of the result): '{{ticker}}', true on the bars of a triangle.
  *
  * Reference: "Bullish Volume Anomaly" by UnknownUnicorn13336802
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,12 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition (title '{{ticker}}', no message) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '{{ticker}}', message: 'Alert Fired!' },
+];
 
 export interface BullishVolumeAnomalyInputs {
   /** ATR length of the zigzag */
@@ -61,7 +68,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<BullishVolumeAnomalyInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -134,8 +141,10 @@ export function calculate(
 
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
   const markers: MarkerData[] = [];
+  const signalFlags: boolean[] = new Array(n).fill(false);
   for (let i = 1; i < n; i++) {
     if (gt(s[i] - p[i], 2) && lt(c[i], 1) && gt(s[i], 0) && lt(bars[i].high, down[i - 1])) {
+      signalFlags[i] = true;
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: color.green, size: 'normal' });
     }
   }
@@ -148,6 +157,8 @@ export function calculate(
       plot2: bars.map((b, i) => ({ time: b.time, value: i > 0 ? fin(down[i - 1]) : NaN, color: color.red })),
     },
     markers,
+    // alertcondition(s-p>2 and c<1 and s>0 and high<down[1], '{{ticker}}')
+    alerts: alertStates(alertConditions, bars, [signalFlags]),
   };
 }
 
@@ -157,4 +168,5 @@ export const BullishVolumeAnomaly = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

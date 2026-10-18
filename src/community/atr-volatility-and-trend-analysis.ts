@@ -4,6 +4,10 @@
  * Three pairs of bands at close +- ATR * multiplier. A volatility breakout circle marks the first bar where the ATR
  * is above its SMA (same length) times the threshold. Trend: the ATR is above its SMA (trend smoothing length) and
  * the close is above its SMA (bullish) or not (bearish); a label marks the first bar of each new trend state.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): "ATR Volatility Breakout",
+ * "ATR Bullish Trend Signal", "ATR Bearish Trend Signal" on the bars of those signals (shown or not), "Price Above ATR
+ * Band 1" / "Price Below ATR Band 1" when the close crosses over the upper / under the lower band 1 (the bands are
+ * close +- ATR, so as in the original these two never run).
  *
  * Reference: "ATR Volatility and Trend Analysis" by dchunt-stack
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,7 +15,11 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { AlertCall, MarkerData } from '../types';
+import { crossedOver, crossedUnder } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface AtrVolatilityAndTrendAnalysisInputs {
   /** ATR length */
@@ -101,7 +109,7 @@ const gt = (a: number, b: number) => a - b > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AtrVolatilityAndTrendAnalysisInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -114,7 +122,13 @@ export function calculate(
   const srcSma = A(ta.sma(S(close), cfg.trendLength));
   const atrSmaTrend = A(ta.sma(S(atrValue), cfg.trendLength));
 
+  // atrCrossover = ta.crossover(close, upperBand1); atrCrossunder = ta.crossunder(close, lowerBand1)
+  const atrCrossover = crossedOver(close, close.map((c, i) => c + atrValue[i] * cfg.band1Mult));
+  const atrCrossunder = crossedUnder(close, close.map((c, i) => c - atrValue[i] * cfg.band1Mult));
+
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
+  const call = (time: number, message: string) => alertCalls.push({ time, message, freq: 'once_per_bar_close' });
   let prevBreakout = false; // volBreakout[1] (false before the first bar)
   let prevTrend = NaN; // trendDirection[1] (na before the first bar: `!=` is false)
   for (let i = 0; i < n; i++) {
@@ -129,6 +143,12 @@ export function calculate(
     const bullishTrend = trend === 1 && !isNaN(prevTrend) && prevTrend !== 1;
     const bearishTrend = trend === -1 && !isNaN(prevTrend) && prevTrend !== -1;
     prevTrend = trend;
+
+    if (volSignal) call(t, 'ATR Volatility Breakout');
+    if (bullishTrend) call(t, 'ATR Bullish Trend Signal');
+    if (bearishTrend) call(t, 'ATR Bearish Trend Signal');
+    if (atrCrossover[i]) call(t, 'Price Above ATR Band 1');
+    if (atrCrossunder[i]) call(t, 'Price Below ATR Band 1');
 
     if (cfg.showVolSignals && volSignal) {
       markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: cfg.signalColor, size: 'tiny' });
@@ -160,6 +180,7 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
     markers,
+    alertCalls,
   };
 }
 
@@ -169,4 +190,5 @@ export const AtrVolatilityAndTrendAnalysis = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

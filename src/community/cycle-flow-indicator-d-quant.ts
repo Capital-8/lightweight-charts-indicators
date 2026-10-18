@@ -7,6 +7,8 @@
  * a bearish state, else neutral. A Hull MA of the close is the baseline, coloured by the state, with a cloud to the
  * close; the HMA + ATR band shows in the bullish state, the HMA - ATR band in the bearish state. Candles take the
  * state colour.
+ * Alerts (alertcondition, `alerts` of the result): 'CFA Bullish Cycle' / 'CFA Bearish Cycle', true on the bars where
+ * the state (-1 / 0 / 1) crosses above / below 0.
  *
  * Reference: "Cycle & Flow Indicator - D_Quant" by D_QUANT
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,9 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { PlotCandleData } from '../types';
+import {
+  alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState,
+} from '../alert-states';
 
 export interface CycleFlowIndicatorDQuantInputs {
   /** STC stochastic / EMA length */
@@ -91,7 +96,7 @@ const ne0 = (x: number) => !Number.isNaN(x) && Number.isFinite(x) ? Math.abs(x) 
 export function calculate(
   bars: Bar[],
   inputs: Partial<CycleFlowIndicatorDQuantInputs> = {},
-): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -173,8 +178,16 @@ export function calculate(
       { plot1: 'plot0', plot2: 'plot3', options: { title: 'Bearish Extension', color: extBear }, colors: bars.map(() => extBear) },
     ],
     plotCandles: { quantCandles: candles },
+    // tx_bull = ta.crossover(trend_state, 0) / tx_bear = ta.crossunder(trend_state, 0)
+    alerts: alertStates(alertConditions, bars, [crossedOver(state, 0), crossedUnder(state, 0)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'CFA Bullish Cycle', message: 'Cycle Flow: Bullish Trend Started' },
+  { id: 'alert1', title: 'CFA Bearish Cycle', message: 'Cycle Flow: Bearish Trend Started' },
+];
 
 export const CycleFlowIndicatorDQuant = {
   calculate,
@@ -182,4 +195,5 @@ export const CycleFlowIndicatorDQuant = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

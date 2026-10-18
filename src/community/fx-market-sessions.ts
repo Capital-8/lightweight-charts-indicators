@@ -18,6 +18,9 @@
  * ratio. A second table shows how often the targets of the opening range were reached. The alerts can be shown:
  * "Start" / "End" labels, and the high and low of the last session with a triangle where the close crosses them
  * after the session.
+ * Alerts (alertcondition, `alerts` of the result): start and end of each session, and the close crossing the high /
+ * low of a session after it closed. alert() calls (`alertCalls`, once per bar): 'Opening range is fixed.' on the
+ * bar that fixes an opening range.
  *
  * Imported libraries of the original, ported here: boitoki/AwesomeColor/9 (the colours of its three palettes that
  * the script uses) and boitoki/Utilities/11 (get_day(), toPips(), clear_lines(), clear_labels(), clear_boxes()).
@@ -52,6 +55,11 @@ import type {
 import { barTime } from '../bar-time';
 import { chartTimeframe, sessionFlags } from '../anchor-period';
 import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
+import type { AlertCall } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls (`alertCalls` of the result) */
+export const hasAlertFunction = true;
 
 type YesNo = 'Yes' | '× No';
 type ChartOption = 'Bar color' | 'Candles' | '× No';
@@ -476,7 +484,7 @@ export function calculate(
 ): Omit<IndicatorResult, 'markers'> & {
   markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; linefills: LinefillData[];
   tables: TableData[]; barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]>;
-} {
+} & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const inMs = n > 0 && bars[0].time >= 1e12;
@@ -630,6 +638,10 @@ export function calculate(
       // plotshape(): ta.crossover(close, high) / ta.crossunder(close, low) on the bars outside the session
       crossHigh: callsite.crossover(),
       crossLow: callsite.crossunder(),
+      // alertcondition((not is_sess) and ta.crossover(close, ohlc.high)) / crossunder(close, ohlc.low): own call
+      // sites, run on the bars outside the session
+      alertCrossHigh: callsite.crossover(),
+      alertCrossLow: callsite.crossunder(),
     };
   });
   type Session = (typeof sessions)[number];
@@ -644,6 +656,9 @@ export function calculate(
   const plots: Record<string, Point[]> = {};
   for (let k = 0; k < 8; k++) plots[`plot${k}`] = [];
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
+  // Alert flags: per session k, started (2k), ended (2k + 1), high crossed (8 + 2k), low crossed (9 + 2k)
+  const alertFlags: boolean[][] = Array.from({ length: 16 }, () => new Array<boolean>(n).fill(false));
   const barColors: BarColorData[] = [];
   const candles: PlotCandleData[] = [];
   const infoCells = new Map<string, TableCellData>();
@@ -962,6 +977,8 @@ export function calculate(
               labels.hold(site('op1'), s.opLabel1);
               labels.hold(site('op2'), s.opLabel2);
               s.oprLabels.push(s.opLabel1, s.opLabel2);
+              // alert('Opening range is fixed.', alert.freq_once_per_bar)
+              alertCalls.push({ time, message: 'Opening range is fixed.', freq: 'once_per_bar' });
             } else if (s.isOpened) {
               // The four crossing calls only run on these bars: they compare with the last bar of this branch
               const flag = (y: number, textColor: string) => {
@@ -1110,13 +1127,25 @@ export function calculate(
       plots[`plot${2 * k + 1}`].push({ time, value: cfg.alert3Show ? s.ohlc.low : NaN, color: s.colour });
     });
     sessions.forEach((s, k) => {
+      // sessN_started = is_sessN and not is_sessN[1]; sessN_ended = not is_sessN and is_sessN[1]
+      alertFlags[2 * k][i] = isSess[k] && !s.prevIn;
+      alertFlags[2 * k + 1][i] = !isSess[k] && s.prevIn;
+      if (!isSess[k]) {
+        alertFlags[8 + 2 * k][i] = s.alertCrossHigh(close, s.ohlc.high);
+        alertFlags[9 + 2 * k][i] = s.alertCrossLow(close, s.ohlc.low);
+      }
+    });
+    sessions.forEach((s, k) => {
       // i_alert3_show and (not is_sess) and ta.crossover(...): the crossing calls only run outside the session
+      // (ids shape0..shape7: 'cross sess<k>_high' / 'cross sess<k>_low' in the original's order)
       if (!cfg.alert3Show || isSess[k]) return;
       if (s.crossHigh(close, s.ohlc.high)) {
-        markers.push({ time, position: 'atPriceMiddle', price: s.ohlc.high, shape: 'triangleUp', color: s.colour, size: 'tiny' });
+        markers.push({ time, position: 'atPriceMiddle', price: s.ohlc.high, shape: 'triangleUp', color: s.colour, size: 'tiny',
+          id: `shape${2 * k}` });
       }
       if (s.crossLow(close, s.ohlc.low)) {
-        markers.push({ time, position: 'atPriceMiddle', price: s.ohlc.low, shape: 'triangleDown', color: s.colour, size: 'tiny' });
+        markers.push({ time, position: 'atPriceMiddle', price: s.ohlc.low, shape: 'triangleDown', color: s.colour, size: 'tiny',
+          id: `shape${2 * k + 1}` });
       }
     });
 
@@ -1245,8 +1274,22 @@ export function calculate(
     labels: labelOut,
     linefills,
     tables,
+    alerts: alertStates(alertConditions, bars, alertFlags),
+    alertCalls,
   };
 }
+
+/** The original's alertconditions (no message: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  ...[1, 2, 3, 4].flatMap((k) => [
+    { id: `alert${2 * k - 2}`, title: `Session #${k} started`, message: 'Alert Fired!' },
+    { id: `alert${2 * k - 1}`, title: `Session #${k} ended`, message: 'Alert Fired!' },
+  ]),
+  ...[1, 2, 3, 4].flatMap((k) => [
+    { id: `alert${2 * k + 6}`, title: `Session #${k} High crossed (after session closed)`, message: 'Alert Fired!' },
+    { id: `alert${2 * k + 7}`, title: `Session #${k} Low crossed (after session closed)`, message: 'Alert Fired!' },
+  ]),
+];
 
 export const FxMarketSessions = {
   calculate,
@@ -1254,4 +1297,6 @@ export const FxMarketSessions = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

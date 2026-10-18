@@ -7,11 +7,15 @@
  * running sum and a ring buffer of `order` values). Optional threshold bands +/- k * MAD (0.6745 * stdev), +/- k * stdev
  * or the percentile (nearest rank) of |voss| over `thresholdPeriod` bars.
  *
+ * Alerts (alertcondition, `alerts` of the result): Voss crossing over the + threshold and under the - threshold (with
+ * the threshold shown), and crossing over / under zero.
+ *
  * Reference: "Voss Predictive Filter" by e2e4
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type VossThresholdMode = 'MAD' | 'Standard Deviation' | 'Percentile Rank';
 
@@ -96,7 +100,10 @@ export const metadata = {
 
 const MAD_SCALE = 0.6745;
 
-export function calculate(bars: Bar[], inputs: Partial<VossPredictiveFilterInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<VossPredictiveFilterInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -146,6 +153,10 @@ export function calculate(bars: Bar[], inputs: Partial<VossPredictiveFilterInput
     }
   }
 
+  // crossedAboveThreshold = showThreshold and ta.crossover(voss, thresholdVal) (na threshold when it is off)
+  const aboveThreshold = crossedOver(voss, threshold).map((v) => cfg.showThreshold && v);
+  const belowThreshold = crossedUnder(voss, threshold.map((v) => -v)).map((v) => cfg.showThreshold && v);
+
   const t = (i: number) => bars[i].time;
   const line = (on: boolean, values: (i: number) => number, c: string) =>
     bars.map((_b, i) => ({ time: t(i), value: on ? values(i) : NaN, color: c }));
@@ -162,8 +173,17 @@ export function calculate(bars: Bar[], inputs: Partial<VossPredictiveFilterInput
     hlines: cfg.showZeroLine
       ? [{ value: 0, options: { title: 'Zero', color: cfg.colorZeroLine, linestyle: 'dashed' } }]
       : [],
+    alerts: alertStates(alertConditions, bars, [aboveThreshold, belowThreshold, crossedOver(voss, 0), crossedUnder(voss, 0)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Voss Predictive Filter: Above +Threshold', message: 'VPF: voss crossed above +threshold' },
+  { id: 'alert1', title: 'Voss Predictive Filter: Below -Threshold', message: 'VPF: voss crossed below -threshold' },
+  { id: 'alert2', title: 'Voss Predictive Filter: Above Zero', message: 'VPF: voss crossed above zero' },
+  { id: 'alert3', title: 'Voss Predictive Filter: Below Zero', message: 'VPF: voss crossed below zero' },
+];
 
 export const VossPredictiveFilter = {
   calculate,
@@ -171,4 +191,5 @@ export const VossPredictiveFilter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

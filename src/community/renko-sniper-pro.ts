@@ -6,8 +6,9 @@
  * `lookback` bars and closes back inside: high > ta.highest(high, lookback) and close < ta.highest(high, lookback)
  * (low < ta.lowest(low, lookback) and close > ta.lowest(low, lookback)). The window of ta.highest / ta.lowest
  * includes the current bar, so the high is never above it and the sweep shapes never show (as in the original).
- * The long / short conditions (sweep + EMA cross + trend + Supertrend + RSI) only feed alert() calls, which give no
- * output here. The script works on any chart type; it reads no Renko data.
+ * The long / short conditions (sweep + EMA cross + trend + Supertrend + RSI) feed the original's alert() calls
+ * (`alertCalls` of the result, once per bar close); as they need a sweep, they never fire either. The script works on
+ * any chart type; it reads no Renko data.
  *
  * Reference: "Renko Sniper PRO (Liquidity Sweep + EMA + ST + RSI)" by zachsprad
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,7 +16,10 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { AlertCall, MarkerData } from '../types';
+
+/** The original calls alert() */
+export const hasAlertFunction = true;
 
 export interface RenkoSniperProInputs {
   emaFastLen: number;
@@ -71,7 +75,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<RenkoSniperProInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -85,6 +89,7 @@ export function calculate(
   const direction = A(dirSeries);
   const highestHigh = A(ta.highest(S(bars.map((b) => b.high)), cfg.lookback));
   const lowestLow = A(ta.lowest(S(bars.map((b) => b.low)), cfg.lookback));
+  const rsi = A(ta.rsi(S(close), cfg.rsiLen));
 
   const finite = (v: number) => (Number.isFinite(v) ? v : NaN);
   const plot0 = bars.map((b, i) => ({ time: b.time, value: finite(emaFast[i]) }));
@@ -95,14 +100,32 @@ export function calculate(
   }));
 
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
+    const t = b.time as number;
+    const liquiditySweepLow = lt(b.low, lowestLow[i]) && gt(b.close, lowestLow[i]);
+    const liquiditySweepHigh = gt(b.high, highestHigh[i]) && lt(b.close, highestHigh[i]);
+    // bullCross = ta.crossover(emaFast, emaSlow), bearCross = ta.crossunder(emaFast, emaSlow)
+    const bullCross = i > 0 && gt(emaFast[i], emaSlow[i]) && !gt(emaFast[i - 1], emaSlow[i - 1])
+      && !isNaN(emaFast[i - 1]) && !isNaN(emaSlow[i - 1]);
+    const bearCross = i > 0 && lt(emaFast[i], emaSlow[i]) && !lt(emaFast[i - 1], emaSlow[i - 1])
+      && !isNaN(emaFast[i - 1]) && !isNaN(emaSlow[i - 1]);
+    // longCondition = liquiditySweepLow and bullCross and close > emaSlow and direction == 1 and rsi > 50
+    const longCondition = liquiditySweepLow && bullCross && gt(b.close, emaSlow[i]) && eq(direction[i], 1) && gt(rsi[i], 50);
+    const shortCondition = liquiditySweepHigh && bearCross && lt(b.close, emaSlow[i]) && eq(direction[i], -1) && lt(rsi[i], 50);
+    if (longCondition) {
+      alertCalls.push({ time: t, message: '🟢 LONG SWEEP: Liquidity Grab + Bullish Confirmation', freq: 'once_per_bar_close' });
+    }
+    if (shortCondition) {
+      alertCalls.push({ time: t, message: '🔴 SHORT SWEEP: Liquidity Grab + Bearish Confirmation', freq: 'once_per_bar_close' });
+    }
     // liquiditySweepLow = low < lowestLow and close > lowestLow
-    if (lt(b.low, lowestLow[i]) && gt(b.close, lowestLow[i])) {
+    if (liquiditySweepLow) {
       markers.push({ time: b.time as number, position: 'belowBar', shape: 'triangleUp', color: color.green, size: 'small' });
     }
     // liquiditySweepHigh = high > highestHigh and close < highestHigh
-    if (gt(b.high, highestHigh[i]) && lt(b.close, highestHigh[i])) {
+    if (liquiditySweepHigh) {
       markers.push({ time: b.time as number, position: 'aboveBar', shape: 'triangleDown', color: color.red, size: 'small' });
     }
   }
@@ -111,6 +134,7 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2 },
     markers,
+    alertCalls,
   };
 }
 
@@ -120,4 +144,5 @@ export const RenkoSniperPro = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

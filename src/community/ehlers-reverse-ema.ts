@@ -6,13 +6,20 @@
  * The line is ema - alpha * re8 after 75 bars, green above zero and red otherwise, with an SMA / EMA / WMA / VWMA of
  * it. Optional triangle signals on zero crosses, MA crosses or both.
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar) when "Enable Alerts" is on:
+ * "Ehlers Reverse EMA: Buy Signal" on a buy signal and "Ehlers Reverse EMA: Sell Signal" on a sell signal (the
+ * signals are computed only when "Show Signals" is on, as in the original).
+ *
  * Reference: "Ehlers Reverse EMA" by AlgoCollective
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © AlgoCollective
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { AlertCall, MarkerData } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface EhlersReverseEmaInputs {
   alpha: number;
@@ -24,7 +31,7 @@ export interface EhlersReverseEmaInputs {
   showSignals: boolean;
   signalType: 'Zero Cross' | 'MA Cross' | 'Zero & MA Cross';
   plotArrows: boolean;
-  /** Enable Alerts (alert() calls: no output) */
+  /** Enable Alerts: the alert() calls are made (`alertCalls`); no effect on the other outputs */
   alertsOn: boolean;
 }
 
@@ -77,7 +84,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<EhlersReverseEmaInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { alpha } = cfg;
@@ -115,6 +122,7 @@ export function calculate(
   const maValue = A(maS);
 
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
   const plot0: { time: number; value: number; color: string }[] = [];
   const plot1: { time: number; value: number }[] = [];
   for (let i = 0; i < n; i++) {
@@ -136,6 +144,11 @@ export function calculate(
       }
     }
     const t = bars[i].time;
+    // if alertsOn: if buySignal alert("Ehlers Reverse EMA: Buy Signal", alert.freq_once_per_bar) / same for sell
+    if (cfg.alertsOn) {
+      if (buySignal) alertCalls.push({ time: t, message: 'Ehlers Reverse EMA: Buy Signal', freq: 'once_per_bar' });
+      if (sellSignal) alertCalls.push({ time: t, message: 'Ehlers Reverse EMA: Sell Signal', freq: 'once_per_bar' });
+    }
     plot0.push({ time: t, value: re, color: gt(re, 0) ? bullColor : bearColor });
     plot1.push({ time: t, value: cfg.showMA ? maValue[i] : NaN });
     // plotshape(buySignal and plotArrows ? reverseEma : na, location.absolute, shape.triangleup, size.small)
@@ -152,6 +165,7 @@ export function calculate(
     plots: { plot0, plot1 },
     hlines: [{ value: 0, options: { title: 'Zero Line', color: String(color.new(color.gray, 0)), linestyle: 'solid' } }],
     markers,
+    alertCalls,
   };
 }
 
@@ -161,4 +175,5 @@ export const EhlersReverseEma = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

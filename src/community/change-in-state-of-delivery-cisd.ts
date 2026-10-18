@@ -17,6 +17,9 @@
  *
  * Drawings are kept up to 500 lines (the oldest are removed).
  *
+ * Alerts (alertcondition, `alerts` of the result): swing high / low mitigation (a level touched on a closed bar),
+ * bearish / bullish normal CISD and strong bearish / bullish CISD (the sweep labels), true on the bars of each event.
+ *
  * Chart values (third argument): the port reads the chart foreground colour (level lines, arrow text; without it:
  * #DBDBDB, a dark chart), the chart background colour (candle colours; without it: #0F0F0F) and the state of the
  * last bar (a level is only mitigated by a closed bar; without it the last bar is taken as closed).
@@ -29,6 +32,7 @@
 import { ta, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LineDrawingData, MarkerData, PlotCandleData } from '../types';
 import { backgroundColorOf, foregroundColorOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ChangeInStateOfDeliveryCisdInputs {
   /** Noise Filter */
@@ -109,7 +113,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ChangeInStateOfDeliveryCisdInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = Math.trunc(cfg.len);
@@ -147,6 +152,7 @@ export function calculate(
   let trend = 0;
 
   const markers: MarkerData[] = [];
+  const flags: boolean[][] = [[], [], [], [], [], []];
   const candles: PlotCandleData[] = [];
   const bodyColor = (t: number) => String(color.from_gradient(cfg.t1, 0, 100, t > 0 ? cfg.green : cfg.red, bg));
   const wickColor = (t: number) => String(color.from_gradient(cfg.t2, 0, 100, t > 0 ? cfg.green : cfg.red, bg));
@@ -266,24 +272,32 @@ export function calculate(
       if (barsSinceLow <= cfg.liquidityLookback && gt(close, lastWickedLowLevel)) bullishSweep = true;
     }
 
+    // alertcondition(wicked_high), (wicked_low), (cisd == 1), (cisd == 2), (bearish_sweep), (bullish_sweep)
+    flags[0].push(wickedHigh);
+    flags[1].push(wickedLow);
+    flags[2].push(cisd === 1);
+    flags[3].push(cisd === 2);
+    flags[4].push(bearishSweep);
+    flags[5].push(bullishSweep);
+
     const time = bars[i].time;
     // plotshape(bearish_sweep ? high : na, ..., shape.labeldown, location.abovebar): the value is read as a condition
     if (bearishSweep && high !== 0) {
-      markers.push({ time, position: 'aboveBar', shape: 'labelDown', color: cfg.red, text: '▼', textColor: fg, size: 'small' });
+      markers.push({ id: 'shape0', time, position: 'aboveBar', shape: 'labelDown', color: cfg.red, text: '▼', textColor: fg, size: 'small' });
     }
     if (bullishSweep && low !== 0) {
-      markers.push({ time, position: 'belowBar', shape: 'labelUp', color: cfg.green, text: '▲', textColor: fg, size: 'small' });
+      markers.push({ id: 'shape1', time, position: 'belowBar', shape: 'labelUp', color: cfg.green, text: '▲', textColor: fg, size: 'small' });
     }
     // plotchar(not na(pivhigh) ? high[len] : na, "Swing High", "●", location.absolute, red, size.tiny, offset = -len)
     if (isPivHigh) {
       markers.push({
-        time: bars[i - len].time, position: 'atPriceMiddle', price: bars[i - len].high, shape: 'circle',
+        id: 'char2', time: bars[i - len].time, position: 'atPriceMiddle', price: bars[i - len].high, shape: 'circle',
         color: 'transparent', text: '●', textColor: cfg.red, size: 'tiny',
       });
     }
     if (isPivLow) {
       markers.push({
-        time: bars[i - len].time, position: 'atPriceMiddle', price: bars[i - len].low, shape: 'circle',
+        id: 'char3', time: bars[i - len].time, position: 'atPriceMiddle', price: bars[i - len].low, shape: 'circle',
         color: 'transparent', text: '●', textColor: cfg.green, size: 'tiny',
       });
     }
@@ -302,7 +316,18 @@ export function calculate(
       time1: bars[l.x1].time, price1: l.y, time2: bars[l.x2].time, price2: l.y, color: l.color,
       ...(l.width !== 1 ? { width: l.width } : {}),
     })),
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const ChangeInStateOfDeliveryCisd = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Swing High Mitigation', message: 'Swing High Mitigated' },
+  { id: 'alert1', title: 'Swing Low Mitigation', message: 'Swing Low Mitigated' },
+  { id: 'alert2', title: 'Bearish Normal CISD', message: 'Bearish Normal CISD Detected' },
+  { id: 'alert3', title: 'Bullish Normal CISD', message: 'Bullish Normal CISD Detected' },
+  { id: 'alert4', title: 'Strong Bearish CISD', message: 'Strong Bearish CISD Detected' },
+  { id: 'alert5', title: 'Strong Bullish CISD', message: 'Strong Bullish CISD Detected' },
+];
+
+export const ChangeInStateOfDeliveryCisd = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

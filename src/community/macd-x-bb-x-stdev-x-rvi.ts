@@ -8,6 +8,8 @@
  * Buy / sell signals are the first bar of a green / red line (optionally only at or below / at or above the
  * midline). A Relative Volatility Index (EMA of the standard deviation of the close on up / down bars) above / below
  * its thresholds gives sell / buy hint flags.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy & Sell', 'Buy' and 'Sell', true on the bars of the buy / sell
+ * signals (whether or not they are plotted).
  *
  * Reference: "[Venturose] MACD x BB x STDEV x RVI" by Vaquant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MacdXBbXStdevXRviInputs {
   fastEmaPeriod: number;
@@ -149,7 +152,7 @@ const colorKey = (c: string): string => {
 export function calculate(
   bars: Bar[],
   inputs: Partial<MacdXBbXStdevXRviInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -199,6 +202,7 @@ export function calculate(
   }
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [], anyFlags: boolean[] = [];
   const bearFill = String(color.new(bear, 90 / 1.5));
   const bullFill = String(color.new(bull, 90 / 1.5));
   const bearFills: string[] = new Array(n);
@@ -212,6 +216,9 @@ export function calculate(
       && (!cfg.enableSignalFilter || le(macd[i], avg[i]));
     const sellSignal = key === bearKey && prevKey !== null && prevKey !== bearKey
       && (!cfg.enableSignalFilter || ge(macd[i], avg[i]));
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
+    anyFlags.push(buySignal || sellSignal);
     if (buySignal && cfg.plotBuySignals) {
       markers.push({ time: t, position: 'bottom', shape: 'triangleUp', color: bull, size: 'small' });
     }
@@ -247,8 +254,17 @@ export function calculate(
       { plot1: 'plot0', plot2: 'plot1', colors: bullFills },
     ],
     markers,
+    // alertcondition(buy_signal or sell_signal, 'Buy & Sell') / (buy_signal, 'Buy') / (sell_signal, 'Sell')
+    alerts: alertStates(alertConditions, bars, [anyFlags, buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy & Sell', message: 'Price entered buy / sell area' },
+  { id: 'alert1', title: 'Buy', message: 'Price entered buying area' },
+  { id: 'alert2', title: 'Sell', message: 'Price entered selling area' },
+];
 
 export const MacdXBbXStdevXRvi = {
   calculate,
@@ -256,4 +272,5 @@ export const MacdXBbXStdevXRvi = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

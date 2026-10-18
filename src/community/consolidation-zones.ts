@@ -8,6 +8,8 @@
  *
  * Drawings: the zone top and bottom as invisible step plots with a fill (painted while the consolidation is longer
  * than the minimum length), and two dashed lines over the bars of the consolidation, replaced on every bar of it.
+ * Alerts (alertcondition, `alerts` of the result): 'Breakout Up' / 'Breakout Down', true on the bars where the pivot
+ * moves above the zone top / below the zone bottom after a consolidation longer than the minimum length.
  *
  * Reference: "Consolidation Zones - Live" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,6 +21,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line,
 } from 'oakscriptjs';
 import type { LineDrawingData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ConsolidationZonesInputs {
   period: number;
@@ -58,7 +61,7 @@ const truthy = (x: number) => !Number.isNaN(x) && x !== 0;
 export function calculate(
   bars: Bar[],
   inputs: Partial<ConsolidationZonesInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const { period: prd, consLen: conslen, paintcons, zonecol } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -80,6 +83,7 @@ export function calculate(
   const plot0: Array<{ time: number; value: number }> = [];
   const plot1: Array<{ time: number; value: number }> = [];
   const fillColors: string[] = [];
+  const upFlags: boolean[] = [], downFlags: boolean[] = [];
 
   resetDrawings(); // max_lines_count 50
   const upline = varDrawing<Line>(); // var line upline
@@ -112,13 +116,21 @@ export function calculate(
     }
 
     // Pine `if change(pp)`: na (first pivot) and 0 are false
+    let breakoutup = false;
+    let breakoutdown = false;
     if (truthy(pp - ppPrev)) {
+      if (conscnt > conslen) {
+        if (pp > condhigh) breakoutup = true;
+        if (pp < condlow) breakoutdown = true;
+      }
       if (conscnt > 0 && pp <= condhigh && pp >= condlow) conscnt += 1;
       else conscnt = 0;
     } else {
       conscnt += 1;
     }
     ppPrev = pp;
+    upFlags.push(breakoutup);
+    downFlags.push(breakoutdown);
 
     if (conscnt >= conslen) {
       if (conscnt === conslen) {
@@ -145,7 +157,15 @@ export function calculate(
     plots: { plot0, plot1 },
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: zonecol }, colors: fillColors }],
     lines: drawingOutputs(bars).lines ?? [],
+    // alertcondition(breakoutup, 'Breakout Up') / alertcondition(breakoutdown, 'Breakout Down')
+    alerts: alertStates(alertConditions, bars, [upFlags, downFlags]),
   };
 }
 
-export const ConsolidationZones = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Breakout Up', message: 'Breakout Up' },
+  { id: 'alert1', title: 'Breakout Down', message: 'Breakout Down' },
+];
+
+export const ConsolidationZones = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

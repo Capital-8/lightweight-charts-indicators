@@ -8,6 +8,9 @@
  * percent. The profile is drawn to the right of the last bar, a box shows the look-back range, and the zone and
  * profile boxes turn green below the close and red above it. Dots mark the pivots (drawn `plen` bars back).
  *
+ * Alerts (alertcondition, `alerts` of the result): 'New Pivot Detected!', true on the bar that confirms a pivot high
+ * or low (`plen` bars after it).
+ *
  * All the boxes and labels are drawn again on every bar: the output is the set of the last bar.
  * `chart.fg_color` / `chart.bg_color` come from the chart context (`foregroundColor` / `backgroundColor`), with the
  * dark theme colours without a context.
@@ -23,6 +26,7 @@ import {
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { backgroundColorOf, foregroundColorOf } from '../chart-context';
 
 export interface DynamicSupplyAndDemandZonesInputs {
@@ -109,7 +113,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<DynamicSupplyAndDemandZonesInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[] } {
+): IndicatorResult & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { plen, res } = cfg;
@@ -141,6 +145,8 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    // alertcondition(not na(ph) or not na(pl), "New Pivot Detected!")
+    alerts: alertStates(alertConditions, bars, [bars.map((_, i) => !Number.isNaN(ph[i]) || !Number.isNaN(pl[i]))]),
   };
   if (n === 0) return empty;
 
@@ -238,4 +244,9 @@ export function calculate(
   return { ...empty, boxes: out.boxes ?? [], labels: out.labels ?? [] };
 }
 
-export const DynamicSupplyAndDemandZones = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertcondition (no message given: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New Pivot Detected!', message: 'Alert Fired!' },
+];
+
+export const DynamicSupplyAndDemandZones = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

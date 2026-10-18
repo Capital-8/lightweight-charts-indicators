@@ -4,6 +4,8 @@
  * Normalized momentum oscillator using EMA of deviation.
  * WT1 = EMA(CI, n2) where CI = (hlc3 - EMA(hlc3, n1)) / (0.015 * EMA(|hlc3 - EMA(hlc3, n1)|, n1))
  * WT2 = SMA(WT1, 4)
+ * On each cross of WT1 and WT2, circles at WT2 (two circle plots as the original: a wide black one under a red / lime
+ * one) and an aqua / yellow bar colour.
  *
  * Reference: "WaveTrend with Crosses" by LazyBear
  */
@@ -36,6 +38,8 @@ export const plotConfig: PlotConfig[] = [
   { id: 'plot0', title: 'WT1', color: '#26A69A', lineWidth: 2 },
   { id: 'plot1', title: 'WT2', color: '#EF5350', lineWidth: 1 },
   { id: 'plot2', title: 'Diff', color: '#2962FF', lineWidth: 1, style: 'area' },
+  { id: 'plot3', title: 'Cross', color: '#000000', lineWidth: 3, style: 'circles' },
+  { id: 'plot4', title: 'Cross Color', color: '#00FF00', lineWidth: 2, style: 'circles' },
 ];
 
 export const metadata = {
@@ -63,22 +67,22 @@ export function calculate(bars: Bar[], inputs: Partial<WaveTrendInputs> = {}): O
   const wt2Arr = wt2.toArray();
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
-  for (let i = 1; i < bars.length; i++) {
+  // plot(cross(wt1, wt2) ? wt2 : na, color = black, style = circles, linewidth = 3)
+  // plot(cross(wt1, wt2) ? wt2 : na, color = (wt2 - wt1 > 0 ? red : lime), style = circles, linewidth = 2)
+  const crossBlack: { time: number; value: number; color: string }[] = [];
+  const crossColor: { time: number; value: number; color: string }[] = [];
+  for (let i = 0; i < bars.length; i++) {
+    const t = bars[i].time as number;
     const w1 = wt1Arr[i]; const w2 = wt2Arr[i];
-    const pw1 = wt1Arr[i - 1]; const pw2 = wt2Arr[i - 1];
-    if (w1 == null || w2 == null || pw1 == null || pw2 == null) continue;
-    const cross = (pw1 <= pw2 && w1 > w2) || (pw1 >= pw2 && w1 < w2);
+    const pw1 = i > 0 ? wt1Arr[i - 1] : null; const pw2 = i > 0 ? wt2Arr[i - 1] : null;
+    const cross = w1 != null && w2 != null && pw1 != null && pw2 != null
+      && ((pw1 <= pw2 && w1 > w2) || (pw1 >= pw2 && w1 < w2));
+    const bearish = cross && (w2 as number) > (w1 as number);
+    crossBlack.push({ time: t, value: cross ? (w2 as number) : NaN, color: '#000000' });
+    crossColor.push({ time: t, value: cross ? (w2 as number) : NaN, color: bearish ? '#FF0000' : '#00FF00' });
     if (cross) {
-      const bearish = w2 > w1;
-      markers.push({
-        time: bars[i].time as number,
-        position: 'inBar',
-        shape: 'circle',
-        color: bearish ? '#FF0000' : '#00FF00',
-        size: 2,
-      });
       barColors.push({
-        time: bars[i].time as number,
+        time: t,
         color: bearish ? '#00FFFF' : '#FFFF00',
       });
     }
@@ -86,7 +90,7 @@ export function calculate(bars: Bar[], inputs: Partial<WaveTrendInputs> = {}): O
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': toPlot(wt1), 'plot1': toPlot(wt2), 'plot2': toPlot(diff) },
+    plots: { 'plot0': toPlot(wt1), 'plot1': toPlot(wt2), 'plot2': toPlot(diff), 'plot3': crossBlack, 'plot4': crossColor },
     hlines: [
       { value: 0, options: { color: '#787B86', linestyle: 'solid', title: 'Zero' } },
       { value: 60, options: { color: '#EF5350', linestyle: 'dashed', title: 'OB1' } },

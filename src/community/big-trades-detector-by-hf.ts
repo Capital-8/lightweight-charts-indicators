@@ -96,15 +96,16 @@ export function calculate(
     const posBuy = (b.close + b.low) / 2; // math.avg(close, low)
     const posSell = (b.close + b.high) / 2;
     // plotshape(cond ? price : na, shape.circle, location.absolute, size.small / normal / large)
-    const circle = (price: number, c: string, size: 'small' | 'normal' | 'large') => {
-      if (!isNaN(price)) markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'circle', color: c, size });
+    // id: the original's output (shape0..shape5 in declaration order)
+    const circle = (price: number, c: string, size: 'small' | 'normal' | 'large', id: string) => {
+      if (!isNaN(price)) markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'circle', color: c, size, id });
     };
-    if (buy1 && !buy2) circle(posBuy, cfg.btBuyColor, 'small');
-    if (buy2 && !buy3) circle(posBuy, cfg.btBuyColor, 'normal');
-    if (buy3) circle(posBuy, cfg.btBuyColor, 'large');
-    if (sell1 && !sell2) circle(posSell, cfg.btSellColor, 'small');
-    if (sell2 && !sell3) circle(posSell, cfg.btSellColor, 'normal');
-    if (sell3) circle(posSell, cfg.btSellColor, 'large');
+    if (buy1 && !buy2) circle(posBuy, cfg.btBuyColor, 'small', 'shape0');
+    if (buy2 && !buy3) circle(posBuy, cfg.btBuyColor, 'normal', 'shape1');
+    if (buy3) circle(posBuy, cfg.btBuyColor, 'large', 'shape2');
+    if (sell1 && !sell2) circle(posSell, cfg.btSellColor, 'small', 'shape3');
+    if (sell2 && !sell3) circle(posSell, cfg.btSellColor, 'normal', 'shape4');
+    if (sell3) circle(posSell, cfg.btSellColor, 'large', 'shape5');
   }
 
   return {

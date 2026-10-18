@@ -521,8 +521,9 @@ export function calculate(
     const vol = bars[i].volume ?? NaN;
     const isHighVolume = gt(vol, cfg.hvbMultiplier * (volEma[i] ?? NaN));
     if (cfg.plotHVB && isHighVolume) {
-      if (isUp(i)) barColors.push({ time, color: cfg.hvbBullColor });
-      else if (isDown(i)) barColors.push({ time, color: cfg.hvbBearColor });
+      // barcolor(... isUp(0) and isHighVolume ? hvbBullColor : na, title = "Bullish HVB") / "Bearish HVB"
+      if (isUp(i)) barColors.push({ time, color: cfg.hvbBullColor, id: 'barcolor0' });
+      else if (isDown(i)) barColors.push({ time, color: cfg.hvbBearColor, id: 'barcolor1' });
     }
 
     // Stacked OB + FVG

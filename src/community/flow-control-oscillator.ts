@@ -7,6 +7,8 @@
  * signal line (EMA, WMA, HMA, TEMA, DEMA or VWMA). The momentum histogram is the change of the FCO over a few bars,
  * optionally divided by the ATR(14) and weighted by the ADX (0.3 + 0.7 * adx / 100), coloured with a gradient. The
  * background is gray where |FCO| > 1 and orange where the ADX is below 20.
+ * Alerts (alertcondition, `alerts` of the result): the 14 conditions of the original (reversal setups, strong
+ * trends, signal crosses, confirmed zero crosses, zero crosses, extreme zones, strong momentum).
  *
  * Reference: "Flow Control Oscillator (FCO)" by WalrusQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { taCore, math, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type FCOWeightMode = 'Equal' | 'MFI Heavy' | 'CMF Heavy' | 'Custom';
 export type FCOSmoothType = 'SMA' | 'EMA' | 'WMA' | 'RMA' | 'TEMA' | 'DEMA' | 'VWMA';
@@ -144,7 +147,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<FlowControlOscillatorInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const high = bars.map((b) => b.high);
@@ -247,9 +250,41 @@ export function calculate(
     plots.plot5.push({ time: t, value: fin(mfi[i]), color: mfiColor });
     plots.plot6.push({ time: t, value: fin(adx[i]), color: adxRawColor });
     // bgcolor(showExtremeZones and math.abs(FCO) > 1.0 ? color.new(color.gray, 95) : na, title = "Extreme Zones")
-    if (cfg.showExtremeZones && gt(Math.abs(fco[i]), 1.0)) bgColors.push({ time: t, color: extremeColor });
+    if (cfg.showExtremeZones && gt(Math.abs(fco[i]), 1.0)) bgColors.push({ time: t, color: extremeColor, id: 'bgcolor0' });
     // bgcolor(useADX and adx < 0.20 ? color.new(color.orange, 97) : na, title = "Weak Trend Zone"), drawn on top
-    if (cfg.useADX && lt(adx[i], 0.2)) bgColors.push({ time: t, color: weakColor });
+    if (cfg.useADX && lt(adx[i], 0.2)) bgColors.push({ time: t, color: weakColor, id: 'bgcolor1' });
+  }
+
+  // Alert conditions
+  const bullMomentum = crossedOver(momentum, 0);
+  const bearMomentum = crossedUnder(momentum, 0);
+  const extremeHigh = fco.map((v) => gt(v, 1.0));
+  const extremeLow = fco.map((v) => lt(v, -1.0));
+  const fcoBullCross = crossedOver(fco, 0);
+  const fcoBearCross = crossedUnder(fco, 0);
+  const strongTrend = adx.map((v) => gt(v, 0.25));
+  const fcoCrossOverSignal = crossedOver(fco, signal);
+  const fcoCrossUnderSignal = crossedUnder(fco, signal);
+  const absPrev = (a: number[], i: number) => (i > 0 ? Math.abs(a[i - 1]) : NaN);
+  const momentumWeakening = momentum.map((m, i) => lt(Math.abs(m), absPrev(momentum, i)));
+  const momentumGrowing = momentum.map((m, i) => gt(Math.abs(m), absPrev(momentum, i)));
+  const sigPrev = (i: number) => (i > 0 ? signal[i - 1] : NaN);
+  const flags: boolean[][] = Array.from({ length: 14 }, () => []);
+  for (let i = 0; i < n; i++) {
+    flags[0].push(extremeLow[i] && fcoCrossOverSignal[i] && momentumWeakening[i]);
+    flags[1].push(extremeHigh[i] && fcoCrossUnderSignal[i] && momentumWeakening[i]);
+    flags[2].push(fcoBullCross[i] && gt(momentum[i], 0) && momentumGrowing[i] && strongTrend[i]);
+    flags[3].push(fcoBearCross[i] && lt(momentum[i], 0) && momentumGrowing[i] && strongTrend[i]);
+    flags[4].push(fcoCrossOverSignal[i]);
+    flags[5].push(fcoCrossUnderSignal[i]);
+    flags[6].push(fcoBullCross[i] && gt(signal[i], sigPrev(i)));
+    flags[7].push(fcoBearCross[i] && lt(signal[i], sigPrev(i)));
+    flags[8].push(fcoBullCross[i]);
+    flags[9].push(fcoBearCross[i]);
+    flags[10].push(extremeHigh[i]);
+    flags[11].push(extremeLow[i]);
+    flags[12].push(bullMomentum[i] && strongTrend[i]);
+    flags[13].push(bearMomentum[i] && strongTrend[i]);
   }
 
   return {
@@ -259,8 +294,27 @@ export function calculate(
       value: h.price, options: { title: h.title, color: h.color, linestyle: h.linestyle, linewidth: h.linewidth },
     })),
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Reversal Setup', message: 'REVERSAL: FCO crossing up from extreme oversold with weakening momentum!' },
+  { id: 'alert1', title: 'Bearish Reversal Setup', message: 'REVERSAL: FCO crossing down from extreme overbought with weakening momentum!' },
+  { id: 'alert2', title: 'Strong Bullish Trend', message: 'TREND: Buyers taking control with growing momentum and strong ADX!' },
+  { id: 'alert3', title: 'Strong Bearish Trend', message: 'TREND: Sellers taking control with growing momentum and strong ADX!' },
+  { id: 'alert4', title: 'FCO Crossed Above Signal', message: 'FCO crossed above Signal line - bullish momentum shift' },
+  { id: 'alert5', title: 'FCO Crossed Below Signal', message: 'FCO crossed below Signal line - bearish momentum shift' },
+  { id: 'alert6', title: 'Confirmed Bullish Signal', message: 'FCO crossed zero UP and Signal confirms - strong buy signal!' },
+  { id: 'alert7', title: 'Confirmed Bearish Signal', message: 'FCO crossed zero DOWN and Signal confirms - strong sell signal!' },
+  { id: 'alert8', title: 'Buyers Take Control', message: 'Buyers Now in Control!' },
+  { id: 'alert9', title: 'Sellers Take Control', message: 'Sellers Now in Control!' },
+  { id: 'alert10', title: 'Extreme Overbought', message: 'Buyers Exhausted - Watch for reversal!' },
+  { id: 'alert11', title: 'Extreme Oversold', message: 'Sellers Exhausted - Watch for reversal!' },
+  { id: 'alert12', title: 'Strong Bullish Momentum', message: 'Strong Buyers Gaining Strength!' },
+  { id: 'alert13', title: 'Strong Bearish Momentum', message: 'Strong Sellers Gaining Strength!' },
+];
 
 export const FlowControlOscillator = {
   calculate,
@@ -269,4 +323,5 @@ export const FlowControlOscillator = {
   inputConfig,
   plotConfig,
   hlineConfig,
+  alertConditions,
 };

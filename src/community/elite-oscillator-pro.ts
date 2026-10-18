@@ -9,6 +9,10 @@
  * (orange, at the band top) and entries into the neutral band (magenta, at the midline); the "Zones" dot logic marks
  * every bar in the zone instead of the entries.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Overbought' / 'Oversold' (the oscillator enters the zone),
+ * 'Exit Overbought' / 'Exit Oversold' (it leaves it), 'Bullish Momentum' (the orange dot rule) and 'Bearish Momentum'
+ * (a cross below the signal line below the midline).
+ *
  * Reference: "Elite Oscillator Pro" by Alpha_Wizard
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © 2026 Not Alpha
@@ -16,6 +20,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EliteOscillatorProInputs {
   calcMode: 'Stochastic' | 'RSI';
@@ -167,6 +172,7 @@ export const metadata = {
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
@@ -178,7 +184,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<EliteOscillatorProInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -204,6 +210,11 @@ export function calculate(
   const enterOS = B(ta.crossunder(oscS, osLevel));
   const crossBandLo = B(ta.crossover(oscS, bandLo));
   const crossBandHi = B(ta.crossunder(oscS, bandHi));
+  const crossDownSignal = B(ta.crossunder(oscS, S(signal)));
+  const exitOB = B(ta.crossunder(oscS, obLevel));
+  const exitOS = B(ta.crossover(oscS, osLevel));
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
 
   const bgColor = String(color.new('#2a2b2e', 100));
   const bgColors: BgColorData[] = [];
@@ -221,6 +232,9 @@ export function calculate(
     const oscInNeutral = ge(o, bandLo) && le(o, bandHi);
     const enterNeutral = (crossBandLo[i] && le(o, bandHi)) || (crossBandHi[i] && ge(o, bandLo));
     const bullMomentum = crossUpSignal[i] && oscAboveMid;
+    // bearMomentum = crossDownSignal and oscBelowMid
+    bullFlags.push(bullMomentum);
+    bearFlags.push(crossDownSignal[i] && lt(o, midLevel));
 
     // bgcolor(useBlackBg ? color.new(#2a2b2e, 100) : na)
     if (cfg.useBlackBg) bgColors.push({ time: t, color: bgColor });
@@ -268,8 +282,20 @@ export function calculate(
           topColor: fill(String(color.new(cfg.colFillBear, 92))), bottomColor: fill(String(color.new(cfg.colFillBear, 14))) } },
     ],
     bgColors,
+    // alertcondition(enterOB / enterOS / exitOB / exitOS / orangeSig / bearMomentum)
+    alerts: alertStates(alertConditions, bars, [enterOB, enterOS, exitOB, exitOS, bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Overbought', message: 'Elite Oscillator: entered overbought zone' },
+  { id: 'alert1', title: 'Oversold', message: 'Elite Oscillator: entered oversold zone' },
+  { id: 'alert2', title: 'Exit Overbought', message: 'Elite Oscillator: exited overbought zone' },
+  { id: 'alert3', title: 'Exit Oversold', message: 'Elite Oscillator: exited oversold zone' },
+  { id: 'alert4', title: 'Bullish Momentum', message: 'Elite Oscillator: bullish momentum cross above midline' },
+  { id: 'alert5', title: 'Bearish Momentum', message: 'Elite Oscillator: bearish momentum cross below midline' },
+];
 
 export const EliteOscillatorPro = {
   calculate,
@@ -279,4 +305,5 @@ export const EliteOscillatorPro = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

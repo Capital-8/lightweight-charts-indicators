@@ -2,12 +2,14 @@
  * Intraday TS, BB + Buy/Sell + Squeeze Mom + ADX-DMI
  *
  * Full overlay: Bollinger Bands with entry/SL/TP levels, buy/sell arrows,
- * squeeze momentum on midBB, DMI directional shapes, and bar coloring.
+ * squeeze momentum on midBB, DMI directional shapes, and bar coloring. The buy / sell arrows are the original's
+ * plotarrow outputs (`arrows` of the result): an up arrow of value 1 on the first bar above the upper band, a down
+ * arrow of value -1 on the first bar below the lower band (transparency 40 as the original).
  *
  * Reference: "Intraday TS ,BB + Buy/Sell +Squeeze Mom.+ adx-dmi" (community)
  */
 
-import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type ArrowData } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
 
 export interface IntradayTSBBInputs {
@@ -129,7 +131,7 @@ function linreg(arr: number[], len: number, offset: number): number[] {
   return out;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<IntradayTSBBInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<IntradayTSBBInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; arrows: ArrowData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { bbLen, bbStdev, tp, sqzBBLen, sqzBBMult, sqzKCLen, sqzKCMult, useTrueRange, diLen, adxSmooth, adxThresh } = cfg;
   const n = bars.length;
@@ -407,13 +409,17 @@ export function calculate(bars: Bar[], inputs: Partial<IntradayTSBBInputs> = {})
   // codiff = compra == 1 ? compra : 0  => arrow when compra exactly equals 1 (state just started)
   // vendi = isUnderBBBottom ? (lowRange == lowRange[1] ? lowRange-0.001 : 1) : 0
   // codiff2 = vendi == 1 ? vendi : 0
+  // plotarrow(codiff, colorup = green, transp = 40) / plotarrow(codiff2 * -1, colordown = orange, transp = 40)
+  const arrows: ArrowData[] = [];
+  const arrowUp = String(color.new('#008000', 40));
+  const arrowDown = String(color.new('#FFA500', 40));
   for (let i = warmup; i < n; i++) {
     let compra = 0;
     if (isOverBBTop[i]) {
       compra = (i > 0 && highRange[i] === highRange[i - 1] && !isNaN(highRange[i])) ? highRange[i] + 0.001 : 1;
     }
     if (compra === 1) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#008000', text: '' });
+      arrows.push({ time: bars[i].time, id: 'arrow0', value: 1, color: arrowUp });
     }
 
     let vendi = 0;
@@ -421,7 +427,7 @@ export function calculate(bars: Bar[], inputs: Partial<IntradayTSBBInputs> = {})
       vendi = (i > 0 && lowRange[i] === lowRange[i - 1] && !isNaN(lowRange[i])) ? lowRange[i] - 0.001 : 1;
     }
     if (vendi === 1) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#FFA500', text: '' });
+      arrows.push({ time: bars[i].time, id: 'arrow1', value: -1, color: arrowDown });
     }
 
     // DMI plotshape
@@ -488,6 +494,7 @@ export function calculate(bars: Bar[], inputs: Partial<IntradayTSBBInputs> = {})
     ],
     markers,
     barColors,
+    arrows,
   };
 }
 

@@ -6,6 +6,8 @@
  * oscillator; the pulse histogram is osc - signal. The fill between the oscillator and the signal, the histogram and
  * the optional bar colours use the bull colour when osc >= signal, else the bear colour. Dashed levels at 50 and at
  * the overbought / oversold values.
+ * Alerts (alertcondition, `alerts` of the result): the oscillator crossing over / under the signal, over / under 50,
+ * over the overbought level and under the oversold level.
  *
  * Reference: "[CT] Trend Pulse Oscillator" by ChaosTrader63
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendPulseOscillatorInputs {
   src: SourceType;
@@ -114,7 +117,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendPulseOscillatorInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -164,8 +167,24 @@ export function calculate(
       },
     ],
     barColors,
+    // alertcondition(ta.crossover(osc, sig)) / crossunder(osc, sig) / crossover(osc, 50) / crossunder(osc, 50) /
+    // crossover(osc, ob) / crossunder(osc, os)
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(osc, sig), crossedUnder(osc, sig), crossedOver(osc, 50), crossedUnder(osc, 50),
+      crossedOver(osc, cfg.ob), crossedUnder(osc, cfg.os),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Osc Cross Up Signal', message: 'TPO: Osc crossed ABOVE Signal (bull)' },
+  { id: 'alert1', title: 'Osc Cross Down Signal', message: 'TPO: Osc crossed BELOW Signal (bear)' },
+  { id: 'alert2', title: 'Osc Cross Up 50', message: 'TPO: Osc crossed ABOVE 50' },
+  { id: 'alert3', title: 'Osc Cross Down 50', message: 'TPO: Osc crossed BELOW 50' },
+  { id: 'alert4', title: 'Osc Cross Up OB', message: 'TPO: Osc crossed ABOVE Overbought' },
+  { id: 'alert5', title: 'Osc Cross Down OS', message: 'TPO: Osc crossed BELOW Oversold' },
+];
 
 export const TrendPulseOscillator = {
   calculate,
@@ -173,4 +192,5 @@ export const TrendPulseOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -150,8 +150,10 @@ export function calculate(bars: Bar[], inputs: Partial<GuppyMMAInputs> = {}): In
     plots[`plot${j}`] = bars.map((_b, i) => ({ time: t(i), value: m[i], color: maColor(m[i], i) }));
   });
   // guppy_color = avg < upper and avg > lower ? neutral : avg > upper ? bullish : avg < lower ? bearish : na
+  // (no colour on the bars without a value: nothing is drawn there; na colour = 'transparent' only at a threshold)
   plots.plot22 = bars.map((_b, i) => {
     const s = smoothed[i];
+    if (isNaN(s)) return { time: t(i), value: s };
     const c = lt(s, upper) && gt(s, lower) ? cfg.neutralColor
       : gt(s, upper) ? cfg.bullishColor : lt(s, lower) ? cfg.bearishColor : 'transparent';
     return { time: t(i), value: s, color: c };

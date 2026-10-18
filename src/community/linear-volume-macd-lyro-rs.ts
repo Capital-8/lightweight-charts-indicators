@@ -8,6 +8,8 @@
  * sign of the regression (Linear Regression), by the regression rising or not (Strong/Weak Trend) or by the sign of
  * hist (Volume MACD). The background is coloured beyond the 2-stdev bands, in the indicator pane and on the price
  * pane.
+ * Alerts (alertcondition, `alerts` of the result): bull / bear state of each signal type (var states, set only while
+ * that type is selected, 0 before).
  *
  * Reference: "Linear Volume MACD | Lyro RS" by LyroRS
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LinearVolumeMacdLyroRsInputs {
   src: SourceType;
@@ -101,7 +104,7 @@ const PALETTES: Record<LinearVolumeMacdLyroRsInputs['colMode'], [string, string]
 export function calculate(
   bars: Bar[],
   inputs: Partial<LinearVolumeMacdLyroRsInputs> = {},
-): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } {
+): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -138,19 +141,29 @@ export function calculate(
   // var color pc = na: the histogram and bar colour by the signal type
   const pc: (string | null)[] = new Array(n);
   let cur: string | null = null;
+  // var int lr_s = 0, swt_s = 0, vmacd_s = 0: the signal state of each type (alerts)
+  const lrS: number[] = new Array(n);
+  const swtS: number[] = new Array(n);
+  const vmS: number[] = new Array(n);
+  let lr = 0, swt = 0, vm = 0;
   for (let i = 0; i < n; i++) {
     if (cfg.sigType === 'Linear Regression') {
-      if (gt(macdLr[i], 0)) cur = upC;
-      if (lt(macdLr[i], 0)) cur = dnC;
+      if (gt(macdLr[i], 0)) { cur = upC; lr = 1; }
+      if (lt(macdLr[i], 0)) { cur = dnC; lr = -1; }
     } else if (cfg.sigType === 'Strong/Weak Trend') {
       // Both branches (macd_lr >= 0 or not, na included): macd_lr[1] < macd_lr ? UpC : DnC
       const prev = i > 0 ? macdLr[i - 1] : NaN;
-      cur = lt(prev, macdLr[i]) ? upC : dnC;
+      const up = lt(prev, macdLr[i]);
+      cur = up ? upC : dnC;
+      swt = up ? 1 : -1;
     } else {
-      if (ge(hist[i], 0)) cur = upC;
-      else if (le(hist[i], 0)) cur = dnC;
+      if (ge(hist[i], 0)) { cur = upC; vm = 1; }
+      else if (le(hist[i], 0)) { cur = dnC; vm = -1; }
     }
     pc[i] = cur;
+    lrS[i] = lr;
+    swtS[i] = swt;
+    vmS[i] = vm;
   }
 
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
@@ -165,13 +178,13 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // barcolor(pc, title = "Bar Color")
-    if (pc[i] !== null) barColors.push({ time: t, color: pc[i] as string });
+    if (pc[i] !== null) barColors.push({ time: t, color: pc[i] as string, id: 'barcolor0' });
     // bgcolor(hist_type > u2 ? color.new(DnC, 75) : hist_type < l2 ? color.new(UpC, 75) : na), in the indicator pane
     // and again with force_overlay = true on the price pane
     const bg = gt(histType[i], u2[i]) ? dnFill : lt(histType[i], l2[i]) ? upFill : null;
     if (bg !== null) {
-      bgColors.push({ time: t, color: bg });
-      bgColors.push({ time: t, color: bg, forceOverlay: true });
+      bgColors.push({ time: t, color: bg, id: 'bgcolor0' });
+      bgColors.push({ time: t, color: bg, forceOverlay: true, id: 'bgcolor1' });
     }
   }
 
@@ -196,8 +209,23 @@ export function calculate(
     ],
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [
+      lrS.map((v) => v === 1), lrS.map((v) => v === -1),
+      swtS.map((v) => v === 1), swtS.map((v) => v === -1),
+      vmS.map((v) => v === 1), vmS.map((v) => v === -1),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Linear Volume MACD - Linear Regression Bull', message: 'Linear Volume MACD, linear regression mode is bullish {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Linear Volume MACD - Linear Regression Bearish', message: 'Linear Volume MACD, linear regression mode is bearish {{exchange}}:{{ticker}}' },
+  { id: 'alert2', title: 'Linear Volume MACD - Strong/Weak Trend Bull', message: 'Linear Volume MACD, strong/weak trend mode is bullish {{exchange}}:{{ticker}}' },
+  { id: 'alert3', title: 'Linear Volume MACD - Strong/Weak Trend Bearish', message: 'Linear Volume MACD, strong/weak trend mode is bearish {{exchange}}:{{ticker}}' },
+  { id: 'alert4', title: 'Linear Volume MACD - Volume MACD Bull', message: 'Linear Volume MACD, volume MACD mode is bullish {{exchange}}:{{ticker}}' },
+  { id: 'alert5', title: 'Linear Volume MACD - Volume MACD Bearish', message: 'Linear Volume MACD, volume MACD mode is bearish {{exchange}}:{{ticker}}' },
+];
 
 export const LinearVolumeMacdLyroRs = {
   calculate,
@@ -205,4 +233,5 @@ export const LinearVolumeMacdLyroRs = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

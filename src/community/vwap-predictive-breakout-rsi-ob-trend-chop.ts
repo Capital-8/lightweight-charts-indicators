@@ -8,6 +8,8 @@
  * signal mirrors it. As in the source, the cross needs close[1] < VWAP and the three-close confirmation needs
  * close[1] > VWAP, so the long / short signals never fire. Circles mark the bullish / bearish engulfing bars. The background is green when trending
  * (ADX > threshold, |EMA fast - EMA slow| > 0.15 * ATR and a clean candle), red otherwise (choppy).
+ * Alerts (alertcondition, `alerts` of the result): 'Predictive Long Entry' and 'Predictive Short Entry', true on the
+ * bars of the long / short signals (so, as in the original, never).
  *
  * Timeframes: Pine `ta.vwap` resets on each new trading day (anchor timeframe.change("1D")). When each bar is one
  * trading day or more, it resets on every bar, so the VWAP is hlc3 of the bar (na when the volume is 0 or na). On
@@ -25,6 +27,7 @@ import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, t
 import type { BgColorData, MarkerData } from '../types';
 import { barInterval } from '../bar-time';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { executeScript, ta as scriptTa, hlc3 as scriptHlc3 } from 'oakscriptjs/script';
 
 export interface VwapPredictiveBreakoutRsiObTrendChopInputs {
@@ -124,7 +127,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<VwapPredictiveBreakoutRsiObTrendChopInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -183,6 +186,7 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const bgTrend = String(color.new(color.green, 85));
   const bgChop = String(color.new(color.red, 85));
+  const upFlags: boolean[] = [], downFlags: boolean[] = [];
 
   let obBullLow = NaN; // var float obBullLow = na
   let obBearHigh = NaN; // var float obBearHigh = na
@@ -230,6 +234,8 @@ export function calculate(
 
     const predictUp = crossUp && volSpike && strongBody && aboveConfirm && rsiBull && nearBullOB && cleanCandle;
     const predictDown = crossDown && volSpike && strongBody && belowConfirm && rsiBear && nearBearOB && cleanCandle;
+    upFlags.push(predictUp);
+    downFlags.push(predictDown);
 
     if (predictUp) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: color.lime, text: '↑BUY',
@@ -251,8 +257,16 @@ export function calculate(
     plots: { plot0: bars.map((b, i) => ({ time: b.time, value: Number.isFinite(vwap[i]) ? vwap[i] : NaN })) },
     markers,
     bgColors,
+    // alertcondition(predictUp, "Predictive Long Entry") / alertcondition(predictDown, "Predictive Short Entry")
+    alerts: alertStates(alertConditions, bars, [upFlags, downFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Predictive Long Entry', message: 'Long: VWAP breakout + RSI + OB + Clean Candle' },
+  { id: 'alert1', title: 'Predictive Short Entry', message: 'Short: VWAP breakdown + RSI + OB + Clean Candle' },
+];
 
 export const VwapPredictiveBreakoutRsiObTrendChop = {
   calculate,
@@ -260,4 +274,5 @@ export const VwapPredictiveBreakoutRsiObTrendChop = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

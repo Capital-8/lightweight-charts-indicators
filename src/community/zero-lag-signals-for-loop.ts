@@ -8,6 +8,8 @@
  * condition. The basis, a gradient fill from the basis to hl2, trend change labels and bar colours follow the trend.
  * The presets replace length, volatility multiplier, loop end and thresholds, as in Pine. The Pine input
  * "Show Signal Markers" is not used by the Pine plots: the labels are always drawn, as in Pine.
+ * Alerts (alertcondition, `alerts` of the result): 'Zero Lag Signals Long' / 'Zero Lag Signals Short' when the trend
+ * crosses over / under 0.
  *
  * Reference: "Zero Lag Signals For Loop [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type ZeroLagPreset = 'Default' | 'Fast Response' | 'Smooth Trend';
 export type ZeroLagColorPreset = 'Classic' | 'Aqua' | 'Cosmic' | 'Cyber' | 'Neon' | 'Custom';
@@ -100,7 +103,7 @@ const COLOR_PRESETS: Record<Exclude<ZeroLagColorPreset, 'Custom'>, [string, stri
 export function calculate(
   bars: Bar[],
   inputs: Partial<ZeroLagSignalsForLoopInputs> = {}
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   let { length, volatilityMult, loopEnd, thresholdUp, thresholdDown } = cfg;
   const { presetConfig, loopStart, colorPreset, paintCandles, showBgLines } = cfg;
@@ -209,7 +212,15 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    // alertcondition(ta.crossover(trend, 0)) / alertcondition(ta.crossunder(trend, 0))
+    alerts: alertStates(alertConditions, bars, [crossedOver(trend, 0), crossedUnder(trend, 0)]),
   };
 }
 
-export const ZeroLagSignalsForLoop = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** alertcondition() calls of the original ({{exchange}} / {{ticker}} placeholders kept) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Zero Lag Signals Long', message: 'Zero Lag Signals Long {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Zero Lag Signals Short', message: 'Zero Lag Signals Short {{exchange}}:{{ticker}}' },
+];
+
+export const ZeroLagSignalsForLoop = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -9,6 +9,9 @@
  * divergence. The same is done with the lows and the last pivot low for positive divergences. A line joins the two
  * price points and a label gives the number of divergences (and the indicator names). Until the next pivot the line
  * and the label of a side are replaced by those of the next signal.
+ * Alerts (alertcondition, `alerts` of the result): 'Positive Divergence' / 'Negative Divergence' on the bars with at
+ * least the minimum number of regular divergences (hidden divergences off), 'Positive Hidden Divergence' /
+ * 'Negative Hidden Divergence' the same for hidden divergences (hidden divergences on).
  *
  * Reference: "Divergence for many indicator v3" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -17,6 +20,7 @@
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LineDrawingData, LabelData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DivergenceForManyIndicatorV3Inputs {
   lb: number;
@@ -165,7 +169,8 @@ class Registry<T> {
 export function calculate(
   bars: Bar[],
   inputs: Partial<DivergenceForManyIndicatorV3Inputs> = {},
-): Omit<IndicatorResult, 'markers' | 'lines' | 'labels'> & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[] } {
+): Omit<IndicatorResult, 'markers' | 'lines' | 'labels'> & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { lb, rb, showHidden, checkCut } = cfg;
@@ -280,6 +285,8 @@ export function calculate(
   const widthOf = (count: number) => (!cfg.changeWidth ? 2 : count <= 2 ? 2 : count <= 5 ? 3 : count <= 8 ? 4 : 5);
 
   const markers: MarkerData[] = [];
+  // posdivergence / negdivergence / hposdivergence / hnegdivergence >= showlimit (with not showhidden / showhidden)
+  const posFlags: boolean[] = [], negFlags: boolean[] = [], hposFlags: boolean[] = [], hnegFlags: boolean[] = [];
   let topc = 0;
   let botc = 0;
   let newAreaHigh = false;
@@ -320,6 +327,8 @@ export function calculate(
     }
     const negNames = emptyHigh && !Number.isNaN(nt) ? divergences(i, topc, 1) : [];
     const negText = textOf(negNames);
+    negFlags.push(!showHidden && negNames.length >= cfg.showLimit);
+    hnegFlags.push(showHidden && negNames.length >= cfg.showLimit);
 
     if (isTop) newAreaHigh = false;
     if (shown(negNames.length)) {
@@ -361,6 +370,8 @@ export function calculate(
       emptyLow = false;
     }
     const posNames = emptyLow && !Number.isNaN(nb) ? divergences(i, botc, -1) : [];
+    posFlags.push(!showHidden && posNames.length >= cfg.showLimit);
+    hposFlags.push(showHidden && posNames.length >= cfg.showLimit);
     let posText = '';
     for (const name of posNames) {
       // hidden search: the CMF line of the original starts again from the text of the negative side
@@ -394,8 +405,17 @@ export function calculate(
     markers,
     lines: lineRegistry.live.map((l) => l.data),
     labels: labelRegistry.live.map((l) => l.data),
+    alerts: alertStates(alertConditions, bars, [posFlags, negFlags, hposFlags, hnegFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Positive Divergence', message: 'Positive Divergence' },
+  { id: 'alert1', title: 'Negative Divergence', message: 'Negative Divergence' },
+  { id: 'alert2', title: 'Positive Hidden Divergence', message: 'Positive Hidden Divergence' },
+  { id: 'alert3', title: 'Negative Hidden Divergence', message: 'Negative Hidden Divergence' },
+];
 
 export const DivergenceForManyIndicatorV3 = {
   calculate,
@@ -403,4 +423,5 @@ export const DivergenceForManyIndicatorV3 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

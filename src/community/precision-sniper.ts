@@ -41,7 +41,11 @@
  * - A time between two bars is given as the time of the next bar, where it is drawn.
  * - Days (previous day high / low, session VWAP anchor) and the bars of the higher timeframe are built from the chart
  *   bars with the calendar rule of src/anchor-period.ts.
- * - The alert inputs are kept but alerts (alert() calls and 16 alert conditions) have no output.
+ * - Alerts: the 16 alertconditions of the original (`alerts` of the result: entries by grade, targets, stop exit,
+ *   position closed, stop changed, candidate cancelled, any entry), and its alert() call (`alertCalls`, once per bar
+ *   close): one batch per closed bar with events (entry / targets / stop changes / exit / candidate cancellation, as
+ *   the alert inputs select them), as text lines or as the JSON batch ('JSON event batch'). The texts and ids use the
+ *   ticker id of the chart context (empty without it) and the chart timeframe.
  *
  * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
  * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
@@ -57,11 +61,17 @@ import {
   ta, Series, color, math, str, timeframe, time as pineTime, label, resetDrawings, setDrawingBar, resample, periodClose, periodTime, barsUntil,
   chartSessions, type Label, type SessionContext, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { BgColorData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TableMergeData, TablePosition } from '../types';
+import type {
+  AlertCall, BgColorData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TableMergeData, TablePosition,
+} from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { periodStarts, securityStarts, chartTimeframe, hasCalendar } from '../anchor-period';
 import {
-  backgroundColorOf, currencyOf, foregroundColorOf, lastBarConfirmedOf, mintickOf, type ChartContext,
+  backgroundColorOf, currencyOf, foregroundColorOf, lastBarConfirmedOf, mintickOf, tickeridOf, type ChartContext,
 } from '../chart-context';
+
+/** The script makes alert() calls (`alertCalls` of the result) */
+export const hasAlertFunction = true;
 
 type Corner = 'Top Right' | 'Top Left' | 'Middle Right' | 'Middle Left' | 'Bottom Right' | 'Bottom Left';
 
@@ -466,6 +476,10 @@ const na = (x: number) => !Number.isFinite(x);
 
 const fmt = (x: number) => (na(x) ? 'N/A' : str.tostring(x, '#.##'));
 const qtyFmt = (x: number) => (na(x) ? 'N/A' : str.tostring(x, '#.################'));
+const jsonNum = (x: number) => (na(x) ? 'null' : str.tostring(x, '#.################'));
+/** escape(): backslash, quote, line feed, carriage return and tab as JSON escapes */
+const escape = (x: string) => x.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r')
+  .replace(/\t/g, '\\t');
 const gradeOf = (ratio: number) => (ge(ratio, 0.8) ? 'A+' : ge(ratio, 0.65) ? 'A' : ge(ratio, 0.5) ? 'B' : 'C');
 const gradeIndex = (g: string) => (g === 'A+' ? 0 : g === 'A' ? 1 : g === 'B' ? 2 : 3);
 const directionName = (d: number) => (d === 1 ? 'Long' : d === -1 ? 'Short' : 'None');
@@ -500,6 +514,8 @@ function rejectReason(code: number): string {
 interface Trade {
   active: boolean;
   dir: number;
+  /** instance tag : ticker id : timeframe : close time of the entry bar */
+  id: string;
   entryBar: number;
   entryTime: number;
   entry: number;
@@ -530,7 +546,7 @@ interface Trade {
 }
 
 const newTrade = (): Trade => ({
-  active: false, dir: 0, entryBar: NaN, entryTime: NaN, entry: NaN, initialStop: NaN, stop: NaN, risk: NaN, tp1: NaN, tp2: NaN,
+  active: false, dir: 0, id: '', entryBar: NaN, entryTime: NaN, entry: NaN, initialStop: NaN, stop: NaN, risk: NaN, tp1: NaN, tp2: NaN,
   tp3: NaN, hit1: false, hit2: false, hit3: false, remaining: 1, grossR: 0, costR: 0, score: NaN, maxScore: NaN, grade: '',
   regime: 0, origin: '', exitBar: NaN, exitTime: NaN, exitPrice: NaN, reason: '', ambiguous: false, mfe: 0, mae: 0,
 });
@@ -587,7 +603,11 @@ function periodEnd(start: number, tf: string): number {
   return start + timeframe.in_seconds(tf) * 1000;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = {}, chart?: ChartContext): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<PrecisionSniperInputs> = {},
+  chart?: ChartContext,
+): IndicatorResult & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   // Values of the chart context (fallbacks: dark chart colours, tick 0.01, every bar closed)
   const CHART_BG = backgroundColorOf(chart);
@@ -789,6 +809,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   let accepted = 0;
   let pendingDir = 0;
   let pendingBar = NaN;
+  let pendingId = '';
   let lastDecision = 'Waiting for crossover';
   let total = 0;
   let wins = 0;
@@ -820,6 +841,48 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
   const observe = (t: Trade, favorable: number, adverse: number) => {
     t.mfe = Math.max(t.mfe, Math.max(0, (t.dir * (favorable - t.entry)) / t.risk));
     t.mae = Math.max(t.mae, Math.max(0, (-t.dir * (adverse - t.entry)) / t.risk));
+  };
+
+  // Alerts: syminfo.tickerid (chart context) and timeframe.period; the events of the bar (JSON and text forms)
+  const tickerid = tickeridOf(chart);
+  const tfPeriod = chartTf;
+  const alertFlags: boolean[][] = Array.from({ length: 16 }, () => [] as boolean[]);
+  const alertCalls: AlertCall[] = [];
+  let events: string[] = [];
+  let texts: string[] = [];
+  /** method event(Trade t, events, texts, kind, level, enabled) on the bar of `time` / `timeClose` (ms) */
+  const tradeEvent = (t: Trade, kind: string, level: number, enabled: boolean, time: number, timeClose: number, close: number) => {
+    if (!enabled) return;
+    const eid = `${t.id}:${str.tostring(timeClose)}:${kind}`;
+    let message = `{"event_id":"${escape(eid)}","trade_id":"${escape(t.id)}","event_type":"${kind}","direction":"${directionName(t.dir)}",`
+      + `"bar_time":${str.tostring(time)}`;
+    message += `,"time_close":${str.tostring(timeClose)}`;
+    message += `,"entry":${jsonNum(t.entry)}`;
+    message += `,"level_price":${jsonNum(level)}`;
+    message += `,"bar_close":${jsonNum(close)}`;
+    message += `,"initial_stop":${jsonNum(t.initialStop)}`;
+    message += `,"new_stop":${jsonNum(t.stop)}`;
+    message += `,"stop_effective":"next_bar","tp1":${jsonNum(t.tp1)}`;
+    message += `,"tp2":${jsonNum(t.tp2)}`;
+    message += `,"tp3":${jsonNum(t.tp3)}`;
+    message += `,"remaining":${jsonNum(t.remaining)}`;
+    message += `,"position_closed":${t.active ? 'false' : 'true'}`;
+    message += `,"exit_reason":"${escape(t.reason)}","realized_net_r":${jsonNum(netR(t))}`;
+    message += `,"score":${jsonNum(t.score)}`;
+    message += `,"score_max":${jsonNum(t.maxScore)}`;
+    message += `,"grade":"${t.grade}","ambiguous_bar":${t.ambiguous ? 'true' : 'false'}}`;
+    events.push(message);
+    texts.push(`${tickerid} | ${tfPeriod} | ${directionName(t.dir)} | ${kind} | Level ${price(level)} | Stop ${price(t.stop)} | `
+      + `Remaining ${fmt(t.remaining * 100)}% | Model net ${fmt(netR(t))}R | ${t.reason} | `
+      + str.format_time(timeClose, 'yyyy-MM-dd HH:mm', sessionTZ));
+  };
+  /** candidateEvent(ev, tx, id, dir, why) */
+  const candidateEvent = (id: string, dir: number, why: string, timeClose: number) => {
+    if (!cfg.alertCandidate) return;
+    const eid = `${id}:${str.tostring(timeClose)}:candidate_cancelled`;
+    events.push(`{"event_id":"${escape(eid)}","candidate_id":"${escape(id)}","event_type":"candidate_cancelled",`
+      + `"direction":"${directionName(dir)}","time_close":${str.tostring(timeClose)},"reason":"${escape(why)}"}`);
+    texts.push(`${tickerid} | ${tfPeriod} | ${directionName(dir)} candidate cancelled | ${why}`);
   };
 
   // Drawings. Labels in the drawing registry of the library, with the label limit of indicator(); the properties of
@@ -948,13 +1011,26 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
     let confirmedBuy = false;
     let confirmedSell = false;
     let stopEvent = false;
+    let tp1Event = false;
+    let tp2Event = false;
+    let tp3Event = false;
+    let slEvent = false;
+    let exitEvent = false;
+    let cancelEvent = false;
+    events = [];
+    texts = [];
 
     if (confirmed) {
       // Candidate lifecycle, counted once per crossover
       if ((bullCross[i] || bearCross[i]) && dateAllowed && warmed) {
-        if (pendingDir !== 0) rejected[0] += 1;
+        if (pendingDir !== 0) {
+          candidateEvent(pendingId, pendingDir, 'Opposite crossover', timeClose);
+          cancelEvent = true;
+          rejected[0] += 1;
+        }
         pendingDir = bullCross[i] ? 1 : -1;
         pendingBar = i;
+        pendingId = `${cfg.instanceTag}:${tickerid}:${tfPeriod}:${str.tostring(timeClose)}`;
         candidates += 1;
       }
       let signal = 0;
@@ -976,6 +1052,8 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
           const terminal = lastChance || code === 5 || alreadyOpen || !dateAllowed;
           if (terminal) {
             rejected[alreadyOpen ? 0 : code] += 1;
+            candidateEvent(pendingId, pendingDir, lastDecision, timeClose);
+            cancelEvent = true;
             pendingDir = 0;
           }
         }
@@ -1002,17 +1080,24 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
           observe(trade, open, open);
           observe(trade, fillPrice, fillPrice);
           finish(fillPrice, !ne(oldStop, trade.initialStop) ? 'SL' : 'Step stop');
+          slEvent = true;
         } else {
           if (touch1) {
             trade.hit1 = true;
             takePartial(trade, trade.tp1, cfg.tp1Pct / 100);
+            tp1Event = true;
+            tradeEvent(trade, 'tp1_hit', trade.tp1, cfg.alertTargets, time, timeClose, close);
           }
           if (touch2) {
             trade.hit2 = true;
             takePartial(trade, trade.tp2, cfg.tp2Pct / 100);
+            tp2Event = true;
+            tradeEvent(trade, 'tp2_hit', trade.tp2, cfg.alertTargets, time, timeClose, close);
           }
           if (touch3) {
             trade.hit3 = true;
+            tp3Event = true;
+            tradeEvent(trade, 'tp3_hit', trade.tp3, cfg.alertTargets, time, timeClose, close);
             if (cfg.fullTP3) {
               observe(trade, open, open);
               observe(trade, trade.tp3, trade.tp3);
@@ -1030,6 +1115,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
               if (gt(trade.dir * (nextStop - trade.stop), MINTICK * 0.1)) {
                 trade.stop = nextStop;
                 stopEvent = true;
+                tradeEvent(trade, 'stop_changed', nextStop, cfg.alertStopMove, time, timeClose, close);
               }
             }
           }
@@ -1037,6 +1123,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
 
         if (!trade.active) {
           // Single accounting path for every complete exit, after all partial fills
+          exitEvent = true;
           const realized = netR(trade);
           total += 1;
           totalR += realized;
@@ -1066,6 +1153,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
             groupN[bucket] += 1;
             groupR[bucket] += realized;
           }
+          tradeEvent(trade, 'exit', trade.exitPrice, cfg.alertExit, time, timeClose, close);
           journal.unshift(trade);
           if (journal.length > JOURNAL_MAX) journal.pop();
           if (cfg.showExits) {
@@ -1085,7 +1173,8 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
         const plan = makePlan(signal);
         const score = signal === 1 ? bullScore : bearScore;
         trade = {
-          ...newTrade(), active: true, dir: signal, entryBar: i, entryTime: timeClose, entry: plan.e, initialStop: plan.stop,
+          ...newTrade(), active: true, dir: signal, id: `${cfg.instanceTag}:${tickerid}:${tfPeriod}:${str.tostring(timeClose)}`,
+          entryBar: i, entryTime: timeClose, entry: plan.e, initialStop: plan.stop,
           stop: plan.stop, risk: plan.risk, tp1: plan.p1, tp2: plan.p2, tp3: plan.p3, score, maxScore: scoreMax,
           grade: gradeOf(score / scoreMax), regime, origin: plan.origin,
         };
@@ -1093,6 +1182,7 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
         firstEntryAt = Number.isNaN(firstEntryAt) ? timeClose : firstEntryAt;
         confirmedBuy = signal === 1;
         confirmedSell = signal === -1;
+        tradeEvent(trade, 'entry', plan.e, cfg.alertEntry, time, timeClose, close);
         if (cfg.showSignals) {
           newLabel({
             time, price: signal === 1 ? low : high, text: directionName(signal) + (cfg.showGradeInput ? ` ${trade.grade}` : ''),
@@ -1104,6 +1194,23 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
         }
       }
     }
+
+    // One confirmed batch: alert(webhookInput ? payload : array.join(texts, "\n"), alert.freq_once_per_bar_close)
+    if (confirmed && events.length > 0) {
+      const payload = `{"schema_version":2,"script_version":"${VERSION}","instance":"${escape(cfg.instanceTag)}",`
+        + `"ticker":"${escape(tickerid)}","tf":"${tfPeriod}","execution_model":"close_entry_old_stop_first_next_bar_trail",`
+        + `"events":[${events.join(',')}]}`;
+      alertCalls.push({ time: bar.time, message: cfg.webhookInput ? payload : texts.join('\n'), freq: 'once_per_bar_close' });
+    }
+    // The alertconditions of the bar (grade: the trade after the bar, the new one on an entry)
+    const isA = trade.grade === 'A+' || trade.grade === 'A';
+    [
+      confirmedBuy, confirmedSell,
+      confirmedBuy && trade.grade === 'A+', confirmedSell && trade.grade === 'A+',
+      confirmedBuy && isA, confirmedSell && isA,
+      confirmedBuy && trade.grade !== 'C', confirmedSell && trade.grade !== 'C',
+      tp1Event, tp2Event, tp3Event, slEvent, exitEvent, stopEvent, cancelEvent, confirmedBuy || confirmedSell,
+    ].forEach((f, k) => alertFlags[k].push(f));
 
     // Plots
     const t = bar.time;
@@ -1482,7 +1589,29 @@ export function calculate(bars: Bar[], inputs: Partial<PrecisionSniperInputs> = 
     lines,
     labels,
     tables,
+    alerts: alertStates(alertConditions, bars, alertFlags),
+    alertCalls,
   };
 }
 
-export const PrecisionSniper = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Confirmed BUY {{ticker}} {{interval}} at {{close}}' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Confirmed SELL {{ticker}} {{interval}} at {{close}}' },
+  { id: 'alert2', title: 'Buy A+ only', message: 'BUY A+ {{ticker}} {{interval}}' },
+  { id: 'alert3', title: 'Sell A+ only', message: 'SELL A+ {{ticker}} {{interval}}' },
+  { id: 'alert4', title: 'Buy A+ and A', message: 'BUY A+/A {{ticker}} {{interval}}' },
+  { id: 'alert5', title: 'Sell A+ and A', message: 'SELL A+/A {{ticker}} {{interval}}' },
+  { id: 'alert6', title: 'Buy B or better', message: 'BUY B+ {{ticker}} {{interval}}' },
+  { id: 'alert7', title: 'Sell B or better', message: 'SELL B+ {{ticker}} {{interval}}' },
+  { id: 'alert8', title: 'TP1 Hit', message: 'Model TP1 {{ticker}} {{interval}} (bar close {{close}} is not fill price)' },
+  { id: 'alert9', title: 'TP2 Hit', message: 'Model TP2 {{ticker}} {{interval}}' },
+  { id: 'alert10', title: 'TP3 Hit', message: 'Model TP3 {{ticker}} {{interval}}' },
+  { id: 'alert11', title: 'Stop Hit', message: 'Model stop exit {{ticker}} {{interval}}' },
+  { id: 'alert12', title: 'Position Closed', message: 'Model position closed {{ticker}} {{interval}}' },
+  { id: 'alert13', title: 'Stop Changed', message: 'Model stop changed for NEXT bar {{ticker}} {{interval}}' },
+  { id: 'alert14', title: 'Candidate Cancelled', message: 'Candidate expired/cancelled {{ticker}} {{interval}}' },
+  { id: 'alert15', title: 'Any Signal', message: 'Confirmed entry {{ticker}} {{interval}}' },
+];
+
+export const PrecisionSniper = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction };

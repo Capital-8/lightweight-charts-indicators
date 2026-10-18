@@ -6,6 +6,7 @@
  * weighted mean of the elements, with triangular weights (1, 2, ..., 2, 1: distance to the nearer edge + 1).
  * The trend turns long when the output rises and short when it falls. The line and the candles take the trend
  * colour; gradient fills join the line and the close, and thin fills (6 % of ATR 14) mark the close edge.
+ * Alerts (alertcondition, `alerts` of the result): the trend turning long / short, the close crossing the filter.
  * The Pine 'Line Width' input is not ported: the plot width is fixed by plotConfig (the Pine default, 3).
  *
  * Reference: "Laguerre Filter [BackQuant]" by BackQuant
@@ -15,6 +16,7 @@
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LaguerreFilterInputs {
   /** Laguerre price source */
@@ -73,7 +75,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<LaguerreFilterInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: { toArray(): (number | null | undefined)[] }) => s.toArray().map((v) => v ?? NaN);
@@ -158,8 +160,22 @@ export function calculate(
       { plot1: 'plot1', plot2: 'plot3', options: { title: 'Bear Edge' }, colors: bearEdge },
     ],
     barColors,
+    alerts: alertStates(alertConditions, bars, [
+      // filter.isLong() and not filter.isLong()[1] (false before the first bar)
+      idx.map((i) => trendArr[i] === 1 && !(i > 0 && trendArr[i - 1] === 1)),
+      idx.map((i) => trendArr[i] === -1 && !(i > 0 && trendArr[i - 1] === -1)),
+      // ta.cross(close, filter.value)
+      ((up, dn) => up.map((u, i) => u || dn[i]))(crossedOver(close, value), crossedUnder(close, value)),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Laguerre Long', message: 'Laguerre Filter turned bullish {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Laguerre Short', message: 'Laguerre Filter turned bearish {{exchange}}:{{ticker}}' },
+  { id: 'alert2', title: 'Price Cross', message: 'Price crossed Laguerre Filter {{exchange}}:{{ticker}}' },
+];
 
 export const LaguerreFilter = {
   calculate,
@@ -167,4 +183,5 @@ export const LaguerreFilter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

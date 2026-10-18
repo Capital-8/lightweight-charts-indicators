@@ -9,6 +9,8 @@
  * crosses of MA 1 with the oversold / overbought levels, circles the MA crosses with MA 1 inside a range, and pivot
  * divergences between MA 1 and the price give Bull Div / Bear Div labels. The overbought / oversold lines are more
  * opaque as MA 1 gets closer to them; gradient fills go from MA 1 to zero.
+ * Alerts (alertcondition, `alerts` of the result): long / short (triangles), bull / bear cross in range (circles),
+ * histogram peak up / down (diamonds) and bullish / bearish divergence (on the bar where the pivot is confirmed).
  *
  * Reference: "VCO Fusion" by Uncle_the_shooter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -17,6 +19,7 @@
 
 import { taCore, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 
 export interface VcoFusionInputs {
@@ -160,7 +163,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<VcoFusionInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const triangleOffset = 6.0;
@@ -269,6 +272,8 @@ export function calculate(
     { topValue: new Array(n), bottomValue: new Array(n), topColor: new Array(n), bottomColor: new Array(n) };
 
   let trendUp = true; // var bool trendUp = true
+  /** One flag per bar for each alertcondition, in the original's order */
+  const flags: boolean[][] = Array.from({ length: 8 }, () => new Array(n).fill(false));
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const up = crossUp(i);
@@ -303,30 +308,44 @@ export function calculate(
     const h = hist[i];
     const h1 = i >= 1 ? hist[i - 1] : NaN;
     const h2 = i >= 2 ? hist[i - 2] : NaN;
-    if (lt(h, h1) && gt(h1, h2) && gt(h1, cfg.histPeakUpper) && !isNaN(h)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: h, shape: 'diamond', color: cfg.colBearMain, size: 'tiny' });
+    const histTurnDown = lt(h, h1) && gt(h1, h2) && gt(h1, cfg.histPeakUpper);
+    const histTurnUp = gt(h, h1) && lt(h1, h2) && lt(h1, cfg.histPeakLower);
+    if (histTurnDown && !isNaN(h)) {
+      markers.push({ time: t, position: 'atPriceMiddle', price: h, shape: 'diamond', color: cfg.colBearMain, size: 'tiny', id: 'shape0' });
     }
-    if (gt(h, h1) && lt(h1, h2) && lt(h1, cfg.histPeakLower) && !isNaN(h)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: h, shape: 'diamond', color: cfg.colBullMain, size: 'tiny' });
+    if (histTurnUp && !isNaN(h)) {
+      markers.push({ time: t, position: 'atPriceMiddle', price: h, shape: 'diamond', color: cfg.colBullMain, size: 'tiny', id: 'shape1' });
     }
     // Triangles: MA 1 crosses the oversold / overbought levels
-    if (crossoverLevel(i, cfg.oversold)) {
+    const longSignal = crossoverLevel(i, cfg.oversold);
+    const shortSignal = crossunderLevel(i, cfg.overbought);
+    if (longSignal) {
       markers.push({ time: t, position: 'atPriceMiddle', price: cfg.oversold - triangleOffset, shape: 'triangleUp',
-        color: cfg.colBullMain, size: 'tiny' });
+        color: cfg.colBullMain, size: 'tiny', id: 'shape2' });
     }
-    if (crossunderLevel(i, cfg.overbought)) {
+    if (shortSignal) {
       markers.push({ time: t, position: 'atPriceMiddle', price: cfg.overbought + triangleOffset, shape: 'triangleDown',
-        color: cfg.colBearMain, size: 'tiny' });
+        color: cfg.colBearMain, size: 'tiny', id: 'shape3' });
     }
     // Circles: MA crosses with MA 1 inside the filter range
-    if (up && ge(ma1[i], cfg.bullCircleLower) && le(ma1[i], cfg.bullCircleUpper)) {
+    const bullCrossSignal = up && ge(ma1[i], cfg.bullCircleLower) && le(ma1[i], cfg.bullCircleUpper);
+    const bearCrossSignal = down && ge(ma1[i], cfg.bearCircleLower) && le(ma1[i], cfg.bearCircleUpper);
+    if (bullCrossSignal) {
       markers.push({ time: t, position: 'atPriceMiddle', price: cfg.oversold - circleOffset, shape: 'circle',
-        color: cfg.colBullMain, size: 'tiny' });
+        color: cfg.colBullMain, size: 'tiny', id: 'shape4' });
     }
-    if (down && ge(ma1[i], cfg.bearCircleLower) && le(ma1[i], cfg.bearCircleUpper)) {
+    if (bearCrossSignal) {
       markers.push({ time: t, position: 'atPriceMiddle', price: cfg.overbought + circleOffset, shape: 'circle',
-        color: cfg.colBearMain, size: 'tiny' });
+        color: cfg.colBearMain, size: 'tiny', id: 'shape5' });
     }
+    flags[0][i] = longSignal;
+    flags[1][i] = shortSignal;
+    flags[2][i] = bullCrossSignal;
+    flags[3][i] = bearCrossSignal;
+    flags[4][i] = histTurnUp;
+    flags[5][i] = histTurnDown;
+    flags[6][i] = cfg.showDivergence && bullCond[i];
+    flags[7][i] = cfg.showDivergence && bearCond[i];
 
     // Divergences, offset = -lookbackRight: the value of bar i is drawn on bar i - lb
     if (i - lb >= 0) {
@@ -338,11 +357,11 @@ export function calculate(
         color: bearCond[i] ? cfg.bearDivColor : noDiv });
       if (cfg.showDivergence && bullCond[i] && !isNaN(o)) {
         markers.push({ time: tp, position: 'atPriceBottom', price: o, shape: 'labelUp', color: bullLabel,
-          text: 'Bull Div', textColor: cfg.divTextColor, size: 'tiny' });
+          text: 'Bull Div', textColor: cfg.divTextColor, size: 'tiny', id: 'shape6' });
       }
       if (cfg.showDivergence && bearCond[i] && !isNaN(o)) {
         markers.push({ time: tp, position: 'atPriceTop', price: o, shape: 'labelDown', color: bearLabel,
-          text: 'Bear Div', textColor: cfg.divTextColor, size: 'tiny' });
+          text: 'Bear Div', textColor: cfg.divTextColor, size: 'tiny', id: 'shape7' });
       }
     }
   }
@@ -360,8 +379,21 @@ export function calculate(
       { plot1: 'plot4', plot2: 'plot5', colors: trendColors },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Signal', message: 'VCO Long Signal – MA1 crossed above Oversold' },
+  { id: 'alert1', title: 'Short Signal', message: 'VCO Short Signal – MA1 crossed below Overbought' },
+  { id: 'alert2', title: 'Bull Cross (Range Filter)', message: 'VCO Bull Cross – MA1 crossed above MA2 in bull range' },
+  { id: 'alert3', title: 'Bear Cross (Range Filter)', message: 'VCO Bear Cross – MA1 crossed below MA2 in bear range' },
+  { id: 'alert4', title: 'Histogram Peak Up', message: 'VCO Histogram turned UP (bullish wave turn)' },
+  { id: 'alert5', title: 'Histogram Peak Down', message: 'VCO Histogram turned DOWN (bearish wave turn)' },
+  { id: 'alert6', title: 'Bullish Divergence', message: 'VCO Bullish Divergence detected on MA1' },
+  { id: 'alert7', title: 'Bearish Divergence', message: 'VCO Bearish Divergence detected on MA1' },
+];
 
 export const VcoFusion = {
   calculate,
@@ -370,4 +402,5 @@ export const VcoFusion = {
   inputConfig,
   plotConfig,
   hlineConfig,
+  alertConditions,
 };

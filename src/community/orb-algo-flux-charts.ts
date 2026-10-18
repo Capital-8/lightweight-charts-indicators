@@ -16,6 +16,8 @@
  * range lines and "Buy" / "Sell" labels of the ranges that start in the last 5,000 bars, the ORB dashboard (signal,
  * entry price, current profit, stop and targets) and the backtesting table (days, wins, losses, win rate, average
  * and total profit in %, with the "Backtesting Exit Ratios" of the three take profits).
+ * Alerts (alertcondition, `alerts` of the result): 'Buy / Sell' on an entry bar, 'Take Profit' on a bar that reaches
+ * a take profit, 'Stop Loss' on a bar that hits the stop (closed bars only, as the original).
  *
  * Chart context (third argument), all optional:
  * - Regular session hours and exchange time zone: a range starts on the first bar of the regular session, as in the
@@ -48,6 +50,7 @@ import {
 import type { LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TableMergeData, TablePosition } from '../types';
 import { chartTimeframe, periodStarts, sessionFlags } from '../anchor-period';
 import { lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type Position = 'Top Right' | 'Right Center' | 'Top Center';
 
@@ -195,7 +198,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<OrbAlgoFluxChartsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[] } {
+): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -204,6 +208,7 @@ export function calculate(
   let labels: LabelData[] = [];
   const tables: TableData[] = [];
   const plot0: Array<{ time: number; value: number }> = [];
+  const entryFlags: boolean[] = [], tpFlags: boolean[] = [], slFlags: boolean[] = [];
   const result = () => ({
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
@@ -211,6 +216,8 @@ export function calculate(
     lines,
     labels,
     tables,
+    // alertcondition(foundEntryTick, "Buy / Sell") / (foundTPTick, "Take Profit") / (foundSLTick, "Stop Loss")
+    alerts: alertStates(alertConditions, bars, [entryFlags, tpFlags, slFlags]),
   });
   if (n === 0) return result();
 
@@ -284,6 +291,7 @@ export function calculate(
     let tp2Found = false;
     let tp3Found = false;
     let slFound = false;
+    let entryFound = false;
 
     // `last_bar_index - bar_index < last_bar_index`: the first bar is left out
     if (i > 0 && i <= lastClosed) {
@@ -333,6 +341,7 @@ export function calculate(
           }
           if (cur.retests >= retestsNeededForEntry) {
             orb.state = 'Entry Taken';
+            entryFound = true;
             orb.entryATR = atr[i];
             orb.entryIndex = i;
             orb.entryPrice = b.close;
@@ -405,20 +414,28 @@ export function calculate(
       }
     }
 
+    entryFlags.push(entryFound);
+    tpFlags.push(tp1Found || tp2Found || tp3Found);
+    slFlags.push(slFound);
+
     // Markers (the series is the close: a close of 0 draws nothing)
     if (i > last - RENDER_MAX_BARS_BACK && b.close !== 0 && !isNaN(b.close)) {
-      const mark = (t: number, above: boolean, text: string, col: string) => markers.push({
-        time: t, position: above ? 'aboveBar' : 'belowBar', shape: 'xcross', color: col, text, textColor: WHITE, size: 'tiny',
+      // `id`: the plotshape of the original (an even id for a long trade, the next one for a short trade)
+      const mark = (id: string, t: number, above: boolean, text: string, col: string) => markers.push({
+        id, time: t, position: above ? 'aboveBar' : 'belowBar', shape: 'xcross', color: col, text, textColor: WHITE, size: 'tiny',
       });
       if (lastORB !== null) {
         const bull = lastORB.entryBullish;
-        if (tp1Found) mark(time, bull, 'TP 1', BLUE);
-        if (tp2Found) mark(time, bull, 'TP 2', BLUE);
-        if (tp3Found) mark(time, bull, 'TP 3', BLUE);
-        if (slFound) mark(time, !bull, 'SL', RED);
+        if (tp1Found) mark(bull ? 'shape0' : 'shape1', time, bull, 'TP 1', BLUE);
+        if (tp2Found) mark(bull ? 'shape2' : 'shape3', time, bull, 'TP 2', BLUE);
+        if (tp3Found) mark(bull ? 'shape4' : 'shape5', time, bull, 'TP 3', BLUE);
+        if (slFound) mark(bull ? 'shape6' : 'shape7', time, !bull, 'SL', RED);
       }
       // offset = -1: on the last bar of the range that ended
-      if (previousORB !== null) mark(bars[i - 1].time, !previousORB.entryBullish, 'Exit', RED);
+      if (previousORB !== null) {
+        const bull = previousORB.entryBullish;
+        mark(bull ? 'shape8' : 'shape9', bars[i - 1].time, !bull, 'Exit', RED);
+      }
     }
   }
 
@@ -555,7 +572,15 @@ export function calculate(
   return result();
 }
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy / Sell', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Take Profit', message: 'Alert Fired!' },
+  { id: 'alert2', title: 'Stop Loss', message: 'Alert Fired!' },
+];
+
 export const OrbAlgoFluxCharts = {
+  alertConditions,
   calculate,
   metadata,
   defaultInputs,

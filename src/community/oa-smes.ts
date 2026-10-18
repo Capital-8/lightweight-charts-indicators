@@ -123,22 +123,23 @@ export function calculate(
   const filtered = bars.map((b, i) => i > 0 && entry[i - 1] && gt(b.close, bars[i - 1].close));
 
   const markers: MarkerData[] = [];
-  const circle = (time: number, price: number, c: string, size: 'small' | 'normal') => {
-    if (!isNaN(price)) markers.push({ time, position: 'atPriceMiddle', price, shape: 'circle', color: c, size });
+  // id: the plotshape output (shape0..shape5 in declaration order)
+  const circle = (time: number, price: number, c: string, size: 'small' | 'normal', id: string) => {
+    if (!isNaN(price)) markers.push({ time, position: 'atPriceMiddle', price, shape: 'circle', color: c, size, id });
   };
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     if (entry[i]) {
-      circle(t, smf[i], ENTRY_COLOR, 'small');
-      if (cfg.showGlow) circle(t, smf[i], ENTRY_GLOW_COLOR, 'normal');
+      circle(t, smf[i], ENTRY_COLOR, 'small', 'shape0');
+      if (cfg.showGlow) circle(t, smf[i], ENTRY_GLOW_COLOR, 'normal', 'shape1');
     }
     if (filtered[i]) {
-      circle(t, smf[i], ENTRY_COLOR_2, 'small');
-      if (cfg.showGlow) circle(t, smf[i], ENTRY_GLOW_COLOR_2, 'normal');
+      circle(t, smf[i], ENTRY_COLOR_2, 'small', 'shape2');
+      if (cfg.showGlow) circle(t, smf[i], ENTRY_GLOW_COLOR_2, 'normal', 'shape3');
     }
     if (exit[i]) {
-      circle(t, smf[i], EXIT_COLOR, 'small');
-      if (cfg.showGlow) circle(t, smf[i], EXIT_GLOW_COLOR, 'normal');
+      circle(t, smf[i], EXIT_COLOR, 'small', 'shape4');
+      if (cfg.showGlow) circle(t, smf[i], EXIT_GLOW_COLOR, 'normal', 'shape5');
     }
   }
 

@@ -71,15 +71,15 @@ export function calculate(
 
     // plotshape(largeBearishSetup, "Large Bearish Setup", location.belowbar, color.yellow, shape.circle, size.tiny)
     if (largeBearishSetup) {
-      markers.push({ time: t, position: 'belowBar', shape: 'circle', color: color.yellow, size: 'tiny' });
+      markers.push({ time: t, position: 'belowBar', shape: 'circle', color: color.yellow, size: 'tiny', id: 'shape0' });
     }
     // plotshape(bullishReversal, "Bullish Reversal", location.belowbar, color.green, shape.circle, size.small, offset = -1)
     if (bullishReversal) {
-      markers.push({ time: bars[i - 1].time, position: 'belowBar', shape: 'circle', color: color.green, size: 'small' });
+      markers.push({ time: bars[i - 1].time, position: 'belowBar', shape: 'circle', color: color.green, size: 'small', id: 'shape1' });
     }
     // plotshape(bearishReversal, "Bearish Reversal", location.belowbar, color.red, shape.circle, size.small, offset = -1)
     if (bearishReversal) {
-      markers.push({ time: bars[i - 1].time, position: 'belowBar', shape: 'circle', color: color.red, size: 'small' });
+      markers.push({ time: bars[i - 1].time, position: 'belowBar', shape: 'circle', color: color.red, size: 'small', id: 'shape2' });
     }
 
     if (largeBearishSetup) {

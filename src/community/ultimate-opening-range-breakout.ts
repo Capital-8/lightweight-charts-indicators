@@ -31,6 +31,10 @@
  * which is exact on symbols that trade 24 hours a day. `timeframe`, when given, is the chart timeframe; without it
  * the chart timeframe is read from the bar spacing.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish ORB' / 'Bearish ORB' on the bars where the close crosses
+ * the range high / low after the session, and the two 'Target 3 Reached' conditions on the bars where the close
+ * crosses the third upper / lower extension level (either way).
+ *
  * Reference: "Ultimate Opening Range Breakout [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © LuxAlgo
@@ -43,6 +47,7 @@ import {
 import { chartTimeframe, hasCalendar } from '../anchor-period';
 import { barInterval, barTime } from '../bar-time';
 import { foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import type { BgColorData, BoxData, LabelData, TableCellData, TableData, TableMergeData } from '../types';
 
 export interface UltimateOpeningRangeBreakoutInputs {
@@ -263,7 +268,7 @@ export function calculate(
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'labels' | 'tables'> & {
   bgColors: BgColorData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -345,6 +350,10 @@ export function calculate(
   const bearClear = String(color.new(bearColor, 100));
   let u = [NaN, NaN, NaN];
   let d = [NaN, NaN, NaN];
+  const upFlags: boolean[] = [];
+  const dnFlags: boolean[] = [];
+  const u3s: number[] = [];
+  const d3s: number[] = [];
 
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === last);
@@ -412,6 +421,10 @@ export function calculate(
     const crossedDn = crossDn(b.close, orLow);
     const breakoutUp = crossedUp && !inSession && sessionEnded;
     const breakoutDn = crossedDn && !inSession && sessionEnded;
+    upFlags.push(breakoutUp);
+    dnFlags.push(breakoutDn);
+    u3s.push(u[2]);
+    d3s.push(d[2]);
 
     if (isNewDay || inSession) {
       canSignalUp = true;
@@ -648,6 +661,7 @@ export function calculate(
     bottomColor: bottom.map((): string | null => bottomColor),
   });
   const C = (css: string, transp: number) => String(color.new(css, transp));
+  const closes = bars.map((b) => b.close);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -672,7 +686,24 @@ export function calculate(
       time: T(l.x), price: l.y, text: l.text, color: l.color, textColor: WHITE, style: l.style, size: l.size as LabelData['size'],
     })),
     tables,
+    // alertcondition(breakoutUp / breakoutDn), alertcondition(ta.cross(close, u3) / ta.cross(close, d3))
+    alerts: alertStates(alertConditions, bars, [upFlags, dnFlags, crossOf(closes, u3s), crossOf(closes, d3s)]),
   };
 }
 
-export const UltimateOpeningRangeBreakout = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** PineScript ta.cross(a, b): a crosses b either way */
+function crossOf(a: number[], b: number[]): boolean[] {
+  const over = crossedOver(a, b);
+  const under = crossedUnder(a, b);
+  return over.map((v, i) => v || under[i]);
+}
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish ORB', message: 'Price broke above the opening range.' },
+  { id: 'alert1', title: 'Bearish ORB', message: 'Price broke below the opening range.' },
+  { id: 'alert2', title: 'Target 3 Reached', message: 'Price reached the final bullish target.' },
+  { id: 'alert3', title: 'Target 3 Reached', message: 'Price reached the final bearish target.' },
+];
+
+export const UltimateOpeningRangeBreakout = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

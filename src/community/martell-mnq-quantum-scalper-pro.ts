@@ -8,13 +8,18 @@
  * Only one trade at a time: stop loss and take profit at entry -+ 2.5 * ATR(14) (long) or entry +- 2.5 * ATR(14)
  * (short); the trade closes when the bar touches either level. The SL / TP lines and a green / red background show
  * the open trade. The script parameters are constants (no inputs).
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): one call on each bar of a long entry and
+ * one on each bar of a short entry, with the original's messages.
  *
  * Reference: "Martell MNQ Quantum Scalper Pro" by JMartell
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BgColorData, MarkerData } from '../types';
+import type { AlertCall, BgColorData, MarkerData } from '../types';
+
+/** The original makes alert() calls (`alertCalls` of the result) */
+export const hasAlertFunction = true;
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface MartellMnqQuantumScalperProInputs {}
@@ -60,7 +65,7 @@ const ATR_MULT = 2.5;
 export function calculate(
   bars: Bar[],
   _inputs: Partial<MartellMnqQuantumScalperProInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; alertCalls: AlertCall[] } {
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -99,6 +104,7 @@ export function calculate(
   };
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  const alertCalls: AlertCall[] = [];
   const bgLong = String(color.new(color.green, 90));
   const bgShort = String(color.new(color.red, 90));
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
@@ -151,6 +157,14 @@ export function calculate(
     // bgcolor(tradeState == 1 ? green 90 : tradeState == -1 ? red 90 : na, title = "Trade Window")
     if (tradeState === 1) bgColors.push({ time: b.time, color: bgLong });
     else if (tradeState === -1) bgColors.push({ time: b.time, color: bgShort });
+
+    // if triggerLong / triggerShort: alert(..., alert.freq_once_per_bar_close)
+    if (triggerLong) {
+      alertCalls.push({ time: b.time, message: '¡COMPRA MNQ! RR 1:1. Entrada detectada. Gestiona el riesgo.', freq: 'once_per_bar_close' });
+    }
+    if (triggerShort) {
+      alertCalls.push({ time: b.time, message: '¡VENTA MNQ! RR 1:1. Entrada detectada. Gestiona el riesgo.', freq: 'once_per_bar_close' });
+    }
   }
 
   return {
@@ -158,6 +172,7 @@ export function calculate(
     plots,
     markers,
     bgColors,
+    alertCalls,
   };
 }
 
@@ -167,4 +182,5 @@ export const MartellMnqQuantumScalperPro = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

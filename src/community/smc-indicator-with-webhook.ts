@@ -10,8 +10,10 @@
  * on confirmed bars only (an open last bar draws nothing new).
  *
  * The background shows four sessions, read in the America/New_York time zone. "Only Draw In Session" limits the
- * drawings and the fractal marks to bars inside a drawn session. The webhook alerts (alert() calls with a JSON message)
- * have no output in the port.
+ * drawings and the fractal marks to bars inside a drawn session.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar, on confirmed bars): the webhook messages (JSON text
+ * with the alert name and the price) of the sweeps (drawn sweeps only, "Sweep Alerts"), the MSS ("MSS Alerts") and the
+ * FVGs ("FVG Alerts"), each in a bar allowed by "Only Draw In Session".
  *
  * Reference: "Simple SMC Indicator" by sunwoo101
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,13 +21,16 @@
  */
 
 import {
-  timeframe, time as pineTime, line, label, box, resetDrawings, setDrawingBar,
+  timeframe, time as pineTime, line, label, box, resetDrawings, setDrawingBar, str,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { BgColorData, BoxData, LabelData, LineDrawingData, MarkerData } from '../types';
+import type { AlertCall, BgColorData, BoxData, LabelData, LineDrawingData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface SmcIndicatorWithWebhookInputs {
   onlyDrawInSession: boolean;
@@ -41,7 +46,7 @@ export interface SmcIndicatorWithWebhookInputs {
   drawFVG: boolean;
   bullishFVGColor: string;
   bearishFVGColor: string;
-  /** Name in the alert messages (alerts have no output in the port) */
+  /** Name in the alert messages */
   alertName: string;
   sweepAlerts: boolean;
   MSSAlerts: boolean;
@@ -149,6 +154,7 @@ export function calculate(
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'bgColors' | 'lines' | 'labels' | 'boxes'> & {
   markers: MarkerData[]; bgColors: BgColorData[]; lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[];
+  alertCalls: AlertCall[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = Math.trunc(cfg.fractalPeriod);
@@ -167,6 +173,13 @@ export function calculate(
   const markers: MarkerData[] = [];
   const interval = barInterval(bars);
   const T = (index: number) => barTime(bars, index, interval);
+
+  // alert(message): '{"content": "@everyone \\n[' + alertName + '] ...' + '"}' (a backslash and an n in the text)
+  const alertCalls: AlertCall[] = [];
+  const say = (time: number, body: string) => {
+    alertCalls.push({ time, message: '{"content": "@everyone \\n[' + cfg.alertName + '] ' + body + '"}', freq: 'once_per_bar' });
+  };
+  const S = (v: number) => str.tostring(v);
 
   let fractalHighBarIndex = NaN;
   let fractalLowBarIndex = NaN;
@@ -232,6 +245,7 @@ export function calculate(
           if (cfg.drawLQSweeps && sessionDraw) {
             line.new(fractalHighBarIndex, level, i, level, 'bar_index', 'none', cfg.sweepColor, 'solid', 1);
             label.new(fractalHighBarIndex, NaN, 'Swept', 'bar_index', 'abovebar', undefined, 'none', cfg.sweepColor, 'small');
+            if (cfg.sweepAlerts && sessionDraw) say(b.time, 'Buy side $$$ swept @ ' + S(level));
           }
           // Find MSS target
           let lowestLowOffset = 1;
@@ -250,6 +264,7 @@ export function calculate(
           if (cfg.drawLQSweeps && sessionDraw) {
             line.new(fractalLowBarIndex, level, i, level, 'bar_index', 'none', cfg.sweepColor, 'solid', 1);
             label.new(fractalLowBarIndex, NaN, 'Swept', 'bar_index', 'belowbar', undefined, 'none', cfg.sweepColor, 'small');
+            if (cfg.sweepAlerts && sessionDraw) say(b.time, 'Sell side $$$ swept @ ' + S(level));
           }
           let highestHighOffset = 1;
           for (let k = 1; k <= i - fractalLowBarIndex; k++) {
@@ -268,6 +283,7 @@ export function calculate(
             line.new(bearishMSSTargetBarIndex, level, i, level, 'bar_index', 'none', cfg.bearishMSSColor, 'solid', 2);
             label.new(i, NaN, 'MSS', 'bar_index', 'abovebar', undefined, 'none', cfg.bearishMSSColor, 'normal');
           }
+          if (cfg.MSSAlerts && sessionDraw) say(b.time, 'Bearish MSS through ' + S(level));
           bearishMSSTargetBarIndex = NaN;
         }
       }
@@ -280,6 +296,7 @@ export function calculate(
             line.new(bullishMSSTargetBarIndex, level, i, level, 'bar_index', 'none', cfg.bullishMSSColor, 'solid', 2);
             label.new(i, NaN, 'MSS', 'bar_index', 'belowbar', undefined, 'none', cfg.bullishMSSColor, 'normal');
           }
+          if (cfg.MSSAlerts && sessionDraw) say(b.time, 'Bullish MSS through ' + S(level));
           bullishMSSTargetBarIndex = NaN;
         }
       }
@@ -287,12 +304,18 @@ export function calculate(
       // Bullish FVG
       if (i >= 2) {
         const p1 = bars[i - 1];
-        if (gt(b.low, H(i - 2)) && gt(p1.close, p1.open) && sessionDraw && cfg.drawFVG) {
-          box.new(i - 2, b.low, i, H(i - 2), cfg.bullishFVGColor, 1, 'solid', 'none', 'bar_index', cfg.bullishFVGColor);
+        if (gt(b.low, H(i - 2)) && gt(p1.close, p1.open) && sessionDraw) {
+          if (cfg.drawFVG) {
+            box.new(i - 2, b.low, i, H(i - 2), cfg.bullishFVGColor, 1, 'solid', 'none', 'bar_index', cfg.bullishFVGColor);
+          }
+          if (cfg.FVGAlerts) say(b.time, 'Bullish FVG (' + S(H(i - 2)) + ' - ' + S(b.low) + ')');
         }
         // Bearish FVG
-        if (lt(b.high, L(i - 2)) && lt(p1.close, p1.open) && sessionDraw && cfg.drawFVG) {
-          box.new(i - 2, b.high, i, L(i - 2), cfg.bearishFVGColor, 1, 'solid', 'none', 'bar_index', cfg.bearishFVGColor);
+        if (lt(b.high, L(i - 2)) && lt(p1.close, p1.open) && sessionDraw) {
+          if (cfg.drawFVG) {
+            box.new(i - 2, b.high, i, L(i - 2), cfg.bearishFVGColor, 1, 'solid', 'none', 'bar_index', cfg.bearishFVGColor);
+          }
+          if (cfg.FVGAlerts) say(b.time, 'Bearish FVG (' + S(L(i - 2)) + ' - ' + S(b.high) + ')');
         }
       }
     }
@@ -323,6 +346,7 @@ export function calculate(
       time1: T(x.left), price1: x.top, time2: T(x.right), price2: x.bottom,
       bgColor: String(x.bgcolor), borderColor: String(x.border_color),
     })),
+    alertCalls,
   };
 }
 
@@ -332,4 +356,5 @@ export const SmcIndicatorWithWebhook = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

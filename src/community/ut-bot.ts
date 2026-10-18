@@ -3,12 +3,15 @@
  *
  * ATR-based trailing stop that flips direction with price.
  * Trailing stop = price ± (key * ATR). Ratchets in trend direction only.
+ * Alerts (alertcondition, `alerts` of the result): 'UT Long' when the close crosses over the stop (and is above it),
+ * 'UT Short' when the stop crosses over the close (and the close is below it).
  *
  * Reference: "UT Bot Alerts"
  */
 
 import { ta, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, crossedOver, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface UTBotInputs {
   keyValue: number;
@@ -35,7 +38,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<UTBotInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<UTBotInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const { keyValue, atrPeriod } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -86,12 +89,29 @@ export function calculate(bars: Bar[], inputs: Partial<UTBotInputs> = {}): Omit<
     }
   }
 
+  // buy = src > xATRTrailingStop and crossover(ema(src, 1), xATRTrailingStop); sell = src < xATRTrailingStop and
+  // crossover(xATRTrailingStop, ema(src, 1)) (ema of length 1 = src); the stop is taken after the ATR warm-up
+  const closes = bars.map((b) => b.close);
+  const stop = trailStop.map((v, i) => (i < warmup ? NaN : v));
+  const above = crossedOver(closes, stop);
+  const below = crossedOver(stop, closes);
+  const buy = closes.map((c, i) => c > stop[i] && above[i]);
+  const sell = closes.map((c, i) => c < stop[i] && below[i]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0 },
     markers,
     barColors,
+    // alertcondition(buy, "UT Long") / alertcondition(sell, "UT Short")
+    alerts: alertStates(alertConditions, bars, [buy, sell]),
   };
 }
 
-export const UTBot = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'UT Long', message: 'UT Long' },
+  { id: 'alert1', title: 'UT Short', message: 'UT Short' },
+];
+
+export const UTBot = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -6,6 +6,9 @@
  * label a close crossing below it; with the long filter on, a buy needs the close above the long MA and a sell the
  * close below it. The optional ADX filter (Wilder smoothing: s = s[1] - s[1] / len + x, ADX = SMA of DX) keeps only
  * the signals with ADX >= the threshold.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' / 'Sell Signal' on the bars of a buy / sell label
+ * that are closed (barstate.isconfirmed). The state of the last bar comes from the optional third argument (see
+ * src/chart-context.ts); without it every bar is taken as closed.
  *
  * Reference: "MA+ADX+LongPeriodFilter[yusufk]" by iping99
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +17,8 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SmaAdxFilterInputs {
   /** Main MA type */
@@ -76,8 +81,12 @@ const nz = (x: number) => (Number.isFinite(x) ? x : 0);
 export function calculate(
   bars: Bar[],
   inputs: Partial<SmaAdxFilterInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastBarOpen = !lastBarConfirmedOf(chart);
+  const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -115,16 +124,23 @@ export function calculate(
   // ta.crossover / ta.crossunder: exact comparisons, with the last bar where both values were not na
   const buyLogic = A(ta.crossover(closeS, S(maValue)));
   const sellLogic = A(ta.crossunder(closeS, S(maValue)));
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const close = closeArr[i];
     const adxFilter = cfg.useAdxFilter ? ge(adx[i], cfg.adxThreshold) : true;
     const longBuyFilter = cfg.useLongFilter ? gt(close, longMaValue[i]) : true;
     const longSellFilter = cfg.useLongFilter ? gt(longMaValue[i], close) : true;
-    if (Boolean(buyLogic[i]) && adxFilter && longBuyFilter) {
+    const buyCondition = Boolean(buyLogic[i]) && adxFilter && longBuyFilter;
+    const sellCondition = Boolean(sellLogic[i]) && adxFilter && longSellFilter;
+    // buyAlertCondition = buyCondition and barstate.isconfirmed; sell alike
+    buyFlags.push(buyCondition && barIsConfirmed(i));
+    sellFlags.push(sellCondition && barIsConfirmed(i));
+    if (buyCondition) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: color.green, text: 'B',
         textColor: color.white, size: 'small' });
     }
-    if (Boolean(sellLogic[i]) && adxFilter && longSellFilter) {
+    if (sellCondition) {
       markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: color.red, text: 'S',
         textColor: color.white, size: 'small' });
     }
@@ -139,8 +155,15 @@ export function calculate(
       plot1: bars.map((b, i) => ({ time: b.time, value: cfg.useLongFilter ? longMaValue[i] : NaN, color: color.orange })),
     },
     markers,
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Buy Signal' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Sell Signal' },
+];
 
 export const SmaAdxFilter = {
   calculate,
@@ -148,4 +171,5 @@ export const SmaAdxFilter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

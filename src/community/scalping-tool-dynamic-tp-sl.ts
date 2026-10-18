@@ -6,6 +6,7 @@
  * ATR). When the close reaches the take profit, the take profit is recalculated from that close. The long trade
  * ends on the next bearish cross; sell trades work the other way. The take profit and stop loss lines are drawn
  * while the trade is open.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' / 'Sell Signal', true on the bars of the labels.
  *
  * Reference: "Scalping Tool with Dynamic Take Profit & Stop Loss" by TruFREND
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ScalpingToolDynamicTPSLInputs {
   fastLength: number;
@@ -95,7 +97,7 @@ const ge = (a: number, b: number) => b - a <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<ScalpingToolDynamicTPSLInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -124,6 +126,7 @@ export function calculate(
   type Point = { time: number; value: number; color: string };
   const plots: Point[][] = Array.from({ length: 6 }, () => []);
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
@@ -139,6 +142,8 @@ export function calculate(
 
     const longSignal = trendUp && !inLong;
     const shortSignal = trendDown && !inShort;
+    longFlags.push(longSignal);
+    shortFlags.push(shortSignal);
 
     if (longSignal) {
       longEntry = c;
@@ -194,8 +199,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: Object.fromEntries(plots.map((p, k) => [`plot${k}`, p])),
     markers,
+    // alertcondition(long_signal, "Buy Signal") / alertcondition(short_signal, "Sell Signal")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Buy Signal' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Sell Signal' },
+];
 
 export const ScalpingToolDynamicTPSL = {
   calculate,
@@ -203,4 +216,5 @@ export const ScalpingToolDynamicTPSL = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

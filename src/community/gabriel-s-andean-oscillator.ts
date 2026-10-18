@@ -6,6 +6,9 @@
  * sqrt(dn2 - dn1^2), the bearish component the one of the upper envelope, sqrt(up2 - up1^2). "Double Smoothed"
  * uses the shorter envelope length and an EMA of each component. Optional components from envelopes of the high /
  * low, an optional ATR scaling, a signal line (EMA of the larger component) and a "Break" area sqrt(bull - bear).
+ * Alerts (alertcondition, `alerts` of the result): regime flips (bull crossing bear), driver / signal crosses, break
+ * turns (bull - bear crossing 0, with "Plot Breakes" on) and the flips confirmed by the high / low components (with
+ * "Use Highs and Lows?" on).
  *
  * Reference: "Gabriel's Andean Oscillator" by GabrielAmadeusLau
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +17,7 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface GabrielsAndeanOscillatorInputs {
   envelopeType: 'Regular' | 'Double Smoothed';
@@ -82,7 +86,10 @@ const nz = (x: number, y = 0) => (Number.isFinite(x) ? x : y);
 const max = (...a: number[]) => (a.some((v) => Number.isNaN(v)) ? NaN : Math.max(...a));
 const min = (...a: number[]) => (a.some((v) => Number.isNaN(v)) ? NaN : Math.min(...a));
 
-export function calculate(bars: Bar[], inputs: Partial<GabrielsAndeanOscillatorInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<GabrielsAndeanOscillatorInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { length, length1, length2, signalLength, breakOn, hilow, atrScale } = cfg;
   const regular = cfg.envelopeType === 'Regular';
@@ -185,11 +192,68 @@ export function calculate(bars: Bar[], inputs: Partial<GabrielsAndeanOscillatorI
     plot5: bars.map((_b, i) => ({ time: t(i), value: breakOn ? fin(Math.sqrt(bull[i] - bear[i])) : NaN })),
   };
 
+  // Alerts: crosses of bull / bear, of the driver (larger component) and the signal, of bull - bear and 0
+  const bullCrossUp = crossedOver(bull, bear);
+  const bearCrossDn = crossedUnder(bull, bear);
+  const driver = bull.map((b, i) => max(b, bear[i]));
+  const sigUp = crossedOver(driver, signal);
+  const sigDn = crossedUnder(driver, signal);
+  const diff = bull.map((b, i) => b - bear[i]);
+  const breakUp = crossedOver(diff, 0).map((f) => breakOn && f);
+  const breakDn = crossedUnder(diff, 0).map((f) => breakOn && f);
+  const bullConfirm = bullCrossUp.map((f, i) => hilow && f && gt(bull[i], bull2[i]));
+  const bearConfirm = bearCrossDn.map((f, i) => hilow && f && gt(bear[i], bear2[i]));
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
+    alerts: alertStates(alertConditions, bars, [bullCrossUp, bearCrossDn, sigUp, sigDn, breakUp, breakDn, bullConfirm, bearConfirm]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0',
+    title: 'Andean • Bullish Regime Flip',
+    message: '{{ticker}} {{interval}} • Andean Oscillator: Bull crossed ABOVE Bear (Bullish regime flip).',
+  },
+  {
+    id: 'alert1',
+    title: 'Andean • Bearish Regime Flip',
+    message: '{{ticker}} {{interval}} • Andean Oscillator: Bull crossed BELOW Bear (Bearish regime flip).',
+  },
+  {
+    id: 'alert2',
+    title: 'Andean • Signal Cross Up',
+    message: '{{ticker}} {{interval}} • Andean Oscillator: Driver crossed ABOVE Signal (bullish thrust).',
+  },
+  {
+    id: 'alert3',
+    title: 'Andean • Signal Cross Down',
+    message: '{{ticker}} {{interval}} • Andean Oscillator: Driver crossed BELOW Signal (bearish thrust).',
+  },
+  {
+    id: 'alert4',
+    title: 'Andean • Break Turned Positive',
+    message: '{{ticker}} {{interval}} • Andean Oscillator: Break turned POSITIVE (bull > bear).',
+  },
+  {
+    id: 'alert5',
+    title: 'Andean • Break Turned Negative',
+    message: '{{ticker}} {{interval}} • Andean Oscillator: Break turned NEGATIVE (bear > bull).',
+  },
+  {
+    id: 'alert6',
+    title: 'Andean • Bullish Regime Flip (Hi/Lo Confirmed)',
+    message: '{{ticker}} {{interval}} • Andean Oscillator: Bullish flip CONFIRMED by High/Low envelopes.',
+  },
+  {
+    id: 'alert7',
+    title: 'Andean • Bearish Regime Flip (Hi/Lo Confirmed)',
+    message: '{{ticker}} {{interval}} • Andean Oscillator: Bearish flip CONFIRMED by High/Low envelopes.',
+  },
+];
 
 export const GabrielsAndeanOscillator = {
   calculate,
@@ -197,4 +261,5 @@ export const GabrielsAndeanOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

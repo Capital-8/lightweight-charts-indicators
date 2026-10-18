@@ -284,18 +284,20 @@ export function calculate(
     // placesell = ta.highest(high, 5) + ta.ema(ta.tr, 20); placebuy = ta.lowest(low, 5) - ta.ema(ta.tr, 20)
     // plotshape(upper_retest ? placesell : na, 'Triangle Dn', shape.triangledown, location.absolute, retest_col_2, size.tiny)
     // plotshape(lower_retest ? placebuy : na, 'Triangle Up', shape.triangleup, location.absolute, retest_col_1, size.tiny)
-    // and the 'UI Only' copies: color.new(retest_col, 50), size.normal
+    // and the 'UI Only' copies: color.new(retest_col, 50), size.normal (ids shape0..shape3 in declaration order)
     const placeSell = hi5[i] + trEma[i];
     const placeBuy = lo5[i] - trEma[i];
     if (upperRetest[i] && !isNaN(placeSell)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: placeSell, shape: 'triangleDown', color: cfg.retestCol2, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: placeSell, shape: 'triangleDown', color: cfg.retestCol2, size: 'tiny',
+        id: 'shape0' });
       markers.push({ time: t, position: 'atPriceMiddle', price: placeSell, shape: 'triangleDown',
-        color: String(color.new(cfg.retestCol2, 50)), size: 'normal' });
+        color: String(color.new(cfg.retestCol2, 50)), size: 'normal', id: 'shape2' });
     }
     if (lowerRetest[i] && !isNaN(placeBuy)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: placeBuy, shape: 'triangleUp', color: cfg.retestCol1, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: placeBuy, shape: 'triangleUp', color: cfg.retestCol1, size: 'tiny',
+        id: 'shape1' });
       markers.push({ time: t, position: 'atPriceMiddle', price: placeBuy, shape: 'triangleUp',
-        color: String(color.new(cfg.retestCol1, 50)), size: 'normal' });
+        color: String(color.new(cfg.retestCol1, 50)), size: 'normal', id: 'shape3' });
     }
   }
 

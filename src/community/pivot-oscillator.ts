@@ -5,6 +5,8 @@
  * (pivot level 0 = lows, 1 = highs). The oscillator is 50 + 50 * (close - pivot line) / (ATR * multiplier),
  * clamped to 1..100, with glow plots and a four-layer fill towards 50. Its SMA is smoothed again by a second SMA,
  * coloured by its slope; crosses of the overbought / oversold levels give triangle signals.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy (Oversold)' / 'Sell (Overbought)', true on the bars of the
+ * triangle signals.
  *
  * Reference: "Pivot Oscillator" by Uncle_the_shooter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PivotOscillatorInputs {
   /** Pivot left / right bars */
@@ -141,7 +144,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<PivotOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -241,11 +244,15 @@ export function calculate(
   // (exact comparisons: crossover / crossunder have no 1e-10 tolerance)
   // plotshape(..., location.bottom / location.top, osColor / obColor, triangleup / triangledown, size.tiny).
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = new Array<boolean>(n).fill(false);
+  const shortFlags: boolean[] = new Array<boolean>(n).fill(false);
   for (let i = 1; i < n; i++) {
-    if (osc[i] > cfg.osLevel && osc[i - 1] <= cfg.osLevel) {
+    longFlags[i] = osc[i] > cfg.osLevel && osc[i - 1] <= cfg.osLevel;
+    shortFlags[i] = osc[i] < cfg.obLevel && osc[i - 1] >= cfg.obLevel;
+    if (longFlags[i]) {
       markers.push({ time: t(i), position: 'bottom', shape: 'triangleUp', color: cfg.osColor, size: 'tiny' });
     }
-    if (osc[i] < cfg.obLevel && osc[i - 1] >= cfg.obLevel) {
+    if (shortFlags[i]) {
       markers.push({ time: t(i), position: 'top', shape: 'triangleDown', color: cfg.obColor, size: 'tiny' });
     }
   }
@@ -263,8 +270,16 @@ export function calculate(
     ],
     fills,
     markers,
+    // alertcondition(longSignalObos, 'Buy (Oversold)') / alertcondition(shortSignalObos, 'Sell (Overbought)')
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy (Oversold)', message: 'Oscillator crossed above oversold.' },
+  { id: 'alert1', title: 'Sell (Overbought)', message: 'Oscillator crossed below overbought.' },
+];
 
 export const PivotOscillator = {
   calculate,
@@ -272,4 +287,5 @@ export const PivotOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

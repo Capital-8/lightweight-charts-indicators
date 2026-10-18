@@ -12,7 +12,8 @@
  * - five-bar fractals drawn three bars back (regular shape when the pivots are shown, else the wider shape), the
  *   last fractal levels, HH / LH / HL / LL labels, and pivot labels with the count of the bars of the pattern;
  * - swing alerts: the first bar that closes outside the channel in its own direction (optionally only on the side
- *   of the medium EMA), drawn one bar later as BUY / SELL arrows or as big arrows.
+ *   of the medium EMA), drawn one bar later as BUY / SELL arrows or as big arrows (the original's plotarrow,
+ *   `arrows` of the result, value +1 / -1; the arrow height is not ported).
  *
  * Alerts (alertcondition, `alerts` of the result): "SCAPSWING alert Up" / "SCAPSWING alert Down" on the bar of the
  * swing alert itself (the bar before the arrow).
@@ -23,7 +24,7 @@
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type ArrowData } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
@@ -133,7 +134,9 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ScalpingSwingTradingToolInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers' | 'barColors'> & { markers: MarkerData[]; barColors: BarColorData[]; alerts: AlertConditionState[] } {
+): Omit<IndicatorResult, 'markers' | 'barColors'> & {
+  markers: MarkerData[]; arrows: ArrowData[]; barColors: BarColorData[]; alerts: AlertConditionState[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -183,6 +186,7 @@ export function calculate(
   for (let k = 0; k < 19; k++) plots[`plot${k}`] = [];
   const barColors: BarColorData[] = [];
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   const add = (on: boolean, index: number, m: Omit<MarkerData, 'time'>) => {
     if (on && index >= 0) markers.push({ time: time(index), ...m });
   };
@@ -229,8 +233,8 @@ export function calculate(
     const bot = filterBw
       ? gt(l5, l4) && gt(l4, l3) && lt(l3, l2) && lt(l2, l1)
       : gt(l5, l3) && gt(l4, l3) && lt(l3, l2) && lt(l3, l1);
-    add(showFractals && top, i - 3, { position: 'aboveBar', shape: 'triangleDown', color: RED });
-    add(showFractals && bot, i - 3, { position: 'belowBar', shape: 'triangleUp', color: LIME });
+    add(showFractals && top, i - 3, { position: 'aboveBar', shape: 'triangleDown', color: RED, id: 'shape0' });
+    add(showFractals && bot, i - 3, { position: 'belowBar', shape: 'triangleUp', color: LIME, id: 'shape1' });
 
     // Last fractal levels: no colour on the bar where the level changes
     const prevTop = topFractals;
@@ -255,33 +259,33 @@ export function calculate(
     const higherLow = bot && lt(b1, b0) && (cfg.showPivots || lt(b2, b0));
     const lowerLow = bot && gt(b1, b0) && (cfg.showPivots || gt(b2, b0));
 
-    add(showHHLL && higherHigh, i - 3, { position: 'aboveBar', shape: 'square', color: MAROON, text: '[HH]' });
-    add(showHHLL && lowerHigh, i - 3, { position: 'aboveBar', shape: 'square', color: MAROON, text: '[LH]' });
-    add(showHHLL && higherLow, i - 3, { position: 'belowBar', shape: 'square', color: GREEN, text: '[HL]' });
-    add(showHHLL && lowerLow, i - 3, { position: 'belowBar', shape: 'square', color: GREEN, text: '[LL]' });
+    add(showHHLL && higherHigh, i - 3, { position: 'aboveBar', shape: 'square', color: MAROON, text: '[HH]', id: 'shape2' });
+    add(showHHLL && lowerHigh, i - 3, { position: 'aboveBar', shape: 'square', color: MAROON, text: '[LH]', id: 'shape3' });
+    add(showHHLL && higherLow, i - 3, { position: 'belowBar', shape: 'square', color: GREEN, text: '[HL]', id: 'shape4' });
+    add(showHHLL && lowerLow, i - 3, { position: 'belowBar', shape: 'square', color: GREEN, text: '[LL]', id: 'shape5' });
 
-    // Pivot points: a cross with a label, or the cross alone
-    const pivot = (on: boolean, above: boolean, text: string) => {
+    // Pivot points: a cross with a label (outputs shape6 / 8 / 10 / 12), or the cross alone (shape7 / 9 / 11 / 13)
+    const pivot = (on: boolean, above: boolean, text: string, k: number) => {
       const base = { position: above ? 'aboveBar' as const : 'belowBar' as const, shape: 'cross' as const, color: above ? MAROON : GREEN };
-      add(cfg.showPivots && on, i - 3, cfg.showPivotLabels ? { ...base, text } : base);
+      add(cfg.showPivots && on, i - 3, cfg.showPivotLabels ? { ...base, text, id: `shape${k}` } : { ...base, id: `shape${k + 1}` });
     };
-    pivot(higherHigh, true, '[HH]\n[PVT]');
-    pivot(lowerHigh, true, '[LH]\n[PVT]');
-    pivot(higherLow, false, '[PVT]\n[HL]');
-    pivot(lowerLow, false, '[PVT]\n[LL]');
+    pivot(higherHigh, true, '[HH]\n[PVT]', 6);
+    pivot(lowerHigh, true, '[LH]\n[PVT]', 8);
+    pivot(higherLow, false, '[PVT]\n[HL]', 10);
+    pivot(lowerLow, false, '[PVT]\n[LL]', 12);
 
     // Numbers on the bars of a pivot pattern (plotchar: the character only)
-    const digit = (on: boolean, offset: number, above: boolean, char: string) => add(cfg.showPivots && on, i + offset, {
-      position: above ? 'aboveBar' : 'belowBar', shape: 'circle', color: 'transparent', text: char, textColor: above ? MAROON : GREEN,
+    const digit = (on: boolean, offset: number, above: boolean, char: string, id: string) => add(cfg.showPivots && on, i + offset, {
+      position: above ? 'aboveBar' : 'belowBar', shape: 'circle', color: 'transparent', text: char, textColor: above ? MAROON : GREEN, id,
     });
-    digit(top, -5, true, '1');
-    digit(top, -4, true, '2');
-    digit(top, -2, true, '2');
-    digit(top, -1, true, '1');
-    digit(bot, -5, false, '1');
-    digit(bot, -4, false, '2');
-    digit(bot, -2, false, '2');
-    digit(bot, -1, false, '1');
+    digit(top, -5, true, '1', 'char14');
+    digit(top, -4, true, '2', 'char15');
+    digit(top, -2, true, '2', 'char16');
+    digit(top, -1, true, '1', 'char17');
+    digit(bot, -5, false, '1', 'char18');
+    digit(bot, -4, false, '2', 'char19');
+    digit(bot, -2, false, '2', 'char20');
+    digit(bot, -1, false, '1', 'char21');
 
     // Swing alerts: the first bar that leaves the PAC, drawn on the next bar
     const prevClose = i > 0 ? bars[i - 1].close : NaN;
@@ -296,13 +300,13 @@ export function calculate(
     upFlags[i] = upAlert === 1;
     dnFlags[i] = dnAlert === 1;
     if (cfg.showPacExit && cfg.useBigArrows) {
-      // plotarrow: the arrow height is not ported
-      if (prevUp === 1) markers.push({ time: t, position: 'belowBar', shape: 'arrowUp', color: T(AQUA, 20) });
-      else if (prevDn === 1) markers.push({ time: t, position: 'aboveBar', shape: 'arrowDown', color: T(FUCHSIA, 20) });
+      // plotarrow(up_alert[1] == 1 ? 1 : dn_alert[1] == 1 ? -1 : na, colorup = aqua, colordown = fuchsia, transp = 20)
+      if (prevUp === 1) arrows.push({ time: t, id: 'arrow0', value: 1, color: T(AQUA, 20) });
+      else if (prevDn === 1) arrows.push({ time: t, id: 'arrow0', value: -1, color: T(FUCHSIA, 20) });
     }
     if (cfg.showPacExit && !cfg.useBigArrows) {
-      if (prevUp === 1) markers.push({ time: t, position: 'belowBar', shape: 'arrowUp', color: GREEN, text: 'BUY', textColor: GREEN });
-      if (prevDn === 1) markers.push({ time: t, position: 'aboveBar', shape: 'arrowDown', color: RED, text: 'SELL', textColor: RED });
+      if (prevUp === 1) markers.push({ time: t, position: 'belowBar', shape: 'arrowUp', color: GREEN, text: 'BUY', textColor: GREEN, id: 'shape22' });
+      if (prevDn === 1) markers.push({ time: t, position: 'aboveBar', shape: 'arrowDown', color: RED, text: 'SELL', textColor: RED, id: 'shape23' });
     }
   }
   markers.sort((p, q) => p.time - q.time);
@@ -315,6 +319,7 @@ export function calculate(
       { plot1: 'plot3', plot2: 'plot4', options: { title: 'Fill EMA5-12', color: T(BLUE, 92) } },
     ],
     markers,
+    arrows,
     barColors,
     alerts: alertStates(alertConditions, bars, [upFlags, dnFlags]),
   };

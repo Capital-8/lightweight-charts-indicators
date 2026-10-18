@@ -14,6 +14,8 @@
  *   gradients from the level colour to nothing.
  * - "Latest Fibonacci": the retracement of the latest two swings, with four filled areas, a middle line, a
  *   diagonal and a label on the latest swing.
+ * - Alerts (alertcondition, `alerts` of the result): 'break Up' / 'break Down', true on the bars where a channel that
+ *   was active on the bar before breaks up / down (the bars of the break labels, also when they are hidden).
  *
  * Chart values (third argument): the port reads the chart background colour (the transparent end of the gradient
  * fills; without it: #0F0F0F, a dark chart).
@@ -27,6 +29,7 @@ import { ta, color, Series, type IndicatorResult, type InputConfig, type PlotCon
 import type { LabelData, LineDrawingData, LinefillData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { backgroundColorOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface FibonacciRangesInputs {
   /** Bars before a pivot */
@@ -127,7 +130,7 @@ export function calculate(
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'lines' | 'labels' | 'linefills'> & {
   markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const L = Math.trunc(cfg.L);
@@ -171,6 +174,8 @@ export function calculate(
   const hidden: boolean[] = new Array<boolean>(n).fill(false);
   const markers: MarkerData[] = [];
   let prevActive = false; // f.active[1]
+  const upFlags = new Array<boolean>(n).fill(false);
+  const downFlags = new Array<boolean>(n).fill(false);
   let prev0 = NaN; // plot_0_000[1]
   const last = n - 1;
 
@@ -292,6 +297,9 @@ export function calculate(
     }
     prev0 = levels[1].y2;
 
+    // alertcondition(brokeU and f.active[1]) / alertcondition(brokeD and f.active[1])
+    upFlags[i] = brokeU && prevActive;
+    downFlags[i] = brokeD && prevActive;
     if (cfg.showBreaks && prevActive) {
       if (brokeU && !Number.isNaN(high) && high !== 0) {
         markers.push({ time: bars[i].time as number, position: 'aboveBar', shape: 'labelDown', color: '#089981', size: 'tiny' });
@@ -364,8 +372,15 @@ export function calculate(
     lines,
     labels,
     linefills,
+    alerts: alertStates(alertConditions, bars, [upFlags, downFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'break Up', message: 'break Up' },
+  { id: 'alert1', title: 'break Down', message: 'break Donw' },
+];
 
 export const FibonacciRanges = {
   calculate,
@@ -373,4 +388,5 @@ export const FibonacciRanges = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

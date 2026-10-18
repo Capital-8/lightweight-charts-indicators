@@ -2,12 +2,17 @@
  * Weis Wave Volume
  *
  * Cumulative volume that resets on trend direction change.
- * Positive (green) in uptrend, negative (red) in downtrend.
+ * Positive (green) in uptrend, negative (red) in downtrend. Colours of the original: green / red with a
+ * transparency of 75 (red also before the first direction).
  *
  * Reference: "Weis Wave Volume" (community)
  */
 
-import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+
+/** color=directionIsUp ? color.new(color.green, 75) : color.new(color.red, 75) */
+const UP = String(color.new(color.green, 75));
+const DOWN = String(color.new(color.red, 75));
 
 export interface WeisWaveVolumeInputs {
   trendLen: number;
@@ -22,7 +27,7 @@ export const inputConfig: InputConfig[] = [
 ];
 
 export const plotConfig: PlotConfig[] = [
-  { id: 'plot0', title: 'Wave Volume', color: '#26A69A', lineWidth: 4, style: 'histogram' },
+  { id: 'plot0', title: 'Wave Volume', color: UP, lineWidth: 4, style: 'histogram' },
 ];
 
 export const metadata = {
@@ -70,7 +75,7 @@ export function calculate(bars: Bar[], inputs: Partial<WeisWaveVolumeInputs> = {
   const plot0 = waveArr.map((v, i) => ({
     time: bars[i].time,
     value: isNaN(v) ? NaN : Math.abs(v),
-    color: isNaN(v) ? '#787B86' : (v >= 0 ? '#26A69A' : '#EF5350'),
+    color: !isNaN(v) && v >= 0 ? UP : DOWN,
   }));
 
   return {

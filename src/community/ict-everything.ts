@@ -1226,12 +1226,13 @@ export function calculate(
         cfg.ShowTWO && thisweek,
         !cfg.ShowTWO && !cfg.SL4W,
       ];
-      for (const on of groups) {
+      // ids: the original's 15 plotchar() outputs, char0..char14 (5 days per group, in this order)
+      groups.forEach((on, g) => {
         if (on) {
           markers.push({ time: b.time, position: DOWLoc, shape: 'square', char: ' ', color: dowShapeColor, text,
-            textColor: dowTextColor });
+            textColor: dowTextColor, id: `char${g * 5 + dayofweek - 2}` });
         }
-      }
+      });
     }
 
     // Cleanup of the drawings before the last 4 weeks / the current week of the bar

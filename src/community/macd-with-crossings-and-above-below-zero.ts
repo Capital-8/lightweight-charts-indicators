@@ -204,16 +204,16 @@ export function calculate(
     const over = xover[i] === 1;
     const under = xunder[i] === 1;
     // xUp = macd > 0 ? crossover : false -> 'MACD X Up': triangle down, top, tiny, red
-    if (gt(macd[i], 0) && over) markers.push({ time: t(i), position: 'top', shape: 'triangleDown', color: RED, size: 'tiny' });
+    if (gt(macd[i], 0) && over) markers.push({ time: t(i), id: 'shape0', position: 'top', shape: 'triangleDown', color: RED, size: 'tiny' });
     // xDn = macd < 0 ? crossunder : false -> 'MACD X Dn': triangle up, bottom, tiny, green
-    if (lt(macd[i], 0) && under) markers.push({ time: t(i), position: 'bottom', shape: 'triangleUp', color: GREEN, size: 'tiny' });
+    if (lt(macd[i], 0) && under) markers.push({ time: t(i), id: 'shape1', position: 'bottom', shape: 'triangleUp', color: GREEN, size: 'tiny' });
     // xDnHigh = macd >= 0 ? crossunder : false -> 'Big MACD X Up': triangle up, bottom, small, green
-    if (ge(macd[i], 0) && under) markers.push({ time: t(i), position: 'bottom', shape: 'triangleUp', color: GREEN, size: 'small' });
+    if (ge(macd[i], 0) && under) markers.push({ time: t(i), id: 'shape2', position: 'bottom', shape: 'triangleUp', color: GREEN, size: 'small' });
     // xUpLow = macd <= 0 ? crossover : false -> 'Big MACD X Dn': triangle down, top, small, red
-    if (le(macd[i], 0) && over) markers.push({ time: t(i), position: 'top', shape: 'triangleDown', color: RED, size: 'small' });
+    if (le(macd[i], 0) && over) markers.push({ time: t(i), id: 'shape3', position: 'top', shape: 'triangleDown', color: RED, size: 'small' });
     // 'DMI+': plusDM > minusDM, arrow up, bottom, size.auto, green; 'DMI-': plusDM < minusDM, arrow down, top, red
-    if (gt(plus[i], minus[i])) markers.push({ time: t(i), position: 'bottom', shape: 'arrowUp', color: GREEN, size: 'auto' });
-    if (lt(plus[i], minus[i])) markers.push({ time: t(i), position: 'top', shape: 'arrowDown', color: RED, size: 'auto' });
+    if (gt(plus[i], minus[i])) markers.push({ time: t(i), id: 'shape4', position: 'bottom', shape: 'arrowUp', color: GREEN, size: 'auto' });
+    if (lt(plus[i], minus[i])) markers.push({ time: t(i), id: 'shape5', position: 'top', shape: 'arrowDown', color: RED, size: 'auto' });
   }
 
   return {

@@ -6,12 +6,18 @@
  * averages of the CVD (SMA / EMA / WMA / VWMA / HMA, default HMA 34, WMA 89, SMA 816). The background is green when
  * the CVD is above 0, red otherwise.
  *
+ * Alerts (alertcondition, `alerts` of the result): the CVD crossing above / below MA A (long / short signal) and MA B,
+ * and the absolute volume delta at or above "Alert Threshold".
+ *
  * Reference: "CVD (Cumulative Volume Delta)" by RUpward
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import {
+  alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState,
+} from '../alert-states';
 
 type MaType = 'SMA' | 'EMA' | 'WMA' | 'VWMA' | 'HMA';
 
@@ -28,7 +34,7 @@ export interface CvdRupwardInputs {
   colorA: string;
   colorB: string;
   colorC: string;
-  /** Threshold of the volume delta alert (alert only, no output) */
+  /** Threshold of the volume delta alert (the 'Volume Delta Alert' condition only) */
   alertThreshold: number;
 }
 
@@ -87,7 +93,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<CvdRupwardInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -135,8 +141,23 @@ export function calculate(
     },
     // bgcolor(cvd > 0 ? color.new(input_color_positive, 90) : color.new(input_color_negative, 90))
     bgColors: bars.map((bar, i) => ({ time: bar.time, color: gt(cvd[i], 0) ? bgPositive : bgNegative })),
+    // long_signal / short_signal = ta.crossover / ta.crossunder(cvd, ma_A); ma_cross_up / ma_cross_down with ma_B;
+    // math.abs(volume_delta) >= input_alert_threshold
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(cvd, maA), crossedUnder(cvd, maA), crossedOver(cvd, maB), crossedUnder(cvd, maB),
+      volumeDelta.map((d) => ge(Math.abs(d), cfg.alertThreshold)),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'CVD Long Signal Alert', message: 'CVD Long Signal' },
+  { id: 'alert1', title: 'CVD Short Signal Alert', message: 'CVD Short Signal' },
+  { id: 'alert2', title: 'CVD Cross Up MA B Alert', message: 'MA Cross Up MA' },
+  { id: 'alert3', title: 'CVD Cross Down MA B Alert', message: 'CVD Cross Down MA' },
+  { id: 'alert4', title: 'Volume Delta Alert', message: 'Volume Delta exceeds threshold!' },
+];
 
 export const CvdRupward = {
   calculate,
@@ -144,4 +165,5 @@ export const CvdRupward = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

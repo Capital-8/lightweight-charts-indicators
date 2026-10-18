@@ -7,6 +7,8 @@
  * Supertrend turns up, the close crosses over the upper Keltner band and is above the EMA; Sell is the mirror.
  * The lines and fills take a red-to-green colour from a 5-bar EMA of the trend (-1 / 1); the EMA is green in an
  * up trend and red in a down trend.
+ * Alerts (alertcondition, `alerts` of the result): 'QuantumTrend SwiftEdge Buy' / 'QuantumTrend SwiftEdge Sell' (the
+ * signals, also with the signals hidden) and 'Trend Change' (the Supertrend direction changes).
  *
  * Reference: "QuantumTrend SwiftEdge" by SwiftEdge
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,14 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'QuantumTrend SwiftEdge Buy', message: 'QuantumTrend SwiftEdge Buy Signal!' },
+  { id: 'alert1', title: 'QuantumTrend SwiftEdge Sell', message: 'QuantumTrend SwiftEdge Sell Signal!' },
+  { id: 'alert2', title: 'Trend Change', message: 'QuantumTrend SwiftEdge Trend Change!' },
+];
 
 export interface QuantumTrendSwiftEdgeInputs {
   /** Use the manual settings instead of the sensitivity */
@@ -91,7 +101,7 @@ const bySens = (s: number, v: [number, number, number, number, number]) =>
 export function calculate(
   bars: Bar[],
   inputs: Partial<QuantumTrendSwiftEdgeInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -150,6 +160,10 @@ export function calculate(
   const showUp: boolean[] = new Array(n);
   const showDn: boolean[] = new Array(n);
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
+  // ta.change(trend) != 0 (na on bar 0: false)
+  const changeFlags = trendArr.map((v, i) => i > 0 && v !== trendArr[i - 1]);
   // ta.crossover(a, b): a > b and a[1] <= b[1] (exact comparisons: no 1e-10 tolerance, unlike the operators)
   const crossover = (a: number[], b: number[], i: number) => i > 0 && a[i] > b[i] && a[i - 1] <= b[i - 1];
   for (let i = 0; i < n; i++) {
@@ -162,6 +176,8 @@ export function calculate(
     const prev = i > 0 ? trendArr[i - 1] : NaN;
     const buySignal = gt(close[i], ema100[i]) && crossover(close, kcUpper, i) && trendArr[i] === 1 && prev === -1;
     const sellSignal = lt(close[i], ema100[i]) && crossover(kcLower, close, i) && trendArr[i] === -1 && prev === 1;
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
     // plotshape(buySignal and showSignals ? up : na, location.absolute, shape.labelup, color.green, size.tiny, "Buy")
     if (buySignal && cfg.showSignals && !isNaN(up[i])) {
       markers.push({ time: t(i), position: 'atPriceBottom', price: up[i], shape: 'labelUp', color: color.green,
@@ -204,6 +220,8 @@ export function calculate(
       },
     ],
     markers,
+    // alertcondition(buySignal), (sellSignal), (ta.change(trend) != 0)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, changeFlags]),
   };
 }
 
@@ -213,4 +231,5 @@ export const QuantumTrendSwiftEdge = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

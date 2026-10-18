@@ -10,6 +10,7 @@
  * - volume spike (off by default): volume >= SMA(volume, volLen) * volMult;
  * - VCP ATR contraction: SMA(ATR % of close, atrShort) < SMA(ATR % of close, atrLong) * atrRatio.
  * A BUY bar gets a BUY label below the bar and a green background.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY', true on the BUY bars.
  *
  * Reference: "Minervini Trend Template Screener (v5)" by hibinomasakazu1991
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -17,6 +18,12 @@
 
 import { ta, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY', message: 'BUY: conditions met' },
+];
 
 export interface MinerviniTrendTemplateScreenerInputs {
   /** Use Trend Template */
@@ -133,7 +140,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<MinerviniTrendTemplateScreenerInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const arr = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const close = new Series(bars, (b) => b.close);
@@ -161,6 +168,7 @@ export function calculate(
   const bg = String(color.new(color.green, 85));
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  const buyFlags: boolean[] = [];
   bars.forEach((b, i) => {
     const c = b.close;
     const sma200Back = i - cfg.slopeLookback >= 0 ? sma200[i - cfg.slopeLookback] : NaN;
@@ -196,6 +204,7 @@ export function calculate(
     const p4 = !cfg.useVolumeSpike || volSpike;
     const p5 = !cfg.useVCP || vcpPass;
     const buy = p1 && p2 && p3 && p4 && p5;
+    buyFlags.push(buy);
 
     if (buy) {
       // plotshape(buy, "BUY label", shape.labelup, text = "BUY", location.belowbar, size.tiny): Pine default colour
@@ -207,13 +216,14 @@ export function calculate(
     }
   });
 
-  // alertcondition(buy, title = "BUY"): no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
     bgColors,
+    // alertcondition(buy, title = "BUY")
+    alerts: alertStates(alertConditions, bars, [buyFlags]),
   };
 }
 
-export const MinerviniTrendTemplateScreener = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const MinerviniTrendTemplateScreener = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

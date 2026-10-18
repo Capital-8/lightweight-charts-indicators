@@ -5,12 +5,15 @@
  * down when it is below the lower band. The VWMA (with a glow), the bands, their mid lines, four ribbons and the bars
  * take the trend colour.
  *
+ * Alerts (alertcondition, `alerts` of the result): the trend turning up, turning down, and either.
+ *
  * Reference: "Volume Weighted Trend [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 const PRESETS = ['Default', 'Fast Response', 'Smooth Trend'];
 const COLOR_PRESETS = ['Classic', 'Aqua', 'Cosmic', 'Cyber', 'Neon', 'Custom'];
@@ -83,7 +86,7 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeWeightedTrendInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   let { vwmaLength, atrMultiplier } = cfg;
   if (cfg.presetConfig === 'Fast Response') {
@@ -108,10 +111,20 @@ export function calculate(
   const ribbons: string[][] = [[], [], [], []];
   const barColors: BarColorData[] = [];
   let dir = 0; // var int trend_direction = 0
+  const turnedBullish: boolean[] = [];
+  const turnedBearish: boolean[] = [];
+  const changed: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
+    const prevDir = dir; // trend_direction[1] (na on the first bar: no turn there)
     if (bars[i].close > upper[i]) dir = 1;
     else if (bars[i].close < lower[i]) dir = -1;
+    // trend_turned_bullish = trend_direction == 1 and trend_direction[1] != 1 (bearish: the mirror)
+    const up = i > 0 && dir === 1 && prevDir !== 1;
+    const down = i > 0 && dir === -1 && prevDir !== -1;
+    turnedBullish.push(up);
+    turnedBearish.push(down);
+    changed.push(up || down);
     const trend = dir === 1 ? bullish : bearish;
     const upperMid = (upper[i] + vwma[i]) / 2;
     const lowerMid = (lower[i] + vwma[i]) / 2;
@@ -143,8 +156,16 @@ export function calculate(
       { plot1: 'plot6', plot2: 'plot2', colors: ribbons[3] },
     ],
     barColors,
+    alerts: alertStates(alertConditions, bars, [turnedBullish, turnedBearish, changed]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend Signal', message: 'Volume Weighted Trend: BULLISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Trend Signal', message: 'Volume Weighted Trend: BEARISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Trend Direction Changed', message: 'Volume Weighted Trend: Trend direction changed on {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const VolumeWeightedTrend = {
   calculate,
@@ -152,4 +173,5 @@ export const VolumeWeightedTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

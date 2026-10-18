@@ -11,8 +11,12 @@
  * than ATR(200)), drawn as 13 stacked boxes that extend until the price comes back to their middle.
  * In 'Present' mode levels and voids are only searched on the last 500 bars.
  *
- * Pine details kept: the 6 alert() calls have no output. The boxes of the level margin are invisible (na colours) but
- * part of the output, as in the original.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): "buyside / sellside liquidity level
+ * detected/updated for <ticker>" when a new level is made, "buyside / sellside liquidity level breached for <ticker>"
+ * when a level is breached.
+ *
+ * Pine details kept: the boxes of the level margin are invisible (na colours) but part of the output, as in the
+ * original.
  *
  * Reference: "Buyside & Sellside Liquidity [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -21,7 +25,11 @@
 
 import { ta, Series, color, math, setDrawingBar, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { executeScript, indicator as declareIndicator, box, line } from 'oakscriptjs/script';
-import type { BoxData, LineDrawingData } from '../types';
+import type { AlertCall, BoxData, LineDrawingData } from '../types';
+import { tickerOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface BuysideSellsideLiquidityInputs {
   /** Detection Length */
@@ -116,7 +124,8 @@ interface Liq {
 export function calculate(
   bars: Bar[],
   inputs: Partial<BuysideSellsideLiquidityInputs> = {},
-): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[] } {
+  chart?: ChartContext,
+): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { liqLen, marBuy, marSel, visLiq } = cfg;
   const liqMar = 10 / cfg.margin;
@@ -127,6 +136,9 @@ export function calculate(
   const atr200 = A(ta.atr(bars, 200));
   const ph = A(ta.pivothigh(new Series(bars, (b) => b.high), liqLen, 1));
   const pl = A(ta.pivotlow(new Series(bars, (b) => b.low), liqLen, 1));
+  const ticker = tickerOf(chart);
+  const alertCalls: AlertCall[] = [];
+  const alertOf = (time: number, message: string) => alertCalls.push({ time, message, freq: 'once_per_bar' });
 
   const run = executeScript(() => {
     declareIndicator(metadata.title, { overlay: true, max_lines_count: 500, max_boxes_count: 500 });
@@ -215,6 +227,8 @@ export function calculate(
           const ln = line.new(stB, stP, i - 1, stP, undefined, undefined, String(color.new(css, 0)));
           const lne = line.new(i - 1, stP, NaN, stP, undefined, undefined, String(color.new(css, 0)), 'dotted');
           arr.unshift({ bx, bxz, bxt, brZ: false, brL: false, ln, lne });
+          // alert('buyside liquidity level detected/updated for ' + syminfo.ticker) (sellside: the same)
+          alertOf(b.time, (side === 1 ? 'buyside' : 'sellside') + ' liquidity level detected/updated for ' + ticker);
         }
         if (arr.length > visLiq) deleteLiq(arr.pop() as Liq);
       };
@@ -228,6 +242,7 @@ export function calculate(
           if (x.bx && gt(b.high, box.get_top(x.bx))) {
             x.brL = true;
             x.brZ = true;
+            alertOf(b.time, 'buyside liquidity level breached for ' + ticker);
             if (x.bxz) {
               box.set_lefttop(x.bxz, i - 1, pineMin(y1Of(x) + marBuy * atr[i], b.high));
               box.set_rightbottom(x.bxz, i + 1, y1Of(x));
@@ -252,6 +267,7 @@ export function calculate(
           if (x.bx && gt(box.get_bottom(x.bx), b.low)) {
             x.brL = true;
             x.brZ = true;
+            alertOf(b.time, 'sellside liquidity level breached for ' + ticker);
             if (x.bxz) {
               box.set_lefttop(x.bxz, i - 1, y1Of(x));
               box.set_rightbottom(x.bxz, i + 1, pineMax(y1Of(x) - marSel * atr[i], b.low));
@@ -334,7 +350,8 @@ export function calculate(
     plots: {},
     lines: run.result.lines ?? [],
     boxes: run.result.boxes ?? [],
+    alertCalls,
   };
 }
 
-export const BuysideSellsideLiquidity = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BuysideSellsideLiquidity = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

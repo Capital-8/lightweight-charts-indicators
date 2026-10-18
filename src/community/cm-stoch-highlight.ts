@@ -104,19 +104,19 @@ export function calculate(bars: Bar[], inputs: Partial<CMStochHighlightInputs> =
     // barcolor: orange when overbought, fuchsia when oversold
     if (sbc) {
       if (aboveLine) {
-        barColors.push({ time: bars[i].time, color: '#FF9800' }); // orange
+        barColors.push({ id: 'barcolor0', time: bars[i].time, color: '#FF9800' }); // orange
       } else if (belowLine) {
-        barColors.push({ time: bars[i].time, color: '#FF00FF' }); // fuchsia
+        barColors.push({ id: 'barcolor0', time: bars[i].time, color: '#FF00FF' }); // fuchsia
       }
     }
 
     // bgcolor: above/below line highlights
     if (sbh) {
       if (aboveLine) {
-        bgColors.push({ time: bars[i].time, color: 'rgba(255, 0, 0, 0.30)' }); // red transp=70
+        bgColors.push({ id: 'bgcolor0', time: bars[i].time, color: 'rgba(255, 0, 0, 0.30)' }); // red transp=70
       }
       if (belowLine) {
-        bgColors.push({ time: bars[i].time, color: 'rgba(0, 255, 0, 0.30)' }); // lime transp=70
+        bgColors.push({ id: 'bgcolor1', time: bars[i].time, color: 'rgba(0, 255, 0, 0.30)' }); // lime transp=70
       }
     }
 
@@ -138,40 +138,40 @@ export function calculate(bars: Bar[], inputs: Partial<CMStochHighlightInputs> =
     // bgcolor: strict cross highlights
     if (sch) {
       if (crossUp) {
-        bgColors.push({ time: bars[i].time, color: 'rgba(0, 255, 0, 0.60)' }); // lime transp=40
+        bgColors.push({ id: 'bgcolor2', time: bars[i].time, color: 'rgba(0, 255, 0, 0.60)' }); // lime transp=40
       }
       if (crossDn) {
-        bgColors.push({ time: bars[i].time, color: 'rgba(255, 0, 0, 0.60)' }); // red transp=40
+        bgColors.push({ id: 'bgcolor3', time: bars[i].time, color: 'rgba(255, 0, 0, 0.60)' }); // red transp=40
       }
     }
 
     // bgcolor: any cross highlights
     if (sac) {
       if (crossUpAll) {
-        bgColors.push({ time: bars[i].time, color: 'rgba(0, 255, 0, 0.60)' }); // lime transp=40
+        bgColors.push({ id: 'bgcolor4', time: bars[i].time, color: 'rgba(0, 255, 0, 0.60)' }); // lime transp=40
       }
       if (crossDownAll) {
-        bgColors.push({ time: bars[i].time, color: 'rgba(255, 0, 0, 0.60)' }); // red transp=40
+        bgColors.push({ id: 'bgcolor5', time: bars[i].time, color: 'rgba(255, 0, 0, 0.60)' }); // red transp=40
       }
     }
 
     // markers: strict cross B/S
     if (sl) {
       if (crossUp) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#00FF00', text: 'B' });
+        markers.push({ id: 'char0', time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#00FF00', text: 'B' });
       }
       if (crossDn) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'S' });
+        markers.push({ id: 'char1', time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'S' });
       }
     }
 
     // markers: any cross B/S
     if (sacl) {
       if (crossUpAll) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#00FF00', text: 'B' });
+        markers.push({ id: 'char2', time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#00FF00', text: 'B' });
       }
       if (crossDownAll) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'S' });
+        markers.push({ id: 'char3', time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'S' });
       }
     }
   }

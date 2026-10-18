@@ -109,10 +109,10 @@ export function calculate(
     const threshSell = i > 0 ? avgSell[i - 1] + stdSell[i - 1] * cfg.btMult : NaN;
     // plotshape(is_bt_buy ? cvd_close : na, shape.circle, location.absolute, c_bt_buy, size.tiny)
     if (gt(rawBuy[i], threshBuy) && !isNaN(cvdClose)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: cvdClose, shape: 'circle', color: cfg.btBuyColor, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: cvdClose, shape: 'circle', color: cfg.btBuyColor, size: 'tiny', id: 'shape0' });
     }
     if (gt(rawSell[i], threshSell) && !isNaN(cvdClose)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: cvdClose, shape: 'circle', color: cfg.btSellColor, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: cvdClose, shape: 'circle', color: cfg.btSellColor, size: 'tiny', id: 'shape1' });
     }
   }
 

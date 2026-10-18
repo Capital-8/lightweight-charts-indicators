@@ -5,11 +5,34 @@
  * TSI = 100 * EMA(EMA(momentum, longLen), shortLen) / EMA(EMA(abs(momentum), longLen), shortLen)
  * Signal = EMA(TSI, signalLen)
  * Fast/Slow speed presets. Bar histogram for TSI-signal spread.
+ * As the original (theme "Classic Bj"): the candles from 0 to the TSI-signal spread (plotcandle, no colour in this
+ * theme), bars coloured on a curl in overbought / oversold ("Ob/Os Curl Color"), background on a cross up in oversold
+ * / down in overbought ("Show Ob/Os Cross").
+ *
+ * Alerts (alertcondition, `alerts` of the result): the original's 11 conditions (TSI crossing its signal, curls,
+ * moves into overbought / oversold, curls and crosses inside them).
  *
  * Reference: "Bjorgum TSI" community indicator
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import type { BarColorData, BgColorData, PlotCandleData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'TSI cross up', message: 'TSI crossed up on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert1', title: 'TSI cross down', message: 'TSI crossed down on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert2', title: 'TSI cross', message: 'TSI crossed on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert3', title: 'TSI Curl Up', message: 'TSI curled up on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert4', title: 'TSI Curl Down', message: 'TSI curled down on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert5', title: 'TSI Overbought', message: 'TSI moved in to overbought on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert6', title: 'TSI Oversold', message: 'TSI moved in to oversold on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert7', title: 'TSI Curl Overbought', message: 'TSI Curled Down In Overbought on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert8', title: 'TSI Curl Oversold', message: 'TSI Curled Up In Oversold on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert9', title: 'TSI Cross Down Overbought', message: 'TSI Crossed Down In Overbought on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert10', title: 'TSI Cross Up Oversold', message: 'TSI Crossed Up In Oversold on {{interval}} chart. Price is {{close}}' },
+];
 
 export interface BjorgumTSIInputs {
   speedInput: string;
@@ -17,6 +40,12 @@ export interface BjorgumTSIInputs {
   osValue: number;
   showLines: boolean;
   showMid: boolean;
+  /** Show Ob/Os Cross: background on a cross up in oversold / down in overbought */
+  showHiLo: boolean;
+  /** Ob/Os Curl Color: bar colours */
+  showCurl: boolean;
+  /** Show White Bars: the other bars white (with "Ob/Os Curl Color") */
+  blankBars: boolean;
   longfLen: number;
   shortfLen: number;
   signalfLen: number;
@@ -31,6 +60,9 @@ export const defaultInputs: BjorgumTSIInputs = {
   osValue: -30,
   showLines: true,
   showMid: true,
+  showHiLo: false,
+  showCurl: false,
+  blankBars: false,
   longfLen: 25,
   shortfLen: 5,
   signalfLen: 14,
@@ -45,6 +77,9 @@ export const inputConfig: InputConfig[] = [
   { id: 'osValue', type: 'int', title: 'Oversold', defval: -30 },
   { id: 'showLines', type: 'bool', title: 'Show OB/OS Lines', defval: true },
   { id: 'showMid', type: 'bool', title: 'Show Midline', defval: true },
+  { id: 'showHiLo', type: 'bool', title: 'Show Ob/Os Cross', defval: false },
+  { id: 'showCurl', type: 'bool', title: 'Ob/Os Curl Color', defval: false },
+  { id: 'blankBars', type: 'bool', title: 'Show White Bars', defval: false },
   { id: 'longfLen', type: 'int', title: 'Fast Long Length', defval: 25, min: 1 },
   { id: 'shortfLen', type: 'int', title: 'Fast Short Length', defval: 5, min: 1 },
   { id: 'signalfLen', type: 'int', title: 'Fast Signal Length', defval: 14, min: 1 },
@@ -70,7 +105,12 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<BjorgumTSIInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<BjorgumTSIInputs> = {},
+): IndicatorResult & {
+  plotCandles: Record<string, PlotCandleData[]>; barColors: BarColorData[]; bgColors: BgColorData[];
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
 
   // Select speed preset
@@ -191,22 +231,22 @@ export function calculate(bars: Bar[], inputs: Partial<BjorgumTSIInputs> = {}): 
 
   const gradientFills = [
     // Pine: fill(h2, h1, oBotInput, 5, color.new(obFillColor, 80), color(na), fillgaps = true)
-    { plot1: 'h2', plot2: 'h1', gradient: {
+    { plot1: 'h2', plot2: 'h1', options: { title: 'Plots Background' }, gradient: {
       topValue: perBar(() => ob), bottomValue: perBar(() => 5),
       topColor: perBar((): string | null => color.new_color(obFillColor, 80) as string),
       bottomColor: perBar((): string | null => null) } },
     // Pine: fill(h2, h1, -5, oSoldInput, color(na), color.new(osFillColor, 80), fillgaps = true)
-    { plot1: 'h2', plot2: 'h1', gradient: {
+    { plot1: 'h2', plot2: 'h1', options: { title: 'Plots Background' }, gradient: {
       topValue: perBar(() => -5), bottomValue: perBar(() => os),
       topColor: perBar((): string | null => null),
       bottomColor: perBar((): string | null => color.new_color(osFillColor, 80) as string) } },
     // Pine: fill(p2, p6, oBotInput + 50, obValue, color.new(bearBgColor, 30), color.new(bearBgColor, 90), fillgaps = true)
-    { plot1: 'plot1', plot2: 'p6', gradient: {
+    { plot1: 'plot1', plot2: 'p6', options: { title: 'Plots Background' }, gradient: {
       topValue: perBar(() => ob + 50), bottomValue: obValueArr,
       topColor: perBar((): string | null => color.new_color(bearBgColor, 30) as string),
       bottomColor: perBar((): string | null => color.new_color(bearBgColor, 90) as string) } },
     // Pine: fill(p2, p7, osValue, oSoldInput - 50, color.new(bullBgColor, 90), color.new(bullBgColor, 30), fillgaps = true)
-    { plot1: 'plot1', plot2: 'p7', gradient: {
+    { plot1: 'plot1', plot2: 'p7', options: { title: 'Plots Background' }, gradient: {
       topValue: osValueArr, bottomValue: perBar(() => os - 50),
       topColor: perBar((): string | null => color.new_color(bullBgColor, 90) as string),
       bottomColor: perBar((): string | null => color.new_color(bullBgColor, 30) as string) } },
@@ -224,6 +264,55 @@ export function calculate(bars: Bar[], inputs: Partial<BjorgumTSIInputs> = {}): 
     hlines.push({ value: 0, options: { color: '#787B86', linestyle: 'dotted' as const, title: 'Zero' } });
   }
 
+  // Conditions of the original
+  const n = bars.length;
+  const tsi = tsiArr;
+  const tsl = signalArr.map((v) => v ?? NaN);
+  const prevOf = (a: number[], i: number) => (i > 0 ? a[i - 1] : NaN);
+  const crossUp = crossedOver(tsi, tsl);
+  const crossDn = crossedUnder(tsi, tsl);
+  const crossAny = crossUp.map((v, i) => v || crossDn[i]);
+  const curlUp = perBar((i) => tsi[i] > prevOf(tsi, i) && tsi[i] < tsl[i]);
+  const curlDn = perBar((i) => tsi[i] < prevOf(tsi, i) && tsi[i] > tsl[i]);
+  const overBought = perBar((i) => tsi[i] > ob && tsi[i] < prevOf(tsi, i) && prevOf(tsi, i) > prevOf(tsl, i));
+  const overSold = perBar((i) => tsi[i] < os && tsi[i] > prevOf(tsi, i) && prevOf(tsi, i) < prevOf(tsl, i));
+  const tsiXUp = crossedOver(tsi, ob);
+  const tsiXDn = crossedUnder(tsi, os);
+  const osCrossUp = perBar((i) => crossUp[i] && tsi[i] <= os);
+  const obCrossDn = perBar((i) => crossDn[i] && tsi[i] >= ob);
+
+  // plotcandle(barLo, barLo, barHi, barHi, color = isClassic ? na : ..., bordercolor = isClassic ? na : ...,
+  // wickcolor = color(na), display = display.pane): barHi = max(0, diff), barLo = min(0, diff)
+  const candles: PlotCandleData[] = [];
+  for (let i = 0; i < n; i++) {
+    const diff = tsi[i] - tsl[i];
+    if (isNaN(diff)) continue;
+    const barHi = Math.max(0, 0 + diff);
+    const barLo = Math.min(0, 0 + diff);
+    candles.push({ time: bars[i].time, open: barLo, high: barLo, low: barHi, close: barHi,
+      color: 'transparent', borderColor: 'transparent', wickColor: 'transparent' });
+  }
+
+  // barcolor(showCurlInput ? barColor : na): barColor = overBought ? obBar : overSold ? osBar : blankBars ? neBar : na
+  const barColors: BarColorData[] = [];
+  if (cfg.showCurl) {
+    for (let i = 0; i < n; i++) {
+      const c = overBought[i] ? '#ff0000' : overSold[i] ? '#17ff00' : cfg.blankBars ? '#ffffff' : null;
+      if (c !== null) barColors.push({ time: bars[i].time, color: c, id: 'barcolor0' });
+    }
+  }
+  // bgcolor(osCrossUp and showHiLoInput ? color.new(oBotColInput, 80) : na), bgcolor(obCrossDn and showHiLoInput ?
+  // color.new(oSoldColInput, 80) : na) (theme "Classic Bj")
+  const bgColors: BgColorData[] = [];
+  if (cfg.showHiLo) {
+    const osBg = String(color.new('#ff0000', 80));
+    const obBg = String(color.new('#64b5f6', 80));
+    for (let i = 0; i < n; i++) {
+      if (osCrossUp[i]) bgColors.push({ time: bars[i].time, color: osBg, id: 'bgcolor0' });
+      if (obCrossDn[i]) bgColors.push({ time: bars[i].time, color: obBg, id: 'bgcolor1' });
+    }
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -232,8 +321,14 @@ export function calculate(bars: Bar[], inputs: Partial<BjorgumTSIInputs> = {}): 
     },
     hlines,
     // Pine order: the 4 gradient fills above, then fill(p1, p2, fillColor1, fillgaps = true)
-    fills: [...gradientFills, { plot1: 'plot0', plot2: 'plot1', colors: fillColors }],
+    fills: [...gradientFills, { plot1: 'plot0', plot2: 'plot1', options: { title: 'Plots Background' }, colors: fillColors }],
+    plotCandles: { candle: candles },
+    barColors,
+    bgColors,
+    alerts: alertStates(alertConditions, bars, [
+      crossUp, crossDn, crossAny, curlUp, curlDn, tsiXUp, tsiXDn, overBought, overSold, obCrossDn, osCrossUp,
+    ]),
   };
 }
 
-export const BjorgumTSI = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BjorgumTSI = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

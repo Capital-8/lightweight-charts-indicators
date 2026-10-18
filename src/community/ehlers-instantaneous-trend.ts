@@ -81,17 +81,19 @@ export function calculate(bars: Bar[], inputs: Partial<EhlersInstantaneousTrendI
     return { time: bars[i].time, value: v, color };
   });
 
-  const fillColors = bars.map((_, i) => {
-    if (i < warmup) return 'transparent';
-    const lag = 2 * it[i] - (i >= 2 ? it[i - 2] : it[i]);
-    return lag > it[i] ? 'rgba(0,128,0,0.15)' : 'rgba(255,0,0,0.15)';
-  });
+  // The original's fills go from its hidden "Dummy" plot (the lower of trend and trigger) to the trigger ('UpTrend',
+  // green) and to the trend ('DownTrend', red): one of them has a height on each bar. Here: two fills between the
+  // trigger and the trend, each coloured on the bars where the original's has a height.
+  const bullishAt = (i: number) => 2 * it[i] - (i >= 2 ? it[i - 2] : it[i]) > it[i];
+  const upFill = bars.map((_, i) => (i >= warmup && bullishAt(i) ? 'rgba(0,128,0,0.15)' : 'transparent'));
+  const downFill = bars.map((_, i) => (i >= warmup && !bullishAt(i) ? 'rgba(255,0,0,0.15)' : 'transparent'));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': lagPlot, 'plot1': itPlot },
     fills: [
-      { plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(0,128,0,0.15)' }, colors: fillColors },
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'UpTrend', color: 'rgba(0,128,0,0.15)' }, colors: upFill },
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'DownTrend', color: 'rgba(255,0,0,0.15)' }, colors: downFill },
     ],
     barColors,
   } as Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] };

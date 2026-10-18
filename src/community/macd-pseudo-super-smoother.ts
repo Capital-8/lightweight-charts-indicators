@@ -10,6 +10,8 @@
  * - Type 4: a shaped window over `length` bars applied to the average of the source and the previous source.
  * Bars before the first bar use the first non-na source. MACD = fast filter - slow filter, signal = filter of the
  * MACD, histogram = MACD - signal, coloured by its sign and by its direction.
+ * Alerts (alertcondition, `alerts` of the result): 'Rising to falling' (the histogram turns negative) and 'Falling to
+ * rising' (it turns positive).
  *
  * Reference: "MACD Pseudo Super Smoother [MACDPSS]" by The_Peaceful_Lizard
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -20,6 +22,7 @@ import {
   getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar,
   type SourceType,
 } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type MacdPssFilterType = 'Type 1' | 'Type 2' | 'Type 3' | 'Type 4';
 
@@ -154,7 +157,10 @@ function pseudoSuperSmoother(source: number[], length: number, style: MacdPssFil
   return out;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<MacdPseudoSuperSmootherInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<MacdPseudoSuperSmootherInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const source = getSourceSeries(bars, cfg.source).toArray().map((v) => v ?? NaN);
 
@@ -165,6 +171,11 @@ export function calculate(bars: Bar[], inputs: Partial<MacdPseudoSuperSmootherIn
   const hist = macd.map((v, i) => v - signal[i]);
 
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
+  const histNa = hist.map(fin);
+  // alertcondition(hist[1] >= 0 and hist < 0, "Rising to falling") / alertcondition(hist[1] <= 0 and hist > 0, ...)
+  const le0 = (v: number) => !isNaN(v) && !(v > EPS);
+  const toFalling = histNa.map((h, i) => i > 0 && ge(histNa[i - 1], 0) && lt(h, 0));
+  const toRising = histNa.map((h, i) => i > 0 && le0(histNa[i - 1]) && h > EPS);
   // hist >= 0 ? (hist[1] < hist ? #26A69A : #B2DFDB) : (hist[1] < hist ? #FFCDD2 : #FF5252)
   const plot0 = bars.map((b, i) => {
     const h = hist[i];
@@ -179,8 +190,15 @@ export function calculate(bars: Bar[], inputs: Partial<MacdPseudoSuperSmootherIn
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2 },
     hlines: [{ value: 0, options: { title: 'Zero Line', color: ZERO_LINE, linestyle: 'dashed' } }],
+    alerts: alertStates(alertConditions, bars, [toFalling, toRising]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Rising to falling', message: 'The MACD histogram switched from a rising to falling state' },
+  { id: 'alert1', title: 'Falling to rising', message: 'The MACD histogram switched from a falling to rising state' },
+];
 
 export const MacdPseudoSuperSmoother = {
   calculate,
@@ -189,4 +207,5 @@ export const MacdPseudoSuperSmoother = {
   inputConfig,
   plotConfig,
   hlineConfig,
+  alertConditions,
 };

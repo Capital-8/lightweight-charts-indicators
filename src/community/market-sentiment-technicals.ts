@@ -594,10 +594,10 @@ export function calculate(
       plot6.push({ time: t, value: phFound[i] ? price : NaN, color: bearCond ? bearColor : 'transparent' });
       plot7.push({ time: t, value: phFound[i] ? price : NaN, color: hiddenBearCond ? bearHidden : 'transparent' });
       if (!isNaN(price)) {
-        if (bullCond) markers.push({ time: t, position: 'atPriceBottom', price, shape: 'labelUp', color: bullSolid });
-        if (hiddenBullCond) markers.push({ time: t, position: 'atPriceBottom', price, shape: 'labelUp', color: bullHidden });
-        if (bearCond) markers.push({ time: t, position: 'atPriceTop', price, shape: 'labelDown', color: bearSolid });
-        if (hiddenBearCond) markers.push({ time: t, position: 'atPriceTop', price, shape: 'labelDown', color: bearHidden });
+        if (bullCond) markers.push({ time: t, id: 'shape0', position: 'atPriceBottom', price, shape: 'labelUp', color: bullSolid });
+        if (hiddenBullCond) markers.push({ time: t, id: 'shape1', position: 'atPriceBottom', price, shape: 'labelUp', color: bullHidden });
+        if (bearCond) markers.push({ time: t, id: 'shape2', position: 'atPriceTop', price, shape: 'labelDown', color: bearSolid });
+        if (hiddenBearCond) markers.push({ time: t, id: 'shape3', position: 'atPriceTop', price, shape: 'labelDown', color: bearHidden });
       }
     }
   }

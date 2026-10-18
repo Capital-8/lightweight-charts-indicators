@@ -8,6 +8,8 @@
  * direction) whose weights learn online against the sign of the standardised close. The signal is the mean of both,
  * EMA smoothed, scaled by the ratio of its stdev over `lookback` to its stdev over 2 * lookback, clamped to -2..2.
  * Candles on the price pane, reference lines, a gradient fill to zero and labels on the zero crossings.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Signal' / 'Bearish Signal' on the zero crossings (the
+ * bars of the labels).
  *
  * Reference: "Wavelet-Trend ML Integration [Alpha Extract]" by AlphaExtract
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface WaveletTrendMLIntegrationInputs {
   shortLength: number;
@@ -122,7 +125,8 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<WaveletTrendMLIntegrationInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -217,6 +221,7 @@ export function calculate(
   const candles: PlotCandleData[] = [];
   const markers: MarkerData[] = [];
   const fillColors: (string | null)[] = [];
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   const zeroLineColor = String(color.new(cfg.hlineColor, 30));
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
@@ -235,6 +240,9 @@ export function calculate(
     fillColors.push(String(color.new(trend, 70)));
     // plotshape(finalSignal > 0 and finalSignal[1] <= 0, labelup, belowbar, text "︿") and the bearish label
     const prev = i > 0 ? finalSignal[i - 1] : NaN;
+    // alertcondition(finalSignal > 0 and finalSignal[1] <= 0) / alertcondition(finalSignal < 0 and finalSignal[1] >= 0)
+    bullFlags.push(finalSignal[i] > 0 && prev <= 0);
+    bearFlags.push(finalSignal[i] < 0 && prev >= 0);
     if (finalSignal[i] > 0 && prev <= 0) {
       markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: cfg.upperCol, text: '︿', textColor: color.white,
         size: 'tiny', forceOverlay: true });
@@ -255,8 +263,15 @@ export function calculate(
     }],
     markers,
     plotCandles: { signalCandles: candles },
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Signal', message: 'Bullish Signal Detected' },
+  { id: 'alert1', title: 'Bearish Signal', message: 'Bearish Signal Detected' },
+];
 
 export const WaveletTrendMLIntegration = {
   calculate,
@@ -264,4 +279,5 @@ export const WaveletTrendMLIntegration = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

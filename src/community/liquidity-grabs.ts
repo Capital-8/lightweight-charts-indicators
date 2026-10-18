@@ -6,10 +6,17 @@
  * Size is proportional to the wick-body ratio relative to the WBR threshold.
  * A cooldown prevents rapid-fire signals.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Buyside Liquidity Grab @ {{ticker}}' and 'Sellside Liquidity
+ * Grab @ {{ticker}}' on the confirmed bars with a grab of that side, as in the original also when the cooldown hides
+ * its bubble (detection on the last 5000 bars, a bar with no body has no grab size; the last bar counts when the
+ * chart context gives it as closed).
+ *
  * Reference: "Liquidity Grabs | Flux Charts" by fluxchart
  */
 
 import { Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface LiquidityGrabsInputs {
   pivotLength: number;
@@ -47,7 +54,11 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<LiquidityGrabsInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<LiquidityGrabsInputs> = {},
+  chart?: ChartContext,
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const { pivotLength, wbr, cooldown, zoneCount } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = pivotLength;
@@ -85,6 +96,9 @@ export function calculate(bars: Bar[], inputs: Partial<LiquidityGrabsInputs> = {
   const sellsideLiqs: number[] = [];
   let lastBuysideGrab = -cooldown - 1;
   let lastSellsideGrab = -cooldown - 1;
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
+  const lastConfirmed = lastBarConfirmedOf(chart);
 
   for (let i = 0; i < n; i++) {
     // Add new pivot zones
@@ -156,6 +170,14 @@ export function calculate(bars: Bar[], inputs: Partial<LiquidityGrabsInputs> = {
       if (idx !== -1) sellsideLiqs.splice(idx, 1);
     }
 
+    // alertcondition((buysideLiqGrabSmall or ...Medium or ...Large) and barstate.isconfirmed, ...): a grab with a size
+    // above 0, whatever the cooldown, on a confirmed bar of the last 5000 (maxDistanceToLastBar); the original's
+    // wick / body is na for a bar with no body (no grab size)
+    if (grabFound && grabSize > 0 && Math.abs(cl - op) > 0 && n - 1 - i < 5000 && (i < n - 1 || lastConfirmed)) {
+      if (grabBuyside) buyFlags[i] = true;
+      else sellFlags[i] = true;
+    }
+
     // Apply cooldown and assign to plots
     if (grabFound && grabSize > 0) {
       const cooldownOk = grabBuyside
@@ -190,7 +212,14 @@ export function calculate(bars: Bar[], inputs: Partial<LiquidityGrabsInputs> = {
       'sellMd': mkPlot(sellMd),
       'sellLg': mkPlot(sellLg),
     },
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
 
-export const LiquidityGrabs = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buyside Liquidity Grab @ {{ticker}}', message: 'Buyside Liquidity Grab @ {{ticker}}' },
+  { id: 'alert1', title: 'Sellside Liquidity Grab @ {{ticker}}', message: 'Sellside Liquidity Grab @ {{ticker}}' },
+];
+
+export const LiquidityGrabs = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

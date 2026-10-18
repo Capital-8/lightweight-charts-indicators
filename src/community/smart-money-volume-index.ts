@@ -6,6 +6,8 @@
  * the sell interest. Each ratio is summed over the index period and divided by the highest of the two sums over
  * the normalisation period. "Net" mode draws buy minus sell as layered columns, "Compare" mode draws both as
  * lines with a gradient fill. Price candles on the main pane take the colour of the interest.
+ * Alerts (alertcondition, `alerts` of the result): buy / sell signal (buy and sell interest in "Compare" mode, net
+ * index and its opposite in "Net" mode) crossing the high interest threshold and zero, and the buy line crossing 0.7.
  *
  * Chart values (third argument): the port reads the chart foreground and background colours (fills, candles, price
  * line; without them: #DBDBDB and #0F0F0F, a dark chart). `plotConfig` has the price line colour of the dark chart.
@@ -18,6 +20,7 @@
 import { ta, math, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { PlotCandleData } from '../types';
 import { foregroundColorOf, backgroundColorOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SmartMoneyVolumeIndexInputs {
   /** "Compare": buy and sell interest as two lines; "Net": one oscillator */
@@ -100,7 +103,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SmartMoneyVolumeIndexInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const compare = cfg.mode === 'Compare';
@@ -221,13 +224,38 @@ export function calculate(
     });
   }
 
+  // Alerts: sig_buy = Compare ? index_buy : net_index; sig_sell = Compare ? index_sell : -net_index;
+  // v_up = Compare ? index_buy : net_index
+  const sigBuy = bars.map((_b, i) => num(compare ? indexBuy[i] : netIndex[i]));
+  const sigSell = bars.map((_b, i) => num(compare ? indexSell[i] : -netIndex[i]));
+  const vUp = sigBuy;
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
     fills,
     plotCandles: { smartMoneyCandles: candles },
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(sigBuy, thr), crossedOver(sigSell, thr), crossedUnder(sigBuy, thr), crossedUnder(sigSell, thr),
+      crossedOver(sigBuy, 0), crossedUnder(sigBuy, 0), crossedOver(sigSell, 0), crossedUnder(sigSell, 0),
+      crossedOver(vUp, 0.7), crossedUnder(vUp, 0.7),
+    ]),
   };
 }
+
+/** The original's alertconditions (no message: the default "Alert Fired!") */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'High Smart Money Buy Interest', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'High Smart Money Sell Interest', message: 'Alert Fired!' },
+  { id: 'alert2', title: 'Smart Money Buy Interest no longer high', message: 'Alert Fired!' },
+  { id: 'alert3', title: 'Smart Money Sell Interest no longer high', message: 'Alert Fired!' },
+  { id: 'alert4', title: 'Smart Money Buy Interest turned positive', message: 'Alert Fired!' },
+  { id: 'alert5', title: 'Smart Money Buy Interest turned negative', message: 'Alert Fired!' },
+  { id: 'alert6', title: 'Smart Money Sell Interest turned positive', message: 'Alert Fired!' },
+  { id: 'alert7', title: 'Smart Money Sell Interest turned negative', message: 'Alert Fired!' },
+  { id: 'alert8', title: 'Smart Money Buy Interest entered high zone', message: 'Alert Fired!' },
+  { id: 'alert9', title: 'Smart Money Buy Interest exited high zone', message: 'Alert Fired!' },
+];
 
 export const SmartMoneyVolumeIndex = {
   calculate,
@@ -235,4 +263,5 @@ export const SmartMoneyVolumeIndex = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

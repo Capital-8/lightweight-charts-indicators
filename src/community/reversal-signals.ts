@@ -15,9 +15,13 @@
  * the target in its tooltip, and optional warning labels on price flips against the setup. At most 500 labels are
  * kept.
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): the trade setups, the crosses of the support /
+ * resistance and risk levels, the phase completions and the start of a bullish / bearish momentum, with the messages
+ * of the original (ticker from the chart context).
+ *
  * The two "Overall Trend Mark" shapes are hidden in the original (display.none) and are not drawn. The prices in
- * the label tooltips use the price tick of the symbol: the port reads it from the chart context (third argument)
- * and uses 0.01 without it.
+ * the label tooltips and alert messages use the price tick of the symbol: the port reads it from the chart context
+ * (third argument) and uses 0.01 without it.
  *
  * Reference: "Reversal Signals [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -25,8 +29,11 @@
  */
 
 import { ta, Series, color, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { LabelData, MarkerData } from '../types';
-import { mintickOf, type ChartContext } from '../chart-context';
+import type { AlertCall, LabelData, MarkerData } from '../types';
+import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
+
+/** The original calls alert() */
+export const hasAlertFunction = true;
 
 export interface ReversalSignalsInputs {
   /** Display of the momentum phases */
@@ -123,7 +130,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ReversalSignalsInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers' | 'labels'> & { markers: MarkerData[]; labels: LabelData[] } {
+): Omit<IndicatorResult, 'markers' | 'labels'> & { markers: MarkerData[]; labels: LabelData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { srL, rsB, rsE, ttE, tso, war } = cfg;
@@ -200,6 +207,8 @@ export function calculate(
   let sB13 = NaN;
 
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
+  const tTxt = tickerOf(chart);
   let labels: LabelData[] = [];
   const newLabel = (l: LabelData) => {
     labels.push(l);
@@ -230,14 +239,16 @@ export function calculate(
     const time = b.time;
     const c = b.close;
     /** plotshape with a text and no visible body (digits of the detailed display) */
-    const digit = (on: boolean, text: string, textColor: string, below: boolean, body = NO_COLOR) => {
-      if (on) markers.push({ time, position: below ? 'belowBar' : 'aboveBar', shape: 'labelDown', color: body, text, textColor });
+    const digit = (id: number, on: boolean, text: string, textColor: string, below: boolean, body = NO_COLOR) => {
+      if (on) {
+        markers.push({ id: `shape${id}`, time, position: below ? 'belowBar' : 'aboveBar', shape: 'labelDown', color: body, text, textColor });
+      }
     };
     /** plotshape of a completed phase (size.tiny) */
-    const phase = (on: boolean, up: boolean, body: string, text: string) => {
+    const phase = (id: number, on: boolean, up: boolean, body: string, text: string) => {
       if (!on) return;
       markers.push({
-        time, position: up ? 'belowBar' : 'aboveBar', shape: up ? 'labelUp' : 'labelDown', color: body,
+        id: `shape${id}`, time, position: up ? 'belowBar' : 'aboveBar', shape: up ? 'labelUp' : 'labelDown', color: body,
         ...(text ? { text } : {}), textColor: WHITE, size: 'tiny',
       });
     };
@@ -254,19 +265,20 @@ export function calculate(
 
     const pbS = (le(b.low, low(i - 3)) && le(b.low, low(i - 2))) || (le(low(i - 1), low(i - 3)) && le(low(i - 1), low(i - 2)));
     const detailed = BnoShw && !Bcmpltd;
-    for (let k = 1; k <= 7; k++) digit(detailed && bSC === k, DIGITS[k - 1], GREEN, false);
-    digit(detailed && bSC === 8 && !pbS, '₈', GREEN, false);
-    digit(detailed && bSC === 8 && pbS, 'ᵖ\n₈', WHITE, false, bullPerfect8);
-    phase(BnoShw && bSC === 9 && !pbS, true, bullPhase, '');
-    phase(BnoShw && bSC === 9 && pbS, true, bullPhase, 'ᵖ');
+    // Shape ids: the original's plotshape outputs in declaration order (shape0 ... shape53)
+    for (let k = 1; k <= 7; k++) digit(k - 1, detailed && bSC === k, DIGITS[k - 1], GREEN, false);
+    digit(7, detailed && bSC === 8 && !pbS, '₈', GREEN, false);
+    digit(8, detailed && bSC === 8 && pbS, 'ᵖ\n₈', WHITE, false, bullPerfect8);
+    phase(9, BnoShw && bSC === 9 && !pbS, true, bullPhase, '');
+    phase(10, BnoShw && bSC === 9 && pbS, true, bullPhase, 'ᵖ');
     const bullEarly = bSCPrev === 8 && sSC === 1; // bC8
-    phase(BnoShw && bullEarly, true, bullPhase, '');
+    phase(11, BnoShw && bullEarly, true, bullPhase, '');
 
     const bSR1 = bSR;
     bSR = bSC === 9 || bullEarly ? sR[i] : gt(c, bSR1) ? 0 : bSR1;
     plot0.push({ time, value: srL && gt(bSR, 0) ? bSR : NaN });
     if (srL && gt(bSR, 0) && ne(bSR, bSR1) && diamonds) {
-      markers.push({ time, position: 'atPriceMiddle', price: bSR, shape: 'diamond', color: RED, size: 'tiny' });
+      markers.push({ id: 'shape12', time, position: 'atPriceMiddle', price: bSR, shape: 'diamond', color: RED, size: 'tiny' });
     }
 
     if (bSC === 1) bSL = b.low;
@@ -279,19 +291,19 @@ export function calculate(
     plot1.push({ time, value: rsB && gt(bSD, 0) ? bSD : NaN });
 
     const psS = (ge(b.high, high(i - 3)) && ge(b.high, high(i - 2))) || (ge(high(i - 1), high(i - 3)) && ge(high(i - 1), high(i - 2)));
-    for (let k = 1; k <= 7; k++) digit(detailed && sSC === k, DIGITS[k - 1], RED, false);
-    digit(detailed && sSC === 8 && !psS, '₈', RED, false);
-    digit(detailed && sSC === 8 && psS, 'ᵖ\n₈', WHITE, false, bearPerfect8);
-    phase(BnoShw && sSC === 9 && !psS, false, bearPhase, '');
-    phase(BnoShw && sSC === 9 && psS, false, bearPhase, 'ᵖ');
+    for (let k = 1; k <= 7; k++) digit(12 + k, detailed && sSC === k, DIGITS[k - 1], RED, false);
+    digit(20, detailed && sSC === 8 && !psS, '₈', RED, false);
+    digit(21, detailed && sSC === 8 && psS, 'ᵖ\n₈', WHITE, false, bearPerfect8);
+    phase(22, BnoShw && sSC === 9 && !psS, false, bearPhase, '');
+    phase(23, BnoShw && sSC === 9 && psS, false, bearPhase, 'ᵖ');
     const bearEarly = sSCPrev === 8 && bSC === 1; // sC8
-    phase(BnoShw && bearEarly, false, bearPhase, '');
+    phase(24, BnoShw && bearEarly, false, bearPhase, '');
 
     const sSS1 = sSS;
     sSS = sSC === 9 || bearEarly ? sS[i] : lt(c, sSS1) ? 0 : sSS1;
     plot2.push({ time, value: srL && gt(sSS, 0) ? sSS : NaN });
     if (srL && gt(sSS, 0) && ne(sSS, sSS1) && diamonds) {
-      markers.push({ time, position: 'atPriceMiddle', price: sSS, shape: 'diamond', color: GREEN, size: 'tiny' });
+      markers.push({ id: 'shape25', time, position: 'atPriceMiddle', price: sSS, shape: 'diamond', color: GREEN, size: 'tiny' });
     }
 
     if (sSC === 1) sSH = b.high;
@@ -316,9 +328,9 @@ export function calculate(
     if (bCC === 8 && bChanged) bC8 = c;
 
     const shwBC = noShw && !cmpltd && sbC && bChanged;
-    for (let k = 1; k <= 12; k++) digit(shwBC && bCC === k, DIGITS[k - 1], GREEN, true);
-    digit(noShw && !cmpltd && sbC && bCC === bCC1 && bCC === 12 && b13, '₊', GREEN, true);
-    phase(noShw && sbC && bChanged && bCC === 13, true, bullExhaustion, 'E');
+    for (let k = 1; k <= 12; k++) digit(25 + k, shwBC && bCC === k, DIGITS[k - 1], GREEN, true);
+    digit(38, noShw && !cmpltd && sbC && bCC === bCC1 && bCC === 12 && b13, '₊', GREEN, true);
+    phase(39, noShw && sbC && bChanged && bCC === 13, true, bullExhaustion, 'E');
 
     if (bCC === 1) {
       bCLt = b.low;
@@ -354,9 +366,9 @@ export function calculate(
     if (sCC === 8 && sChanged) sC8 = c;
 
     const shwSC = noShw && !cmpltd && ssC && sChanged;
-    for (let k = 1; k <= 12; k++) digit(shwSC && sCC === k, DIGITS[k - 1], RED, true);
-    digit(noShw && !cmpltd && ssC && sCC === sCC1 && sCC === 12 && s13, '₊', RED, true);
-    phase(noShw && ssC && sChanged && sCC === 13, false, bearExhaustion, 'E');
+    for (let k = 1; k <= 12; k++) digit(39 + k, shwSC && sCC === k, DIGITS[k - 1], RED, true);
+    digit(52, noShw && !cmpltd && ssC && sCC === sCC1 && sCC === 12 && s13, '₊', RED, true);
+    phase(53, noShw && ssC && sChanged && sCC === 13, false, bearExhaustion, 'E');
 
     if (sCC === 1) {
       sCLt = b.low;
@@ -415,6 +427,10 @@ export function calculate(
         time, price: b.high, text: 'S', color: String(color.new(YELLOW, 25)), style: 'label_down', textColor: WHITE,
         size: 'small', tooltip: sTT + '\n\nnot a finacial advice, subject to high risk',
       });
+      alertCalls.push({
+        time, freq: 'once_per_bar',
+        message: tTxt + ' : ' + sTT + '\n Price    : ' + tick(c) + '\n\nnot a finacial advice, subject to high risk',
+      });
       sTrd = true;
       lTrd = false;
     }
@@ -451,6 +467,10 @@ export function calculate(
         time, price: b.low, text: 'L', color: String(color.new(LABEL_BLUE, 25)), style: 'label_up', textColor: WHITE,
         size: 'small', tooltip: lTT + '\n\nnot a finacial advice, subject to high risk',
       });
+      alertCalls.push({
+        time, freq: 'once_per_bar',
+        message: tTxt + ' : ' + lTT + '\n Price    : ' + tick(c) + '\n\nnot a finacial advice, subject to high risk',
+      });
       lTrd = true;
       sTrd = false;
     }
@@ -469,6 +489,22 @@ export function calculate(
       lTrd = false;
     }
 
+    // Alerts: f_xLX(_p, _l) = (_l > _p and _l < _p[1]) or (_l < _p and _l > _p[1]) with _p = close
+    const xLX = (l: number) => (gt(l, c) && lt(l, c1)) || (lt(l, c) && gt(l, c1));
+    const pTxt = tick(c);
+    const call = (message: string) => alertCalls.push({ time, message, freq: 'once_per_bar' });
+    if (xLX(bSR) && srL) call(tTxt + ' crossing resistance level detected, price ' + tick(bSR));
+    // `a or b and c` is `a or (b and c)`, as in the original
+    if (xLX(bSD) || (xLX(sSD) && rsB)) call(tTxt + ' crossing momentum risk level detected, price ' + tick(bSD));
+    if (xLX(sSS) && srL) call(tTxt + ' crossing support level detected, price ' + tick(sSS));
+    if (xLX(bCD) || (xLX(sCD) && rsE)) call(tTxt + ' crossing trend exhaustion risk level detected, price ' + tick(bCD));
+    if (bSC === 9 && cmpltd) call(tTxt + ' bullish momentum phase completion detected, price ' + pTxt);
+    if (sSC === 9 && cmpltd) call(tTxt + ' bearish momentum phase completion detected, price ' + pTxt);
+    if (bCC === 13 && cmpltd) call(tTxt + ' bullish trend exhaustion phase completion detected, price ' + pTxt);
+    if (sCC === 13 && cmpltd) call(tTxt + ' bearish trend exhaustion phase completion detected, price ' + pTxt);
+    if (gt(bSR, 0) && eq(bSR1, 0)) call(tTxt + ' bearish momentum detected, price ' + pTxt);
+    if (gt(sSS, 0) && eq(sSS1, 0)) call(tTxt + ' bullish momentum detected, price ' + pTxt);
+
     bSCPrev = bSC;
     sSCPrev = sSC;
     pbSPrev = pbS;
@@ -480,6 +516,7 @@ export function calculate(
     plots: { plot0, plot1, plot2, plot3, plot4, plot5, plot6, plot7 },
     markers,
     labels,
+    alertCalls,
   };
 }
 
@@ -489,4 +526,5 @@ export const ReversalSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

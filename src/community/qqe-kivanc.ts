@@ -5,6 +5,8 @@
  * and multiplied by 4.236 to give a band above and below FAST. SLOW is a trailing line that follows the lower band
  * while FAST is above it and the upper band while FAST is below it. The area between FAST and SLOW is green when
  * FAST is above and red when it is below; Buy / Sell labels mark the crosses of FAST and SLOW.
+ * Alerts (alertcondition, `alerts` of the result): the original's five conditions, crosses of FAST with SLOW (any
+ * cross, crossover, crossunder) and with 50.
  *
  * Reference: "Quantitative Qualitative Estimation" (QQE) by KivancOzbilgic
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface QqeKivancInputs {
   src: SourceType;
@@ -72,7 +75,7 @@ const nz = (v: number) => (isNaN(v) ? 0 : v);
 export function calculate(
   bars: Bar[],
   inputs: Partial<QqeKivancInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // QQEF = ema(rsi(src, length), SSF) (RSII is the same series)
@@ -138,7 +141,21 @@ export function calculate(
       { plot1: 'plot0', plot2: 'plot1', options: { title: 'DownTrend Highligter' }, colors: shortFill },
     ],
     markers,
+    // alertcondition(cross / crossover / crossunder(QQEF, QQES), crossover / crossunder(QQEF, 50))
+    alerts: alertStates(alertConditions, bars, [
+      buy.map((v, i) => !!v || !!sell[i]), buy.map((v) => !!v), sell.map((v) => !!v),
+      crossedOver(fast, 50), crossedUnder(fast, 50),
+    ]),
   };
 }
 
-export const QqeKivanc = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cross Alert', message: 'QQE Crossing Signal!' },
+  { id: 'alert1', title: 'Crossover Alarm', message: 'QQE BUY SIGNAL!' },
+  { id: 'alert2', title: 'Crossunder Alarm', message: 'QQE SELL SIGNAL!' },
+  { id: 'alert3', title: 'Cross 50 Up Alert', message: 'QQE FAST Crossing 50 UP!' },
+  { id: 'alert4', title: 'Cross 50 Down Alert', message: 'QQE FAST Crossing 50 DOWN!' },
+];
+
+export const QqeKivanc = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

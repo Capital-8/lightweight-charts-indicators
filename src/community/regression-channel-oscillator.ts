@@ -6,6 +6,8 @@
  * values around that line. The oscillator is 50 * (src - B) / (mult * RMSE), clamped to -150..150 and smoothed
  * (SMA / EMA / none); the signal line is its SMA. Glow plots, a five-layer fill to zero, band glows coloured when the
  * signal passes its thresholds, and triangles on crosses of the oversold / overbought levels.
+ * Alerts (alertcondition, `alerts` of the result): the oscillator crosses over the oversold / under the overbought
+ * level, the signal crosses over / under 0, over the MA oversold and under the MA overbought threshold.
  *
  * Reference: "Regression Channel Oscillator" by Uncle_the_shooter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RegressionChannelOscillatorInputs {
   /** Regression length */
@@ -140,7 +143,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<RegressionChannelOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = cfg.len;
@@ -272,8 +275,23 @@ export function calculate(
     ],
     fills,
     markers,
+    alerts: alertStates(alertConditions, bars, [
+      longObos.map((v) => !!v), shortObos.map((v) => !!v),
+      crossedOver(signal, 0), crossedUnder(signal, 0),
+      crossedOver(signal, cfg.maOversold), crossedUnder(signal, cfg.maOverbought),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy (Oversold)', message: 'Oscillator crossed above oversold.' },
+  { id: 'alert1', title: 'Sell (Overbought)', message: 'Oscillator crossed below overbought.' },
+  { id: 'alert2', title: 'Signal MA Cross Above 0', message: 'Signal MA crossed ABOVE zero line.' },
+  { id: 'alert3', title: 'Signal MA Cross Below 0', message: 'Signal MA crossed BELOW zero line.' },
+  { id: 'alert4', title: 'Signal MA Cross Above MA OS', message: 'Signal MA crossed ABOVE its oversold threshold.' },
+  { id: 'alert5', title: 'Signal MA Cross Below MA OB', message: 'Signal MA crossed BELOW its overbought threshold.' },
+];
 
 export const RegressionChannelOscillator = {
   calculate,
@@ -281,4 +299,5 @@ export const RegressionChannelOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

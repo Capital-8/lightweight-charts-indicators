@@ -8,6 +8,10 @@
  * percent. Lines and labels take the resistance colour when the level is at or above the close, else the support
  * colour. Optional 'H' / 'L' marks on the pivot bars.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Resistance Broken' on the bars whose close crosses above a level
+ * (close[1] at or below it), 'Support Broken' on the bars whose close crosses below a level, 'Support or Resistance
+ * Broken' on both.
+ *
  * Chart values read: the symbol price tick (the levels are rounded to it). Without a chart context the tick is 0.01.
  *
  * Reference: "Support Resistance - Dynamic v2" by LonesomeTheBlue
@@ -19,6 +23,7 @@ import { ta, str, math, compare, Series, type IndicatorResult, type InputConfig,
 import type { MarkerData, LabelData, LineDrawingData } from '../types';
 import { mintickOf, type ChartContext } from '../chart-context';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SupportResistanceDynamicV2Inputs {
   /** Pivot Period */
@@ -98,7 +103,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceDynamicV2Inputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; labels: LabelData[]; lines: LineDrawingData[] } {
+): IndicatorResult & { markers: MarkerData[]; labels: LabelData[]; lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const {
     prd, ppsrc, maxNumPP, channelW, maxNumSR, minStrength, labelLoc, lineStyle, lineWidth, resistanceColor, supportColor, showPP,
   } = { ...defaultInputs, ...inputs };
@@ -121,6 +126,17 @@ export function calculate(
   // Levels drawn on the last pivot bar (the lines and labels of older pivot bars are deleted)
   let levels: number[] = [];
   let levelsBar = -1;
+  // f_crossed_over() / f_crossed_under() on every bar, with the levels of the last pivot bar
+  const crossedOver: boolean[] = new Array(n).fill(false);
+  const crossedUnder: boolean[] = new Array(n).fill(false);
+  const checkCrosses = (i: number) => {
+    const close = bars[i].close;
+    const close1 = i > 0 ? bars[i - 1].close : NaN;
+    for (const mid of levels) {
+      if (compare.le(close1, mid) && compare.gt(close, mid)) crossedOver[i] = true;
+      if (compare.ge(close1, mid) && compare.lt(close, mid)) crossedUnder[i] = true;
+    }
+  };
 
   for (let i = 0; i < n; i++) {
     const ph = phArr[i] ?? NaN;
@@ -136,7 +152,10 @@ export function calculate(
       if (isPl) markers.push({ time: bars[i - prd].time, position: 'belowBar', shape: 'labelUp', color: 'transparent', text: 'L', textColor: LIME });
     }
 
-    if (!isPh && !isPl) continue;
+    if (!isPh && !isPl) {
+      checkCrosses(i);
+      continue;
+    }
 
     pivotVals.unshift(isPh ? ph : pl);
     if (pivotVals.length > maxNumPP) pivotVals.pop();
@@ -200,6 +219,7 @@ export function calculate(
 
     levels = srUp.map((up, x) => math.round_to_mintick((up + srDn[x]) / 2, mintick));
     levelsBar = i;
+    checkCrosses(i);
   }
 
   // Lines and labels alive after the last bar. Every bar updates the label text, position and colours and the
@@ -235,7 +255,15 @@ export function calculate(
     markers,
     labels,
     lines,
+    alerts: alertStates(alertConditions, bars, [crossedOver, crossedUnder, crossedOver.map((v, i) => v || crossedUnder[i])]),
   };
 }
 
-export const SupportResistanceDynamicV2 = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Resistance Broken', message: 'Resistance Broken' },
+  { id: 'alert1', title: 'Support Broken', message: 'Support Broken' },
+  { id: 'alert2', title: 'Support or Resistance Broken', message: 'Support or Resistance Broken' },
+];
+
+export const SupportResistanceDynamicV2 = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

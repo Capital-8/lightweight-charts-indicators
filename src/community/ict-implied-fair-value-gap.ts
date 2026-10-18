@@ -7,6 +7,8 @@
  * shadow is above the middle of the upper shadow of the first candle (the bearish IFVG mirrors it). Each IFVG draws
  * a zone box and its average line from the first candle to `extension` bars after the current one; the average of
  * the latest zone is plotted, coloured once the zone is more than `extension` bars old when "Extend Averages" is on.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish IFVG' and 'Bearish IFVG', true on the bar of each IFVG
+ * (whether or not its side is shown).
  *
  * Reference: "ICT Implied Fair Value Gap (IFVG) [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
  */
 
 import { taCore, compare, line, box, resetDrawings, setDrawingBar, drawingOutputs, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface IctImpliedFairValueGapInputs {
   /** Shadow threshold (%) */
@@ -68,7 +71,16 @@ export const metadata = {
 /** indicator(max_lines_count = 500, max_boxes_count = 500) */
 const MAX_OBJECTS = 500;
 
-export function calculate(bars: Bar[], inputs: Partial<IctImpliedFairValueGapInputs> = {}): IndicatorResult {
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish IFVG', message: 'Bullish IFVG detected' },
+  { id: 'alert1', title: 'Bearish IFVG', message: 'Bearish IFVG detected' },
+];
+
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<IctImpliedFairValueGapInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const thr = cfg.thr / 100;
@@ -148,6 +160,8 @@ export function calculate(bars: Bar[], inputs: Partial<IctImpliedFairValueGapInp
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
     ...drawingOutputs(bars),
+    // alertcondition(bull_ifvg, 'Bullish IFVG') / alertcondition(bear_ifvg, 'Bearish IFVG')
+    alerts: alertStates(alertConditions, bars, [bullIfvg, bearIfvg]),
   };
 }
 
@@ -157,4 +171,5 @@ export const IctImpliedFairValueGap = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

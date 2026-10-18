@@ -5,13 +5,17 @@
  * when the close is above the upper band with RSI >= overbought, green when the close is below the lower band with
  * RSI <= oversold. A SELL label when the close crosses under the upper band with RSI[1] >= overbought, a BUY label
  * when the close crosses over the lower band with RSI[1] <= oversold.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close) on the bars of the SELL / BUY signals.
  *
  * Reference: "Magnet Force + RSI Filter V6" by mehmetbezgincan
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BgColorData, MarkerData } from '../types';
+import type { AlertCall, BgColorData, MarkerData } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface MagnetForceRsiFilterV6Inputs {
   /** Magnet core period (VWMA and stdev length) */
@@ -64,7 +68,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<MagnetForceRsiFilterV6Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -86,6 +90,7 @@ export function calculate(
   const bgGreen = String(color.new(color.green, 90));
   const bgColors: BgColorData[] = [];
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
   const t = (i: number) => bars[i].time;
 
   for (let i = 0; i < n; i++) {
@@ -108,6 +113,13 @@ export function calculate(
       markers.push({ time: t(i), position: 'belowBar', shape: 'labelUp', color: color.green, text: 'BUY',
         textColor: color.white, size: 'small' });
     }
+    // if sell_signal alert("Magnet Pull Down: ...") / if buy_signal alert("Magnet Pull Up: ..."), once per bar close
+    if (sellSignal) {
+      alertCalls.push({ time: t(i), message: 'Magnet Pull Down: Price returning to core from Overbought', freq: 'once_per_bar_close' });
+    }
+    if (buySignal) {
+      alertCalls.push({ time: t(i), message: 'Magnet Pull Up: Price returning to core from Oversold', freq: 'once_per_bar_close' });
+    }
   }
 
   const P = (vals: number[]) => bars.map((b, i) => ({ time: b.time, value: vals[i] }));
@@ -118,6 +130,7 @@ export function calculate(
     fills: [{ plot1: 'plot1', plot2: 'plot2', options: { title: 'Magnetic Field', color: String(color.new(color.purple, 92)) } }],
     bgColors,
     markers,
+    alertCalls,
   };
 }
 
@@ -127,4 +140,5 @@ export const MagnetForceRsiFilterV6 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

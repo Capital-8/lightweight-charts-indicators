@@ -10,6 +10,8 @@
  * Up and down waves are columns coloured with a gradient between a base and an intense colour, from the wave total
  * normalized to 0..100 between the lowest and highest wave totals of `lookback` bars; the background takes the
  * wave colour with a transparency of 90.
+ * Alerts (alertcondition, `alerts` of the result): 'Upward Trend Change' / 'Downward Trend Change' on the bars where
+ * the wave turns from down to up / from up to down.
  *
  * Reference: "Weis Wave Candle" by Uncle_the_shooter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +20,7 @@
 
 import { ta, taCore, callsite, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface WeisWaveCandleInputs {
   /** Trend detection method */
@@ -81,7 +84,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<WeisWaveCandleInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -154,10 +157,10 @@ export function calculate(
     plot1.push({ time: t, value: waveDown[i], color: waveColorDown ?? 'transparent' });
     // bgcolor(waveUp > 0.01 ? color.new(waveColorUp, 90) : na), then the same for the down wave (drawn on top)
     if (gt(waveUp[i], 0.01) && waveColorUp !== null) {
-      bgColors.push({ time: t, color: String(color.new(waveColorUp, 90)) });
+      bgColors.push({ time: t, color: String(color.new(waveColorUp, 90)), id: 'bgcolor0' });
     }
     if (gt(waveDown[i], 0.01) && waveColorDown !== null) {
-      bgColors.push({ time: t, color: String(color.new(waveColorDown, 90)) });
+      bgColors.push({ time: t, color: String(color.new(waveColorDown, 90)), id: 'bgcolor1' });
     }
   }
 
@@ -165,8 +168,19 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
     bgColors,
+    // alertcondition(wave == 1 and wave[1] == -1, ...) / alertcondition(wave == -1 and wave[1] == 1, ...)
+    alerts: alertStates(alertConditions, bars, [
+      wave.map((w, i) => i > 0 && w === 1 && wave[i - 1] === -1),
+      wave.map((w, i) => i > 0 && w === -1 && wave[i - 1] === 1),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Upward Trend Change', message: 'Weis Wave: Trend changed to Upward' },
+  { id: 'alert1', title: 'Downward Trend Change', message: 'Weis Wave: Trend changed to Downward' },
+];
 
 export const WeisWaveCandle = {
   calculate,
@@ -174,4 +188,5 @@ export const WeisWaveCandle = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

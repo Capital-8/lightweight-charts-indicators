@@ -113,9 +113,10 @@ export function calculate(
     if (i > 0 && !isNaN(diff[i - 1])) {
       const up = diff[i] > 0 && diff[i - 1] <= 0;
       const dn = diff[i] < 0 && diff[i - 1] >= 0;
+      // shape0: the signal_up diamond, shape1: the signal_dn diamond
       if (up || dn) {
-        markers.push({ time: bars[i - 1].time, position: 'atPriceMiddle', price: base[i - 1], shape: 'diamond',
-          color: color.orange, size: 'tiny' });
+        markers.push({ id: up ? 'shape0' : 'shape1', time: bars[i - 1].time, position: 'atPriceMiddle', price: base[i - 1],
+          shape: 'diamond', color: color.orange, size: 'tiny' });
       }
     }
   }

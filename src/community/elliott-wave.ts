@@ -13,8 +13,12 @@
  * On the last bar, the Fibonacci levels of the latest valid motive wave are drawn 10 bars ahead (4 levels, a dashed
  * pole and a filled area between the levels 3 and 4: green when level 4 holds, red and dotted when it is broken).
  *
- * At most 500 lines, 500 labels and 50 boxes are kept, and 15 patterns per zig-zag. The 9 alerts of the original
- * give no output.
+ * At most 500 lines, 500 labels and 50 boxes are kept, and 15 patterns per zig-zag.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close), on the bar of the pivot: a new or
+ * invalidated motive pattern ('New EW Motive Bullish Pattern found', 'Invalidated EW Motive Bearish Pattern', ...),
+ * a new or invalidated corrective pattern (the original gives 'Invalidated EW Corrective Bullish Pattern' for both
+ * directions) and a possible new start of a motive wave.
  *
  * Reference: "Elliott Wave [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -22,8 +26,11 @@
  */
 
 import { ta, str, color, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BoxData, LabelData, LabelStyle, LineDrawingData, LinefillData } from '../types';
+import type { AlertCall, BoxData, LabelData, LabelStyle, LineDrawingData, LinefillData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface ElliottWaveInputs {
   iHi: 'high' | 'close' | 'max open/close';
@@ -186,6 +193,7 @@ export function calculate(
   labels: LabelData[];
   lines: LineDrawingData[];
   linefills: LinefillData[];
+  alertCalls: AlertCall[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -248,6 +256,11 @@ export function calculate(
   };
 
   const fibs: FibLines[] = [];
+  const alertCalls: AlertCall[] = [];
+  /** alert(message, alert.freq_once_per_bar_close) on bar i */
+  const alertOn = (i: number, message: string) => {
+    alertCalls.push({ time: bars[i].time as number, message, freq: 'once_per_bar_close' });
+  };
 
   /** One `draw(enabled, left, col, n)` call of the script; returns the function to run on each bar */
   const draw = (enabled: boolean, leftInput: number, col: string, index: number) => {
@@ -280,6 +293,7 @@ export function calculate(
     /** A new pivot high (isHigh) or pivot low on bar i */
     const pivot = (i: number, isHigh: boolean, value: number) => {
       const s = isHigh ? 1 : -1;
+      const side = isHigh ? 'Bullish' : 'Bearish';
       const gEW = aEW[0];
       const dir = zzD[0];
       const x1 = zzX[0];
@@ -342,12 +356,14 @@ export function calculate(
           wave.dir = s;
           aEW.unshift(wave);
           nFibL.broken = false;
+          alertOn(i, `New EW Motive ${side} Pattern found`);
         }
       } else if (same && gEW.on) {
         // dot(): the motive wave is no longer valid
         for (const l of gEW.l) setStyle(l, 'dotted');
         for (const b of gEW.b) hideText(b);
         gEW.on = false;
+        alertOn(i, `Invalidated EW Motive ${side} Pattern`);
       }
 
       // ABC
@@ -381,6 +397,7 @@ export function calculate(
             getEW.bx = { left: x6, top: y6, right: x6 + width, bottom: y4, bg: String(color.new(col, 93)), border: String(color.new(col, 65)), deleted: false };
             boxes.push(getEW.bx);
             limit(boxes, MAX_BOXES);
+            alertOn(i, `New EW Corrective ${side} Pattern found`);
           }
         } else if (current) {
           // dash(): the corrective wave is no longer valid
@@ -394,6 +411,8 @@ export function calculate(
             getEW.bx.bg = null;
             getEW.bx.border = null;
           }
+          // the original gives the bullish message for both directions
+          alertOn(i, 'Invalidated EW Corrective Bullish Pattern');
         }
       }
 
@@ -404,6 +423,7 @@ export function calculate(
           x: x6, y: y6, text: '', color: String(color.new(col, 65)), textColor: LABEL_TEXT, style: 'circle',
           yloc: isHigh ? 'abovebar' : 'belowbar', size: 'tiny',
         });
+        alertOn(i, `Possible new start of EW Motive ${side} Wave`);
       }
     };
 
@@ -548,6 +568,7 @@ export function calculate(
     linefills: fibs.filter((f) => drawn(f.fill1) && drawn(f.fill2)).map((f) => ({
       line1: toLine(f.fill1), line2: toLine(f.fill2), color: f.fillColor ?? 'transparent',
     })),
+    alertCalls,
   };
 }
 
@@ -557,4 +578,5 @@ export const ElliottWave = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

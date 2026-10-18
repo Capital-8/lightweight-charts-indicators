@@ -7,12 +7,17 @@
  * Optional plots: the EMA(10) of the difference of the two EMAs (net drift), the EMA(10) of its absolute value
  * (drift strength), and the EMA(10) of their mean (baseline) with a percentage envelope and stdev bands.
  *
+ * Alerts (alertcondition, `alerts` of the result): the green and the red background, the up EMA crossing over / under
+ * the down EMA, the net drift crossing over / under 0, and the drift strength crossing over its 50-bar high (as in
+ * the original, the high includes the current bar, so this one never fires).
+ *
  * Reference: "Volumetric Entropy Index" by Sherlock_MacGyver
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolumetricEntropyIndexInputs {
   /** EMA length of the up / down volumes */
@@ -147,7 +152,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumetricEntropyIndexInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => (v === null || v === undefined ? NaN : v));
@@ -189,11 +194,15 @@ export function calculate(
   const plots: Record<string, Point[]> = {};
   for (let k = 0; k < 9; k++) plots[`plot${k}`] = [];
   const bgColors: BgColorData[] = [];
+  const agreeUp: boolean[] = [];
+  const agreeDown: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // upR = smoothUpDrift > 0; dnR = smoothDnDrift > 0 (na is false: both false gives the red background)
     const upR = gt(smoothUpDrift[i], 0);
     const dnR = gt(smoothDnDrift[i], 0);
+    agreeUp.push(upR && dnR);
+    agreeDown.push(!upR && !dnR);
     if (cfg.showBg) {
       if (upR && dnR) bgColors.push({ time: t, color: bgUp });
       else if (!upR && !dnR) bgColors.push({ time: t, color: bgDn });
@@ -220,8 +229,25 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [
+      agreeUp, agreeDown,
+      crossedOver(emaUp, emaDownF), crossedUnder(emaUp, emaDownF),
+      crossedOver(smoothedDelta, 0), crossedUnder(smoothedDelta, 0),
+      crossedOver(smoothedStrength, A(ta.highest(S(smoothedStrength), 50))),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Drift Agreement Up', message: 'Both drift directions rising (Green Background)' },
+  { id: 'alert1', title: 'Drift Agreement Down', message: 'Both drift directions falling (Red Background)' },
+  { id: 'alert2', title: 'EMA DNA Bull Cross', message: 'EMA Up crossed above EMA Down' },
+  { id: 'alert3', title: 'EMA DNA Bear Cross', message: 'EMA Up crossed below EMA Down' },
+  { id: 'alert4', title: 'Net Drift Bullish', message: 'Smoothed Net Drift crossed above 0' },
+  { id: 'alert5', title: 'Net Drift Bearish', message: 'Smoothed Net Drift crossed below 0' },
+  { id: 'alert6', title: 'Drift Strength Spike', message: 'Drift Strength is spiking above 50-bar high' },
+];
 
 export const VolumetricEntropyIndex = {
   calculate,
@@ -229,4 +255,5 @@ export const VolumetricEntropyIndex = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

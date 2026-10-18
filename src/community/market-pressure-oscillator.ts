@@ -6,6 +6,8 @@
  * (the oscillator) and averaged by an SMA (the moving average). Glow plots and a five-layer fill to zero draw the
  * oscillator; pivot divergences between price and oscillator give Bull / Bear labels, and crosses of the thresholds,
  * of zero and of the moving average with zero give triangle signals.
+ * Alerts (alertcondition, `alerts` of the result): the bullish / bearish divergences (on the bar that confirms the
+ * pivot) and the six threshold / zero-line crosses (whatever the signal type shown).
  *
  * Reference: "Market Pressure Oscillator" by Uncle_the_shooter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MarketPressureOscillatorInputs {
   overbought: number;
@@ -148,7 +151,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<MarketPressureOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -314,33 +317,40 @@ export function calculate(
   // (exact comparisons, no 1e-10 tolerance; na gives false)
   const crossover = (a: number[], b: number, i: number) => i > 0 && a[i] > b && a[i - 1] <= b;
   const crossunder = (a: number[], b: number, i: number) => i > 0 && a[i] < b && a[i - 1] >= b;
+  // longSignalObos, shortSignalObos, longSignalZero, shortSignalZero, longSignalMaZero, shortSignalMaZero
+  const signalFlags: boolean[][] = [[], [], [], [], [], []];
   for (let i = 0; i < n; i++) {
     // plotshape(bullCond ? oscLbr : na, offset = -lookbackRight, text = ' Bull ', shape.labelup, location.absolute,
     //   color.new(bullDivColor, bandTransparency), textcolor = textColor, display = calculateDivergence ? all : none)
     if (cfg.calculateDivergence && i - lb >= 0) {
       const price = oscLbr(i);
       if (bullCond[i] && !isNaN(price)) {
-        markers.push({ time: barTime(bars, i - lb, interval), position: 'atPriceBottom', price, shape: 'labelUp',
+        markers.push({ time: barTime(bars, i - lb, interval), id: 'shape6', position: 'atPriceBottom', price, shape: 'labelUp',
           color: bullLabel, text: ' Bull ', textColor: cfg.textColor });
       }
       if (bearCond[i] && !isNaN(price)) {
-        markers.push({ time: barTime(bars, i - lb, interval), position: 'atPriceTop', price, shape: 'labelDown',
+        markers.push({ time: barTime(bars, i - lb, interval), id: 'shape7', position: 'atPriceTop', price, shape: 'labelDown',
           color: bearLabel, text: ' Bear ', textColor: cfg.textColor });
       }
     }
     // Signal triangles: location.bottom (buy) / location.top (sell), size.tiny
-    const buy = (on: boolean, v: number) => {
-      if (on && !isNaN(v)) markers.push({ time: t(i), position: 'bottom', shape: 'triangleUp', color: cfg.oversoldColor, size: 'tiny' });
+    const buy = (on: boolean, v: number, id: string) => {
+      if (on && !isNaN(v)) markers.push({ time: t(i), id, position: 'bottom', shape: 'triangleUp', color: cfg.oversoldColor, size: 'tiny' });
     };
-    const sell = (on: boolean, v: number) => {
-      if (on && !isNaN(v)) markers.push({ time: t(i), position: 'top', shape: 'triangleDown', color: cfg.overboughtColor, size: 'tiny' });
+    const sell = (on: boolean, v: number, id: string) => {
+      if (on && !isNaN(v)) markers.push({ time: t(i), id, position: 'top', shape: 'triangleDown', color: cfg.overboughtColor, size: 'tiny' });
     };
-    buy(showObos && crossover(osc, cfg.oversold, i), osc[i]);
-    sell(showObos && crossunder(osc, cfg.overbought, i), osc[i]);
-    buy(showZero && crossover(osc, 0, i), osc[i]);
-    sell(showZero && crossunder(osc, 0, i), osc[i]);
-    buy(showMaZero && crossover(maCpo, 0, i), maCpo[i]);
-    sell(showMaZero && crossunder(maCpo, 0, i), maCpo[i]);
+    const sig = [
+      crossover(osc, cfg.oversold, i), crossunder(osc, cfg.overbought, i), crossover(osc, 0, i), crossunder(osc, 0, i),
+      crossover(maCpo, 0, i), crossunder(maCpo, 0, i),
+    ];
+    sig.forEach((f, k) => signalFlags[k].push(f));
+    buy(showObos && sig[0], osc[i], 'shape0');
+    sell(showObos && sig[1], osc[i], 'shape1');
+    buy(showZero && sig[2], osc[i], 'shape2');
+    sell(showZero && sig[3], osc[i], 'shape3');
+    buy(showMaZero && sig[4], maCpo[i], 'shape4');
+    sell(showMaZero && sig[5], maCpo[i], 'shape5');
   }
 
   return {
@@ -353,8 +363,21 @@ export function calculate(
     ],
     fills,
     markers,
+    alerts: alertStates(alertConditions, bars, [bullCond, bearCond, ...signalFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Divergence Detected', message: 'Bullish divergence detected at pivot, lookback right bars ago.' },
+  { id: 'alert1', title: 'Bearish Divergence Detected', message: 'Bearish divergence detected at pivot, lookback right bars ago.' },
+  { id: 'alert2', title: 'Buy Signal (Oversold)', message: 'Oscillator crossed above the oversold threshold.' },
+  { id: 'alert3', title: 'Sell Signal (Overbought)', message: 'Oscillator crossed below the overbought threshold.' },
+  { id: 'alert4', title: 'Buy Signal (Zero Line)', message: 'Oscillator crossed above the zero line.' },
+  { id: 'alert5', title: 'Sell Signal (Zero Line)', message: 'Oscillator crossed below the zero line.' },
+  { id: 'alert6', title: 'Buy Signal (MA Zero Line)', message: 'Moving Average crossed above the zero line.' },
+  { id: 'alert7', title: 'Sell Signal (MA Zero Line)', message: 'Moving Average crossed below the zero line.' },
+];
 
 export const MarketPressureOscillator = {
   calculate,
@@ -362,4 +385,5 @@ export const MarketPressureOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

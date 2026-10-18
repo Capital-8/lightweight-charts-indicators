@@ -7,6 +7,8 @@
  * WMA(locked / ATR(length), 5), coloured by the trend, with four fills of decreasing opacity between the oscillator,
  * its 80 %, 55 % and 30 % layers and zero. Optional trend bar colours. Presets override the length, the MA type and
  * the threshold; colour presets override the trend colours.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend Signal' / 'Bearish Trend Signal' on the bar the trend
+ * state turns to 1 / -1, 'Trend Direction Changed' on either.
  *
  * Reference: "Volatility-Gated Trend Oscillator [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolatilityGatedTrendOscillatorInputs {
   /** Price source */
@@ -89,7 +92,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolatilityGatedTrendOscillatorInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -165,6 +168,11 @@ export function calculate(
     if (cfg.enableBarcolor && trend[i] !== 0) barColors.push({ time: t, color: String(color.new(c, 20)) });
   }
 
+  // trend_turned_bullish = trend_state == 1 and trend_state[1] != 1 (bearish: -1); trend_changed = either
+  const turnedBull = trend.map((v, i) => v === 1 && i > 0 && trend[i - 1] !== 1);
+  const turnedBear = trend.map((v, i) => v === -1 && i > 0 && trend[i - 1] !== -1);
+  const changed = turnedBull.map((b, i) => b || turnedBear[i]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2, plot3, plot4 },
@@ -176,8 +184,16 @@ export function calculate(
       { plot1: 'plot3', plot2: 'plot4', options: { title: 'Luminance Layer 4' }, colors: fillCols[3] },
     ],
     barColors,
+    alerts: alertStates(alertConditions, bars, [turnedBull, turnedBear, changed]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend Signal', message: 'Volatility-Gated Trend Oscillator: BULLISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Trend Signal', message: 'Volatility-Gated Trend Oscillator: BEARISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Trend Direction Changed', message: 'Volatility-Gated Trend Oscillator: Trend direction changed on {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const VolatilityGatedTrendOscillator = {
   calculate,
@@ -185,4 +201,5 @@ export const VolatilityGatedTrendOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

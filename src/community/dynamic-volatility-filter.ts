@@ -7,6 +7,8 @@
  * "Show Neutral". Four fills of fading transparency go from the line to the source, and optional bands at the line
  * +/- the threshold have a fill between them. Optional bar and background colours by trend. Presets override the
  * noise multiplier, the ATR period and the catch-up speed.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend Signal' / 'Bearish Trend Signal' (the trend turns
+ * up / down) and 'Any Trend Change' (either).
  *
  * Reference: "Dynamic Volatility Filter [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DynamicVolatilityFilterInputs {
   /** 'Default' | 'Fast Response' | 'Smooth Trend' (the presets override noiseMult, lookback and snapSpeed) */
@@ -110,7 +113,8 @@ const COLOR_PRESETS: Record<string, [string, string]> = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<DynamicVolatilityFilterInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   let { noiseMult, lookback, snapSpeed } = cfg;
@@ -133,7 +137,9 @@ export function calculate(
   const lineColor: string[] = new Array(n);
   let dvf = NaN; // var float dvf_line = na
   let trendDir = 0; // var int trend_dir = 0
+  const turnedBull: boolean[] = [], turnedBear: boolean[] = [];
   for (let i = 0; i < n; i++) {
+    const prevDir = i > 0 ? trendDir : NaN; // trend_dir[1] (na on the first bar: != compares false)
     threshold[i] = atr[i] * noiseMult;
     const prev = dvf;
     if (isNaN(dvf)) {
@@ -148,6 +154,9 @@ export function calculate(
     else if (gt(prev, dvf)) trendDir = -1;
     else trendDir = cfg.showNeutral ? 0 : trendDir;
     lineColor[i] = trendDir === 1 ? bullish : trendDir === -1 ? bearish : cfg.neutralColor;
+    // turned_bullish = trend_dir == 1 and trend_dir[1] != 1; turned_bearish = trend_dir == -1 and trend_dir[1] != -1
+    turnedBull.push(trendDir === 1 && !isNaN(prevDir) && prevDir !== 1);
+    turnedBear.push(trendDir === -1 && !isNaN(prevDir) && prevDir !== -1);
   }
 
   const t = (i: number) => bars[i].time;
@@ -191,8 +200,17 @@ export function calculate(
     markers: [],
     barColors,
     bgColors,
+    // trend_changed = turned_bullish or turned_bearish
+    alerts: alertStates(alertConditions, bars, [turnedBull, turnedBear, turnedBull.map((b, i) => b || turnedBear[i])]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend Signal', message: 'Dynamic Volatility Filter: BULLISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Trend Signal', message: 'Dynamic Volatility Filter: BEARISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Any Trend Change', message: 'Dynamic Volatility Filter: Trend direction changed on {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const DynamicVolatilityFilter = {
   calculate,
@@ -200,4 +218,5 @@ export const DynamicVolatilityFilter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

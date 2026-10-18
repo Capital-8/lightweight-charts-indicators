@@ -5,12 +5,15 @@
  * Divergence detection on MACD2 with fractal tops/bottoms.
  * Entry markers (largo/corto) on MACD2 zero cross with MACD1 confirmation.
  * Counter-trend entries (largo1/corto1) on MACD2/MACD1 cross.
+ * Alerts (alertcondition, `alerts` of the result): 'Compras' (largo or largo1), 'Ventas' (corto or corto1) and
+ * 'Compras/Ventas' (any of them), with both entry kinds on as the port draws them.
  *
  * Reference: "DOBLE MACD X" community indicator
  */
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DoubleMACDInputs {
   fast1: number;
@@ -57,7 +60,7 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<DoubleMACDInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<DoubleMACDInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const { fast1, slow1, fast2, slow2, src } = { ...defaultInputs, ...inputs };
   const source = getSourceSeries(bars, src);
   const n = bars.length;
@@ -128,10 +131,10 @@ export function calculate(bars: Bar[], inputs: Partial<DoubleMACDInputs> = {}): 
       // Pine offset=-2, so place label at bar i-2
       const labelTime = bars[i - 2] ? bars[i - 2].time : bars[i].time;
       if (regBearish) {
-        markers.push({ time: labelTime, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'Bear R' });
+        markers.push({ id: 'shape0', time: labelTime, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'Bear R' });
       }
       if (hidBearish) {
-        markers.push({ time: labelTime, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'Bear O' });
+        markers.push({ id: 'shape1', time: labelTime, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'Bear O' });
       }
 
       highPrev = curVal;
@@ -153,10 +156,10 @@ export function calculate(bars: Bar[], inputs: Partial<DoubleMACDInputs> = {}): 
       // Pine offset=-2, so place label at bar i-2
       const labelTime = bars[i - 2] ? bars[i - 2].time : bars[i].time;
       if (regBullish) {
-        markers.push({ time: labelTime, position: 'belowBar', shape: 'labelUp', color: '#0AAC00', text: 'Bull R' });
+        markers.push({ id: 'shape2', time: labelTime, position: 'belowBar', shape: 'labelUp', color: '#0AAC00', text: 'Bull R' });
       }
       if (hidBullish) {
-        markers.push({ time: labelTime, position: 'belowBar', shape: 'labelUp', color: '#0AAC00', text: 'Bull O' });
+        markers.push({ id: 'shape3', time: labelTime, position: 'belowBar', shape: 'labelUp', color: '#0AAC00', text: 'Bull O' });
       }
 
       lowPrev = curVal;
@@ -180,22 +183,41 @@ export function calculate(bars: Bar[], inputs: Partial<DoubleMACDInputs> = {}): 
 
     // Trend buy: macd2 crosses above 0, macd1 < macd2, macd1 rising, macd1 < 0
     if (m2prev <= 0 && m2 > 0 && m1 < m2 && m1 > m1prev && m1 < 0) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#0AAC00', text: 'Buy' });
+      markers.push({ id: 'shape4', time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#0AAC00', text: 'Buy' });
     }
     // Trend sell: macd2 crosses below 0, macd1 > macd2, macd1 falling, macd1 > 0
     if (m2prev >= 0 && m2 < 0 && m1 > m2 && m1 < m1prev && m1 > 0) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: 'Sell' });
+      markers.push({ id: 'shape6', time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: 'Sell' });
     }
 
     // Counter-trend buy: macd2 crosses above macd1, macd2 < 0
     const m1prev2 = macd1Arr[i - 1] ?? NaN;
     if (m2prev <= m1prev2 && m2 > m1 && m2 < 0) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#0AAC00', text: 'CT Buy' });
+      markers.push({ id: 'shape5', time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#0AAC00', text: 'CT Buy' });
     }
     // Counter-trend sell: macd2 crosses below macd1, macd2 > 0
     if (m2prev >= m1prev2 && m2 < m1 && m2 > 0) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: 'CT Sell' });
+      markers.push({ id: 'shape7', time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: 'CT Sell' });
     }
+  }
+
+  // Alerts: largo / largo1 / corto / corto1 on every bar where the two MACDs and their previous values exist (the
+  // port has no "Ver Señal" inputs and draws both entry kinds: vset and vsct are on)
+  const largoF: boolean[] = new Array(n).fill(false);
+  const cortoF: boolean[] = new Array(n).fill(false);
+  for (let i = 1; i < n; i++) {
+    const m2 = macd2Arr[i] ?? NaN, m2p = macd2Arr[i - 1] ?? NaN;
+    const m1 = macd1Arr[i] ?? NaN, m1p = macd1Arr[i - 1] ?? NaN;
+    // largo = crossover(macd_2, 0) and macd_1 < macd_2 and macd_1[1] < macd_1[0] and macd_1 < 0
+    const largo = m2 > 0 && m2p <= 0 && m1 < m2 && m1p < m1 && m1 < 0;
+    // largo1 = crossover(macd_2, macd_1) and macd_2 < 0
+    const largo1 = m2 > m1 && m2p <= m1p && m2 < 0;
+    // corto = crossunder(macd_2, 0) and macd_1 > macd_2 and macd_1[1] > macd_1[0] and macd_1 > 0
+    const corto = m2 < 0 && m2p >= 0 && m1 > m2 && m1p > m1 && m1 > 0;
+    // corto1 = crossunder(macd_2, macd_1) and macd_2 > 0
+    const corto1 = m2 < m1 && m2p >= m1p && m2 > 0;
+    largoF[i] = largo || largo1;
+    cortoF[i] = corto || corto1;
   }
 
   // Pine bgcolor: atlas zone (red bg when dbb < factor) and choppiness zone (red bg when chop > 50)
@@ -277,7 +299,16 @@ export function calculate(bars: Bar[], inputs: Partial<DoubleMACDInputs> = {}): 
     ],
     markers,
     bgColors,
+    // alertcondition(largo or largo1) / (corto or corto1) / (largo or largo1 or corto or corto1)
+    alerts: alertStates(alertConditions, bars, [largoF, cortoF, largoF.map((v, i) => v || cortoF[i])]),
   };
 }
 
-export const DoubleMACD = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions (no message given: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Compras', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Ventas', message: 'Alert Fired!' },
+  { id: 'alert2', title: 'Compras/Ventas', message: 'Alert Fired!' },
+];
+
+export const DoubleMACD = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

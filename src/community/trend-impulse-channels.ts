@@ -4,7 +4,9 @@
  * ATR-based trend-following channel indicator. A "trend" level steps
  * in the trend direction each bar. Flips occur when price exceeds
  * the trigger threshold (ATR * multiplier). Volatility bands are
- * drawn around the trend line. Retest and step signals are generated.
+ * drawn around the trend line. Retest and step signals are generated: the retest triangles below / above the bar, the
+ * step circles on the high (bullish) or the low (bearish), each drawn twice as in the original (a tiny circle and a
+ * small half-transparent one).
  *
  * Reference: "Trend Impulse Channels (Zeiierman)" by Zeiierman
  */
@@ -163,10 +165,10 @@ export function calculate(bars: Bar[], inputs: Partial<TrendImpulseChannelsInput
       }
 
       if (showCrossUnder) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: colorUp, text: '' });
+        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: colorUp, text: '', id: 'shape0' });
       }
       if (showCrossOver) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: colorDown, text: '' });
+        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: colorDown, text: '', id: 'shape1' });
       }
     }
 
@@ -174,11 +176,20 @@ export function calculate(bars: Bar[], inputs: Partial<TrendImpulseChannelsInput
     if (cfg.showStepSignals) {
       const trendStep = dir[i] !== 0 && trend[i] !== trend[i - 1] &&
         ((trend[i] > trend[i - 1] && dir[i] === 1) || (trend[i] < trend[i - 1] && dir[i] === -1));
+      // plotshape(trendStep and dir == 1 and TrendStepSignal ? high : na, "Bullish Step", location.absolute, shape.circle,
+      //   colorUp3, size.tiny), then the same with color.new(colorUp3, 50) and size.small; Bearish Step: low, colorDown3
+      const t = bars[i].time;
       if (trendStep && dir[i] === 1) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'circle', color: colorUp, text: '' });
+        markers.push({ time: t, position: 'atPriceMiddle', price: highArr[i], shape: 'circle', color: colorUp, size: 'tiny', id: 'shape2' });
       }
       if (trendStep && dir[i] === -1) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'circle', color: colorDown, text: '' });
+        markers.push({ time: t, position: 'atPriceMiddle', price: lowArr[i], shape: 'circle', color: colorDown, size: 'tiny', id: 'shape3' });
+      }
+      if (trendStep && dir[i] === 1) {
+        markers.push({ time: t, position: 'atPriceMiddle', price: highArr[i], shape: 'circle', color: String(color.new(colorUp, 50)), size: 'small', id: 'shape4' });
+      }
+      if (trendStep && dir[i] === -1) {
+        markers.push({ time: t, position: 'atPriceMiddle', price: lowArr[i], shape: 'circle', color: String(color.new(colorDown, 50)), size: 'small', id: 'shape5' });
       }
     }
   }

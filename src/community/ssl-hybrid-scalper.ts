@@ -4,6 +4,7 @@
  * Fast, slow and trend EMAs of the close. A buy label marks a crossover of the fast EMA over the slow EMA while the
  * RSI is below the overbought level and the close is above the trend EMA; a sell label marks a crossunder while the
  * RSI is above the oversold level and the close is below the trend EMA.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Alert' and 'Sell Alert', true on the bars of each signal.
  *
  * Reference: "SSL Hybrid Scalper" by nabeel8369
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +12,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SslHybridScalperInputs {
   /** Fast EMA length */
@@ -65,7 +67,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<SslHybridScalperInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -77,6 +79,8 @@ export function calculate(
   const rsi = A(ta.rsi(close, cfg.rsiLength));
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   // ta.crossover / ta.crossunder compare with the last bar where both values were not na (exact comparisons:
   // no 1e-10 tolerance, unlike the operators)
   let prevF = NaN;
@@ -96,6 +100,8 @@ export function calculate(
     const trendDown = lt(c, trendEMA[i]);
     const buySignal = crossUp && lt(rsi[i], cfg.rsiOverbought) && trendUp;
     const sellSignal = crossDown && gt(rsi[i], cfg.rsiOversold) && trendDown;
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
     const t = bars[i].time;
     if (buySignal) markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: color.green, size: 'small' });
     if (sellSignal) markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: color.red, size: 'small' });
@@ -109,8 +115,16 @@ export function calculate(
       plot2: bars.map((b, i) => ({ time: b.time, value: trendEMA[i], color: color.silver })),
     },
     markers,
+    // alertcondition(buySignal, "Buy Alert") / alertcondition(sellSignal, "Sell Alert")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'Bullish signal detected' },
+  { id: 'alert1', title: 'Sell Alert', message: 'Bearish signal detected' },
+];
 
 export const SslHybridScalper = {
   calculate,
@@ -118,4 +132,5 @@ export const SslHybridScalper = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

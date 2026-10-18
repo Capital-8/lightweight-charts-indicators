@@ -8,6 +8,8 @@
  * a green candle or a long lower shadow (> 30 % of the range) is a "watch" signal (after a cooldown); a second
  * pullback to the same band is the buy signal (sell: the mirror). The background shows the stable (85 %) and the
  * unstable (95 % transparency) trends.
+ * Alerts (alertcondition, `alerts` of the result): '[Alert] Buy Signal' and '[Alert] Sell Signal', true on the bars of
+ * the buy / sell signals.
  *
  * Reference: "Trend Double Pullback [Stable 20]" by puduxbt
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendDoublePullbackV10Inputs {
   /** Short EMA 1 (top) */
@@ -86,7 +89,7 @@ type Band = 'NA' | 'SHORT' | 'MEDIUM';
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendDoublePullbackV10Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -136,6 +139,8 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const t = b.time;
@@ -253,6 +258,8 @@ export function calculate(
       markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: red, size: 'tiny', text: '卖出', textColor: color.red });
     }
 
+    buyFlags.push(isBuy);
+    sellFlags.push(isSell);
     prevStateLong = stateLong;
     prevBandLong = bandLong;
     prevStateShort = stateShort;
@@ -275,8 +282,16 @@ export function calculate(
     ],
     bgColors,
     markers,
+    // alertcondition(is_buy_signal, "[Alert] Buy Signal") / alertcondition(is_sell_signal, "[Alert] Sell Signal")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '[Alert] Buy Signal', message: 'Stable Trend Buy: Double pullback 🚀' },
+  { id: 'alert1', title: '[Alert] Sell Signal', message: 'Stable Trend Sell: Double pullback 🩸' },
+];
 
 export const TrendDoublePullbackV10 = {
   calculate,
@@ -284,4 +299,5 @@ export const TrendDoublePullbackV10 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

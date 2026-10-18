@@ -17,13 +17,55 @@
  * "Only when E is in Premium/Discount Array" keeps the blocks whose swing E is in the right half of the range from
  * A, and can show that range. At most 500 labels are kept.
  *
+ * Alerts: the 22 alertconditions of the original (`alerts` of the result), one per signal of each side (new block,
+ * signal, the three targets, cancel, mitigation, the two swing line breaks and the two swing area breaks; a reset
+ * counts as a new block), true on the bars of that signal; and its alert() calls (`alertCalls`): '+BB' / '-BB',
+ * 'signal UP', 'cancel UP', '+BB Mitigated', '+BB (R)', 'LL 1 break', 'Swing UP 1 break' ... (once per bar close)
+ * and 'TP UP 1' ... 'TP DN 3' (once per bar).
+ *
  * Reference: "Breaker Blocks with Signals [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © LuxAlgo
  */
 
 import { ta, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BoxData, LabelData, LineDrawingData } from '../types';
+import type { AlertCall, BoxData, LabelData, LineDrawingData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: ' 1. +BB', message: '1. +BB' },
+  { id: 'alert1', title: ' 2. signal UP', message: '2. signal UP' },
+  { id: 'alert2', title: ' 3. TP UP 1', message: '3. TP UP 1' },
+  { id: 'alert3', title: ' 3. TP UP 2', message: '3. TP UP 2' },
+  { id: 'alert4', title: ' 3. TP UP 3', message: '3. TP UP 3' },
+  { id: 'alert5', title: ' 4. cancel UP', message: '4. cancel UP' },
+  { id: 'alert6', title: ' 5. +BB Mitigated', message: '5. +BB Mitigated' },
+  { id: 'alert7', title: ' 6. LL 1 Break', message: '6. LL 1 Break' },
+  { id: 'alert8', title: ' 6. LL 2 Break', message: '6. LL 2 Break' },
+  { id: 'alert9', title: ' 7. Swing UP 1 Break', message: '7. Swing UP 1 Break' },
+  { id: 'alert10', title: ' 7. Swing UP 2 Break', message: '7. Swing UP 2 Break' },
+  { id: 'alert11', title: '1. -BB', message: '1. -BB' },
+  { id: 'alert12', title: '2. signal DN', message: '2. signal DN' },
+  { id: 'alert13', title: '3. TP DN 1', message: '3. TP DN 1' },
+  { id: 'alert14', title: '3. TP DN 2', message: '3. TP DN 2' },
+  { id: 'alert15', title: '3. TP DN 3', message: '3. TP DN 3' },
+  { id: 'alert16', title: '4. cancel DN', message: '4. cancel DN' },
+  { id: 'alert17', title: '5. -BB Mitigated', message: '5. -BB Mitigated' },
+  { id: 'alert18', title: '6. HH 1 Break', message: '6. HH 1 Break' },
+  { id: 'alert19', title: '6. HH 2 Break', message: '6. HH 2 Break' },
+  { id: 'alert20', title: '7. Swing DN 1 Break', message: '7. Swing DN 1 Break' },
+  { id: 'alert21', title: '7. Swing DN 2 Break', message: '7. Swing DN 2 Break' },
+];
+
+/** Index of each signal of the original in `alertConditions` */
+const SIG = {
+  BBplus: 0, signUP: 1, tpUP1: 2, cnclUP: 5, BBendBl: 6, LL1break: 7, SW1breakUP: 9,
+  BBmin: 11, signDN: 12, tpDN1: 13, cnclDN: 16, BBendBr: 17, HH1break: 18, SW1breakDN: 20,
+} as const;
 import { barInterval, barTime } from '../bar-time';
 
 export interface BreakerBlocksWithSignalsInputs {
@@ -182,7 +224,8 @@ interface Lb {
 export function calculate(
   bars: Bar[],
   inputs: Partial<BreakerBlocksWithSignalsInputs> = {},
-): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & { boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & { boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -259,9 +302,18 @@ export function calculate(
   };
   let mssDir = 0;
 
+  // signals = array.from(false, ...): one flag per alertcondition and bar
+  const flags: boolean[][] = alertConditions.map(() => new Array<boolean>(n).fill(false));
+  const alertCalls: AlertCall[] = [];
+
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const { open, high, low, close } = b;
+    /** signals.set(k, true) and alert(message, freq) */
+    const signal = (k: number | null, message: string, freq: AlertCall['freq'] = 'once_per_bar_close') => {
+      if (k !== null) flags[k][i] = true;
+      alertCalls.push({ time: b.time, message, freq });
+    };
     if (i === 0) {
       pd[0].lab = newLabel(NaN, NaN, '', '#FFFFFF', 'label_down', 'normal');
       pd[1].lab = newLabel(NaN, NaN, '', '#FFFFFF', 'label_down', 'normal');
@@ -426,6 +478,8 @@ export function calculate(
             Object.assign(t.line, { x1: i, y1: e, x2: i + 20, y2: e });
           });
         }
+        // signals.set(BBplus / BB_min, true); alert('+BB' / '-BB', alert.freq_once_per_bar_close)
+        signal(up ? SIG.BBplus : SIG.BBmin, up ? '+BB' : '-BB');
         createLab(up ? 'u' : 'd', up ? low : high, notransp(cssB), up ? ARROW_UP : ARROW_DOWN, 'large');
         break;
       }
@@ -458,6 +512,7 @@ export function calculate(
       if (!mitigated) {
         if (behind(close, far)) {
           mitigated = true;
+          signal(up ? SIG.BBendBl : SIG.BBendBr, up ? '+BB Mitigated' : '-BB Mitigated');
           if (up) createLab('u', low, YELLOW, DOT);
           else if (showBreaks) createLab('d', high, notransp(cfg.cBBminB), DOT);
           boxB.right = i;
@@ -474,6 +529,8 @@ export function calculate(
               tp.forEach((t, j) => {
                 if (!t.hit && behind(open, targets[j]) && beyond(up ? high : low, targets[j])) {
                   t.hit = true;
+                  // alert('TP UP 1', alert.freq_once_per_bar) ...
+                  signal((up ? SIG.tpUP1 : SIG.tpDN1) + j, `TP ${up ? 'UP' : 'DN'} ${j + 1}`, 'once_per_bar');
                   createLab('c', targets[j], TP_HIT, DOT);
                 }
               });
@@ -481,16 +538,19 @@ export function calculate(
             if (beyond(open, avg) && behind(open, near) && beyond(close, near)) {
               for (const t of tp) t.hit = false;
               scalp = true;
+              signal(up ? SIG.signUP : SIG.signDN, up ? 'signal UP' : 'signal DN');
               createLab(s, extreme, up ? LIME : ORANGE, up ? ARROW_UP : ARROW_DOWN, 'normal');
             } else if (behind(close, avg) && beyond(close, far)) {
               broken = true;
               scalp = false;
+              signal(up ? SIG.cnclUP : SIG.cnclDN, up ? 'cancel UP' : 'cancel DN');
               createLab(s, extreme, up ? ORANGE : RED, CROSS);
             }
           } else if (!tillFirstBreak && beyond(close, near)) {
             // reset
             broken = false;
             scalp = true;
+            signal(up ? SIG.BBplus : SIG.BBmin, up ? '+BB (R)' : '-BB (R)');
             createLab(s, extreme, BLUE, 'R', 'normal');
           }
         }
@@ -502,19 +562,21 @@ export function calculate(
         swing[j].line.x2 = i;
         if (behind(close, level)) {
           swing[j].broken = true;
+          signal((up ? SIG.LL1break : SIG.HH1break) + j, `${up ? 'LL' : 'HH'} ${j + 1} break`);
           if (showBreaks) createLab('c', extreme, BREAK, DOT);
         }
       });
       // Breaks of the swing areas
-      for (const p of pd) {
-        if (p.broken) continue;
+      pd.forEach((p, j) => {
+        if (p.broken) return;
         p.box.right = i;
         p.line.x2 = i;
         if (beyond(close, up ? p.box.top : p.box.bottom) && i > p.box.left) {
           p.broken = true;
+          signal((up ? SIG.SW1breakUP : SIG.SW1breakDN) + j, `Swing ${up ? 'UP' : 'DN'} ${j + 1} break`);
           if (showBreaks) createLab('c', up ? high : low, BREAK, DOT);
         }
-      }
+      });
     }
   }
 
@@ -540,6 +602,8 @@ export function calculate(
     labels: labels.filter((o) => drawn(o.x, o.y)).map((o) => ({
       time: T(o.x), price: o.y, text: o.text, color: 'transparent', textColor: o.textColor, style: o.style, size: o.size,
     })),
+    alerts: alertStates(alertConditions, bars, flags),
+    alertCalls,
   };
 }
 
@@ -549,4 +613,6 @@ export const BreakerBlocksWithSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

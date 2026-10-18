@@ -5,6 +5,8 @@
  * first bar, na history read as 0). The line is lime when it rises, red when it falls, yellow when flat. A cloud
  * between the source and the line is lime when the source is above the line, red otherwise. Triangles mark the
  * crosses of the source over / under the line, drawn one bar back (offset -1).
+ * Alerts (alertcondition, `alerts` of the result): 'ITL Bullish Cross' / 'ITL Bearish Cross', true on the bar where
+ * the source crosses over / under the line.
  *
  * Reference: "Instantaneous Trendline with Cloud v2" by Sesilya
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface InstantaneousTrendlineWithCloudInputs {
   /** Smoothing coefficient */
@@ -56,7 +59,7 @@ const nz = (v: number, r = 0) => (Number.isFinite(v) ? v : r);
 export function calculate(
   bars: Bar[],
   inputs: Partial<InstantaneousTrendlineWithCloudInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const alpha = cfg.alphaIT;
@@ -104,8 +107,16 @@ export function calculate(
     plots: { plot0, plot1 },
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Trend Cloud' }, colors: fillColors }],
     markers,
+    // alertcondition(bullCross, "ITL Bullish Cross", ...) / alertcondition(bearCross, "ITL Bearish Cross", ...)
+    alerts: alertStates(alertConditions, bars, [bullCross.map(Boolean), bearCross.map(Boolean)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'ITL Bullish Cross', message: 'Price crossed ABOVE Instantaneous Trendline (bullish signal).' },
+  { id: 'alert1', title: 'ITL Bearish Cross', message: 'Price crossed BELOW Instantaneous Trendline (bearish signal).' },
+];
 
 export const InstantaneousTrendlineWithCloud = {
   calculate,
@@ -113,4 +124,5 @@ export const InstantaneousTrendlineWithCloud = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -4,6 +4,7 @@
  * A fast and a slow EMA of the close and the RSI of the close. A long entry (green triangle below the bar) is a
  * crossover of the fast EMA above the slow EMA with the RSI above the long threshold; a short entry (red triangle
  * above the bar) is a crossunder with the RSI below the short threshold.
+ * Alerts (alertcondition, `alerts` of the result): 'LONG Entry' and 'SHORT Entry', true on the entry bars.
  *
  * Reference: "EMA + RSI Autotrade Webhook - Varun" by varuns_back
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +12,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EmaRsiAutotradeWebhookVarunInputs {
   /** Fast EMA length */
@@ -59,7 +61,7 @@ const gt = (a: number, b: number) => a - b > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<EmaRsiAutotradeWebhookVarunInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -69,6 +71,8 @@ export function calculate(
   const rsi = A(ta.rsi(close, cfg.rsiLength));
 
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
   // ta.crossover / ta.crossunder compare exactly, with the last bar where both values were not na
   let prevA = NaN;
   let prevB = NaN;
@@ -83,10 +87,14 @@ export function calculate(
       prevB = b;
     }
     // longEntry = bullCross and rsi > rsi_long; shortEntry = bearCross and rsi < rsi_short
-    if (bullCross && gt(rsi[i], cfg.rsiLong)) {
+    const longEntry = bullCross && gt(rsi[i], cfg.rsiLong);
+    const shortEntry = bearCross && gt(cfg.rsiShort, rsi[i]);
+    longFlags.push(longEntry);
+    shortFlags.push(shortEntry);
+    if (longEntry) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: color.green, size: 'small' });
     }
-    if (bearCross && gt(cfg.rsiShort, rsi[i])) {
+    if (shortEntry) {
       markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: color.red, size: 'small' });
     }
   }
@@ -98,8 +106,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
     markers,
+    // alertcondition(longEntry, "LONG Entry") / alertcondition(shortEntry, "SHORT Entry")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'LONG Entry', message: 'Entry LONG {{ticker}} @ {{close}}' },
+  { id: 'alert1', title: 'SHORT Entry', message: 'Entry SHORT {{ticker}} @ {{close}}' },
+];
 
 export const EmaRsiAutotradeWebhookVarun = {
   calculate,
@@ -107,4 +123,5 @@ export const EmaRsiAutotradeWebhookVarun = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -202,8 +202,8 @@ export function calculate(
     // barcolor(Mean Deviations Up) then barcolor(Mean Deviations Down): the later non-na colour is drawn
     const up = cfg.showDeviations && gt(numFreeBarsUp, 0) ? colorBarUp : null;
     const down = cfg.showDeviations && gt(numFreeBarsDown, 0) ? colorBarDown : null;
-    const barCol = down ?? up;
-    if (barCol) barColors.push({ time: b.time, color: barCol });
+    if (up) barColors.push({ id: 'barcolor0', time: b.time, color: up });
+    if (down) barColors.push({ id: 'barcolor1', time: b.time, color: down });
 
     // Band crosses (every historical bar is confirmed)
     const longCrossCandle = cfg.signalSource === 'Wick' ? b.high : b.close;
@@ -215,10 +215,10 @@ export function calculate(
     prevLongCross = longCross;
     prevShortCross = shortCross;
     if (cfg.showBandCross && showLongCross) {
-      markers.push({ time: b.time, position: 'aboveBar', shape: 'triangleDown', color: upSignal, size: 'tiny' });
+      markers.push({ id: 'shape0', time: b.time, position: 'aboveBar', shape: 'triangleDown', color: upSignal, size: 'tiny' });
     }
     if (cfg.showBandCross && showShortCross) {
-      markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: downSignal, size: 'tiny' });
+      markers.push({ id: 'shape1', time: b.time, position: 'belowBar', shape: 'triangleUp', color: downSignal, size: 'tiny' });
     }
 
     // Free bars; the Pine source uses the inner lower band for shortFreeBar with both signal bands
@@ -226,11 +226,11 @@ export function calculate(
     const shortFreeBar = le(b.high, downInner[i]);
     // plotchar('★', size.tiny): the character as text in the plotchar colour
     if (cfg.showFreeBars && longFreeBar) {
-      markers.push({ time: b.time, position: 'aboveBar', shape: 'circle', color: 'transparent', text: '★',
+      markers.push({ id: 'char2', time: b.time, position: 'aboveBar', shape: 'circle', color: 'transparent', text: '★',
         textColor: upSignal, size: 'tiny' });
     }
     if (cfg.showFreeBars && shortFreeBar) {
-      markers.push({ time: b.time, position: 'belowBar', shape: 'circle', color: 'transparent', text: '★',
+      markers.push({ id: 'char3', time: b.time, position: 'belowBar', shape: 'circle', color: 'transparent', text: '★',
         textColor: downSignal, size: 'tiny' });
     }
   }

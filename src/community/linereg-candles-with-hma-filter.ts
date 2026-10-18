@@ -7,6 +7,8 @@
  * signal strength made of the distance to the signal, the regression slope and the relative volume). Optional:
  * volatility adaptation of the lengths (ATR based, with factors updated every N bars), confirmation by the next bar,
  * an anti-whipsaw filter (slope and volume), and divergences between the regression close and its smoothed slope.
+ * Alerts (alertcondition, `alerts` of the result): buy / sell signals at least 'Bars Between Alerts' bars after the
+ * previous alert of the same kind, bullish / bearish divergences; all off when 'Enable Alerts' is off.
  *
  * Reference: "Advanced LinReg Candles with AI Optimization" by MaximusGains
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, callsite, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AdvancedLinRegCandlesInputs {
   /** Signal smoothing length */
@@ -53,7 +56,7 @@ export interface AdvancedLinRegCandlesInputs {
   /** Bars between two updates of the optimisation factors */
   optimizationFrequency: number;
   volatilitySensitivity: number;
-  /** Alert settings (alertcondition only, no output) */
+  /** Alert settings (alertcondition only: `alerts` of the result; the lookback is not used by the original) */
   alertEnabled: boolean;
   alertLookback: number;
   alertRearmBars: number;
@@ -166,7 +169,7 @@ export function calculate(
   inputs: Partial<AdvancedLinRegCandlesInputs> = {},
 ): Omit<IndicatorResult, 'markers'> & {
   markers: MarkerData[]; bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]>;
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -358,21 +361,35 @@ export function calculate(
     const t = bars[i].time;
     if (cfg.showMarkers && buySignal[i]) {
       markers.push({ time: t, position: 'belowBar', shape: 'circle', color: cfg.markerBuyColor, text: 'buy',
-        textColor: String(color.rgb(27, 240, 211)), size: 'tiny' });
+        textColor: String(color.rgb(27, 240, 211)), size: 'tiny', id: 'shape0' });
     }
     if (cfg.showMarkers && sellSignal[i]) {
       markers.push({ time: t, position: 'aboveBar', shape: 'cross', color: cfg.markerSellColor, text: 'sell',
-        textColor: String(color.rgb(17, 240, 221)), size: 'tiny' });
+        textColor: String(color.rgb(17, 240, 221)), size: 'tiny', id: 'shape1' });
     }
     if (cfg.divergenceDetection && bullDiv[i]) {
       markers.push({ time: t, position: 'belowBar', shape: 'circle', color: bullDivMarker, text: '⋓',
-        textColor: String(color.rgb(25, 184, 33)), size: 'tiny' });
+        textColor: String(color.rgb(25, 184, 33)), size: 'tiny', id: 'shape2' });
     }
     if (cfg.divergenceDetection && bearDiv[i]) {
       markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: bearDivMarker, text: '⋒',
-        textColor: String(color.rgb(201, 30, 30)), size: 'tiny' });
+        textColor: String(color.rgb(201, 30, 30)), size: 'tiny', id: 'shape3' });
     }
   }
+
+  // var last_buy_alert_bar = 0 / last_sell_alert_bar = 0: a signal alerts when alert_rearm_bars bars have passed
+  const buyAlert: boolean[] = new Array(n);
+  const sellAlert: boolean[] = new Array(n);
+  let lastBuy = 0, lastSell = 0;
+  for (let i = 0; i < n; i++) {
+    const b = buySignal[i] && i - lastBuy >= cfg.alertRearmBars;
+    const s = sellSignal[i] && i - lastSell >= cfg.alertRearmBars;
+    if (b) lastBuy = i;
+    if (s) lastSell = i;
+    buyAlert[i] = cfg.alertEnabled && b;
+    sellAlert[i] = cfg.alertEnabled && s;
+  }
+  const divAlert = (d: boolean[]) => d.map((v) => cfg.alertEnabled && cfg.divergenceDetection && v);
 
   const signalColor = (i: number) => (cfg.smaSignal ? SIGNAL_SMA_COLOR : candleColor[i]);
   return {
@@ -386,8 +403,17 @@ export function calculate(
     markers,
     bgColors,
     plotCandles: { linregCandles: candles },
+    alerts: alertStates(alertConditions, bars, [buyAlert, sellAlert, divAlert(bullDiv), divAlert(bearDiv)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'LinReg Candles: Buy signal generated' },
+  { id: 'alert1', title: 'Sell Alert', message: 'LinReg Candles: Sell signal generated' },
+  { id: 'alert2', title: 'Bullish Divergence Alert', message: 'LinReg Candles: Bullish divergence detected' },
+  { id: 'alert3', title: 'Bearish Divergence Alert', message: 'LinReg Candles: Bearish divergence detected' },
+];
 
 export const AdvancedLinRegCandles = {
   calculate,
@@ -395,4 +421,5 @@ export const AdvancedLinRegCandles = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

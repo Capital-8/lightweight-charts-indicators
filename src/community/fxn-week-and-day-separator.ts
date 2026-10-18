@@ -204,19 +204,20 @@ export function calculate(
       if (week) vline(t, weekColour, lineStyle(cfg.weekLineStyle), cfg.weekLineWidth);
       if (day) vline(t, dayColour, lineStyle(cfg.dayLineStyle), cfg.dayLineWidth);
     } else {
-      if (week) bgColors.push({ time: t, color: weekBg });
-      // four bgcolor() calls with the same condition and colour (Monday to Thursday separators)
-      if (day) for (let k = 0; k < 4; k++) bgColors.push({ time: t, color: dayBg });
+      if (week) bgColors.push({ id: 'bgcolor0', time: t, color: weekBg });
+      // four bgcolor() calls with the same condition and colour (Monday to Thursday separators: bgcolor1 to bgcolor4)
+      if (day) for (let k = 0; k < 4; k++) bgColors.push({ id: `bgcolor${k + 1}`, time: t, color: dayBg });
     }
 
     // Day names
     if (validDay && hour === dayLabelStartTime && minute === 0 && dow >= 2 && dow <= 6) {
       const [shortText, longText, textColor] = names[dow - 2];
-      const marker = (text: string): MarkerData => ({
-        time: t, position: 'bottom', shape: 'circle', color: dot, text, textColor, size: 'tiny',
+      // plotshape outputs: short names shape0 (Mon) to shape4 (Fri), long names shape5 (Monday) to shape9 (Friday)
+      const marker = (text: string, id: string): MarkerData => ({
+        id, time: t, position: 'bottom', shape: 'circle', color: dot, text, textColor, size: 'tiny',
       });
-      if (shortNames) markers.push(marker(shortText));
-      if (longNames) markers.push(marker(longText));
+      if (shortNames) markers.push(marker(shortText, `shape${dow - 2}`));
+      if (longNames) markers.push(marker(longText, `shape${dow + 3}`));
     }
   }
 

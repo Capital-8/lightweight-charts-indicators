@@ -7,6 +7,7 @@
  * needs a low below the lowest low of the 3 previous bars and RSI above the threshold, a sell a high below the highest
  * high of the 3 previous bars and RSI below 100 - threshold. Only the first bar of each condition gives a BUY / SELL
  * label. The SMA is drawn as the trend line.
+ * Alerts (alertcondition, `alerts` of the result): 'Unified Buy/Sell Alert', true on the bars of a BUY or SELL label.
  *
  * Reference: "TRENDSYNC BUY/SELL BY SIMPLY_DANTE-FX" by Simply_Dante-fx
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendsyncBuySellInputs {
   smaLength: number;
@@ -57,7 +59,7 @@ const gt = (a: number, b: number) => a - b > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendsyncBuySellInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -72,6 +74,7 @@ export function calculate(
   const prevLow = A(ta.lowest(S(bars.map((_b, i) => (i > 0 ? bars[i - 1].low : NaN))), 3));
 
   const markers: MarkerData[] = [];
+  const unifiedFlags: boolean[] = [];
   let prevBuy = false;
   let prevSell = false;
   let prevBuyDown = false;
@@ -96,6 +99,8 @@ export function calculate(
     // x and not x[1] (x[1] is false on the first bar)
     const finalBuy = (buySignal && !prevBuy) || (buySignalDown && !prevBuyDown);
     const finalSell = (sellSignal && !prevSell) || (sellSignalDown && !prevSellDown);
+    // unifiedSignal = finalBuySignal or finalSellSignal
+    unifiedFlags.push(finalBuy || finalSell);
     prevBuy = buySignal;
     prevSell = sellSignal;
     prevBuyDown = buySignalDown;
@@ -117,8 +122,14 @@ export function calculate(
       plot0: bars.map((b, i) => ({ time: b.time as number, value: sma[i], color: color.purple })),
     },
     markers,
+    alerts: alertStates(alertConditions, bars, [unifiedFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Unified Buy/Sell Alert', message: 'Unified Signal Triggered (Buy/Sell)' },
+];
 
 export const TrendsyncBuySell = {
   calculate,
@@ -126,4 +137,5 @@ export const TrendsyncBuySell = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

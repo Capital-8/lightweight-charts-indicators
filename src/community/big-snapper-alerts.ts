@@ -4,12 +4,15 @@
  * Multi-MA signal indicator with ColouredMA (HullMA default), Fast/Medium/Slow MAs,
  * SuperTrend filtering, Bollinger Band OutsideIn swing filter, and buy/sell markers.
  * Supports 11 MA types: SMA, EMA, WMA, VWMA, SMMA, DEMA, TEMA, HullMA, ZEMA, TMA, SSMA.
+ * The ColouredMA and MACross signals are big arrows (the original's plotarrow, `arrows` of the result); the
+ * Bollinger Bands (hidden by default, as in the original) carry the "BB fill".
  *
  * Reference: "Big Snapper Alerts R3.0 by JustUncleL"
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import type { ArrowData } from 'oakscriptjs';
 
 export interface BigSnapperAlertsInputs {
   typeColoured: string;
@@ -23,6 +26,7 @@ export interface BigSnapperAlertsInputs {
   filterOption: string;
   showMALines: boolean;
   showSuperTrend: boolean;
+  showBollingerBands: boolean;
   sFactor: number;
   sPd: number;
   bbLength: number;
@@ -42,6 +46,7 @@ export const defaultInputs: BigSnapperAlertsInputs = {
   filterOption: 'SuperTrend',
   showMALines: true,
   showSuperTrend: false,
+  showBollingerBands: false,
   sFactor: 3.618,
   sPd: 5,
   bbLength: 20,
@@ -61,6 +66,7 @@ export const inputConfig: InputConfig[] = [
   { id: 'filterOption', type: 'string', title: 'Signal Filter', defval: 'SuperTrend', options: ['SuperTrend', '3xMATrend', 'SuperTrend+3xMA', 'MACross', 'MACross+ST', 'MACross+3xMA', 'OutsideIn:MACross', 'OutsideIn:MACross+ST', 'OutsideIn:MACross+3xMA', 'ColouredMA', 'No Alerts'] },
   { id: 'showMALines', type: 'bool', title: 'Show MA Lines', defval: true },
   { id: 'showSuperTrend', type: 'bool', title: 'Show SuperTrend', defval: false },
+  { id: 'showBollingerBands', type: 'bool', title: 'Show Bollinger Bands', defval: false },
   { id: 'sFactor', type: 'float', title: 'SuperTrend Factor', defval: 3.618, min: 1, step: 0.1 },
   { id: 'sPd', type: 'int', title: 'SuperTrend Length', defval: 5, min: 1 },
   { id: 'bbLength', type: 'int', title: 'Bollinger Length', defval: 20, min: 2 },
@@ -68,12 +74,21 @@ export const inputConfig: InputConfig[] = [
   { id: 'oiLength', type: 'int', title: 'OutsideIn LookBack', defval: 8, min: 1 },
 ];
 
+/** dodgerblue #1E90FF with transp 20 (lines) / 96 (fill) */
+const BB_LINE = 'rgba(30, 144, 255, 0.8)';
+const BB_FILL = 'rgba(30, 144, 255, 0.04)';
+/** plotarrow colours: colorup = green, colordown = maroon (Pine v3 constants), transp 20 */
+const ARROW_UP = 'rgba(0, 128, 0, 0.8)';
+const ARROW_DOWN = 'rgba(128, 0, 0, 0.8)';
+
 export const plotConfig: PlotConfig[] = [
   { id: 'colouredMA', title: 'Coloured MA', color: '#1E90FF', lineWidth: 3 },
   { id: 'fastMA', title: 'Fast MA', color: '#00FF00', lineWidth: 2 },
   { id: 'mediumMA', title: 'Medium MA', color: '#FF0000', lineWidth: 2 },
   { id: 'slowMA', title: 'Slow MA', color: '#808080', lineWidth: 2 },
   { id: 'superTrend', title: 'SuperTrend', color: '#008000', lineWidth: 2 },
+  { id: 'bbUpper', title: 'BB upper', color: BB_LINE, lineWidth: 1 },
+  { id: 'bbLower', title: 'BB lower', color: BB_LINE, lineWidth: 1 },
 ];
 
 export const metadata = {
@@ -171,7 +186,10 @@ function variant(bars: Bar[], src: number[], len: number, type: string): number[
   }
 }
 
-export function calculate(bars: Bar[], inputs: Partial<BigSnapperAlertsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<BigSnapperAlertsInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; arrows: ArrowData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const closeArr = bars.map(b => b.close);
@@ -257,6 +275,7 @@ export function calculate(bars: Bar[], inputs: Partial<BigSnapperAlertsInputs> =
 
   // Signal computation
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   const warmup = Math.max(cfg.lenColoured, cfg.lenFast, cfg.lenMedium, cfg.lenSlow, cfg.sPd, cfg.bbLength) + 5;
 
   // Accumulators for filtering
@@ -339,24 +358,26 @@ export function calculate(bars: Bar[], inputs: Partial<BigSnapperAlertsInputs> =
     if (uSuperTrendFilter && stBuy[i] === 1) longSignal = true;
     if (u3xMATrendFilter && _3xmaBuy[i] === 1) longSignal = true;
     if (uBothTrendFilters && st3xmaBuyV && (stBuy[i] === 1 || _3xmaBuy[i] === 1)) longSignal = true;
-    if (uMACrossFilter && macrossBuy[i] === 1) longSignal = true;
     if (uMACrossSTFilter && macrossSTBuyV) longSignal = true;
     if (uMACross3xMAFilter && macross3xMABuyV) longSignal = true;
     if (uOIMACrossFilter && oiMACrossBuyV) longSignal = true;
     if (uOISTFilter && oiMACrossBuyV && sTrend[i] === 1) longSignal = true;
     if (uOI3xMAFilter && oiMACrossBuyV && maDirection[i] === 1) longSignal = true;
-    if (disableAllFilters && hBuy[i] === 1) longSignal = true;
 
     if (uSuperTrendFilter && stSell[i] === 1) shortSignal = true;
     if (u3xMATrendFilter && _3xmaSell[i] === 1) shortSignal = true;
     if (uBothTrendFilters && st3xmaSellV && (stSell[i] === 1 || _3xmaSell[i] === 1)) shortSignal = true;
-    if (uMACrossFilter && macrossSell[i] === 1) shortSignal = true;
     if (uMACrossSTFilter && macrossSTSellV) shortSignal = true;
     if (uMACross3xMAFilter && macross3xMASellV) shortSignal = true;
     if (uOIMACrossFilter && oiMACrossSellV) shortSignal = true;
     if (uOISTFilter && oiMACrossSellV && sTrend[i] === -1) shortSignal = true;
     if (uOI3xMAFilter && oiMACrossSellV && maDirection[i] === -1) shortSignal = true;
-    if (disableAllFilters && hSell[i] === 1) shortSignal = true;
+
+    // plotarrow(along ? 1 : ashort ? -1 : na, "ColouredMA or MACross Arrow", colorup = green, colordown = maroon)
+    const along = (disableAllFilters && hBuy[i] === 1) || (uMACrossFilter && macrossBuy[i] === 1);
+    const ashort = (disableAllFilters && hSell[i] === 1) || (uMACrossFilter && macrossSell[i] === 1);
+    if (along) arrows.push({ time: bars[i].time, id: 'arrow0', value: 1, color: ARROW_UP });
+    else if (ashort) arrows.push({ time: bars[i].time, id: 'arrow0', value: -1, color: ARROW_DOWN });
 
     if (longSignal) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#00FF00', text: 'Buy' });
@@ -401,8 +422,14 @@ export function calculate(bars: Bar[], inputs: Partial<BigSnapperAlertsInputs> =
       mediumMA: plotMediumMA,
       slowMA: plotSlowMA,
       superTrend: plotSuperTrend,
+      // plot(hideBollingerBands ? na : upper / lower, "BB upper" / "BB lower", dodgerblue, transp = 20)
+      bbUpper: bbUpper.map((v, i) => ({ time: bars[i].time, value: cfg.showBollingerBands ? v : NaN })),
+      bbLower: bbLower.map((v, i) => ({ time: bars[i].time, value: cfg.showBollingerBands ? v : NaN })),
     },
+    // fill(p1, p2, color = dodgerblue, transp = 96, title = "BB fill")
+    fills: [{ plot1: 'bbUpper', plot2: 'bbLower', options: { title: 'BB fill', color: BB_FILL } }],
     markers,
+    arrows,
   };
 }
 

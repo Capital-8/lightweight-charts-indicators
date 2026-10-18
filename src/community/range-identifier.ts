@@ -73,7 +73,10 @@ export function calculate(bars: Bar[], inputs: Partial<RangeIdentifierInputs> = 
   }
 
   const warmup = emaLength;
-  const fillColors: string[] = [];
+  // fill(ul, dummy, lime) / fill(dummy, ll, red) with dummy = close > ema ? down : up (a hidden plot, not ported):
+  // the first fill covers the range when the close is above the EMA, the second one when it is not
+  const fillUpColors: string[] = [];
+  const fillDownColors: string[] = [];
 
   const upperPlot = rangeUp.map((v, i) => {
     if (i < warmup) return { time: bars[i].time, value: NaN };
@@ -98,12 +101,14 @@ export function calculate(bars: Bar[], inputs: Partial<RangeIdentifierInputs> = 
 
   for (let i = 0; i < n; i++) {
     if (i < warmup) {
-      fillColors.push('transparent');
+      fillUpColors.push('transparent');
+      fillDownColors.push('transparent');
       continue;
     }
     const ema = emaArr[i] ?? 0;
     const bullish = bars[i].close > ema;
-    fillColors.push(bullish ? '#26A69A40' : '#EF535040');
+    fillUpColors.push(bullish ? '#26A69A40' : 'transparent');
+    fillDownColors.push(bullish ? 'transparent' : '#EF535040');
   }
 
   const emaPlot = emaArr.map((v, i) => ({
@@ -114,7 +119,10 @@ export function calculate(bars: Bar[], inputs: Partial<RangeIdentifierInputs> = 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': upperPlot, 'plot1': lowerPlot, 'plot2': midPlot, 'plot3': emaPlot },
-    fills: [{ plot1: 'plot0', plot2: 'plot1', colors: fillColors }],
+    fills: [
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'Plots Background' }, colors: fillUpColors },
+      { plot1: 'plot1', plot2: 'plot0', options: { title: 'Plots Background' }, colors: fillDownColors },
+    ],
   };
 }
 

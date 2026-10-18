@@ -4,6 +4,8 @@
  * A fast and a slow Hull moving average of the source. A ribbon fill between them is green when the fast HMA is at
  * or above the slow HMA, else red. BUY / SELL triangles mark the crossovers / crossunders of the fast HMA over the
  * slow HMA; an optional background shows the regime (fast above slow: green, else red).
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' and 'Sell Signal', true on the bars of the long / short
+ * signals (with the bar-close rule below, whether or not the triangles are shown).
  *
  * Last bar: with 'Confirm signals on bar close' a signal needs a closed bar. The port reads the state of the last bar
  * from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
@@ -15,6 +17,13 @@
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType, type Series } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'HMA fast crossed above slow — BUY' },
+  { id: 'alert1', title: 'Sell Signal', message: 'HMA fast crossed below slow — SELL' },
+];
 
 export interface BuySellHullCrossoverSignalsInputs {
   /** Fast HMA length */
@@ -83,7 +92,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<BuySellHullCrossoverSignalsInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -105,6 +114,8 @@ export function calculate(
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
   const ribbon: string[] = new Array(n);
+  const longFlags: boolean[] = new Array(n);
+  const shortFlags: boolean[] = new Array(n);
   // ta.crossover / ta.crossunder compare with the last bar where both values were not na; exact comparisons (no
   // tolerance)
   let prevF = NaN;
@@ -123,6 +134,8 @@ export function calculate(
     const confirmed = !cfg.confirmOnClose || barIsConfirmed(i);
     const longSignal = rawLong && confirmed;
     const shortSignal = rawShort && confirmed;
+    longFlags[i] = longSignal;
+    shortFlags[i] = shortSignal;
 
     // ribbonColor = hmaFast >= hmaSlow ? bull : bear; fill colour = showRibbon ? ribbonColor : na
     ribbon[i] = cfg.showRibbon ? (ge(f, s) ? bullRibbon : bearRibbon) : 'transparent';
@@ -147,6 +160,8 @@ export function calculate(
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'HMA Ribbon/Cloud' }, colors: ribbon }],
     markers,
     bgColors,
+    // alertcondition(longSignal, "Buy Signal") / alertcondition(shortSignal, "Sell Signal")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
@@ -156,4 +171,5 @@ export const BuySellHullCrossoverSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

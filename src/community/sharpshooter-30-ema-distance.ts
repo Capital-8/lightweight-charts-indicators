@@ -4,6 +4,7 @@
  * A fast and a slow EMA of close. A death cross (the fast EMA crosses under the slow EMA) arms the signal; the first
  * confirmed bar after that where the fast EMA is at least `distUSD` below the slow EMA gives a BUY label and disarms
  * it (one signal per death cross).
+ * Alerts (alertcondition, `alerts` of the result): 'BUY', true on the bars of a BUY label.
  *
  * Last bar: a BUY label needs a closed bar. The port reads the state of the last bar from the optional third argument
  * (see src/chart-context.ts); without it every bar is taken as closed.
@@ -15,6 +16,7 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface Sharpshooter30EmaDistanceInputs {
   /** Fast EMA length */
@@ -56,7 +58,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<Sharpshooter30EmaDistanceInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -70,11 +72,13 @@ export function calculate(
   const deathCross = ta.crossunder(fastSeries, slowSeries).toArray();
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [];
   let armed = false; // var bool armed = false
   for (let i = 0; i < bars.length; i++) {
     armed = deathCross[i] ? true : armed;
     // buySignal = barstate.isconfirmed and armed and fastMA <= slowMA - distUSD
     const buySignal = barIsConfirmed(i) && armed && le(fastMa[i], slowMa[i] - cfg.distUSD);
+    buyFlags.push(buySignal);
     if (buySignal) {
       armed = false;
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: color.lime, text: 'BUY',
@@ -90,8 +94,15 @@ export function calculate(
       plot1: bars.map((b, i) => ({ time: b.time, value: fin(slowMa[i]) })),
     },
     markers,
+    // alertcondition(buySignal, title="BUY", ...)
+    alerts: alertStates(alertConditions, bars, [buyFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY', message: 'BUY: One signal per death cross (fast MA below slow MA by set USD distance)' },
+];
 
 export const Sharpshooter30EmaDistance = {
   calculate,
@@ -99,4 +110,5 @@ export const Sharpshooter30EmaDistance = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

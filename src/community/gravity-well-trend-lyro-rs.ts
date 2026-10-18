@@ -7,6 +7,7 @@
  * above / below the centre, 'Bands' when the source crosses above the lowest band (long) or below the highest band
  * (short). The trend colours the centre glow; the centre line and the candles take a gradient from the faded to the
  * full trend colour by |distance| / bandMult. Gradient fills between the bands, labels on the flips.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Signal', 'Bearish Signal' and 'Any Signal', on the flips.
  *
  * Reference: "Gravity Well Trend | Lyro RS" by LyroRS
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +16,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type GravityWellSignalMode = 'Trend' | 'Midline' | 'Bands';
 export type GravityWellPalette = 'Classic' | 'Mystic' | 'Accented' | 'Royal';
@@ -109,7 +111,8 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<GravityWellTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -216,10 +219,14 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const candles: PlotCandleData[] = [];
+  const upFlags: boolean[] = [];
+  const downFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     // flipUp = trend == 1 and trend[1] != 1 (trend[1] is na on the first bar: na != 1 is false)
     const flipUp = i > 0 && trendArr[i] === 1 && trendArr[i - 1] !== 1;
     const flipDown = i > 0 && trendArr[i] === -1 && trendArr[i - 1] !== -1;
+    upFlags.push(flipUp);
+    downFlags.push(flipDown);
     if (cfg.showSignals && flipUp) {
       markers.push({ time: t(i), position: 'belowBar', shape: 'labelUp', color: upC, text: '𝓛𝓸𝓷𝓰', textColor: '#000000', size: 'small' });
     }
@@ -240,8 +247,17 @@ export function calculate(
     fills,
     markers,
     plotCandles: { candlePlot: candles },
+    // alertcondition(flipUp) / alertcondition(flipDown) / alertcondition(flipUp or flipDown)
+    alerts: alertStates(alertConditions, bars, [upFlags, downFlags, upFlags.map((f, i) => f || downFlags[i])]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Signal', message: 'Gravity Well | Lyro RS: Bullish signal on {{ticker}} ({{interval}})' },
+  { id: 'alert1', title: 'Bearish Signal', message: 'Gravity Well | Lyro RS: Bearish signal on {{ticker}} ({{interval}})' },
+  { id: 'alert2', title: 'Any Signal', message: 'Gravity Well | Lyro RS: Signal flip on {{ticker}} ({{interval}})' },
+];
 
 export const GravityWellTrend = {
   calculate,
@@ -249,4 +265,5 @@ export const GravityWellTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -7,6 +7,8 @@
  * middle. A trailing line follows it inside an ATR band (trend value +- ATR * multiplier): it only moves when the band
  * pushes it. The line is bullish while it last rose, bearish while it last fell; a gradient fill runs from the line
  * to hl2, and the candles can be coloured. Presets override the lengths and multipliers.
+ * Alerts (alertcondition, `alerts` of the result): 'Bollinger Adaptive Trend Bullish' / 'Bearish' on the bar where
+ * the line turns bullish / bearish.
  *
  * Reference: "Bollinger Adaptive Trend Navigator [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,13 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bollinger Adaptive Trend Bullish', message: 'Bollinger Adaptive Trend Bullish Signal {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Bollinger Adaptive Trend Bearish', message: 'Bollinger Adaptive Trend Bearish Signal {{exchange}}:{{ticker}}' },
+];
 
 export interface BollingerAdaptiveTrendNavigatorInputs {
   bbPeriod: number;
@@ -84,7 +93,7 @@ const ne = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) >
 export function calculate(
   bars: Bar[],
   inputs: Partial<BollingerAdaptiveTrendNavigatorInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -132,6 +141,10 @@ export function calculate(
   const isBull: boolean[] = new Array(n);
   let tl = NaN; // var float trendLine = bollingerTrendValue (first bar)
   let bull = false;
+  // var bool isBearish = false: false until the line first falls (isBullish is false before it first rises)
+  let bear = false;
+  const bullFlags: boolean[] = new Array(n);
+  const bearFlags: boolean[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const deviation = atr[i] * volatilityMultiplier;
     const upperBound = trendValue[i] + deviation;
@@ -142,9 +155,19 @@ export function calculate(
     if (gt(lowerBound, tl)) tl = lowerBound;
     trendLine[i] = tl;
     const prevTl = i > 0 ? trendLine[i - 1] : NaN;
-    if (gt(tl, prevTl)) bull = true;
-    else if (lt(tl, prevTl)) bull = false;
+    const wasBull = bull;
+    const wasBear = bear;
+    if (gt(tl, prevTl)) {
+      bull = true;
+      bear = false;
+    } else if (lt(tl, prevTl)) {
+      bull = false;
+      bear = true;
+    }
     isBull[i] = bull;
+    // alertcondition(isBullish and not isBullish[1]) / alertcondition(isBearish and not isBearish[1])
+    bullFlags[i] = bull && !wasBull;
+    bearFlags[i] = bear && !wasBear;
   }
 
   const current = isBull.map((b) => (b ? bullish : bearish));
@@ -169,6 +192,7 @@ export function calculate(
       },
     }],
     barColors,
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
 
@@ -178,4 +202,5 @@ export const BollingerAdaptiveTrendNavigator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -14,6 +14,13 @@
  * the close is below it, else with the bullish colour. The price in the labels is rounded to the symbol tick (chart
  * context; 0.01 without it).
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Order Block Alert' / 'Bearish Order Block Alert' on the
+ * bars of the circles; 'Bearish OB Line Crossed Up' / 'Down' and 'Bullish OB Line Crossed Up' / 'Down': as in the
+ * original, one crossing state shared by both sides and kept from bar to bar, set by each zone in the loop over the
+ * zones (the high above / the low below the zone's high level for the bearish side, its low level for the bullish
+ * side; false for a zone without that line), read after the loop of the bearish zones and after the loop of the
+ * bullish zones: the state left by the last zone of that loop, or the state before it when the side has no zone.
+ *
  * Reference: "Institutional OrderBlock Pressure" by RickSimpson
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: @ RickSimpson
@@ -24,6 +31,7 @@ import {
   type Line, type Label, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 import { mintickOf, type ChartContext } from '../chart-context';
 
@@ -132,7 +140,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<InstitutionalOrderblockPressureInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers' | 'lines' | 'labels'> & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[] } {
+): Omit<IndicatorResult, 'markers' | 'lines' | 'labels'> & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const count = bars.length;
   const length = Math.trunc(cfg.length);
@@ -161,6 +170,10 @@ export function calculate(
   const upper: Zones = { highLines: [], lowLines: [], midLines: [], evaluated: [], highLabels: [], midLabels: [] };
   const lower: Zones = { highLines: [], lowLines: [], midLines: [], evaluated: [], highLabels: [], midLabels: [] };
   let lastState = NaN;
+  // var CrossoverStatus crossoverStatus: one state for both sides, kept from bar to bar
+  const crossover = { up: false, down: false };
+  // isBullishOrderBlock, isBearishOrderBlock, bearish line crossed up / down, bullish line crossed up / down
+  const flags: boolean[][] = [[], [], [], [], [], []];
 
   // createZoneLine()
   const zoneLine = (i: number, value: number, isWick: boolean, isAverage: boolean): Line | null => {
@@ -242,8 +255,10 @@ export function calculate(
         }
       }
 
-      // crossoverStatus (alert conditions only); the zone check reads crossedDown
-      const crossedDown = lt(b.low, y1(ref));
+      // crossoverStatus.crossedUp := high > line.get_y1(...) / crossedDown := low < line.get_y1(...)
+      crossover.up = gt(b.high, y1(ref));
+      crossover.down = lt(b.low, y1(ref));
+      const crossedDown = crossover.down;
       if (crossedDown && !evaluated) {
         z.evaluated[k] = true;
         if (lHigh) label.delete(lHigh);
@@ -272,6 +287,8 @@ export function calculate(
     const isBear = bear && (isNaN(lastState) || lastState !== -1);
     if (isBull) lastState = 1;
     else if (isBear) lastState = -1;
+    flags[0].push(isBull);
+    flags[1].push(isBear);
 
     if (cfg.displayLabels && isBull) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'circle', color: bullCol, size: 'tiny' });
@@ -296,6 +313,8 @@ export function calculate(
       addZone(upper, hi, lo, mid, lHigh, lMid);
     }
     updateZones(upper, i, true);
+    flags[2].push(crossover.up);
+    flags[3].push(crossover.down);
 
     // Support zones
     if (isBull) {
@@ -309,6 +328,8 @@ export function calculate(
       addZone(lower, hi, lo, mid, lLow, lMid);
     }
     updateZones(lower, i, false);
+    flags[4].push(crossover.up);
+    flags[5].push(crossover.down);
   }
   setDrawingBar(null);
 
@@ -326,8 +347,19 @@ export function calculate(
       time: T(l.x), price: l.y, text: l.text ?? '', style: 'none' as const, textColor: String(l.textcolor),
       size: (l.size ?? 'normal') as LabelData['size'],
     })),
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Order Block Alert', message: 'Bullish Order Block Detected!' },
+  { id: 'alert1', title: 'Bearish Order Block Alert', message: 'Bearish Order Block Detected!' },
+  { id: 'alert2', title: 'Bearish OB Line Crossed Up', message: 'Bearish OB line has been crossed up!' },
+  { id: 'alert3', title: 'Bearish OB Line Crossed Down', message: 'Bearish OB line has been crossed down!' },
+  { id: 'alert4', title: 'Bullish OB Line Crossed Up', message: 'Bullish OB line has been crossed up!' },
+  { id: 'alert5', title: 'Bullish OB Line Crossed Down', message: 'Bullish OB line has been crossed down!' },
+];
 
 export const InstitutionalOrderblockPressure = {
   calculate,
@@ -335,4 +367,5 @@ export const InstitutionalOrderblockPressure = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

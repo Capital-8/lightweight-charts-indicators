@@ -8,6 +8,10 @@
  * with a price label next to the last bar; two more lines and labels mark the highest and the lowest pivot of the
  * period. The plot `RS_level` (not displayed) is the level that the close has just crossed.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Resistance Broken' on the bars whose close crosses above a level
+ * (close[1] at or below it), 'Support Broken' on the bars whose close crosses below a level; the messages keep the
+ * {{close}} and {{plot("RS_level")}} placeholders.
+ *
  * Chart context (optional third argument): the label prices are rounded to the price tick of the symbol, read
  * from the context (`mintick`). Without it the tick is 0.01.
  *
@@ -20,6 +24,7 @@ import { ta, str, math, compare, Series, type IndicatorResult, type InputConfig,
 import type { MarkerData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SupportResistanceDynamicInputs {
   /** Period for Pivot Points */
@@ -94,7 +99,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceDynamicInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; labels: LabelData[]; lines: LineDrawingData[] } {
+): IndicatorResult & { markers: MarkerData[]; labels: LabelData[]; lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const { rb, prd, nump, channelW, labelLocation, linestyle, lineColor, drawhl, showpp } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -110,6 +115,8 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const rsLevel: number[] = new Array(n).fill(NaN);
+  const resistanceBroken: boolean[] = new Array(n).fill(false);
+  const supportBroken: boolean[] = new Array(n).fill(false);
   let highestph = NaN;
   let lowestpl = NaN;
   // var sr_levs: the levels of the last pivot bar (21 slots)
@@ -204,8 +211,14 @@ export function calculate(
     const close1 = i > 0 ? bars[i - 1].close : NaN;
     for (const lev of srLevs) {
       if (!truthy(lev)) continue;
-      if (le(close1, lev) && gt(close, lev)) rsLevel[i] = lev;
-      if (ge(close1, lev) && lt(close, lev)) rsLevel[i] = lev;
+      if (le(close1, lev) && gt(close, lev)) {
+        resistanceBroken[i] = true;
+        rsLevel[i] = lev;
+      }
+      if (ge(close1, lev) && lt(close, lev)) {
+        supportBroken[i] = true;
+        rsLevel[i] = lev;
+      }
     }
   }
 
@@ -255,7 +268,15 @@ export function calculate(
     markers,
     labels,
     lines,
+    // alertcondition(resistance_broken, 'Resistance Broken', ...) / alertcondition(support_broken, 'Support Broken', ...)
+    alerts: alertStates(alertConditions, bars, [resistanceBroken, supportBroken]),
   };
 }
 
-export const SupportResistanceDynamic = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Resistance Broken', message: 'Resistance Broken, Close Price: {{close}}, Resistance level = {{plot("RS_level")}}' },
+  { id: 'alert1', title: 'Support Broken', message: 'Support Broken, Close Price: {{close}}, Support level = {{plot("RS_level")}}' },
+];
+
+export const SupportResistanceDynamic = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

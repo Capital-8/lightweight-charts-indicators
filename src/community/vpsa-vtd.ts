@@ -9,13 +9,21 @@
  * volume rose / fell on each of the last `period` steps ('Step By Step' mode); all bars of the period can be
  * required to be bullish or bearish. A label at the top of the pane marks the bars of the chosen trend.
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): with the combined alert off, 'Conditions met:
+ * Spread & Volume.' when the four spread / volume conditions (normalised value and z-score against their thresholds)
+ * hold and 'Condition met: Volume Trend Detector' on a trend bar; with it on, 'Conditions met: Spread, Volume & Volume
+ * Trend Detector.' when the normalised spread condition holds on a trend bar.
+ *
  * Reference: "VPSA-VTD" by CatTheTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © CatTheTrader
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, PlotCandleData } from '../types';
+import type { AlertCall, MarkerData, PlotCandleData } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 const CONDITIONS = ['greater than or equal to', 'less than or equal to'];
 
@@ -94,6 +102,8 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 const ne = (a: number, b: number) => Math.abs(a - b) > EPS;
+const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
 /** Pine plotshape default text colour */
 const PINE_TEXT = '#2962FF';
@@ -104,7 +114,9 @@ const CANDLE_BORDER = '#000000';
 export function calculate(
   bars: Bar[],
   inputs: Partial<VpsaVtdInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & {
+  markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]>; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -196,10 +208,31 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     if (!conditionVtd[i]) continue;
     const time = bars[i].time;
-    if (step && up) markers.push({ time, position: 'top', shape: 'labelUp', color: color.green, text: 'Step Up', textColor: PINE_TEXT, size: 'auto' });
-    if (step && !up) markers.push({ time, position: 'top', shape: 'labelDown', color: color.red, text: 'Step Down', textColor: PINE_TEXT, size: 'auto' });
-    if (!step && up) markers.push({ time, position: 'top', shape: 'labelUp', color: color.lime, text: 'SMA Up', textColor: PINE_TEXT, size: 'auto' });
-    if (!step && !up) markers.push({ time, position: 'top', shape: 'labelDown', color: color.maroon, text: 'SMA Down', textColor: PINE_TEXT, size: 'auto' });
+    if (step && up) markers.push({ id: 'shape0', time, position: 'top', shape: 'labelUp', color: color.green, text: 'Step Up', textColor: PINE_TEXT, size: 'auto' });
+    if (step && !up) markers.push({ id: 'shape1', time, position: 'top', shape: 'labelDown', color: color.red, text: 'Step Down', textColor: PINE_TEXT, size: 'auto' });
+    if (!step && up) markers.push({ id: 'shape2', time, position: 'top', shape: 'labelUp', color: color.lime, text: 'SMA Up', textColor: PINE_TEXT, size: 'auto' });
+    if (!step && !up) markers.push({ id: 'shape3', time, position: 'top', shape: 'labelDown', color: color.maroon, text: 'SMA Down', textColor: PINE_TEXT, size: 'auto' });
+  }
+
+  // Alert conditions: value >= threshold or value <= threshold, as the condition input says
+  const check = (cond: string, v: number, thr: number) =>
+    (cond === 'greater than or equal to' && ge(v, thr)) || (cond === 'less than or equal to' && le(v, thr));
+  const alertCalls: AlertCall[] = [];
+  const call = (time: number, message: string) => alertCalls.push({ time, message, freq: 'once_per_bar' });
+  for (let i = 0; i < n; i++) {
+    const time = bars[i].time;
+    const spreadAlert = check(cfg.spreadCondition, spreadNorm[i], cfg.alertSpreadNormalized);
+    const spreadSigmaAlert = check(cfg.spreadSigmaCondition, spreadZ[i], cfg.alertSpreadSigma);
+    const volumeAlert = check(cfg.volumeCondition, volumeNorm[i], cfg.alertVolumeNormalized);
+    const volumeSigmaAlert = check(cfg.volumeSigmaCondition, volumeZ[i], cfg.alertVolumeSigma);
+    if (!cfg.enableCombinedAlert && spreadAlert && spreadSigmaAlert && volumeAlert && volumeSigmaAlert) {
+      call(time, 'Conditions met: Spread & Volume.');
+    }
+    if (!cfg.enableCombinedAlert && conditionVtd[i]) call(time, 'Condition met: Volume Trend Detector');
+    // combined_alert_condition = spread_alert_condition and condition_vtd
+    if (cfg.enableCombinedAlert && spreadAlert && conditionVtd[i]) {
+      call(time, 'Conditions met: Spread, Volume & Volume Trend Detector.');
+    }
   }
 
   return {
@@ -207,6 +240,7 @@ export function calculate(
     plots: { plot0, plot1 },
     markers,
     plotCandles: { normalizedSpread: candles },
+    alertCalls,
   };
 }
 
@@ -216,4 +250,5 @@ export const VpsaVtd = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

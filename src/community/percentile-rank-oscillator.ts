@@ -7,6 +7,8 @@
  * deviation of the midpoint from its VWMA. Both can be smoothed with an RMA and are shown on a -1..+1 or 0..100
  * scale. The background takes the top / bottom colour when a percentile reaches the upper / lower threshold
  * (priority: both lines, then price, then VWMA), with a band fill between the threshold lines.
+ * Alerts (alertcondition, `alerts` of the result): price / VWMA / confluence TOP and BOTTOM, true on the bars where
+ * the percentile is at or beyond the threshold (and the alert switch of that kind is on).
  *
  * Reference: "Percentile Rank Oscillator (Price + VWMA)" by exploretranspose
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, math, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type PercentileRankOutputScale = '-1..+1' | '0..100';
 
@@ -151,7 +154,7 @@ function rollingPercentile(src: number[], n: number, i: number): number {
 export function calculate(
   bars: Bar[],
   inputs: Partial<PercentileRankOscillatorInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -180,6 +183,7 @@ export function calculate(
 
   // Background: confluence > price > VWMA
   const bgColors: BgColorData[] = [];
+  const flags: boolean[][] = [[], [], [], [], [], []];
   for (let i = 0; i < n; i++) {
     const isPriceTop = ge(pricePct[i], cfg.highThresh);
     const isPriceBot = le(pricePct[i], cfg.lowThresh);
@@ -191,6 +195,12 @@ export function calculate(
     const bgVw = (isVwTop || isVwBot) && cfg.fillExtremes && cfg.alertsVwma ? (isVwTop ? cfg.topColor : cfg.botColor) : null;
     const bgConfl = (conflTop || conflBot) && cfg.fillExtremes && cfg.alertsConfl ? (conflTop ? cfg.topColor : cfg.botColor) : null;
     const finalBg = bgConfl ?? bgPrice ?? bgVw;
+    flags[0].push(cfg.alertsPrice && isPriceTop);
+    flags[1].push(cfg.alertsPrice && isPriceBot);
+    flags[2].push(cfg.enableVwmaPct && cfg.alertsVwma && isVwTop);
+    flags[3].push(cfg.enableVwmaPct && cfg.alertsVwma && isVwBot);
+    flags[4].push(cfg.enableVwmaPct && cfg.alertsConfl && conflTop);
+    flags[5].push(cfg.enableVwmaPct && cfg.alertsConfl && conflBot);
     if (finalBg !== null) bgColors.push({ time: bars[i].time, color: finalBg });
   }
 
@@ -216,8 +226,19 @@ export function calculate(
         colors: new Array<string>(n).fill(cfg.bandFillColor) },
     ],
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Price Percentile TOP', message: 'Price percentile reached TOP threshold' },
+  { id: 'alert1', title: 'Price Percentile BOTTOM', message: 'Price percentile reached BOTTOM threshold' },
+  { id: 'alert2', title: 'VWMA Percentile TOP', message: 'VWMA percentile reached TOP threshold' },
+  { id: 'alert3', title: 'VWMA Percentile BOTTOM', message: 'VWMA percentile reached BOTTOM threshold' },
+  { id: 'alert4', title: 'Confluence TOP', message: 'Price & VWMA percentiles both at TOP extreme' },
+  { id: 'alert5', title: 'Confluence BOTTOM', message: 'Price & VWMA percentiles both at BOTTOM extreme' },
+];
 
 export const PercentileRankOscillator = {
   calculate,
@@ -227,4 +248,5 @@ export const PercentileRankOscillator = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

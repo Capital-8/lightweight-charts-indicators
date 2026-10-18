@@ -4,12 +4,15 @@
  * The standard MACD: MACD = MA(src, fast) - MA(src, slow) (EMA or SMA), signal = MA(MACD, signal length) (EMA or SMA),
  * histogram = MACD - signal as columns: dark green above zero and rising, light green above zero and falling, light
  * red below zero and rising, red below zero and falling. Zero line.
+ * Alerts (alertcondition, `alerts` of the result): 'Rising to falling' (histogram from >= 0 to < 0) and 'Falling to
+ * rising' (histogram from <= 0 to > 0).
  *
  * Reference: "MACD XD" by Zen_Formless
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MacdXdInputs {
   fastLength: number;
@@ -57,8 +60,13 @@ export const metadata = {
 const EPS = 1e-10;
 const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const gt = (a: number, b: number) => a - b > EPS;
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
-export function calculate(bars: Bar[], inputs: Partial<MacdXdInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<MacdXdInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const src = getSourceSeries(bars, cfg.src);
@@ -77,6 +85,10 @@ export function calculate(bars: Bar[], inputs: Partial<MacdXdInputs> = {}): Indi
     return lt(prev, hist[i]) ? '#FFCDD2' : '#FF5252';
   };
 
+  // alertcondition(hist[1] >= 0 and hist < 0) / alertcondition(hist[1] <= 0 and hist > 0)
+  const toFalling = hist.map((h, i) => i > 0 && ge(hist[i - 1], 0) && lt(h, 0));
+  const toRising = hist.map((h, i) => i > 0 && le(hist[i - 1], 0) && gt(h, 0));
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -87,8 +99,15 @@ export function calculate(bars: Bar[], inputs: Partial<MacdXdInputs> = {}): Indi
     hlines: [
       { value: 0, options: { title: 'Zero Line', color: String(color.new('#787B86', 50)), linestyle: 'dashed' } },
     ],
+    alerts: alertStates(alertConditions, bars, [toFalling, toRising]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Rising to falling', message: 'The MACD histogram switched from a rising to falling state' },
+  { id: 'alert1', title: 'Falling to rising', message: 'The MACD histogram switched from a falling to rising state' },
+];
 
 export const MacdXd = {
   calculate,
@@ -96,4 +115,5 @@ export const MacdXd = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

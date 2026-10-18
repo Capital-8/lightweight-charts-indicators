@@ -14,8 +14,11 @@
  * absolute rating (0 to 5) while the rating is above 0.1 or below -0.1. Five dashed levels, three data window plots
  * (All, MAs, Oscillators), six labels on the last bar with the three rating states ("Strong Buy" above 0.5, "Buy"
  * above 0.1, "Neutral", "Sell", "Strong Sell"), and optional long / short markers when the rating crosses a level
- * or when the count of rising bars reaches a value ('Direction', off by default). The alerts of the original have
- * no output.
+ * or when the count of rising bars reaches a value ('Direction', off by default).
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): the 'Alert message: Long' / 'Short' text on the
+ * bars where the original triggers a long / short: the level cross or count condition of the bar, or of the bar
+ * before on the chart timeframe with 'Repainting' On (as the original, `[ensureNoRepaintIdx]`), alternating when
+ * 'Alternate longs & shorts' applies. The markers keep the rule of the version the port was built from (no delay).
  *
  * Timeframe: "" is the chart timeframe. A higher timeframe takes the ratings computed on the bars of that timeframe
  * built from the chart bars (src/anchor-period.ts, with the exchange calendar of the chart context when it has the
@@ -35,7 +38,7 @@ import {
   ta, Series, color, array, math, timeframe, mapToChart,
   type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar,
 } from 'oakscriptjs';
-import type { LabelData, MarkerData } from '../types';
+import type { AlertCall, LabelData, MarkerData } from '../types';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
@@ -74,9 +77,9 @@ export interface TechnicalRatingsInputs {
   levelDnInput: number;
   /** Cumulative adv./decl. */
   gradInput: number;
-  /** Alert message: Long (no output) */
+  /** Alert message: Long (text of the long alert() calls) */
   alertUpInput: string;
-  /** Alert message: Short (no output) */
+  /** Alert message: Short (text of the short alert() calls) */
   alertDnInput: string;
 }
 
@@ -344,7 +347,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<TechnicalRatingsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; labels: LabelData[] } {
+): IndicatorResult & { markers: MarkerData[]; labels: LabelData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const repaint = cfg.repaintInput === 'On';
@@ -419,6 +422,12 @@ export function calculate(
   const plotValue = (v: number) => (Number.isFinite(v) ? v : NaN);
   let lastDir = 0;
   let prevGradient = NaN;
+  // alert(): int ensureNoRepaintIdx = not htfUsed and repaintInput ? 1 : 0; var bool lastDirectionUp = na
+  const alertCalls: AlertCall[] = [];
+  const noRepaintIdx = !htfUsed && repaint ? 1 : 0;
+  let lastDirectionUp: boolean | null = null;
+  let prevRawLong = false;
+  let prevRawShort = false;
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const u = userRating[i];
@@ -453,6 +462,20 @@ export function calculate(
     const triggerShort = allowAlert && (dn || gDn) && allowShort && doShorts;
     if (triggerLong) lastDir = 1;
     else if (triggerShort) lastDir = -1;
+    // the original's triggers: ((xUp or gUp) and (...) and doLongs)[ensureNoRepaintIdx]
+    const rawLong = (up || gUp) && (!altInput || lastDirectionUp === null || !lastDirectionUp) && doLongs;
+    const rawShort = (dn || gDn) && (!altInput || lastDirectionUp === null || lastDirectionUp) && doShorts;
+    const alertLong = noRepaintIdx === 1 ? prevRawLong : rawLong;
+    const alertShort = noRepaintIdx === 1 ? prevRawShort : rawShort;
+    prevRawLong = rawLong;
+    prevRawShort = rawShort;
+    if (alertLong) {
+      alertCalls.push({ time: t, message: cfg.alertUpInput, freq: 'once_per_bar' });
+      lastDirectionUp = true;
+    } else if (alertShort) {
+      alertCalls.push({ time: t, message: cfg.alertDnInput, freq: 'once_per_bar' });
+      lastDirectionUp = false;
+    }
     if (triggerLong) {
       markers.push({ time: t, position: 'bottom', shape: 'circle', color: 'transparent', text: '▲', textColor: longColor, size: 'tiny' });
     }
@@ -507,7 +530,10 @@ export function calculate(
     hlines,
     markers,
     labels,
+    alertCalls,
   };
 }
 
-export const TechnicalRatings = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig };
+export const hasAlertFunction = true;
+
+export const TechnicalRatings = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, hasAlertFunction };

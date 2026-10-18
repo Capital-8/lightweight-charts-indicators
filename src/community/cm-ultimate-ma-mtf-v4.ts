@@ -15,8 +15,11 @@
  * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar, see src/anchor-period.ts;
  * without them the port uses the UTC calendar and the bars.
  *
- * The line widths are inputs in the original; the plots here have the default width of 3. The four alert() calls
- * of the original have no output.
+ * The line widths are inputs in the original; the plots here have the default width of 3.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close), each with its switch (all off by default):
+ * fast MA slope turns up / down (over `fast_ma_smooth` bars), fast MA crosses above / below the slow MA. The message
+ * gives the symbol (`tickerid` of the chart context), the timeframe inputs and the close, as the original builds it.
  *
  * Reference: "_CM_Ultimate_MA_MTF_V4" by ChrisMoody
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -24,11 +27,15 @@
  */
 
 import {
-  ta, Series, color, timeframe, mapToChart, getSourceSeries, barTime, barInterval,
+  ta, Series, color, timeframe, str, mapToChart, getSourceSeries, barTime, barInterval,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
-import type { ChartContext } from '../chart-context';
+import { tickeridOf, type ChartContext } from '../chart-context';
+import type { AlertCall } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type MaType = 'SMA' | 'EMA' | 'WMA' | 'Hull MA' | 'VWMA' | 'RMA' | 'TEMA' | 'TIL T3';
 type MaSource = SourceType | 'volume';
@@ -165,6 +172,7 @@ export const metadata = {
 const EPS = 1e-10;
 const ge = (a: number, b: number) => a - b >= -EPS;
 const lt = (a: number, b: number) => b - a > EPS;
+const gt = (a: number, b: number) => a - b > EPS;
 /** A number used as a condition: na and 0 are false */
 const truthy = (v: number) => !Number.isNaN(v) && v !== 0;
 
@@ -224,7 +232,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<CmUltimateMaMtfV4Inputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const interval = barInterval(bars);
@@ -276,11 +284,36 @@ export function calculate(
     colors: colFinal.map((c) => String(color.new(c, cfg.fill_transp))),
   }];
 
+  // Alerts: if alert_X and cond: alert("Symbol = (" + syminfo.tickerid + ") Fast MA TimeFrame = (" + res1 + ") ...
+  //   Current Price (" + str.tostring(close) + ") ...", alert.freq_once_per_bar_close)
+  const alertCalls: AlertCall[] = [];
+  const tickerid = tickeridOf(chart);
+  const at = (a: number[], j: number) => (j >= 0 ? a[j] : NaN);
+  for (let i = 0; i < n; i++) {
+    const price = str.tostring(bars[i].close);
+    const push = (message: string) => alertCalls.push({ time: bars[i].time as number, message, freq: 'once_per_bar_close' });
+    const fast = (back: number) => at(fastMa, i - back);
+    const slow = (back: number) => at(slowMa, i - back);
+    // alert_Fast_MA_Slope_UP = fast_ma[1] < fast_ma[1 + smooth] and fast_ma[0] >= fast_ma[smooth]
+    const slopeUp = lt(fast(1), fast(1 + k)) && ge(fast(0), fast(k));
+    const slopeDn = gt(fast(1), fast(1 + k)) && lt(fast(0), fast(k));
+    // alert_Cross_UP = fast_ma[1] < slow_ma[1] and fast_ma >= slow_ma
+    const crossUp = lt(fast(1), slow(1)) && ge(fast(0), slow(0));
+    const crossDn = gt(fast(1), slow(1)) && lt(fast(0), slow(0));
+    const fastTf = `Symbol = (${tickerid}) Fast MA TimeFrame = (${cfg.res1})`;
+    const bothTf = `${fastTf} Slow MA TimeFrame = (${cfg.res2})`;
+    if (cfg.alert_Slope_Bull && slopeUp) push(`${fastTf} Current Price (${price}) Fast MA Slope Up.`);
+    if (cfg.alert_Slope_Bear && slopeDn) push(`${fastTf} Current Price (${price}) Fast MA Slope Down.`);
+    if (cfg.alert_Cross_Bull && crossUp) push(`${bothTf} Current Price (${price}) Fast MA Crosses Above Slow MA.`);
+    if (cfg.alert_Cross_Bear && crossDn) push(`${bothTf} Current Price (${price}) Fast MA Crosses Below Slow MA.`);
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2, plot3 },
     fills,
+    alertCalls,
   };
 }
 
-export const CmUltimateMaMtfV4 = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const CmUltimateMaMtfV4 = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

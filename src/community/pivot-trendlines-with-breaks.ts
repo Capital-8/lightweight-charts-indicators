@@ -16,8 +16,8 @@
  *
  * The lines come from the SimpleTrendlines library of the same author (functions new, drawLine and drawTrendline,
  * ported in this file). Each use of the library keeps two lines (a `var` line pair) and its own history; at most
- * 500 lines are kept (drawing registry of oakscriptjs). Two alertconditions (bearish / bullish breakout) are not
- * ported.
+ * 500 lines are kept (drawing registry of oakscriptjs). Alerts (alertcondition, `alerts` of the result):
+ * 'Bearish Breakout' / 'Bullish Breakout', true on the bar of each break of the lows / highs trendline.
  *
  * Reference: "Pivot Trendlines with Breaks [HG]" by HoanGhetti
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -31,6 +31,7 @@ import {
 import type { LineDrawingData, MarkerData } from '../types';
 import { barTime } from '../bar-time';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PivotTrendlinesWithBreaksInputs {
   /** Bars on the right of a pivot (and on the left with the "Normal" type) */
@@ -174,7 +175,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<PivotTrendlinesWithBreaksInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[] } {
+): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = Math.trunc(cfg.len);
@@ -315,6 +316,7 @@ export function calculate(
   };
 
   const markers: MarkerData[] = [];
+  const bearFlags: boolean[] = [], bullFlags: boolean[] = [];
   try {
     setDrawingBar(0, n === 1);
     // creation order of the `var` lines on the first bar: pivot(pl), pivot(ph), then the two target levels
@@ -341,6 +343,9 @@ export function calculate(
       const cu = breakout(cuSite, plData, i, pl[i]);
       const co = breakout(coSite, phData, i, ph[i]);
       const time = bars[i].time as number;
+      // alertcondition(ta.change(cu) and cu, 'Bearish Breakout') / alertcondition(ta.change(co) and co, 'Bullish Breakout')
+      bearFlags.push(cu && !cuPrev);
+      bullFlags.push(co && !coPrev);
       // plotshape(ta.change(cu) and cu ? startline.get_y2() : na, location.absolute)
       if (cu && !cuPrev) {
         const price = line.get_y2(plData.tl.startline);
@@ -394,8 +399,15 @@ export function calculate(
     plots: {},
     markers,
     lines,
+    alerts: alertStates(alertConditions, bars, [bearFlags, bullFlags]),
   };
 }
+
+/** The original's alertconditions (no message: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bearish Breakout', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Bullish Breakout', message: 'Alert Fired!' },
+];
 
 export const PivotTrendlinesWithBreaks = {
   calculate,
@@ -403,4 +415,5 @@ export const PivotTrendlinesWithBreaks = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

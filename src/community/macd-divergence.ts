@@ -2,12 +2,15 @@
  * MACD Divergences by @DaviddTech
  *
  * MACD with regular (and hidden) divergence detection on the MACD line.
+ * Alerts (alertcondition, `alerts` of the result): 'Bull', 'Bear', 'H Bull' and 'H Bear', true on the bar that confirms
+ * the pivot of each divergence (lbR bars after the pivot, where the label is drawn).
  *
  * Reference: "MACD Divergences by @DaviddTech" (community, Pine v4)
  */
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MACDDivergenceInputs {
   fastLength: number;
@@ -97,7 +100,10 @@ export const metadata = {
 
 type PlotPoint = { time: number; value: number; color?: string };
 
-export function calculate(bars: Bar[], inputs: Partial<MACDDivergenceInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<MACDDivergenceInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { fastLength, slowLength, signalLength, oscMaType, signalMaType, pivotLookback, pivotLookbackLeft,
     rangeUpper, rangeLower, dontTouchZero, plotBull, plotBear, plotHiddenBull, plotHiddenBear, src } = { ...defaultInputs, ...inputs };
   const source = getSourceSeries(bars, src);
@@ -144,6 +150,7 @@ export function calculate(bars: Bar[], inputs: Partial<MACDDivergenceInputs> = {
   const hidBearPlot = bars.map((_, i) => na(i));
 
   const markers: MarkerData[] = [];
+  const flags: boolean[][] = [0, 1, 2, 3].map(() => new Array(n).fill(false)); // bull, bear, hidden bull, hidden bear
 
   // Pine: _inRange(cond) => bars = barssince(cond == true); rangeLower <= bars and bars <= rangeUpper,
   // called with plFound[1] / phFound[1]. Pine v4 `and` evaluates both sides, so barssince runs on every bar.
@@ -175,8 +182,11 @@ export function calculate(bars: Bar[], inputs: Partial<MACDDivergenceInputs> = {
 
       regBullPlot[p] = { time: bars[p].time, value: osc, color: bullCond ? BULL_COLOR : NONE_COLOR };
       hidBullPlot[p] = { time: bars[p].time, value: osc, color: hiddenBullCond ? HIDDEN_BULL_COLOR : NONE_COLOR };
-      if (bullCond) markers.push({ time: bars[p].time as number, position: 'atPriceBottom', price: osc, shape: 'labelUp', color: BULL_COLOR, text: ' Bull ', textColor: TEXT_COLOR });
-      if (hiddenBullCond) markers.push({ time: bars[p].time as number, position: 'atPriceBottom', price: osc, shape: 'labelUp', color: BULL_COLOR, text: ' H Bull ', textColor: TEXT_COLOR });
+      // ids: plotshape outputs "Regular Bullish Label" (shape0) and "Hidden Bullish Label" (shape1)
+      if (bullCond) markers.push({ time: bars[p].time as number, position: 'atPriceBottom', price: osc, shape: 'labelUp', color: BULL_COLOR, text: ' Bull ', textColor: TEXT_COLOR, id: 'shape0' });
+      if (hiddenBullCond) markers.push({ time: bars[p].time as number, position: 'atPriceBottom', price: osc, shape: 'labelUp', color: BULL_COLOR, text: ' H Bull ', textColor: TEXT_COLOR, id: 'shape1' });
+      flags[0][i] = bullCond;
+      flags[2][i] = hiddenBullCond;
 
       plLastOsc = osc;
       plLastLow = low;
@@ -196,8 +206,11 @@ export function calculate(bars: Bar[], inputs: Partial<MACDDivergenceInputs> = {
 
       regBearPlot[p] = { time: bars[p].time, value: osc, color: bearCond ? BEAR_COLOR : NONE_COLOR };
       hidBearPlot[p] = { time: bars[p].time, value: osc, color: hiddenBearCond ? HIDDEN_BEAR_COLOR : NONE_COLOR };
-      if (bearCond) markers.push({ time: bars[p].time as number, position: 'atPriceTop', price: osc, shape: 'labelDown', color: BEAR_COLOR, text: ' Bear ', textColor: TEXT_COLOR });
-      if (hiddenBearCond) markers.push({ time: bars[p].time as number, position: 'atPriceTop', price: osc, shape: 'labelDown', color: BEAR_COLOR, text: ' H Bear ', textColor: TEXT_COLOR });
+      // ids: plotshape outputs "Regular Bearish Label" (shape2) and "Hidden Bearish Label" (shape3)
+      if (bearCond) markers.push({ time: bars[p].time as number, position: 'atPriceTop', price: osc, shape: 'labelDown', color: BEAR_COLOR, text: ' Bear ', textColor: TEXT_COLOR, id: 'shape2' });
+      if (hiddenBearCond) markers.push({ time: bars[p].time as number, position: 'atPriceTop', price: osc, shape: 'labelDown', color: BEAR_COLOR, text: ' H Bear ', textColor: TEXT_COLOR, id: 'shape3' });
+      flags[1][i] = bearCond;
+      flags[3][i] = hiddenBearCond;
 
       phLastOsc = osc;
       phLastHigh = high;
@@ -216,7 +229,17 @@ export function calculate(bars: Bar[], inputs: Partial<MACDDivergenceInputs> = {
       'hidBear': hidBearPlot,
     },
     markers,
+    // alertcondition(bullCond / bearCond / hiddenBullCond / hiddenBearCond)
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const MACDDivergence = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bull', message: 'Regular Bull Div {{ticker}} XXmin' },
+  { id: 'alert1', title: 'Bear', message: 'Regular Bear Div {{ticker}} XXmin' },
+  { id: 'alert2', title: 'H Bull', message: 'Hidden Bull Div {{ticker}} XXmin' },
+  { id: 'alert3', title: 'H Bear', message: 'Hidden Bear Div {{ticker}} XXmin' },
+];
+
+export const MACDDivergence = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

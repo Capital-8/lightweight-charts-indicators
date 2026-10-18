@@ -6,6 +6,8 @@
  * the source times the multiplier. The trend turns up when the close is above the upper band (and not below the
  * lower band) and down when the close is below the lower band. Lines, band fills, candles and bar colours are green
  * in an up trend and purple in a down trend (no colour before the first signal).
+ * Alerts (alertcondition, `alerts` of the result): 'IMVL long' when the trend signal crosses over 0, 'IMVL short' when
+ * it crosses under 0.
  *
  * Reference: "Interpolated Median Volatility LSMA | Oquant" by oquant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar, type SourceType, Series } from 'oakscriptjs';
 import type { BarColorData, PlotCandleData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface InterpolatedMedianVolatilityLSMAOttoInputs {
   /** Source */
@@ -73,7 +76,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<InterpolatedMedianVolatilityLSMAOttoInputs> = {},
-): IndicatorResult & { barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -89,6 +92,7 @@ export function calculate(
   // colors = signal == 1 ? green : signal == -1 ? purple : na
   const colors: Array<string | null> = new Array(n);
   let signal = 0; // var signal = 0
+  const signals: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
     upper[i] = lsma[i] + sd[i] * cfg.mult;
     lower[i] = lsma[i] - sd[i] * cfg.mult;
@@ -96,6 +100,7 @@ export function calculate(
     const short = lt(bars[i].close, lower[i]);
     if (long && !short) signal = 1;
     if (short) signal = -1;
+    signals[i] = signal;
     colors[i] = signal === 1 ? UP : signal === -1 ? DOWN : null;
   }
 
@@ -127,8 +132,16 @@ export function calculate(
     // plotcandle(open, high, low, close, "bar color", colors, colors, colors, force_overlay = true)
     plotCandles: { barColorCandles: candles },
     barColors,
+    // alertcondition(ta.crossover(signal, 0), "IMVL long", ...) / alertcondition(ta.crossunder(signal, 0), "IMVL short", ...)
+    alerts: alertStates(alertConditions, bars, [crossedOver(signals, 0), crossedUnder(signals, 0)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'IMVL long', message: 'IMVL long {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'IMVL short', message: 'IMVL short {{exchange}}:{{ticker}}' },
+];
 
 export const InterpolatedMedianVolatilityLSMAOtto = {
   calculate,
@@ -137,4 +150,5 @@ export const InterpolatedMedianVolatilityLSMAOtto = {
   inputConfig,
   plotConfig,
   fillConfig,
+  alertConditions,
 };

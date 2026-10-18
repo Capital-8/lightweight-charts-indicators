@@ -515,7 +515,7 @@ export function calculate(
   // ---- Level markers on one bar (plotshape, location.absolute, show_last = 1) ----
   const shape = (
     on: boolean, price: number, offset: number,
-    marker: Pick<MarkerData, 'position' | 'shape' | 'color' | 'text' | 'textColor'>,
+    marker: Pick<MarkerData, 'position' | 'shape' | 'color' | 'text' | 'textColor' | 'id'>,
   ) => {
     if (!on || isNa(price) || last + offset < 0) return;
     markers.push({ time: barTime(bars, last + offset, interval), price, size: 'auto', ...marker });
@@ -531,25 +531,25 @@ export function calculate(
     vaLowCol = named(cfg.vwapLowCol, NAMED.lime);
   }
   shape(cfg.showPoc && gt(pocLevel, 0), pocLevel, pocOffset, {
-    position: 'atPriceMiddle', shape: 'circle', color: NAMED.black, text: POC_TEXT, textColor: pocCol,
+    id: 'shape0', position: 'atPriceMiddle', shape: 'circle', color: NAMED.black, text: POC_TEXT, textColor: pocCol,
   });
   shape(cfg.showPoc2 && gt(poc2Level, 0), poc2Level, pocOffset, {
-    position: 'atPriceMiddle', shape: 'circle', color: NAMED.silver, text: POC_TEXT, textColor: poc2Col,
+    id: 'shape1', position: 'atPriceMiddle', shape: 'circle', color: NAMED.silver, text: POC_TEXT, textColor: poc2Col,
   });
   // Zones outside the value area: white labels, plotshape transp = 20 (shape and text)
   const zoneColor = String(color.new(NAMED.white, 20));
   shape(cfg.showVa && cfg.dimNvaZones && gt(vaHighLevel, 0), vaHighLevel, vaOffset, {
-    position: 'atPriceTop', shape: 'labelDown', color: zoneColor, text: LINE_BLOCK + TEXT_UNDER, textColor: zoneColor,
+    id: 'shape2', position: 'atPriceTop', shape: 'labelDown', color: zoneColor, text: LINE_BLOCK + TEXT_UNDER, textColor: zoneColor,
   });
   shape(cfg.showVa && cfg.dimNvaZones && gt(vaLowLevel, 0), vaLowLevel, vaOffset, {
-    position: 'atPriceBottom', shape: 'labelUp', color: zoneColor, text: TEXT_UPPER + LINE_BLOCK,
+    id: 'shape3', position: 'atPriceBottom', shape: 'labelUp', color: zoneColor, text: TEXT_UPPER + LINE_BLOCK,
     textColor: String(color.new(vaLowCol, 20)),
   });
   shape(cfg.showVa && gt(vaHighLevel, 0), vaHighLevel, vaOffset, {
-    position: 'atPriceMiddle', shape: 'circle', color: NAMED.red, text: TEXT_UNDER, textColor: vaHighCol,
+    id: 'shape4', position: 'atPriceMiddle', shape: 'circle', color: NAMED.red, text: TEXT_UNDER, textColor: vaHighCol,
   });
   shape(cfg.showVa && gt(vaLowLevel, 0) && !cfg.dimNvaZones, vaLowLevel, vaOffset, {
-    position: 'atPriceMiddle', shape: 'circle', color: NAMED.green, text: TEXT_UNDER, textColor: vaLowCol,
+    id: 'shape5', position: 'atPriceMiddle', shape: 'circle', color: NAMED.green, text: TEXT_UNDER, textColor: vaLowCol,
   });
 
   return result();

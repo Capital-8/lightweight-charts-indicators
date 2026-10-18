@@ -7,6 +7,8 @@
  * back above the lower band (buy, pane bottom) or below the upper band (sell, pane top). The background is green
  * below 30 and red above 70. Pivot divergences (5 / 5 bars) between the RSI and the price give regular and
  * "hidden" bullish / bearish labels, drawn on the pivot bar.
+ * Alerts (alertcondition, `alerts` of the result): the regular and hidden bullish / bearish divergences, true on the
+ * bar that confirms the pivot (5 bars after it).
  *
  * Reference: "RSI Games 1.2" by petejfjohnson
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type MaType = 'None' | 'SMA' | 'SMA + Bollinger Bands' | 'EMA' | 'SMMA (RMA)' | 'WMA' | 'VWMA';
 
@@ -81,7 +84,8 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<RsiGames12Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; visibility: Record<string, boolean> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; visibility: Record<string, boolean> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -264,8 +268,17 @@ export function calculate(
     markers,
     bgColors,
     visibility: { enableMA, isBB },
+    alerts: alertStates(alertConditions, bars, [bullCond, bearCond, hiddenBullCond, hiddenBearCond]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Regular Bullish Divergence', message: 'Regular Bullish Divergence' },
+  { id: 'alert1', title: 'Regular Bearish Divergence', message: 'Regular Bearish Divergence' },
+  { id: 'alert2', title: 'Hidden Bullish Divergence', message: 'Hidden Bullish Divergence' },
+  { id: 'alert3', title: 'Hidden Bearish Divergence', message: 'Hidden Bearish Divergence' },
+];
 
 export const RsiGames12 = {
   calculate,
@@ -273,4 +286,5 @@ export const RsiGames12 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

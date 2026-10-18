@@ -9,6 +9,8 @@
  * the true range and directional moves) is mapped to 85..100 and coloured amber above the strong-trend level. A
  * volatility line (the share of the last N bars with an ATR below the current ATR) is mapped to -105..-85.
  * Invisible plots at 105 and -105 fix the pane scale.
+ * Alerts (alertcondition, `alerts` of the result): the original's 8 conditions (CMO crossing the oversold /
+ * overbought levels and its signal, CMO divergences, ADX crossing the strong-trend level).
  *
  * Last bar: the volatility percentile is computed on a closed bar only (0 on an open bar). The port reads the state
  * of the last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as
@@ -22,6 +24,19 @@ import { ta, Series, math, color, type IndicatorResult, type InputConfig, type P
 import type { BgColorData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'CMO Cross OS Up', message: 'EDGE Panel: CMO crossed above oversold — bullish momentum!' },
+  { id: 'alert1', title: 'CMO Cross OB Down', message: 'EDGE Panel: CMO crossed below overbought — bearish momentum!' },
+  { id: 'alert2', title: 'CMO Bull Cross', message: 'EDGE Panel: CMO bullish signal cross!' },
+  { id: 'alert3', title: 'CMO Bear Cross', message: 'EDGE Panel: CMO bearish signal cross!' },
+  { id: 'alert4', title: 'CMO Bull Divergence', message: 'EDGE Panel: Bullish divergence on CMO!' },
+  { id: 'alert5', title: 'CMO Bear Divergence', message: 'EDGE Panel: Bearish divergence on CMO!' },
+  { id: 'alert6', title: 'Trend Starting', message: 'EDGE Panel: Trend strength breaking out — ADX rising!' },
+  { id: 'alert7', title: 'Trend Weakening', message: 'EDGE Panel: Trend weakening — ADX falling below threshold!' },
+];
 
 export interface Blacklab84PanelInputs {
   /** CMO length */
@@ -127,7 +142,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<Blacklab84PanelInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -273,6 +288,16 @@ export function calculate(
       },
     ],
     bgColors,
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(cmo, cfg.cmoOS),
+      crossedUnder(cmo, cfg.cmoOB),
+      crossedOver(cmo, cmoSig).map((x, i) => x && lt(cmo[i], 0)),
+      crossedUnder(cmo, cmoSig).map((x, i) => x && gt(cmo[i], 0)),
+      bullDiv,
+      bearDiv,
+      crossedOver(adx, cfg.adxStrong),
+      crossedUnder(adx, cfg.adxStrong),
+    ]),
   };
 }
 
@@ -282,4 +307,5 @@ export const Blacklab84Panel = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

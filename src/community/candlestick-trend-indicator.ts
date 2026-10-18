@@ -242,11 +242,12 @@ export function calculate(
   const barAlert: boolean[] = new Array(n);
   const barAlertDn: boolean[] = new Array(n);
 
-  const arrowDown = (i: number, on: boolean, text: string) => {
-    if (on) markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: SHAPE_RED, text, textColor: TEXT_COLOR });
+  // id: shape<k> of the k-th plotshape of the original
+  const arrowDown = (id: string, i: number, on: boolean, text: string) => {
+    if (on) markers.push({ id, time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: SHAPE_RED, text, textColor: TEXT_COLOR });
   };
-  const arrowUp = (i: number, on: boolean, text: string) => {
-    if (on) markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: SHAPE_GREEN, text, textColor: TEXT_COLOR });
+  const arrowUp = (id: string, i: number, on: boolean, text: string) => {
+    if (on) markers.push({ id, time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: SHAPE_GREEN, text, textColor: TEXT_COLOR });
   };
 
   for (let i = 0; i < n; i++) {
@@ -264,10 +265,10 @@ export function calculate(
     const botfractal = lt(L(i - 2), L(i - 1)) && lt(L(i - 2), low) && lt(L(i - 2), L(i - 3)) && lt(L(i - 2), L(i - 4));
     // plotshape(hidefractals ? na : topfractal, ..., offset = -2): drawn two bars back
     if (!cfg.hidefractals && topfractal) {
-      markers.push({ time: bars[i - 2].time, position: 'aboveBar', shape: 'triangleUp', color: GREEN, size: 'tiny' });
+      markers.push({ id: 'shape0', time: bars[i - 2].time, position: 'aboveBar', shape: 'triangleUp', color: GREEN, size: 'tiny' });
     }
     if (!cfg.hidefractals && botfractal) {
-      markers.push({ time: bars[i - 2].time, position: 'belowBar', shape: 'triangleDown', color: RED, size: 'tiny' });
+      markers.push({ id: 'shape1', time: bars[i - 2].time, position: 'belowBar', shape: 'triangleDown', color: RED, size: 'tiny' });
     }
     const topPrev = i > 0 ? topfractals[i - 1] : NaN;
     const botPrev = i > 0 ? botfractals[i - 1] : NaN;
@@ -297,54 +298,54 @@ export function calculate(
 
     // Pin bars with a long upper shadow (selling pressure) / a long lower shadow (buying pressure)
     const pBarDn = cfg.upb && lt(open, high - range * pctCp) && lt(close, high - range * pctCp);
-    arrowDown(i, pBarDn && !pBarRUp && !pBarRDn, 'Bearish\nPinBar');
+    arrowDown('shape2', i, pBarDn && !pBarRUp && !pBarRDn, 'Bearish\nPinBar');
     const pBarUp = cfg.upb && gt(open, low + range * pctCp) && gt(close, low + range * pctCp);
-    arrowUp(i, pBarUp && !pBarRUp && !pBarRDn, 'Bullish\nPinBar');
+    arrowUp('shape3', i, pBarUp && !pBarRUp && !pBarRDn, 'Bullish\nPinBar');
 
     const o1 = O(i - 1);
     const c1 = C(i - 1);
     const range1 = H(i - 1) - L(i - 1);
     const dcc = cfg.udc && gt(c1, o1) && ge(Math.abs(c1 - o1) / range1, 0.7) && lt(close, open)
       && ge(Math.abs(close - open) / range, 0.7) && ge(open, c1) && gt(close, o1) && lt(close, (o1 + c1) / 2);
-    arrowDown(i, dcc, 'DarkCloud\nCover');
+    arrowDown('shape4', i, dcc, 'DarkCloud\nCover');
 
     const pln = cfg.upl && lt(c1, o1) && ge(Math.abs(o1 - c1) / range1, 0.7) && gt(close, open)
       && ge(Math.abs(close - open) / range, 0.7) && le(open, c1) && lt(close, o1) && gt(close, (o1 + c1) / 2);
-    arrowUp(i, pln, 'Piercing\nLine');
+    arrowUp('shape5', i, pln, 'Piercing\nLine');
 
     const beh = cfg.ubh && gt(c1, o1) && gt(open, close) && le(open, c1) && ge(low, o1) && lt(open - close, c1 - o1) && inside;
-    arrowDown(i, beh && !dcc, 'Bear\nHarami');
+    arrowDown('shape6', i, beh && !dcc, 'Bear\nHarami');
 
     const blh = cfg.ubh && gt(o1, c1) && gt(close, open) && le(close, o1) && le(high, o1) && lt(close - open, o1 - c1) && inside;
-    arrowUp(i, blh && !pln, 'Bull\nHarami');
+    arrowUp('shape7', i, blh && !pln, 'Bull\nHarami');
 
     const bee = cfg.ube && gt(c1, o1) && lt(close, open) && le(close, L(i - 1)) && ge(open, c1);
-    arrowDown(i, bee, 'Bearish\nEngulf');
+    arrowDown('shape8', i, bee, 'Bearish\nEngulf');
 
     const ble = cfg.ube && lt(c1, o1) && gt(close, open) && ge(close, H(i - 1)) && le(open, c1);
-    arrowUp(i, ble, 'Bullish\nEngulf');
+    arrowUp('shape9', i, ble, 'Bullish\nEngulf');
 
     // crossover / crossunder of the close and the fractal levels (exact comparisons)
     const blfr = cfg.ufb && i > 0 && close > topfractals[i] && c1 <= topPrev;
-    arrowUp(i, blfr && !ble && !blh && !sBarUp, 'Fractal\nCross');
+    arrowUp('shape10', i, blfr && !ble && !blh && !sBarUp, 'Fractal\nCross');
     const befr = cfg.ufb && i > 0 && close < botfractals[i] && c1 >= botPrev;
-    arrowDown(i, befr && !bee && !beh && !sBarDown, 'Fractal\nCross');
+    arrowDown('shape11', i, befr && !bee && !beh && !sBarDown, 'Fractal\nCross');
 
     const bcolorDn = sbarDn && !(pBarRDn || pBarRUp || sBarDown || insideBar || outsideBar) && (beh || bee || dcc || befr || pBarDn);
     const bcolorUp = sbarUp && !(pBarRDn || pBarRUp || sBarUp || insideBar || outsideBar) && (blh || ble || pln || blfr || pBarUp);
 
-    // barcolor calls in the order of the script: the last colour that is not na is drawn
-    let barColor: string | undefined;
-    if (pBarRUp) barColor = GREEN;
-    if (pBarRDn) barColor = RED;
-    if (sBarDown) barColor = FUCHSIA;
-    if (sBarUp) barColor = AQUA;
-    if (insideBar) barColor = YELLOW;
-    if (outsideBar) barColor = ORANGE;
-    if (bcolorDn) barColor = MAROON;
-    if (bcolorUp) barColor = LIME;
-    if (cfg.sgb && !isNaN(close) && close !== 0) barColor = GRAY;
-    if (barColor) barColors.push({ time: bars[i].time, color: barColor });
+    // barcolor calls in the order of the script: the last colour that is not na is drawn (id: barcolor<k> of that call)
+    const barcolorCalls: Array<[boolean, string]> = [
+      [pBarRUp, GREEN], [pBarRDn, RED], [sBarDown, FUCHSIA], [sBarUp, AQUA], [insideBar, YELLOW], [outsideBar, ORANGE],
+      [bcolorDn, MAROON], [bcolorUp, LIME], [cfg.sgb && !isNaN(close) && close !== 0, GRAY],
+    ];
+    let barColorCall = -1;
+    barcolorCalls.forEach(([on], k) => {
+      if (on) barColorCall = k;
+    });
+    if (barColorCall >= 0) {
+      barColors.push({ id: `barcolor${barColorCall}`, time: bars[i].time, color: barcolorCalls[barColorCall][1] });
+    }
 
     barAlertDn[i] = (sbarDn && (befr || bee || beh || pBarDn || dcc)) || (sbarDn && (insideBar || outsideBar || sBarDown)) || pBarRDn;
     const barAlertUp = (sbarUp && (blfr || ble || blh || pBarUp || pln)) || (sbarUp && (insideBar || outsideBar || sBarUp)) || pBarRUp;
@@ -352,7 +353,7 @@ export function calculate(
     // plotshape(salc and barAlert[1], location.bottom, color = barAlertDn[1] ? red : green, offset = -1):
     // a dot under the bar of the alert once that bar is closed
     if (cfg.salc && i > 0 && barAlert[i - 1]) {
-      markers.push({ time: bars[i - 1].time, position: 'bottom', shape: 'circle', color: barAlertDn[i - 1] ? RED : GREEN });
+      markers.push({ id: 'shape12', time: bars[i - 1].time, position: 'bottom', shape: 'circle', color: barAlertDn[i - 1] ? RED : GREEN });
     }
   }
 

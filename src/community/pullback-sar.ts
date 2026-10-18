@@ -6,6 +6,7 @@
  * close and a lower low; a long re-entry is the next bar when it is bullish and closes higher. A pullback in a
  * downtrend is a bar after a bearish bar with a higher close and a higher high; a short re-entry is the next bar when
  * it is bearish and closes lower. Re-entries are drawn as triangles, the SAR as crosses.
+ * Alerts (alertcondition, `alerts` of the result): 'Alert Long' and 'Alert Short', true on the re-entry bars.
  *
  * Reference: "Pullback SAR" by szymonsobkowiak
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { ta, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PullbackSarInputs {
   /** SAR start (acceleration factor) */
@@ -53,7 +55,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<PullbackSarInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const sar = ta.sar(bars, cfg.start, cfg.increment, cfg.maximum).toArray().map((v) => v ?? NaN);
@@ -63,6 +65,7 @@ export function calculate(
   const pbUp: boolean[] = new Array(n);
   const pbDown: boolean[] = new Array(n);
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const p = i > 0 ? bars[i - 1] : undefined;
@@ -77,6 +80,8 @@ export function calculate(
     const reentryLong = i > 0 && pbUp[i - 1] && isBull[i] && gt(b.close, pClose);
     // reentryShort = pullbackInDowntrend[1] and isBear and close < close[1]
     const reentryShort = i > 0 && pbDown[i - 1] && isBear[i] && lt(b.close, pClose);
+    longFlags.push(reentryLong);
+    shortFlags.push(reentryShort);
     // plotshape(reentryLong, location.belowbar, color.green, shape.triangleup, size.small)
     if (reentryLong) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: color.green, size: 'small' });
@@ -94,8 +99,16 @@ export function calculate(
       plot0: bars.map((b, i) => ({ time: b.time, value: sar[i], color: color.gray })),
     },
     markers,
+    // alertcondition(reentryLong, "Alert Long") / alertcondition(reentryShort, "Alert Short")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Alert Long', message: 'Pullback SAR: LONG signal' },
+  { id: 'alert1', title: 'Alert Short', message: 'Pullback SAR: SHORT signal' },
+];
 
 export const PullbackSar = {
   calculate,
@@ -103,4 +116,5 @@ export const PullbackSar = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -6,12 +6,21 @@
  * The trend is 1 while the filter rises, -1 while it falls. The filter and the source are coloured by the trend
  * with a fill between them; BUY / SELL arrows mark the trend changes.
  *
+ * Alerts (alertcondition, `alerts` of the result): "Buy Alert" (buySignal) and "Sell Alert" (sellSignal).
+ *
  * Reference: "Muses afl script" by mostafa47ab (indicator title "L1 Filter Sig")
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'L1 Filter BUY Signal!' },
+  { id: 'alert1', title: 'Sell Alert', message: 'L1 Filter SELL Signal!' },
+];
 
 export interface MusesAflScriptInputs {
   src: SourceType;
@@ -58,7 +67,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<MusesAflScriptInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -91,8 +100,13 @@ export function calculate(
 
   const zColor = (i: number) => (trend[i] === 1 ? BULL_COLOR : BEAR_COLOR);
   const markers: MarkerData[] = [];
+  // buySignal = showSignals and upChange / sellSignal = showSignals and downChange
+  const buySignal: boolean[] = new Array(n).fill(false);
+  const sellSignal: boolean[] = new Array(n).fill(false);
   for (let i = 1; i < n; i++) {
     if (!cfg.showSignals) break;
+    buySignal[i] = trend[i] === 1 && trend[i - 1] === -1;
+    sellSignal[i] = trend[i] === -1 && trend[i - 1] === 1;
     if (trend[i] === 1 && trend[i - 1] === -1) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: BULL_COLOR, size: 'large',
         text: 'BUY', textColor: '#2962FF' });
@@ -112,6 +126,7 @@ export function calculate(
     // fill(plotZ, plotSrc, color = color.new(zColor, 90))
     fills: [{ plot1: 'plot0', plot2: 'plot1', colors: bars.map((_b, i) => String(color.new(zColor(i), 90))) }],
     markers,
+    alerts: alertStates(alertConditions, bars, [buySignal, sellSignal]),
   };
 }
 
@@ -121,4 +136,5 @@ export const MusesAflScript = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

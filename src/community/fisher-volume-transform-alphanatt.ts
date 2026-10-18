@@ -6,12 +6,14 @@
  * na) and Fisher-transformed (0.5 * ln((1 + x) / (1 - x))). The oscillator is 25 * EMA(fisher, smoothing), with an
  * EMA signal line of twice the smoothing. Nine gradient fill layers per side, a histogram with a colour gradient,
  * the oscillator line and the signal line.
+ * Alerts (alertcondition, `alerts` of the result): the oscillator crossing zero and crossing the signal line.
  *
  * Reference: "Fisher Volume Transform | AlphaNatt" by AlphaNatt
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface FisherVolumeTransformAlphanattInputs {
   fisherPeriod: number;
@@ -62,7 +64,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<FisherVolumeTransformAlphanattInputs> = {},
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { fisherPeriod, volumeWeight, smoothing } = cfg;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -126,8 +128,20 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
     fills,
+    // alertcondition(ta.crossover(oscillator, 0)) / crossunder(oscillator, 0) / crossover / crossunder(oscillator, signal)
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(osc, 0), crossedUnder(osc, 0), crossedOver(osc, signal), crossedUnder(osc, signal),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Fisher Bull Cross', message: 'Fisher Transform crossed above zero' },
+  { id: 'alert1', title: 'Fisher Bear Cross', message: 'Fisher Transform crossed below zero' },
+  { id: 'alert2', title: 'Signal Cross Up', message: 'Fisher crossed above signal' },
+  { id: 'alert3', title: 'Signal Cross Down', message: 'Fisher crossed below signal' },
+];
 
 export const FisherVolumeTransformAlphanatt = {
   calculate,
@@ -135,4 +149,5 @@ export const FisherVolumeTransformAlphanatt = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

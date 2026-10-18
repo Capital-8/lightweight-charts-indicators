@@ -5,6 +5,8 @@
  * v1 = variance(src, length) and v2 = (CMA[1] - SMA)^2, v3 = v2 / (v1 + v2) (1 when v1 or v2 is 0) and
  * k = max(0, 2 - 1 / v3); CMA = CMA[1] + k * (SMA - CMA[1]). The CMA can take its direction colour, and a ribbon
  * fill between the SMA and the CMA shows whether the SMA is above or below the CMA.
+ * Alerts (alertcondition, `alerts` of the result): 'Long Signal' / 'Short Signal', true on the bars where the SMA
+ * crosses above / below the CMA.
  *
  * Reference: "Corrected Moving Average" by everget
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,9 @@
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import {
+  alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState,
+} from '../alert-states';
 
 export interface CorrectedMovingAverageInputs {
   length: number;
@@ -56,7 +61,7 @@ const gt = (a: number, b: number) => a - b > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<CorrectedMovingAverageInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -103,8 +108,16 @@ export function calculate(
     // fill(smaPlot, cmaPlot, color = fillColor)
     fills: [{ plot1: 'plot1', plot2: 'plot0', colors: fillColors }],
     markers: [],
+    // longSignal = ta.crossover(sma, cma) / shortSignal = ta.crossunder(sma, cma)
+    alerts: alertStates(alertConditions, bars, [crossedOver(sma, cma), crossedUnder(sma, cma)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Signal', message: 'Enter Long\nSymbol: {{exchange}}:{{ticker}}\nPrice: {{close}}' },
+  { id: 'alert1', title: 'Short Signal', message: 'Enter Short\nSymbol: {{exchange}}:{{ticker}}\nPrice: {{close}}' },
+];
 
 export const CorrectedMovingAverage = {
   calculate,
@@ -112,4 +125,5 @@ export const CorrectedMovingAverage = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

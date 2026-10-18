@@ -25,8 +25,9 @@
  * Chart values read (optional third argument of calculate): the chart timeframe (without it, read from the bar
  * spacing), the chart background colour (candle tint, table; without it #0F0F0F) and the chart foreground colour
  * (label texts, table; without it #DBDBDB).
- * The candles are drawn in front of the chart candles (behind_chart = false). The 4 alert conditions of the script
- * have no output.
+ * The candles are drawn in front of the chart candles (behind_chart = false).
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish ST Start' and 'Bearish ST Start' on the start labels,
+ * 'Short Liquidation Spike' and 'Long Liquidation Spike' on the liquidation bars.
  *
  * Reference: "Liquidation Reversal Signals [AlgoAlpha]" by AlgoAlpha
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -35,6 +36,7 @@
 
 import { ta, Series, color, math, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData, TableData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { chartTimeframe } from '../anchor-period';
 import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
 import { upDownVolumeOfChartBars } from '../lower-tf-volume';
@@ -119,7 +121,7 @@ export function calculate(
     markers: MarkerData[];
     plotCandles: Record<string, PlotCandleData[]>;
     tables: TableData[];
-  } {
+  } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { length, zThresh, timeoutBars, green, red } = cfg;
   // chart.fg_color, chart.bg_color
@@ -173,6 +175,7 @@ export function calculate(
   const bearPlot: Array<{ time: number; value: number; color: string }> = [];
   const markers: MarkerData[] = [];
   const candles: PlotCandleData[] = [];
+  const bullStFlags: boolean[] = [], bearStFlags: boolean[] = [], shortLiqFlags: boolean[] = [], longLiqFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const bar = bars[i];
@@ -205,23 +208,27 @@ export function calculate(
     const newBullSt = plottrnd === -1 && !Number.isNaN(prevPlottrnd) && prevPlottrnd !== -1;
     const newBearSt = plottrnd === 1 && !Number.isNaN(prevPlottrnd) && prevPlottrnd !== 1;
     prevPlottrnd = plottrnd;
+    bullStFlags.push(newBullSt);
+    bearStFlags.push(newBearSt);
+    shortLiqFlags.push(shortLiq);
+    longLiqFlags.push(longLiq);
 
     midPlot.push({ time: bar.time, value: (bar.open + bar.close) / 2 });
     bullPlot.push({ time: bar.time, value: plottrnd === -1 ? supertrend[i] : NaN, color: red });
     bearPlot.push({ time: bar.time, value: plottrnd === 1 ? supertrend[i] : NaN, color: green });
 
     if (newBullSt) {
-      markers.push({ time: bar.time, position: 'aboveBar', shape: 'labelDown', color: bullLabel, text: '▼', textColor: chartFg, size: 'tiny' });
+      markers.push({ id: 'shape0', time: bar.time, position: 'aboveBar', shape: 'labelDown', color: bullLabel, text: '▼', textColor: chartFg, size: 'tiny' });
     }
     if (newBearSt) {
-      markers.push({ time: bar.time, position: 'belowBar', shape: 'labelUp', color: bearLabel, text: '▲', textColor: chartFg, size: 'tiny' });
+      markers.push({ id: 'shape1', time: bar.time, position: 'belowBar', shape: 'labelUp', color: bearLabel, text: '▲', textColor: chartFg, size: 'tiny' });
     }
     // plotchar(shortLiq ? high + vola : na, "Short Liquidation", "●", location.absolute, colShort, size = size.tiny)
     if (shortLiq && Number.isFinite(bar.high + vola[i])) {
       const norm = math.min(math.max((Math.abs(zU) - zThresh) / 5, 0), 1) as number;
       const transp = math.round(transpMax - norm * (transpMax - transpMin)) as number;
       markers.push({
-        time: bar.time, position: 'atPriceMiddle', price: bar.high + vola[i], shape: 'circle', color: 'transparent', text: '●',
+        id: 'char2', time: bar.time, position: 'atPriceMiddle', price: bar.high + vola[i], shape: 'circle', color: 'transparent', text: '●',
         textColor: String(color.new(green, transp)), size: 'tiny',
       });
     }
@@ -229,7 +236,7 @@ export function calculate(
       const norm = math.min(math.max((Math.abs(zD) - zThresh) / 5, 0), 1) as number;
       const transp = math.round(transpMax - norm * (transpMax - transpMin)) as number;
       markers.push({
-        time: bar.time, position: 'atPriceMiddle', price: bar.low - vola[i], shape: 'circle', color: 'transparent', text: '●',
+        id: 'char3', time: bar.time, position: 'atPriceMiddle', price: bar.low - vola[i], shape: 'circle', color: 'transparent', text: '●',
         textColor: String(color.new(red, transp)), size: 'tiny',
       });
     }
@@ -263,7 +270,16 @@ export function calculate(
     markers,
     plotCandles: { candles },
     tables,
+    alerts: alertStates(alertConditions, bars, [bullStFlags, bearStFlags, shortLiqFlags, longLiqFlags]),
   };
 }
 
-export const LiquidationReversalSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig, fillConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish ST Start', message: 'Bullish supertrend became visible after qualifying liquidation and confirmation.' },
+  { id: 'alert1', title: 'Bearish ST Start', message: 'Bearish supertrend became visible after qualifying liquidation and confirmation.' },
+  { id: 'alert2', title: 'Short Liquidation Spike', message: 'Short-side liquidation detected (zU > threshold).' },
+  { id: 'alert3', title: 'Long Liquidation Spike', message: 'Long-side liquidation detected (zD > threshold).' },
+];
+
+export const LiquidationReversalSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig, fillConfig, alertConditions };

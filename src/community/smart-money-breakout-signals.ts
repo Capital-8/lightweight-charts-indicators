@@ -15,7 +15,9 @@
  *
  * Chart values read: the chart foreground colour (table frame, borders and texts) and background colour (table
  * background). Without a chart context they are the dark theme colours #DBDBDB and #0F0F0F.
- * The 2 alert conditions and the 2 alert() calls of the script have no output.
+ * Alerts: the alertconditions 'Bullish Signal' / 'Bearish Signal' (`alerts` of the result) on the bars of a break up /
+ * down, and the alert() calls (`alertCalls`, once per bar) "Bullish Breakout Detected" / "Bearish Breakout Detected"
+ * on the same bars.
  *
  * Reference: "Smart Money Breakout Signals [AlgoAlpha]" by AlgoAlpha
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -24,7 +26,12 @@
 
 import { ta, Series, color, str, callsite, barTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, LabelData, LineDrawingData, LinefillData, MarkerData, TableCellData, TableData } from '../types';
+import type { AlertCall } from '../types';
 import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface SmartMoneyBreakoutSignalsInputs {
   /** Market Structure Time-Horizon: bars on each side of a swing */
@@ -122,7 +129,8 @@ export function calculate(
     labels: LabelData[];
     linefills: LinefillData[];
     tables: TableData[];
-  } {
+    alertCalls: AlertCall[];
+  } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { swingSize, bull, bear } = cfg;
   const closeConfirms = cfg.bosConfType === 'Candle Close';
@@ -132,6 +140,9 @@ export function calculate(
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
+  const alertCalls: AlertCall[] = [];
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
 
   const pivHi = A(ta.pivothigh(S(bars.map((b) => b.high)), swingSize, swingSize));
   const pivLo = A(ta.pivotlow(S(bars.map((b) => b.low)), swingSize, swingSize));
@@ -199,6 +210,13 @@ export function calculate(
       lowBroken = true;
       lowActive = false;
     }
+
+    // alertcondition(highBroken, "Bullish Signal") / alertcondition(lowBroken, "Bearish Signal")
+    bullFlags.push(highBroken);
+    bearFlags.push(lowBroken);
+    // if highBroken: alert("Bullish Breakout Detected", alert.freq_once_per_bar); if lowBroken: alert("Bearish ...")
+    if (highBroken) alertCalls.push({ time: bar.time as number, message: 'Bullish Breakout Detected', freq: 'once_per_bar' });
+    if (lowBroken) alertCalls.push({ time: bar.time as number, message: 'Bearish Breakout Detected', freq: 'once_per_bar' });
 
     let length = 0;
     if (highBroken) {
@@ -323,7 +341,17 @@ export function calculate(
     // a fill between two lines that the count limit deleted is not drawn
     linefills: fills.filter((f) => !f.line1.dead && !f.line2.dead).map((f) => ({ line1: lineData(f.line1), line2: lineData(f.line2), color: f.color })),
     tables,
+    alertCalls,
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
 
-export const SmartMoneyBreakoutSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions (no message given: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Signal', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Bearish Signal', message: 'Alert Fired!' },
+];
+
+export const SmartMoneyBreakoutSignals = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction,
+};

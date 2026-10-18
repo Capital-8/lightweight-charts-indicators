@@ -6,6 +6,7 @@
  * the slow EMA) with (the RSI above the buy threshold, or the EMAs within the proximity percentage of each other); a
  * sell signal on the bar after (the MFI crosses under the overbought level, or the fast EMA crosses under the slow
  * EMA) with (the RSI under the sell threshold, or the EMAs within the proximity percentage).
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' and 'Sell Signal', true on the bars of the signals.
  *
  * Reference: "MFI + RSI + EMA Dynamic Signals" by Raisontgh
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,13 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'MFI + RSI + EMA Buy Signal v6' },
+  { id: 'alert1', title: 'Sell Signal', message: 'MFI + RSI + EMA Sell Signal v6' },
+];
 
 export interface MfiRsiEmaDynamicSignalsInputs {
   mfiLength: number;
@@ -74,7 +82,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<MfiRsiEmaDynamicSignalsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -100,10 +108,14 @@ export function calculate(
   const mfiDown = B(ta.crossunder(mfi1, cfg.mfiOverbought));
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
   for (let i = 1; i < n; i++) {
     const near1 = emaNear[i - 1];
     const buy = (mfiUp[i] || emaCrossover[i - 1]) && (bullishMomentum[i - 1] || near1);
     const sell = (mfiDown[i] || emaCrossunder[i - 1]) && (bearishMomentum[i - 1] || near1);
+    buyFlags[i] = buy;
+    sellFlags[i] = sell;
     // plotshape(buy_signal, "Buy Signal", shape.triangleup, location.belowbar, color.green, size = size.small)
     if (buy) markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: color.green, size: 'small' });
     // plotshape(sell_signal, "Sell Signal", shape.triangledown, location.abovebar, color.red, size = size.small)
@@ -126,6 +138,8 @@ export function calculate(
       { value: cfg.rsiSellThreshold, options: { title: 'RSI Sell Threshold', color: color.red, linestyle: 'dashed' } },
     ],
     markers,
+    // alertcondition(buy_signal, "Buy Signal") / alertcondition(sell_signal, "Sell Signal")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
 
@@ -135,4 +149,5 @@ export const MfiRsiEmaDynamicSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

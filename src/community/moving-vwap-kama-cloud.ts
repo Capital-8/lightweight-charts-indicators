@@ -17,6 +17,9 @@
  * barInterval is 0 and no error is thrown: a single bar is the start of its anchor period, so its VWAP is hlc3 on
  * any timeframe.
  *
+ * Alerts (alertcondition, `alerts` of the result): the close crossing above / below the Moving VWAP, the Moving VWAP
+ * crossing above / below the KAMA, and the close crossing above / below the KAMA.
+ *
  * Reference: "Moving VWAP-KAMA Cloud" by SovereignCharts
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -24,6 +27,7 @@
 import { ta, math, Series, color, timeframe, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { barInterval } from '../bar-time';
 import type { ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { executeScript, ta as scriptTa, hlc3 as scriptHlc3 } from 'oakscriptjs/script';
 
 export interface MovingVwapKamaCloudInputs {
@@ -105,7 +109,7 @@ function intradayVwap(bars: Bar[], chart: ChartContext): number[] {
   return vwap;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<MovingVwapKamaCloudInputs> = {}, chart?: ChartContext): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<MovingVwapKamaCloudInputs> = {}, chart?: ChartContext): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -156,6 +160,7 @@ export function calculate(bars: Bar[], inputs: Partial<MovingVwapKamaCloudInputs
   const plot0: { time: number; value: number; color: string }[] = [];
   const plot1: { time: number; value: number; color: string }[] = [];
   const cloud: string[] = [];
+  const close = bars.map((b) => b.close);
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // color = show_lines ? (MVWAP_smoothed >= MVWAP_smoothed[1] ? color.olive : color.maroon) : na
@@ -173,8 +178,24 @@ export function calculate(bars: Bar[], inputs: Partial<MovingVwapKamaCloudInputs
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'VWAP-KAMA Cloud' }, colors: cloud }],
+    // alertcondition(ta.crossover / ta.crossunder of (close, MVWAP_smoothed), (MVWAP_smoothed, kama), (close, kama))
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(close, sm), crossedUnder(close, sm),
+      crossedOver(sm, kama), crossedUnder(sm, kama),
+      crossedOver(close, kama), crossedUnder(close, kama),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Price Above MVWAP', message: 'Price crossed above Moving VWAP' },
+  { id: 'alert1', title: 'Price Below MVWAP', message: 'Price crossed below Moving VWAP' },
+  { id: 'alert2', title: 'MVWAP Above KAMA', message: 'Moving VWAP crossed above KAMA' },
+  { id: 'alert3', title: 'MVWAP Below KAMA', message: 'Moving VWAP crossed below KAMA' },
+  { id: 'alert4', title: 'Price Above KAMA', message: 'Price crossed above KAMA' },
+  { id: 'alert5', title: 'Price Below KAMA', message: 'Price crossed below KAMA' },
+];
 
 export const MovingVwapKamaCloud = {
   calculate,
@@ -182,4 +203,5 @@ export const MovingVwapKamaCloud = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

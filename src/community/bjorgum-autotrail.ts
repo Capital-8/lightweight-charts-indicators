@@ -5,11 +5,28 @@
  * Computes swing high/low over a lookback window, applies offset, and ratchets
  * the trail in the favorable direction. Flips direction when price breaches trail.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Long Trail' on a long trail hit (the "Stop" cross above the bar)
+ * and 'Short Trail' on a short trail hit (the cross below the bar). alert() calls (`alertCalls`, once per bar), as the
+ * original: on the first stop only, on a crypto symbol "<sell|buy> <base><currency> q=<quantity> a=<market>", on a
+ * forex symbol "e=<broker> s=<base>/<currency> b=<sell|buy> q=<quantity>" (sell after a long trail hit, buy after a
+ * short one); none on other symbol types (`chart.symbolType`).
+ *
  * Reference: "Bjorgum AutoTrail" by Bjorgum (simplified for auto mode)
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import { ta, Series, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import type { AlertCall, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+import { basecurrencyOf, currencyOf, symbolTypeOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Trail', message: 'Long  Trail Trigger on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert1', title: 'Short Trail', message: 'Short Trail Trigger on {{interval}} chart. Price is {{close}}' },
+];
 
 export interface BjorgumAutoTrailInputs {
   trailType: string;
@@ -17,6 +34,12 @@ export interface BjorgumAutoTrailInputs {
   atrMult: number;
   perc: number;
   lookback: number;
+  /** Quantity of the alert() messages */
+  quantity: number;
+  /** Market of the crypto alert() message */
+  market: string;
+  /** Broker of the forex alert() message */
+  broker: string;
 }
 
 export const defaultInputs: BjorgumAutoTrailInputs = {
@@ -25,6 +48,9 @@ export const defaultInputs: BjorgumAutoTrailInputs = {
   atrMult: 1.0,
   perc: 2.0,
   lookback: 5,
+  quantity: 0.001,
+  market: 'usdm',
+  broker: 'Test',
 };
 
 export const inputConfig: InputConfig[] = [
@@ -33,6 +59,9 @@ export const inputConfig: InputConfig[] = [
   { id: 'atrMult', type: 'float', title: 'ATR Multiplier', defval: 1.0, min: 0.1, step: 0.1 },
   { id: 'perc', type: 'float', title: 'Percent', defval: 2.0, min: 0.1, step: 0.1 },
   { id: 'lookback', type: 'int', title: 'Lookback', defval: 5, min: 1 },
+  { id: 'quantity', type: 'float', title: 'Quantity', defval: 0.001 },
+  { id: 'market', type: 'string', title: 'Market', defval: 'usdm' },
+  { id: 'broker', type: 'string', title: 'Broker', defval: 'Test' },
 ];
 
 export const plotConfig: PlotConfig[] = [
@@ -45,8 +74,12 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<BjorgumAutoTrailInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
-  const { trailType, atrLength, atrMult, perc, lookback } = { ...defaultInputs, ...inputs };
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<BjorgumAutoTrailInputs> = {},
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } & { alerts: AlertConditionState[] } {
+  const { trailType, atrLength, atrMult, perc, lookback, quantity, market, broker } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
   // Compute offset per bar
@@ -128,14 +161,36 @@ export function calculate(bars: Bar[], inputs: Partial<BjorgumAutoTrailInputs> =
 
   // Markers on direction changes
   const markers: MarkerData[] = [];
+  const longStop: boolean[] = new Array(n).fill(false);
+  const shortStop: boolean[] = new Array(n).fill(false);
   for (let i = warmup + 1; i < n; i++) {
     if (isNaN(trail[i]) || isNaN(trail[i - 1])) continue;
     if (dir[i] === -1 && dir[i - 1] === 1) {
       // Long trail hit -> bearish flip
+      longStop[i] = true;
       markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'xcross', color: '#2962FF', text: 'Stop' });
     } else if (dir[i] === 1 && dir[i - 1] === -1) {
       // Short trail hit -> bullish flip
+      shortStop[i] = true;
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'xcross', color: '#FF0000', text: 'Stop' });
+    }
+  }
+
+  // alert() calls: `if (longStop or shortStop) and oneTime and syminfo.type == "crypto"` (then "forex"), oneTime :=
+  // false after the first one. action = long ? 'sell' : short ? 'buy'
+  const alertCalls: AlertCall[] = [];
+  const type = symbolTypeOf(chart);
+  if (type === 'crypto' || type === 'forex') {
+    const first = bars.findIndex((_b, i) => longStop[i] || shortStop[i]);
+    if (first >= 0) {
+      const action = longStop[first] ? 'sell' : 'buy';
+      const base = basecurrencyOf(chart);
+      const currency = currencyOf(chart);
+      const q = str.tostring(quantity);
+      const message = type === 'crypto'
+        ? action + ' ' + base + currency + ' ' + 'q=' + q + ' ' + 'a=' + market
+        : 'e=' + broker + ' s=' + base + '/' + currency + ' b=' + action + ' q=' + q;
+      alertCalls.push({ time: bars[first].time as number, message, freq: 'once_per_bar' });
     }
   }
 
@@ -143,7 +198,12 @@ export function calculate(bars: Bar[], inputs: Partial<BjorgumAutoTrailInputs> =
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0 },
     markers,
+    alertCalls,
+    // alertcondition(longStop, "Long Trail") / alertcondition(shortStop, "Short Trail")
+    alerts: alertStates(alertConditions, bars, [longStop, shortStop]),
   };
 }
 
-export const BjorgumAutoTrail = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BjorgumAutoTrail = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction,
+};

@@ -6,6 +6,7 @@
  * (na until both bars are found). Fair value gaps: bullish when low[1] > high[3], bearish when high[1] < low[3]
  * (labels). Fresh Buy: close above the NWOG high on a bullish FVG; Fresh Sell: close below the NWOG low on a bearish
  * FVG (labels BUY / SELL).
+ * Alerts (alertcondition, `alerts` of the result): 'Fresh Buy Signal' / 'Fresh Sell Signal' on those bars.
  *
  * Reference: "FVG Breakout/Breakdown" by ICT_Concept_Trading
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 // The Pine script has no inputs
 export interface FvgBreakoutBreakdownInputs {}
@@ -47,11 +49,13 @@ const MONDAY_OPEN_TIME = Date.UTC(2024, 0, 4, 0, 0) / 1000;
 export function calculate(
   bars: Bar[],
   _inputs: Partial<FvgBreakoutBreakdownInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const n = bars.length;
   const nwogHigh: number[] = new Array(n);
   const nwogLow: number[] = new Array(n);
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   let fridayClose = NaN; // var float fridayClose = na
   let mondayOpen = NaN; // var float mondayOpen = na
   for (let i = 0; i < n; i++) {
@@ -67,22 +71,24 @@ export function calculate(
     const bearishFVG = i >= 3 && lt(bars[i - 1].high, bars[i - 3].low);
     const freshBreakout = gt(b.close, nwogHigh[i]) && bullishFVG;
     const freshBreakdown = lt(b.close, nwogLow[i]) && bearishFVG;
+    buyFlags.push(freshBreakout);
+    sellFlags.push(freshBreakdown);
 
     // plotshape(bullishFVG, location.belowbar, color.purple, shape.labelup, text = "")
     if (bullishFVG) {
-      markers.push({ time: b.time, position: 'belowBar', shape: 'labelUp', color: color.purple, size: 'auto' });
+      markers.push({ time: b.time, position: 'belowBar', shape: 'labelUp', color: color.purple, size: 'auto', id: 'shape0' });
     }
     if (bearishFVG) {
-      markers.push({ time: b.time, position: 'aboveBar', shape: 'labelDown', color: color.red, size: 'auto' });
+      markers.push({ time: b.time, position: 'aboveBar', shape: 'labelDown', color: color.red, size: 'auto', id: 'shape1' });
     }
     // plotshape(freshBreakout, location.belowbar, color.purple, shape.labelup, text = "BUY"): default text colour
     if (freshBreakout) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'labelUp', color: color.purple, text: 'BUY',
-        textColor: PINE_BLUE, size: 'auto' });
+        textColor: PINE_BLUE, size: 'auto', id: 'shape2' });
     }
     if (freshBreakdown) {
       markers.push({ time: b.time, position: 'aboveBar', shape: 'labelDown', color: color.red, text: 'SELL',
-        textColor: PINE_BLUE, size: 'auto' });
+        textColor: PINE_BLUE, size: 'auto', id: 'shape3' });
     }
   }
 
@@ -94,8 +100,16 @@ export function calculate(
       plot1: bars.map((b, i) => ({ time: b.time, value: val(nwogLow[i]), color: color.red })),
     },
     markers,
+    // alertcondition(freshBreakout, "Fresh Buy Signal") / alertcondition(freshBreakdown, "Fresh Sell Signal")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Fresh Buy Signal', message: 'Fresh Buy signal based on NWOG breakout and FVG!' },
+  { id: 'alert1', title: 'Fresh Sell Signal', message: 'Fresh Sell signal based on NWOG breakdown and FVG!' },
+];
 
 export const FvgBreakoutBreakdown = {
   calculate,
@@ -103,4 +117,5 @@ export const FvgBreakoutBreakdown = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

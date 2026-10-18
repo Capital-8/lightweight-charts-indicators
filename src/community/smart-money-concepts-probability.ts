@@ -18,7 +18,9 @@
  * At most 500 lines and 500 labels are kept (the oldest are removed first).
  * Chart values read from the optional third argument: the foreground and background colours of the chart, used by
  * the two labels and the table. Without them the port uses #DBDBDB and #0F0F0F (dark chart).
- * The three inputs of the group "Any alert() function call" only change the text of the alert: no output.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): on every bar where the structure changes,
+ * the ticker, the chart timeframe and the two probability texts, each line when its input of the group "Any alert()
+ * function call" is on (no call when all three are off).
  *
  * Reference: "Smart Money Concepts Probability (Expo)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -26,9 +28,13 @@
  */
 
 import { ta, math, str, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BoxData, LabelData, LineDrawingData, LinefillData, TableData } from '../types';
+import type { AlertCall, BoxData, LabelData, LineDrawingData, LinefillData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
-import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
+import { backgroundColorOf, foregroundColorOf, tickerOf, type ChartContext } from '../chart-context';
+import { chartTimeframe } from '../anchor-period';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface SmartMoneyConceptsProbabilityInputs {
   /** Pivot period: bars on each side */
@@ -139,6 +145,7 @@ export function calculate(
   lines: LineDrawingData[];
   linefills: LinefillData[];
   tables: TableData[];
+  alertCalls: AlertCall[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
   // chart.bg_color / chart.fg_color
@@ -189,6 +196,11 @@ export function calculate(
   let iDn = NaN;
   let pos = 0;
   const at = (x: number[], i: number) => (i >= 0 ? x[i] : NaN);
+  // alert() calls: syminfo.ticker and timeframe.period (v5: "D" for 1D) of the messages
+  const alertCalls: AlertCall[] = [];
+  const ticker = tickerOf(chart);
+  const period = chartTimeframe(bars, chart).replace(/^1([DWM])$/, '$1');
+  const alertOn = [cfg.alertTicker, cfg.alertTimeframe, cfg.alertProbability];
   const createLabel = (x: number, y: number, text: string, col: string, down: boolean) => {
     add<Lb>(labels, { x, y, text, textColor: col, style: down ? 'label_down' : 'label_up' });
   };
@@ -312,6 +324,12 @@ export function calculate(
       txt[1] = name + str.tostring(val2, 'percent');
       vals[8][0] = val1;
       vals[8][1] = val2;
+
+      // if array.includes(alert_bool, true): alert(array.join(output, '\n'), alert.freq_once_per_bar_close)
+      if (alertOn.includes(true)) {
+        const parts = [ticker, period, txt.join('\n')].filter((_, k) => alertOn[k]);
+        alertCalls.push({ time: bar.time as number, message: parts.join('\n'), freq: 'once_per_bar_close' });
+      }
     }
   }
 
@@ -379,6 +397,7 @@ export function calculate(
       time: T(l.x), price: l.y, text: l.text, color: 'transparent', textColor: l.textColor, style: l.style,
     })),
     tables: [table],
+    alertCalls,
   };
 }
 
@@ -388,4 +407,5 @@ export const SmartMoneyConceptsProbability = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

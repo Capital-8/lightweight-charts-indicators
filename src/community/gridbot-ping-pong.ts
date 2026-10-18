@@ -8,6 +8,8 @@
  * with the trend at the inner levels. When a bar closes beyond the outer level plus an anchor buffer, the grid shifts
  * one level in that direction (an adverse position is stopped). The grid lines are hidden on the bar after a shift
  * change; a symmetrically weighted MA (SWMA) is drawn with gradient fills to the outer levels.
+ * Alerts (alertcondition, `alerts` of the result): Buy, Sell, Buy TP, Sell TP, Buy Stop and Sell Stop, on the bars of
+ * each signal.
  *
  * Reference: "Gridbot Ping Pong" by xxattaxx
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, array, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type GridbotTrigger = 'Auto' | 'Wick Touch' | 'Wick Reverse' | 'SWMA' | 'Close';
 
@@ -91,7 +94,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<GridbotPingPongInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const trigger = cfg.trigger;
@@ -121,6 +124,8 @@ export function calculate(
   const fill0 = { topValue: [] as number[], bottomValue: [] as number[], topColor: [] as (string | null)[], bottomColor: [] as (string | null)[] };
   const fill1 = { topValue: [] as number[], bottomValue: [] as number[], topColor: [] as (string | null)[], bottomColor: [] as (string | null)[] };
   const markers: MarkerData[] = [];
+  // Buy, Sell, BuyTP, SellTP, BuyStop, SellStop per bar (the alertcondition() order)
+  const flags: boolean[][] = [[], [], [], [], [], []];
 
   for (let i = 0; i < n; i++) {
     const bar = bars[i];
@@ -276,6 +281,7 @@ export function calculate(
     char(sellTP, false, '▽');
     char(buyStop, true, '⦿');
     char(sellStop, false, '⦿');
+    [buy, sell, buyTP, sellTP, buyStop, sellStop].forEach((f, k) => flags[k].push(f));
 
     // Position tracking
     if (buy) P = P > 0 ? P + 1 : 1;
@@ -308,8 +314,19 @@ export function calculate(
       { plot1: 'plot5', plot2: 'plot4', options: { title: 'Upper Fill' }, gradient: fill1 },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy', message: 'Buy' },
+  { id: 'alert1', title: 'Sell', message: 'Sell' },
+  { id: 'alert2', title: 'Buy TP', message: 'Buy TP' },
+  { id: 'alert3', title: 'Sell TP', message: 'Sell TP' },
+  { id: 'alert4', title: 'Buy Stop', message: 'Buy Stop' },
+  { id: 'alert5', title: 'Sell Stop', message: 'Sell Stop' },
+];
 
 export const GridbotPingPong = {
   calculate,
@@ -317,4 +334,5 @@ export const GridbotPingPong = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

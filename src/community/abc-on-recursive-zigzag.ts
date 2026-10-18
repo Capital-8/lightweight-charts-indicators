@@ -16,6 +16,9 @@
  * tracked without. A table on the last bar shows the counts (invalid / stopped / complete), the win ratio and the
  * risk reward.
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): "New ABC Pattern Detected" for each new pattern
+ * found on a level, "ABC Pattern Coordinates Updated" each time a tracked pattern gets a new C.
+ *
  * The zigzag is the library "ZigzagLite" (version 3), the drawing types "Drawing" (version 2), the theme colours
  * "utils" (version 1) and the ratios "FibRatios" (version 1) by Trendoscope; the functions used are written in this
  * file.
@@ -32,8 +35,11 @@ import {
   taCore, math, str, color, compare, line, label, box, resetDrawings, setDrawingBar, drawingOutputs,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { TableData } from '../types';
+import type { AlertCall, TableData } from '../types';
 import { backgroundColorOf, mintickOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type Line = ReturnType<typeof line.new>;
 type Label = ReturnType<typeof label.new>;
@@ -268,7 +274,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<AbcOnRecursiveZigzagInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { tables: TableData[] } {
+): IndicatorResult & { tables: TableData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { gt, ge, le, lt, eq } = compare;
@@ -296,6 +302,8 @@ export function calculate(
   const oldPatterns: Abc[] = [];
   const bullishCounts = [0, 0, 0];
   const bearishCounts = [0, 0, 0];
+  const alertCalls: AlertCall[] = [];
+  let barTime = 0;
   const themeColors = (cfg.theme === 'DARK' ? DARK_COLORS : LIGHT_COLORS).map(([r, g, b]) => String(color.rgb(r, g, b)));
 
   const calculateTargets = (p: Abc) => {
@@ -421,6 +429,8 @@ export function calculate(
             if (p.c.point.index > c.point.index && p.status === 0) {
               // update(): new C, targets, and a new drawing when the close is before the entry
               p.c = c;
+              // alert('ABC Pattern Coordinates Updated')
+              alertCalls.push({ time: barTime, message: 'ABC Pattern Coordinates Updated', freq: 'once_per_bar' });
               calculateTargets(p);
               if (withinEntry(p, close)) draw(createDrawing(deleteDrawing(p)));
             }
@@ -437,6 +447,7 @@ export function calculate(
   for (let bi = 0; bi < n; bi++) {
     setDrawingBar(bi, bi === n - 1);
     const bar = bars[bi];
+    barTime = bar.time as number;
 
     // zigzag.calculate(array.from(high, low))
     {
@@ -492,6 +503,8 @@ export function calculate(
         if (ml.level >= cfg.minimumZigZagLevel) {
           if (scanAbc(ml, bar.close)) {
             const patternColor = themeColors.shift() as string;
+            // alert('New ABC Pattern Detected')
+            alertCalls.push({ time: barTime, message: 'New ABC Pattern Detected', freq: 'once_per_bar' });
             // createAbc(): the last three pivots
             const c = ml.pivots[0];
             const b = ml.pivots[1];
@@ -562,6 +575,7 @@ export function calculate(
     plots: {},
     ...drawingOutputs(bars),
     tables,
+    alertCalls,
   };
 }
 
@@ -571,4 +585,5 @@ export const AbcOnRecursiveZigzag = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

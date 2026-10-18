@@ -6,6 +6,7 @@
  * than the previous bar. Each flip is marked by a triangle and a background colour, strong (bigger, more opaque)
  * when the volume is above its SMA over `volLen` bars. Two hidden plots give the gain in % since the open of the
  * flip candle while the state holds.
+ * Alerts (alertcondition, `alerts` of the result): 'Bull Flip' and 'Bear Flip', true on the bars of each flip.
  *
  * Reference: "CBC Flip with Volume [Pt]" by PtGambler
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,7 @@
 
 import { taCore, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CbcFlipWithVolumeInputs {
   /** Volume SMA lookback */
@@ -47,7 +49,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<CbcFlipWithVolumeInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const volume = bars.map((b) => b.volume ?? NaN);
@@ -66,6 +68,7 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const plot0 = [];
   const plot1 = [];
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   let cbc = false; // var bool cbc = false
   let cbcOpen = 0.0; // var float cbc_open = 0.
   for (let i = 0; i < n; i++) {
@@ -88,18 +91,21 @@ export function calculate(
     }
     const bullFlip = cbc && !prevCbc;
     const bearFlip = !cbc && prevCbc;
+    bullFlags.push(bullFlip);
+    bearFlags.push(bearFlip);
 
+    // The four plotshape calls: Bull / Bear Flip (Normal), then Bull / Bear Flip (Strong), ids shape0 .. shape3
     if (bullFlip && !volHigh) {
-      markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: bullNormal, size: 'tiny' });
+      markers.push({ id: 'shape0', time: t, position: 'belowBar', shape: 'triangleUp', color: bullNormal, size: 'tiny' });
     }
     if (bearFlip && !volHigh) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: bearNormal, size: 'tiny' });
+      markers.push({ id: 'shape1', time: t, position: 'aboveBar', shape: 'triangleDown', color: bearNormal, size: 'tiny' });
     }
     if (bullFlip && volHigh) {
-      markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: bullStrong, size: 'small' });
+      markers.push({ id: 'shape2', time: t, position: 'belowBar', shape: 'triangleUp', color: bullStrong, size: 'small' });
     }
     if (bearFlip && volHigh) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: bearStrong, size: 'small' });
+      markers.push({ id: 'shape3', time: t, position: 'aboveBar', shape: 'triangleDown', color: bearStrong, size: 'small' });
     }
 
     if (bullFlip) bgColors.push({ time: t, color: volHigh ? bgBullStrong : bgBullNormal });
@@ -117,8 +123,16 @@ export function calculate(
     plots: { plot0, plot1 },
     markers,
     bgColors,
+    // alertcondition(cbc and not prevCbc, 'Bull Flip') / alertcondition(not cbc and prevCbc, 'Bear Flip')
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bull Flip', message: 'CBC Flip: Bulls in control' },
+  { id: 'alert1', title: 'Bear Flip', message: 'CBC Flip: Bears in control' },
+];
 
 export const CbcFlipWithVolume = {
   calculate,
@@ -126,4 +140,5 @@ export const CbcFlipWithVolume = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

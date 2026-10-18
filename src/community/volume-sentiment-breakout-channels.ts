@@ -27,7 +27,10 @@
  *
  * Chart values read (optional third argument of calculate): the chart foreground colour (grey box, mid line, text
  * of the channel sentiment) and the chart background colour (sentiment boxes, fills). Without a chart context they
- * are the dark theme colours #DBDBDB and #0F0F0F. The 3 alert conditions of the script have no output.
+ * are the dark theme colours #DBDBDB and #0F0F0F.
+ *
+ * Alerts (alertcondition, `alerts` of the result): 'Channel Formed' on the bars where a channel is made, 'Bullish
+ * Channel Break' on a ▲ and 'Bearish Channel Break' on a ▼.
  *
  * Reference: "Volume Sentiment Breakout Channels [AlgoAlpha]" by AlgoAlpha
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -37,6 +40,7 @@
 import { ta, taCore, Series, color, str, array, callsite, barTime, barInterval, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LineDrawingData, MarkerData } from '../types';
 import { foregroundColorOf, backgroundColorOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolumeSentimentBreakoutChannelsInputs {
   /** Normalization Length */
@@ -138,7 +142,9 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeSentimentBreakoutChannelsInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[] } & {
+  alerts: AlertConditionState[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const { length, strong, green, red } = cfg;
   // chart.fg_color, chart.bg_color
@@ -297,6 +303,7 @@ export function calculate(
 
   const channelBreak: boolean[] = [];
   const channelBreakDown: boolean[] = [];
+  const newChannel = new Array<boolean>(n).fill(false);
 
   for (let i = 0; i < n; i++) {
     const bar = bars[i];
@@ -327,6 +334,7 @@ export function calculate(
         lowerTopLines.unshift(newLine(left, l + vola, i, C(green, 20), 1, 'dotted'));
         lowerBottomLines.unshift(newLine(left, l, i, C(green, 0), 2, 'solid'));
         sentimentTexts(p, bar.close, centerY, boxesU[0], boxesL[0], false);
+        newChannel[i] = true;
       }
     }
 
@@ -470,7 +478,18 @@ export function calculate(
     markers,
     lines: lineOut,
     boxes: boxOut,
+    // alertcondition(newChannel, ...) / alertcondition(channelBreak, ...) / alertcondition(channelBreak_, ...)
+    alerts: alertStates(alertConditions, bars, [newChannel, channelBreak, channelBreakDown]),
   };
 }
 
-export const VolumeSentimentBreakoutChannels = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Channel Formed', message: 'A new channel has formed.' },
+  { id: 'alert1', title: 'Bullish Channel Break', message: 'Price broke above the channel.' },
+  { id: 'alert2', title: 'Bearish Channel Break', message: 'Price broke below the channel.' },
+];
+
+export const VolumeSentimentBreakoutChannels = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions,
+};

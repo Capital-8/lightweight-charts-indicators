@@ -6,12 +6,24 @@
  * lime when low > SMA (uptrend), red when high < SMA (downtrend), yellow otherwise.
  * Buy/Sell signals on SMA/EMA crossover.
  * RSI exit markers on overbought/oversold crossback.
+ * Alerts (alertcondition, `alerts` of the result): 'Reversal' (RSI back under the overbought or over the oversold
+ * limit) and 'Buy/Sale Swing Signal' (SMA / EMA cross with the bar condition), from the original's expressions.
  *
  * Reference: "SWING CALLS" by nicks1008
  */
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Reversal', message: 'Possible Reversal on Swing Signal Alert' },
+  { id: 'alert1', title: 'Buy/Sale Swing Signal', message: 'Swing Signal Entry Alert' },
+];
+
+/** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
+const gt = (a: number, b: number) => a - b > 1e-10;
 
 export interface SwingTradeSignalsInputs {
   emaValue: number;
@@ -50,7 +62,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<SwingTradeSignalsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<SwingTradeSignalsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { emaValue, smaValue, rsiLen, overbought, oversold, src } = { ...defaultInputs, ...inputs };
 
   const source = getSourceSeries(bars, src);
@@ -108,11 +120,22 @@ export function calculate(bars: Bar[], inputs: Partial<SwingTradeSignalsInputs> 
     }
   }
 
+  // Alerts from the original's expressions (na is false): buyexit = crossunder(rs, hl), sellexit = crossover(rs, ll),
+  // sellcall = crossover(sma2, ema1) and open > close, buycall = crossunder(sma2, ema1) and high > sma2
+  const buyExit = crossedUnder(rsi, overbought);
+  const sellExit = crossedOver(rsi, oversold);
+  const smaOver = crossedOver(sma2, ema1);
+  const smaUnder = crossedUnder(sma2, ema1);
+  const reversal = bars.map((_b, i) => buyExit[i] || sellExit[i]);
+  const entry = bars.map((b, i) => (smaOver[i] && gt(b.open, b.close)) || (smaUnder[i] && gt(b.high, sma2[i] ?? NaN)));
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0 },
     markers,
+    // alertcondition(buyexit or sellexit, 'Reversal') / alertcondition(buycall or sellcall, 'Buy/Sale Swing Signal')
+    alerts: alertStates(alertConditions, bars, [reversal, entry]),
   };
 }
 
-export const SwingTradeSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const SwingTradeSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

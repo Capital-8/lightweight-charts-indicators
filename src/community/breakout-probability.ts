@@ -14,8 +14,12 @@
  * (or low).
  *
  * Chart values read: the chart background and foreground colours, for the table. Without a chart context they are
- * the dark theme colours (background #0F0F0F, foreground #DBDBDB). The alert() call of the script has no
- * output; its four inputs are kept.
+ * the dark theme colours (background #0F0F0F, foreground #DBDBDB).
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): on every bar, one call per level that is shown
+ * (the rule above), when one of the four alert inputs is on. The message joins with new lines the parts that are on:
+ * the ticker, "High Price: <previous high> | Low Price: <previous low>" (rounded to the tick), "BIAS: BULLISH" or
+ * "BIAS: BEARISH", and "Percentage: High: <x>% | Low: <y>%".
  *
  * Reference: "Breakout Probability (Expo)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -25,7 +29,11 @@
 import { color, compare, math, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, LinefillData, TableData } from '../types';
 import { barTime } from '../bar-time';
-import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
+import { backgroundColorOf, foregroundColorOf, mintickOf, tickerOf, type ChartContext } from '../chart-context';
+import type { AlertCall } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface BreakoutProbabilityInputs {
   /** Space between two levels, in percent of the close */
@@ -103,8 +111,16 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<BreakoutProbabilityInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[] } {
-  const { perc, nbr, upCol, dnCol, fill, disableZero, showStats } = { ...defaultInputs, ...inputs };
+): IndicatorResult & {
+  lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[]; alertCalls: AlertCall[];
+} {
+  const cfg = { ...defaultInputs, ...inputs };
+  const { perc, nbr, upCol, dnCol, fill, disableZero, showStats } = cfg;
+  // alert_bool = [Ticker ID, High/Low Price, Bullish/Bearish Bias, Bullish/Bearish Percentage]
+  const alertBool = [cfg.alertTicker, cfg.alertPrice, cfg.alertBias, cfg.alertPercentage];
+  const mintick = mintickOf(chart);
+  const ticker = tickerOf(chart);
+  const alertCalls: AlertCall[] = [];
   const n = bars.length;
   // chart.bg_color / chart.fg_color
   const chartBg = backgroundColorOf(chart);
@@ -161,6 +177,27 @@ export function calculate(
     const b1 = vals[0][1];
     const a2 = vals[0][2];
     const b2 = vals[0][3];
+
+    // for i = 0 to nbr - 1: a shown level makes an alert() call (array.includes(alert_bool, true))
+    if (alertBool.includes(true)) {
+      for (let i = 0; i <= nbr - 1; i++) {
+        const shown = !disableZero ||
+          (green ? compare.gt(Math.min(vals[i][0], vals[i][1]), 0) : compare.gt(Math.min(vals[i][2], vals[i][3]), 0));
+        if (!shown) continue;
+        const roundTick = (x: number) => math.round_to_mintick(x, mintick) as unknown as number;
+        const s1 = ticker;
+        const s2 = 'High Price: ' + str.tostring(roundTick(h1)) + ' | Low Price: ' + str.tostring(roundTick(l1));
+        const s3 = green ? (compare.eq(Math.max(a1, b1), a1) ? 'BULLISH' : 'BEARISH')
+          : (compare.eq(Math.max(a2, b2), a2) ? 'BULLISH' : 'BEARISH');
+        const s4 = green ? (compare.eq(Math.max(a1, b1), a1) ? a1 : b1) : (compare.eq(Math.min(a2, b2), a2) ? a2 : b2);
+        const s5 = red ? (compare.eq(Math.max(a2, b2), a2) ? a2 : b2) : (compare.eq(Math.min(a1, b1), a1) ? a1 : b1);
+        const strVals = [s1, s2, 'BIAS: ' + s3,
+          'Percentage: High: ' + str.tostring(s4, 'percent') + ' | Low: ' + str.tostring(s5, 'percent')];
+        const output = strVals.filter((_, x) => alertBool[x]);
+        // alert(array.join(output, '\n'), alert.freq_once_per_bar)
+        alertCalls.push({ time: bar.time, message: output.join('\n'), freq: 'once_per_bar' });
+      }
+    }
 
     // Lines and labels. Every slot in use is deleted on each bar, and made again when its level is shown: the
     // objects of the last bar are the only ones alive at the end. A deleted line also deletes its linefills.
@@ -245,7 +282,8 @@ export function calculate(
     labels: labelSlots.filter((l): l is LabelData => l !== null),
     linefills,
     tables: n > 0 ? [table] : [],
+    alertCalls,
   };
 }
 
-export const BreakoutProbability = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BreakoutProbability = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

@@ -111,17 +111,19 @@ export function calculate(bars: Bar[], inputs: Partial<CMGannSwingInputs> = {}):
     // Cross below swing low: close < lo and close[1] > lo
     const crossBelow = !isNaN(lo) && bars[i].close < lo && bars[i - 1].close > lo;
 
-    // Pine barcolor: yellow on cross
-    if (crossAbove || crossBelow) {
-      barColors.push({ time: bars[i].time, color: '#FFFF00' });
+    // Pine barcolor: yellow on cross (barcolor(closeAbove() ? yellow : na), barcolor(closeBelow() ? yellow : na))
+    if (crossAbove) {
+      barColors.push({ id: 'barcolor0', time: bars[i].time, color: '#FFFF00' });
+    } else if (crossBelow) {
+      barColors.push({ id: 'barcolor1', time: bars[i].time, color: '#FFFF00' });
     }
 
     // Pine bgcolor: green on cross above, red on cross below (transp=60)
     if (crossAbove) {
-      bgColors.push({ time: bars[i].time, color: 'rgba(0,128,0,0.40)' });
+      bgColors.push({ id: 'bgcolor0', time: bars[i].time, color: 'rgba(0,128,0,0.40)' });
     }
     if (crossBelow) {
-      bgColors.push({ time: bars[i].time, color: 'rgba(255,0,0,0.40)' });
+      bgColors.push({ id: 'bgcolor1', time: bars[i].time, color: 'rgba(255,0,0,0.40)' });
     }
 
     // Pine plotshape: triangles on cross events (pttb=true by default)

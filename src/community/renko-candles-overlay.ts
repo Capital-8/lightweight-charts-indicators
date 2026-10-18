@@ -12,6 +12,8 @@
  *   prices where the next brick up and the next brick down would form.
  * - "Change Bar Color": colours the bars by the Renko trend.
  * - When the last bar receives live updates, the bricks added on it are drawn in the 'Unconfirmed' colour.
+ * Alerts (alertcondition, `alerts` of the result): 'Trend is UP' / 'Trend is DOWN', true on the bars on which the
+ * Renko trend turns from down to up / from up to down.
  *
  * Chart values (third argument): the port reads the symbol tick (rounding and minimum of the brick size; without
  * it: 0.01) and whether the last bar receives live updates (`realtime`; without it: a calculation on history).
@@ -25,6 +27,7 @@ import { ta, str, math, type IndicatorResult, type InputConfig, type PlotConfig,
 import type { BarColorData, BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RenkoCandlesOverlayInputs {
   /** Brick size method */
@@ -118,7 +121,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<RenkoCandlesOverlayInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { barColors: BarColorData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] } {
+): IndicatorResult & { barColors: BarColorData[]; boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const mintick = mintickOf(chart);
@@ -157,6 +161,8 @@ export function calculate(
   const rclose: number[] = [];
   let unconfirmed = -1;
   const barColors: BarColorData[] = [];
+  const trendUp: boolean[] = [];
+  const trendDown: boolean[] = [];
   // barstate.isrealtime: the last bar receives live updates
   const live = chart?.realtime === true;
 
@@ -199,6 +205,10 @@ export function calculate(
     }
     // delete old elements
     while (rclose.length > period + 3) rclose.pop();
+
+    // alertcondition(trend[1] == -1 and trend == 1) / alertcondition(trend[1] == 1 and trend == -1)
+    trendUp.push(i > 0 && prevTrend === -1 && trend === 1);
+    trendDown.push(i > 0 && prevTrend === 1 && trend === -1);
 
     if (cfg.changebrol) barColors.push({ time: bars[i].time as number, color: trend === 1 ? cfg.barcolup : cfg.barcoldn });
   }
@@ -263,8 +273,15 @@ export function calculate(
     boxes,
     labels,
     lines,
+    alerts: alertStates(alertConditions, bars, [trendUp, trendDown]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Trend is UP', message: 'Trend is UP' },
+  { id: 'alert1', title: 'Trend is DOWN', message: 'Trend is DOWN' },
+];
 
 export const RenkoCandlesOverlay = {
   calculate,
@@ -272,4 +289,5 @@ export const RenkoCandlesOverlay = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -14,6 +14,11 @@
  * The prices of the label texts are rounded to the price tick of the symbol: the port reads it from the chart
  * context (third argument) and uses 0.01 without it.
  *
+ * Alerts (alertcondition, `alerts` of the result): the close crossing over / under the stop loss, a rejection at the
+ * stop (the high crossing over it with a close below, the low crossing under it with a close above) and the close
+ * crossing over TP1 / TP2 / TP3. The stop and the targets are the levels of the last signal (0 before the first one,
+ * as the original's var levels; they are only set with "Show Take Profit Levels").
+ *
  * Reference: "Trend Targets [AlgoAlpha]" by AlgoAlpha
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © AlgoAlpha
@@ -23,6 +28,7 @@ import { ta, str, color, Series, type IndicatorResult, type InputConfig, type Pl
 import type { MarkerData, BarColorData, LineDrawingData, LabelData, LinefillData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendTargetsInputs {
   /** Multiplier for the ATR of the Supertrend bands */
@@ -109,7 +115,7 @@ export function calculate(
   lines: LineDrawingData[];
   labels: LabelData[];
   linefills: LinefillData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { green, red } = cfg;
@@ -171,6 +177,11 @@ export function calculate(
   let rejcount = 0;
   // entry, stop loss, TP1, TP2, TP3 (var lines and labels: na before the first signal)
   let levels: Level[] = [];
+  // var SL / TP1_lvl / TP2_lvl / TP3_lvl = 0.0, per bar (for the alerts)
+  let slLvl = 0;
+  let tpLvl = [0, 0, 0];
+  const slArr: number[] = new Array(n);
+  const tpArr: number[][] = [new Array(n), new Array(n), new Array(n)];
 
   for (let i = 0; i < n; i++) {
     const { high, low, close, time } = bars[i];
@@ -206,6 +217,8 @@ export function calculate(
       const dist = Math.abs(close - sl);
       const sign = long ? 1 : -1;
       const tp = [cfg.tp1Multiplier, cfg.tp2Multiplier, cfg.tp3Multiplier].map((m) => close + sign * dist * m);
+      slLvl = sl;
+      tpLvl = tp;
       const level = (y: number, c: string, text: string): Level => ({ x1: i, x2: i, labelX: i, y, color: c, text });
       levels = [
         level(close, long ? green : red, 'Entry ▸ ' + priceText(close)),
@@ -225,6 +238,8 @@ export function calculate(
     else extend(i);
     if (shortSignal[i] && cfg.showTp) setLevels(false);
     else extend(i + 40);
+    slArr[i] = slLvl;
+    for (let k = 0; k < 3; k++) tpArr[k][i] = tpLvl[k];
   }
 
   const interval = barInterval(bars);
@@ -249,8 +264,36 @@ export function calculate(
     lines,
     labels,
     linefills,
+    alerts: alertStates(alertConditions, bars, (() => {
+      const closeA = bars.map((b) => b.close);
+      const highOver = crossedOver(bars.map((b) => b.high), slArr);
+      const lowUnder = crossedUnder(bars.map((b) => b.low), slArr);
+      return [
+        // ta.crossover(close, SL) / ta.crossunder(close, SL)
+        crossedOver(closeA, slArr),
+        crossedUnder(closeA, slArr),
+        // ta.crossover(high, SL) and close < SL / ta.crossunder(low, SL) and close > SL
+        highOver.map((x, i) => x && closeA[i] < slArr[i]),
+        lowUnder.map((x, i) => x && closeA[i] > slArr[i]),
+        // ta.crossover(close, TP1_lvl) / TP2_lvl / TP3_lvl
+        crossedOver(closeA, tpArr[0]),
+        crossedOver(closeA, tpArr[1]),
+        crossedOver(closeA, tpArr[2]),
+      ];
+    })()),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Trend Change: Bullish', message: 'Price crossed above SL - Potential Bullish Trend' },
+  { id: 'alert1', title: 'Trend Change: Bearish', message: 'Price crossed below SL - Potential Bearish Trend' },
+  { id: 'alert2', title: 'Rejection: Bearish', message: 'Price rejected at SL - Bearish Rejection' },
+  { id: 'alert3', title: 'Rejection: Bullish', message: 'Price rejected at SL - Bullish Rejection' },
+  { id: 'alert4', title: 'TP1 Hit', message: 'Price reached TP1 level' },
+  { id: 'alert5', title: 'TP2 Hit', message: 'Price reached TP2 level' },
+  { id: 'alert6', title: 'TP3 Hit', message: 'Price reached TP3 level' },
+];
 
 export const TrendTargets = {
   calculate,
@@ -258,4 +301,5 @@ export const TrendTargets = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

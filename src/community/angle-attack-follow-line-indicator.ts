@@ -11,6 +11,8 @@
  * trend in the same direction. Labels: Buy / Sell on a trend change, "Add" when the angle comes back to 0 after a
  * rise / fall (1, 4 or 7 flat bars), "Red" (reduce) when the angle crosses the levels. Bars are coloured by the
  * trend of the follow line.
+ * Alerts (alertcondition, `alerts` of the result): 'Sell', 'Buy', 'Add Sell', 'Add Buy', 'Reduce Buy', 'Reduce Sell'
+ * on the bars of those labels (whether the labels are hidden or not), and 'Buy/Sell/Add/Reduce' on any of them.
  *
  * Conditional ATR: the ATR of the band breaks is computed inside the two `if` blocks of the original, so each of
  * them averages the true range of the bars where its block runs only (one history per block).
@@ -33,6 +35,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BarColorData, BgColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
 
@@ -363,7 +366,7 @@ export function calculate(
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'barColors' | 'bgColors'> & {
   markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -446,6 +449,7 @@ export function calculate(
   const bgBlue = String(color.new(BLUE, 70));
   const bgRed = String(color.new(RED, 70));
   const { maxLevel1: max1, maxLevel2: max2, minLevel1: min1, minLevel2: min2 } = cfg;
+  const flags: boolean[][] = [[], [], [], [], [], [], []];
 
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
@@ -510,6 +514,16 @@ export function calculate(
       beyond(4, min2, -1) && cfg.redSell4,
     ].map((c) => c && modeOk(-1));
 
+    // alertcondition(sell_0 or sell_0_A) / (buy_0 or buy_0_A) / add sell / add buy / reduce buy / reduce sell / any
+    const sellF = sell0 || sell0A;
+    const buyF = buy0 || buy0A;
+    const addSellF = addSell1 || addSell1A || addSell2 || addSell3 || addSell2A || addSell3A;
+    const addBuyF = addBuy1 || addBuy1A || addBuy2 || addBuy3 || addBuy2A || addBuy3A;
+    const reduBuyF = reduBuy.some((c) => c);
+    const reduSellF = reduSell.some((c) => c);
+    [sellF, buyF, addSellF, addBuyF, reduBuyF, reduSellF, sellF || buyF || addSellF || addBuyF || reduBuyF || reduSellF]
+      .forEach((f, k) => flags[k].push(f));
+
     // PLOTS
     const lineColor = up ? BLUE : RED;
     const value = Number.isFinite(a) ? a : NaN;
@@ -524,15 +538,16 @@ export function calculate(
           color: col, text, textColor: '#FFFFFF', size: 'tiny', id,
         });
       };
-      if (sell0 || sell0A) mark('Sell', 5, true, RED, 'Sell');
-      if (buy0 || buy0A) mark('Buy', -5, false, BLUE, 'Buy');
-      if (addSell1 || addSell1A || addSell2 || addSell3 || addSell2A || addSell3A) mark('Add Sell 1', a + 5, true, RED, 'Add');
-      if (addBuy1 || addBuy1A || addBuy2 || addBuy3 || addBuy2A || addBuy3A) mark('Add Buy 1', a - 5, false, BLUE, 'Add');
+      // ids: the plotshape outputs in declaration order (Sell, Buy, Add Sell 1, Add Buy 1, Reduce Buy 1-5, Reduce Sell 1-5)
+      if (sellF) mark('shape0', 5, true, RED, 'Sell');
+      if (buyF) mark('shape1', -5, false, BLUE, 'Buy');
+      if (addSellF) mark('shape2', a + 5, true, RED, 'Add');
+      if (addBuyF) mark('shape3', a - 5, false, BLUE, 'Add');
       reduBuy.forEach((c, k) => {
-        if (c) mark(`Reduce Buy ${k + 1}`, a + 5, true, BLUE, 'Red');
+        if (c) mark(`shape${4 + k}`, a + 5, true, BLUE, 'Red');
       });
       reduSell.forEach((c, k) => {
-        if (c) mark(`Reduce Sell ${k + 1}`, a - 5, false, RED, 'Red');
+        if (c) mark(`shape${9 + k}`, a - 5, false, RED, 'Red');
       });
     }
 
@@ -554,8 +569,20 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Sell', message: 'Sell' },
+  { id: 'alert1', title: 'Buy', message: 'Buy' },
+  { id: 'alert2', title: 'Add Sell', message: 'Add Sell' },
+  { id: 'alert3', title: 'Add Buy', message: 'Add Buy' },
+  { id: 'alert4', title: 'Reduce Buy', message: 'Reduce Buy' },
+  { id: 'alert5', title: 'Reduce Sell', message: 'Reduce Sell' },
+  { id: 'alert6', title: 'Buy/Sell/Add/Reduce', message: 'Buy/Sell/Add/Reduce' },
+];
 
 export const AngleAttackFollowLineIndicator = {
   calculate,
@@ -563,4 +590,5 @@ export const AngleAttackFollowLineIndicator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

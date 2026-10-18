@@ -7,6 +7,8 @@
  * 500 bars above the target, when the volume filter is on). A Hull MA of the close (main trend filter) colours the
  * background (close above it: green tint, else red tint) and greys the line when the trend is against the filter.
  * BUY / SELL triangles mark trend changes that agree with the filter.
+ * Alerts (alertcondition, `alerts` of the result): 'Smart Trend: BUY Signal' and 'Smart Trend: SELL Signal', true on
+ * the bars of the BUY / SELL triangles.
  *
  * Reference: "Smart Trend [Zofesu]" by Zofesu
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SmartTrendInputs {
   /** ATR period */
@@ -79,7 +82,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<SmartTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -100,6 +103,8 @@ export function calculate(
   const plot1: { time: number; value: number; color: string }[] = [];
   const bgColors: BgColorData[] = [];
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -141,6 +146,8 @@ export function calculate(
     const prevDir = i > 0 ? trendDir[i - 1] : NaN; // trend_dir[1] (na on bar 0)
     const showLong = dir === 1 && prevDir === -1 && (!cfg.useFilter || mainTrendBull);
     const showShort = dir === -1 && prevDir === 1 && (!cfg.useFilter || mainTrendBear);
+    longFlags.push(showLong);
+    shortFlags.push(showShort);
     if (showLong) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: BULL, text: 'BUY',
         textColor: color.white, size: 'small' });
@@ -156,8 +163,16 @@ export function calculate(
     plots: { plot0, plot1 },
     markers,
     bgColors,
+    // alertcondition(show_long, ...) / alertcondition(show_short, ...)
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Smart Trend: BUY Signal', message: 'Smart Trend Buy Signal on {{ticker}}' },
+  { id: 'alert1', title: 'Smart Trend: SELL Signal', message: 'Smart Trend Sell Signal on {{ticker}}' },
+];
 
 export const SmartTrend = {
   calculate,
@@ -165,4 +180,5 @@ export const SmartTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

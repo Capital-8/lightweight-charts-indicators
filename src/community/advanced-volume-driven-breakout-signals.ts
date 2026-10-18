@@ -7,6 +7,8 @@
  * breakout without a spike, and optionally a relative volume (volume / its MA) above a threshold and a cumulative net
  * volume (CNV) above / below its MA. Overextension arrows mark spikes on up / down candles without a breakout. Bar
  * colours show the raw breakout and spike states; an optional background shows the CNV state.
+ * Alerts (alertcondition, `alerts` of the result): buy volume, sell volume, bullish and bearish overextension, each
+ * while its alert input is on.
  *
  * Reference: "Advanced Volume-Driven Breakout Signals" by VolumeVigilante
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,11 +17,12 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type AdvancedVolumeDrivenBreakoutSignalsMaType = 'SMA' | 'EMA' | 'WMA' | 'HMA' | 'VWMA';
 
 export interface AdvancedVolumeDrivenBreakoutSignalsInputs {
-  /** Alert inputs: only used by the alertconditions (no output in the port) */
+  /** Alert inputs: the conditions of `alerts` are false while their input is off */
   enableBuyVolumeAlerts: boolean;
   enableSellVolumeAlerts: boolean;
   enableBullishOverextensionAlerts: boolean;
@@ -113,7 +116,8 @@ const BEAR_COLOR = '#FF5252';
 export function calculate(
   bars: Bar[],
   inputs: Partial<AdvancedVolumeDrivenBreakoutSignalsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -182,6 +186,7 @@ export function calculate(
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
+  const alertFlags: boolean[][] = [[], [], [], []];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const cnvBullishCondition = cfg.useCnv ? gt(smoothedCnv[i], 0) : true;
@@ -192,6 +197,10 @@ export function calculate(
     const sellVolumeCondition = sellVolumeSignal[i] && rvolOk && cnvBearishCondition && !spikeBlock;
     const bearishOverextension = spikeBlock && lt(b.close, b.open) && rvolOk && !sellVolumeSignal[i];
     const bullishOverextension = spikeBlock && gt(b.close, b.open) && rvolOk && !buyVolumeSignal[i];
+    alertFlags[0].push(cfg.enableBuyVolumeAlerts && buyVolumeCondition);
+    alertFlags[1].push(cfg.enableSellVolumeAlerts && sellVolumeCondition);
+    alertFlags[2].push(cfg.enableBullishOverextensionAlerts && bullishOverextension);
+    alertFlags[3].push(cfg.enableBearishOverextensionAlerts && bearishOverextension);
 
     // barcolor(buyVolumeSignal ? INFO : sellVolumeSignal ? BEAR : vsHigh ? VS_HIGH : vsSignificant ? VS_SIGNIF : na)
     const bc = buyVolumeSignal[i] ? INFO_COLOR : sellVolumeSignal[i] ? BEAR_COLOR
@@ -224,14 +233,23 @@ export function calculate(
     }
   }
 
-  // 4 alertconditions (buy volume, sell volume, bullish / bearish overextension): no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
     barColors,
     bgColors,
+    // 4 alertconditions: buy volume, sell volume, bullish / bearish overextension
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
 
-export const AdvancedVolumeDrivenBreakoutSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Volume Vigilante | AVDBS | Buy Volume', message: 'VV AVDBS: Buy Volume signal detected on {{ticker}}.' },
+  { id: 'alert1', title: 'Volume Vigilante | AVDBS | Sell Volume', message: 'VV AVDBS: Sell Volume signal detected on {{ticker}}.' },
+  { id: 'alert2', title: 'Volume Vigilante | AVDBS | Bullish Overextension', message: 'VV AVDBS: Bullish overextension detected on {{ticker}}.' },
+  { id: 'alert3', title: 'Volume Vigilante | AVDBS | Bearish Overextension', message: 'VV AVDBS: Bearish overextension detected on {{ticker}}.' },
+];
+
+export const AdvancedVolumeDrivenBreakoutSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

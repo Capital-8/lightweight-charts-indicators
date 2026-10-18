@@ -9,12 +9,18 @@
  * the level (small / normal / large). Bars whose middle is inside the body and whose volume reaches Medium or Big are
  * coloured green (bullish bar) or light red (bearish bar).
  *
+ * Alerts (alertcondition, `alerts` of the result), on confirmed bars (every bar but the last one, unless the chart
+ * context says the last bar is closed): 'Buying Absorption' (an up arrow), 'Selling Absorption' (a down arrow),
+ * 'Absorption (Any)' (either) and 'Big Absorption Only' (a large arrow).
+ *
  * Reference: "Absorption Arrows v2" by WaveWalker1
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface AbsorptionArrowsV2Inputs {
   /** Selling absorption only on bull bars, buying absorption only on bear bars */
@@ -94,7 +100,8 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<AbsorptionArrowsV2Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const volume = new Series(bars, (b) => b.volume ?? NaN);
@@ -121,6 +128,9 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastConfirmed = lastBarConfirmedOf(chart);
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [], anyFlags: boolean[] = [], bigFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const v = b.volume ?? NaN;
@@ -142,6 +152,15 @@ export function calculate(
     const sell = [isSmall && validSell && cfg.showSmall, isMed && validSell && cfg.showMedium, isBig && validSell && cfg.showBig];
     const buy = [isSmall && validBuy && cfg.showSmall, isMed && validBuy && cfg.showMedium, isBig && validBuy && cfg.showBig];
 
+    // alertcondition((sigBuy... ) and barstate.isconfirmed, ...) in the original's order
+    const confirmed = i < n - 1 || lastConfirmed;
+    const anyBuy = buy[0] || buy[1] || buy[2];
+    const anySell = sell[0] || sell[1] || sell[2];
+    buyFlags.push(anyBuy && confirmed);
+    sellFlags.push(anySell && confirmed);
+    anyFlags.push((anyBuy || anySell) && confirmed);
+    bigFlags.push((buy[2] || sell[2]) && confirmed);
+
     const atrOffset = val(atr) * cfg.atrMult;
     // plotshape(sig ? high + atrOffset : na, "", shape.arrowdown, location.absolute, arrowDnColor, size = ...)
     const sellPrice = b.high + atrOffset;
@@ -149,13 +168,13 @@ export function calculate(
     for (let k = 0; k < 3; k++) {
       if (sell[k] && Number.isFinite(sellPrice)) {
         markers.push({ time: b.time, position: 'atPriceMiddle', price: sellPrice, shape: 'arrowDown', color: dnColor,
-          size: sizes[k] });
+          size: sizes[k], id: `shape${k}` });
       }
     }
     for (let k = 0; k < 3; k++) {
       if (buy[k] && Number.isFinite(buyPrice)) {
         markers.push({ time: b.time, position: 'atPriceMiddle', price: buyPrice, shape: 'arrowUp', color: upColor,
-          size: sizes[k] });
+          size: sizes[k], id: `shape${k + 3}` });
       }
     }
 
@@ -171,7 +190,16 @@ export function calculate(
     plots: {},
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, anyFlags, bigFlags]),
   };
 }
 
-export const AbsorptionArrowsV2 = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buying Absorption', message: 'Absorption Arrows v2: Buying absorption detected' },
+  { id: 'alert1', title: 'Selling Absorption', message: 'Absorption Arrows v2: Selling absorption detected' },
+  { id: 'alert2', title: 'Absorption (Any)', message: 'Absorption Arrows v2: Absorption event detected' },
+  { id: 'alert3', title: 'Big Absorption Only', message: 'Absorption Arrows v2: HIGH CONVICTION absorption event detected' },
+];
+
+export const AbsorptionArrowsV2 = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

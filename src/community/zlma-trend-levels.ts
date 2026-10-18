@@ -136,10 +136,10 @@ export function calculate(bars: Bar[], inputs: Partial<ZlmaTrendLevelsInputs> = 
 
     // Pine: plotshape(signalUp ? zlma : na, "", shape.diamond, location.absolute, color=up, size=size.tiny)
     if (signalUp) {
-      markers.push({ time: bars[i].time, position: 'inBar', shape: 'diamond', color: '#30d453', text: '' });
+      markers.push({ id: 'shape0', time: bars[i].time, position: 'inBar', shape: 'diamond', color: '#30d453', text: '' });
     }
     if (signalDn) {
-      markers.push({ time: bars[i].time, position: 'inBar', shape: 'diamond', color: '#4043f1', text: '' });
+      markers.push({ id: 'shape1', time: bars[i].time, position: 'inBar', shape: 'diamond', color: '#4043f1', text: '' });
     }
 
     // Trend levels: boxes and labels (Pine: if show_levl)

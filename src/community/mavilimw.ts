@@ -3,11 +3,21 @@
  *
  * Cascaded WMA chain: each level feeds into the next with increasing Fibonacci-like periods.
  * M1(fmal) → M2(smal) → M3(fmal+smal) → M4(smal+tmal) → M5(tmal+Fmal) → MAVW(Fmal+Ftmal)
+ * Alerts (alertcondition, `alerts` of the result): 'MAVW BUY' (MAVW crosses over its previous value), 'MAVW SELL'
+ * (crosses under it) and 'Color ALARM' (either).
  *
  * Reference: "MavilimW" by KivancOzbilgic
  */
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'MAVW BUY', message: 'MAVW BUY!' },
+  { id: 'alert1', title: 'MAVW SELL', message: 'MAVW SELL!' },
+  { id: 'alert2', title: 'Color ALARM', message: 'MavilimW has changed color!' },
+];
 
 export interface MavilimWInputs {
   firstMALength: number;
@@ -35,7 +45,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<MavilimWInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<MavilimWInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const { firstMALength, secondMALength } = { ...defaultInputs, ...inputs };
 
   const fmal = firstMALength;
@@ -77,10 +90,17 @@ export function calculate(bars: Bar[], inputs: Partial<MavilimWInputs> = {}): In
     value: i < warmupOld || v == null || isNaN(v) ? NaN : v,
   }));
 
+  // crossover(MAVW, MAVW[1]) / crossunder(MAVW, MAVW[1]) / cross(MAVW, MAVW[1])
+  const mavwV = mavwArr.map((v) => v ?? NaN);
+  const mavwPrev = mavwV.map((_v, i) => (i > 0 ? mavwV[i - 1] : NaN));
+  const buy = crossedOver(mavwV, mavwPrev);
+  const sell = crossedUnder(mavwV, mavwPrev);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1 },
+    alerts: alertStates(alertConditions, bars, [buy, sell, buy.map((v, i) => v || sell[i])]),
   };
 }
 
-export const MavilimW = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const MavilimW = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

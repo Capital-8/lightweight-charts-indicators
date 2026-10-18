@@ -31,6 +31,11 @@
  * 0.01 without it). The original redraws on closed bars only: when the context says that the last bar is still open
  * (`lastBarConfirmed` false), the drawings are those of the bar before it; without it every bar is a closed bar.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'New Retest' on a closed bar that draws an "R" label of a retest of
+ * the bar before it (or of the bar itself), 'New Break' on a closed bar that draws a "B" label within one bar of it
+ * (both need the labels shown: "Show Retests" / "Show Breaks"). alert() calls (`alertCalls`, once per bar): "New
+ * Retests Occured." / "New Breaks Occured." on the same bars when "Enable Retest Alerts" / "Enable Break Alerts" is on.
+ *
  * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
  * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
  * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
@@ -44,10 +49,14 @@
  */
 
 import { ta, str, color, timeframe, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BoxData, LabelData, LineDrawingData } from '../types';
+import type { AlertCall, BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe, periodStarts, securityBars } from '../anchor-period';
 import { mintickOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface SupportAndResistanceFluxChartsInputs {
   srPivotLength: number;
@@ -407,10 +416,14 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SupportAndResistanceFluxChartsInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'boxes' | 'lines' | 'labels'> & { boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[] } {
+): Omit<IndicatorResult, 'boxes' | 'lines' | 'labels'> & { boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[] }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
+  // alerts.put("Retest" / "Break", false) on every bar; set by renderSRObj()
+  const retestFlags = new Array<boolean>(n).fill(false);
+  const breakFlags = new Array<boolean>(n).fill(false);
   const lineList = drawingList<LineDrawingData>(MAX_DRAWINGS);
   const boxList = drawingList<BoxData>(MAX_DRAWINGS);
   const labelList = drawingList<LabelData>(MAX_DRAWINGS);
@@ -420,7 +433,19 @@ export function calculate(
     boxes: boxList.alive(),
     lines: lineList.alive(),
     labels: labelList.alive(),
+    // alertcondition(alerts.get("Retest"), "New Retest", "") / alertcondition(alerts.get("Break"), "New Break", "")
+    alerts: alertStates(alertConditions, bars, [retestFlags, breakFlags]),
+    alertCalls: alertCallsOf(),
   });
+  // if enableRetestAlerts and alerts.get("Retest"): alert("New Retests Occured."); the same for the breaks
+  const alertCallsOf = (): AlertCall[] => {
+    const calls: AlertCall[] = [];
+    bars.forEach((b, i) => {
+      if (cfg.enableRetestAlerts && retestFlags[i]) calls.push({ time: b.time, message: 'New Retests Occured.', freq: 'once_per_bar' });
+      if (cfg.enableBreakAlerts && breakFlags[i]) calls.push({ time: b.time, message: 'New Breaks Occured.', freq: 'once_per_bar' });
+    });
+    return calls;
+  };
   if (n === 0) return result();
 
   const timeMs = timeMsOf(bars);
@@ -644,6 +669,7 @@ export function calculate(
           } : null);
         }
         if (cfg.showBreaks && broken) {
+          if (time - curTFMS <= info.breakTime && time + curTFMS >= info.breakTime) breakFlags[i] = true;
           addLabel(sr, NaN, final ? {
             time: place(info.breakTime), price: info.price, text: 'B', yloc: resistance ? 'belowbar' : 'abovebar',
             style: resistance ? 'label_up' : 'label_down', color: cfg.breakColor, textColor: opaqueText, size: 'small',
@@ -656,6 +682,7 @@ export function calculate(
             const lastLabel = sr.retestLabels.length > 0 ? sr.retestLabels[0] : null;
             const cooldownOK = !(lastLabel !== null && lastLabel.alive && Math.abs(lastLabel.x - retestTime) < curTFMS * RETEST_LABEL_COOLDOWN);
             if (cooldownOK && retestTime >= info.startTime && (!broken || retestTime < info.breakTime)) {
+              if (time - curTFMS <= retestTime && time >= retestTime) retestFlags[i] = true;
               sr.retestLabels = [addLabel(sr, retestTime, final ? {
                 time: place(retestTime), price: info.price, text: 'R', yloc: resistance ? 'abovebar' : 'belowbar',
                 style: resistance ? 'label_down' : 'label_up', color: levelColor, textColor: opaqueText, size: 'small',
@@ -678,10 +705,18 @@ export function calculate(
   return result();
 }
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New Retest', message: '' },
+  { id: 'alert1', title: 'New Break', message: '' },
+];
+
 export const SupportAndResistanceFluxCharts = {
   calculate,
   metadata,
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

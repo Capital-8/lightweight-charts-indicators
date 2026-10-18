@@ -163,8 +163,9 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     levels.forEach(([, c], k) => {
       if (crosses[k][i]) {
+        // ids char0 / char1 / char2: the three plotchar outputs in declaration order
         markers.push({ time: bars[i].time, position: 'belowBar', shape: 'circle', color: 'transparent', text: '▲',
-          textColor: c, size: 'small' });
+          textColor: c, size: 'small', id: `char${k}` });
       }
     });
   }

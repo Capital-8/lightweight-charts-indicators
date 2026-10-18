@@ -4,6 +4,8 @@
  * Directional movement (+DI / -DI) from the RMA of the true range and of the plus / minus directional movement:
  * the background is green when +DI is above -DI, else red. A fast and a slow EMA of the close are drawn; a Buy
  * label marks a fast EMA cross above the slow EMA after a cross below, a Sell label the opposite.
+ * Alerts (alertcondition, `alerts` of the result): 'Trend Green Alert' (+DI above -DI), 'Trend Red Alert' (-DI above
+ * +DI), 'Buy Alert' and 'Sell Alert' (the bars of the Buy / Sell labels).
  *
  * Reference: "Trend with ADX/EMA - Buy & Sell Signals" by RMPM
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +13,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendWithAdxEmaBuySellSignalsInputs {
   /** ADX length (RMA length of the true range and directional movement) */
@@ -54,7 +57,7 @@ const gt = (a: number, b: number) => a - b > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendWithAdxEmaBuySellSignalsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -86,6 +89,7 @@ export function calculate(
   const markers: MarkerData[] = [];
   const bull = 'rgb(173, 230, 174)';
   const bear = 'rgb(227, 142, 142)';
+  const greenFlags: boolean[] = [], redFlags: boolean[] = [], buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   let condIni = NaN; // CondIni[1] is na on the first bar
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
@@ -93,10 +97,15 @@ export function calculate(
     const diPlus = (smoothedPlus[i] / smoothedTr[i]) * 100;
     const diMinus = (smoothedMinus[i] / smoothedTr[i]) * 100;
     bgColors.push({ time: t, color: gt(diPlus, diMinus) ? bull : bear });
+    // trendGreen = DIPlus > DIMinus / trendRed = DIMinus > DIPlus
+    greenFlags.push(gt(diPlus, diMinus));
+    redFlags.push(gt(diMinus, diPlus));
 
     // CondIni := longCond ? 1 : shortCond ? -1 : CondIni[1]
     const prev = condIni;
     condIni = longCond[i] ? 1 : shortCond[i] ? -1 : prev;
+    buyFlags.push(!!longCond[i] && prev === -1);
+    sellFlags.push(!!shortCond[i] && prev === 1);
     if (longCond[i] && prev === -1) {
       markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: color.green, text: 'Buy',
         textColor: color.white, size: 'tiny' });
@@ -115,8 +124,17 @@ export function calculate(
     plots: { plot0, plot1 },
     markers,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [greenFlags, redFlags, buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Trend Green Alert', message: 'Trend Green Alert' },
+  { id: 'alert1', title: 'Trend Red Alert', message: 'Trend Red Alert' },
+  { id: 'alert2', title: 'Buy Alert', message: 'Buy Alert' },
+  { id: 'alert3', title: 'Sell Alert', message: 'Sell Alert' },
+];
 
 export const TrendWithAdxEmaBuySellSignals = {
   calculate,
@@ -124,4 +142,5 @@ export const TrendWithAdxEmaBuySellSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

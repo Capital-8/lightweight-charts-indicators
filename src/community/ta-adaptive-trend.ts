@@ -3,6 +3,8 @@
  *
  * A fast and a slow EMA of the close. The zone between them is filled mint green when the fast EMA is above the slow
  * EMA, orange when it is below, gray otherwise. Triangles mark the crosses of the fast EMA over / under the slow EMA.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish EMA cross' and 'Bearish EMA cross', on the bars of the
+ * crosses (whatever the marker input).
  *
  * Reference: "TA (Miles) Adaptive Trend" by TradingApologist
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -10,6 +12,19 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0', title: 'Bullish EMA cross',
+    message: 'TA Adaptive Trend: fast EMA crossed above slow EMA on {{ticker}} ({{interval}})',
+  },
+  {
+    id: 'alert1', title: 'Bearish EMA cross',
+    message: 'TA Adaptive Trend: fast EMA crossed below slow EMA on {{ticker}} ({{interval}})',
+  },
+];
 
 export interface TaAdaptiveTrendInputs {
   /** Fast EMA length */
@@ -57,7 +72,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TaAdaptiveTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -94,6 +109,8 @@ export function calculate(
     // fill(pFast, pSlow, color = zoneColor, title = "Trend Zone")
     fills: [{ plot1: 'plot0', plot2: 'plot1', colors: zoneColors, options: { title: 'Trend Zone' } }],
     markers,
+    // alertcondition(bull, 'Bullish EMA cross') / alertcondition(bear, 'Bearish EMA cross')
+    alerts: alertStates(alertConditions, bars, [bull.map((v) => v === 1), bear.map((v) => v === 1)]),
   };
 }
 
@@ -103,4 +120,5 @@ export const TaAdaptiveTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

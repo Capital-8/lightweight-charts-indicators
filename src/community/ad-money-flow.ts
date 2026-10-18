@@ -249,11 +249,12 @@ export function calculate(
         fallPrev = ma1[i];
       }
     }
+    // plotshape(..., title = 'Signal crossunder') = shape0, plotshape(..., title = 'Signal crossover') = shape1
     if (!isNaN(under)) {
-      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: under, shape: 'circle', color: ADMF_COLOR, size: 'tiny' });
+      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: under, shape: 'circle', color: ADMF_COLOR, size: 'tiny', id: 'shape0' });
     }
     if (!isNaN(over)) {
-      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: over, shape: 'circle', color: SIGNAL_COLOR, size: 'tiny' });
+      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: over, shape: 'circle', color: SIGNAL_COLOR, size: 'tiny', id: 'shape1' });
     }
   }
 

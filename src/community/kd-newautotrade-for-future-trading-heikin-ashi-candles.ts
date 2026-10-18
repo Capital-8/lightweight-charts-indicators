@@ -5,6 +5,7 @@
  * over the slow EMA, the RSI is above the buy level and, with the ADX filter on, the ADX of ta.dmi is above the
  * minimum. A SELL triangle (and a red background) is drawn on a cross under with the RSI below the sell level and
  * the same ADX filter.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY ALERT' and 'SELL ALERT' on the bars of the BUY / SELL signals.
  *
  * Reference: "KD-NewAutoTrade for Future Trading - Heikin Ashi candles" by krish16887
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +13,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface KdNewAutoTradeInputs {
   fastLength: number;
@@ -70,7 +72,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<KdNewAutoTradeInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -91,11 +93,15 @@ export function calculate(
   const sellColor = String(color.new(color.red, 0));
   const buyBg = String(color.new(color.green, 85));
   const sellBg = String(color.new(color.red, 85));
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const trendStrong = !cfg.adxFilter || gt(adx[i], cfg.adxMin);
     const longCond = !!bullishCross[i] && gt(rsi[i], cfg.rsiBuyLvl) && trendStrong;
     const shortCond = !!bearishCross[i] && lt(rsi[i], cfg.rsiSellLvl) && trendStrong;
+    longFlags.push(longCond);
+    shortFlags.push(shortCond);
     // plotshape(..., size = size.large, text = "BUY"): no textcolor, the Pine default text colour (color.blue)
     if (longCond) {
       markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: buyColor, text: 'BUY',
@@ -118,8 +124,16 @@ export function calculate(
     },
     markers,
     bgColors,
+    // alertcondition(longCond, "BUY ALERT") / alertcondition(shortCond, "SELL ALERT")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY ALERT', message: 'BUY: EMA 10 crossed above EMA 20 with RSI & ADX confirmation.' },
+  { id: 'alert1', title: 'SELL ALERT', message: 'SELL: EMA 10 crossed below EMA 20 with RSI & ADX confirmation.' },
+];
 
 export const KdNewAutoTrade = {
   calculate,
@@ -127,4 +141,5 @@ export const KdNewAutoTrade = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

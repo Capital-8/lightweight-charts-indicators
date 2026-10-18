@@ -7,6 +7,7 @@
  * slope up and ADX above the minimum (bear: the opposite). A BUY label marks the first bar of a bull trend with a
  * close above the EMA 55, EMA 9 > EMA 21, a green candle, an up slope, ADX above the minimum and the close at least
  * ATR * multiplier away from the EMA 55; SELL is the opposite. A BUY allows the next SELL and the reverse.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY Alert' and 'SELL Alert', true on the BUY / SELL bars.
  *
  * Reference: "RRR EMA Ignition BUY & SELL (Sideways-Proof)" by RAGSTER123
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RrrEmaIgnitionBuySellInputs {
   len9: number;
@@ -72,7 +74,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<RrrEmaIgnitionBuySellInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -95,6 +97,7 @@ export function calculate(
   let buyDone = false;
   let sellDone = false;
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -138,6 +141,8 @@ export function calculate(
       buyDone = false;
     }
 
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
     if (buySignal) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'labelUp', color: color.green, text: 'BUY',
         textColor: color.white, size: 'small' });
@@ -158,8 +163,16 @@ export function calculate(
       plot2: line(ema55, color.blue),
     },
     markers,
+    // alertcondition(buySignal, "BUY Alert") / alertcondition(sellSignal, "SELL Alert")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY Alert', message: 'RRR EMA Ignition BUY' },
+  { id: 'alert1', title: 'SELL Alert', message: 'RRR EMA Ignition SELL' },
+];
 
 export const RrrEmaIgnitionBuySell = {
   calculate,
@@ -167,4 +180,5 @@ export const RrrEmaIgnitionBuySell = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

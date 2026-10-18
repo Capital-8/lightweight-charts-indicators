@@ -4,8 +4,10 @@
  * Marks six bullish candlestick patterns in a down move (the close and the two previous closes below the EMA 20 of
  * the close): Hammer, Bullish Engulfing, Morning Star, Piercing Line, Three White Soldiers and Three Inside Up, each
  * with a label below the bar. Optional filters: a stochastic filter (K = SMA of the stochastic, D = SMA of K; K above
- * D) and a volume filter (volume above the SMA 20 of the volume times a multiplier). The alert toggles only change
- * the alert conditions.
+ * D) and a volume filter (volume above the SMA 20 of the volume times a multiplier).
+ * Alerts (alertcondition, `alerts` of the result): one per pattern ('Hammer Alert', 'Engulfing Alert', 'Morning Star
+ * Alert', 'Piercing Line Alert', 'Three White Soldiers Alert', 'Three Inside Up Alert'), true on the bars of its label
+ * when its alert toggle is on.
  *
  * Reference: "Abusuhil Bullish Candles" by abusuhil
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AbusuhilBullishCandlesInputs {
   showHammer: boolean;
@@ -21,7 +24,7 @@ export interface AbusuhilBullishCandlesInputs {
   showPiercing: boolean;
   showThreeSoldiers: boolean;
   showThreeInsideUp: boolean;
-  /** Alert toggles (only used by the Pine alert conditions, no output) */
+  /** Alert toggles (only used by the alert conditions) */
   alertHammer: boolean;
   alertEngulfing: boolean;
   alertMorningStar: boolean;
@@ -100,7 +103,7 @@ const PINE_TEXT = '#2962FF';
 export function calculate(
   bars: Bar[],
   inputs: Partial<AbusuhilBullishCandlesInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -116,9 +119,12 @@ export function calculate(
   const ema = A(ta.ema(close, 20));
 
   const markers: MarkerData[] = [];
-  const label = (time: number, on: boolean, col: string, text: string) => {
-    if (on) markers.push({ time, position: 'belowBar', shape: 'labelUp', color: col, text, textColor: PINE_TEXT, size: 'auto' });
+  // id: the plotshape output (shape0 .. shape5 in the original's order)
+  const label = (time: number, on: boolean, col: string, text: string, id: string) => {
+    if (on) markers.push({ time, position: 'belowBar', shape: 'labelUp', color: col, text, textColor: PINE_TEXT, size: 'auto', id });
   };
+  // alertcondition(<pattern>Cond and alert<Pattern>, ...): one flag list per pattern
+  const flags: boolean[][] = [[], [], [], [], [], []];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const { open, high, close: c } = b;
@@ -143,41 +149,58 @@ export function calculate(
     // Hammer
     const hammerCond = cfg.showHammer && isDown && gt(c, open) && gt(open - b.low, 2 * Math.abs(c - open))
       && lt(high - c, c - open) && allFiltersPass;
-    label(b.time, hammerCond, color.green, 'Hammer');
+    label(b.time, hammerCond, color.green, 'Hammer', 'shape0');
+    flags[0].push(hammerCond && cfg.alertHammer);
 
     // Bullish Engulfing
     const engulfingCond = cfg.showEngulfing && isDown && lt(close1, open1) && gt(c, open) && lt(open, close1)
       && gt(c, open1) && gt(c - open, 1.5 * Math.abs(close1 - open1)) && allFiltersPass;
-    label(b.time, engulfingCond, color.lime, 'Engulf');
+    label(b.time, engulfingCond, color.lime, 'Engulf', 'shape1');
+    flags[1].push(engulfingCond && cfg.alertEngulfing);
 
     // Morning Star
     const body2 = Math.abs(close2 - open2);
     const body1 = Math.abs(close1 - open1);
     const morningStarCond = cfg.showMorningStar && isDown && lt(close2, open2) && gt(body2, body1 * 2)
       && lt(body1, body2 * 0.5) && gt(c, open) && gt(c, (open2 + close2) / 2) && allFiltersPass;
-    label(b.time, morningStarCond, color.navy, 'Morning Star');
+    label(b.time, morningStarCond, color.navy, 'Morning Star', 'shape2');
+    flags[2].push(morningStarCond && cfg.alertMorningStar);
 
     // Piercing Line
     const piercingCond = cfg.showPiercing && isDown && lt(close1, open1) && gt(c, open) && lt(open, low1)
       && gt(c, (open1 + close1) / 2) && allFiltersPass;
-    label(b.time, piercingCond, color.orange, 'Piercing');
+    label(b.time, piercingCond, color.orange, 'Piercing', 'shape3');
+    flags[3].push(piercingCond && cfg.alertPiercing);
 
     // Three White Soldiers
     const threeSoldiersCond = cfg.showThreeSoldiers && isDown && gt(close2, open2) && gt(close1, open1) && gt(c, open)
       && gt(open1, open2) && gt(close1, close2) && gt(open, open1) && gt(c, close1) && allFiltersPass;
-    label(b.time, threeSoldiersCond, color.maroon, '3 Soldiers');
+    label(b.time, threeSoldiersCond, color.maroon, '3 Soldiers', 'shape4');
+    flags[4].push(threeSoldiersCond && cfg.alertThreeSoldiers);
 
     // Three Inside Up
     const threeInsideUpCond = cfg.showThreeInsideUp && isDown && lt(close2, open2) && gt(close1, open1)
       && gt(open1, close2) && lt(close1, open2) && gt(c, open) && gt(c, high2) && allFiltersPass;
-    label(b.time, threeInsideUpCond, color.teal, 'Inside Up');
+    label(b.time, threeInsideUpCond, color.teal, 'Inside Up', 'shape5');
+    flags[5].push(threeInsideUpCond && cfg.alertThreeInsideUp);
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const AbusuhilBullishCandles = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Hammer Alert', message: 'Hammer pattern detected' },
+  { id: 'alert1', title: 'Engulfing Alert', message: 'Bullish Engulfing pattern detected' },
+  { id: 'alert2', title: 'Morning Star Alert', message: 'Morning Star pattern detected' },
+  { id: 'alert3', title: 'Piercing Line Alert', message: 'Piercing Line pattern detected' },
+  { id: 'alert4', title: 'Three White Soldiers Alert', message: 'Three White Soldiers pattern detected' },
+  { id: 'alert5', title: 'Three Inside Up Alert', message: 'Three Inside Up pattern detected' },
+];
+
+export const AbusuhilBullishCandles = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

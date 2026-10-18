@@ -7,6 +7,9 @@
  * magenta is long; Normal: MACD above / below 0; Safe: only bright blue is long). Candles on the price pane take
  * the state colour, triangles mark the first bar of a long / short state, and a trend moving average (SMA, EMA,
  * WMA, HMA, RMA, LSMA, DEMA, TEMA or VIDYA) is drawn on the price pane.
+ * Alerts (alertcondition, `alerts` of the result): the four histogram colour states (dark blue, dark magenta, no
+ * leverage = dark blue / dark magenta / bright magenta, bright blue), the close above / below the trend MA and the
+ * first bar of a long / short state (whatever signals are shown).
  *
  * Reference: "MACD Liquidity Tracker System" by PROFABIGHI_CAPITAL
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +18,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type MacdLiquidityTrackerSystemType = 'Fast' | 'Normal' | 'Safe';
 export type MacdLiquidityTrackerMaType = 'SMA' | 'EMA' | 'WMA' | 'HMA' | 'RMA' | 'LSMA' | 'DEMA' | 'TEMA' | 'VIDYA';
@@ -87,7 +91,8 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<MacdLiquidityTrackerSystemInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -164,6 +169,7 @@ export function calculate(
   const plot1: { time: number; value: number }[] = [];
   const candles: PlotCandleData[] = [];
   const markers: MarkerData[] = [];
+  const flags: boolean[][] = Array.from({ length: 8 }, () => [] as boolean[]);
   let longSignal = false; // var bool longSignal = false
   let shortSignal = false; // var bool shortSignal = false
   for (let i = 0; i < n; i++) {
@@ -200,14 +206,21 @@ export function calculate(
     const shortEntry = shortSignal && !prevShort;
     // plotshape(..., location.belowbar / abovebar, color = candleColor, shape.triangleup / triangledown, size.small,
     //   text = "Long" / "Short" (with text only), textcolor = candleColor, force_overlay = true)
+    // ids: the outputs "... with Text" (shape0 / shape1) when showText, "... without Text" (shape2 / shape3) otherwise
     if (showLong && longEntry) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: candleColor, size: 'small',
-        ...(cfg.showText ? { text: 'Long', textColor: candleColor } : {}), forceOverlay: true });
+        ...(cfg.showText ? { text: 'Long', textColor: candleColor } : {}), forceOverlay: true,
+        id: cfg.showText ? 'shape0' : 'shape2' });
     }
     if (showShort && shortEntry) {
       markers.push({ time: b.time, position: 'aboveBar', shape: 'triangleDown', color: candleColor, size: 'small',
-        ...(cfg.showText ? { text: 'Short', textColor: candleColor } : {}), forceOverlay: true });
+        ...(cfg.showText ? { text: 'Short', textColor: candleColor } : {}), forceOverlay: true,
+        id: cfg.showText ? 'shape1' : 'shape3' });
     }
+    // alertconditions: isNeutralBuy_Orig, isNeutralSell_Orig, isNoLeverage_Orig, isLeverage_Orig, isAboveMA,
+    // isBelowMA, longEntryCondition, shortEntryCondition
+    [isDarkBlueTransp, isDarkMagentaTransp, isDarkMagentaTransp || isDarkBlueTransp || isBrightMagenta, isBrightBlue,
+      gt(b.close, smoothedMA[i]), lt(b.close, smoothedMA[i]), longEntry, shortEntry].forEach((f, k) => flags[k].push(f));
     // plotcandle(open, high, low, close, color / wickcolor / bordercolor = candleColor, force_overlay = true)
     candles.push({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, color: candleColor,
       wickColor: candleColor, borderColor: candleColor, forceOverlay: true });
@@ -219,8 +232,21 @@ export function calculate(
     hlines: [{ value: 0, options: { title: 'Zero line', color: color.gray, linestyle: 'dashed' } }],
     markers,
     plotCandles: { coloredCandles: candles },
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Color: Dark Blue Transp', message: 'Dark Blue Transp color detected.' },
+  { id: 'alert1', title: 'Color: Dark Magenta Transp', message: 'Dark Magenta Transp color detected.' },
+  { id: 'alert2', title: 'Color: No Leverage Colors', message: 'Indicator shows Dark Blue T, Dark Magenta T, or Bright Magenta.' },
+  { id: 'alert3', title: 'Color: Bright Blue', message: 'Bright Blue (Leverage) color detected.' },
+  { id: 'alert4', title: 'Price Above MA', message: 'Price is above the selected MA.' },
+  { id: 'alert5', title: 'Price Below MA', message: 'Price is below the selected MA.' },
+  { id: 'alert6', title: 'Long Entry Signal Trigger', message: 'Long entry signal (triangle) detected.' },
+  { id: 'alert7', title: 'Short Entry Signal Trigger', message: 'Short entry signal (triangle) detected.' },
+];
 
 export const MacdLiquidityTrackerSystem = {
   calculate,
@@ -228,4 +254,5 @@ export const MacdLiquidityTrackerSystem = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -13,7 +13,10 @@
  * Pine details kept: the mitigation loop is `for element in array` with removals inside, so the element after a
  * removed one is skipped on that bar. The average line ends 1 ms after its start in Pine (x in bar time): the port
  * gives it the time of the next bar, where the line is drawn. Blocks that do not exist leave their box and line
- * without coordinates: they are not in the output. The 4 alert conditions have no output.
+ * without coordinates: they are not in the output.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish OB Formed' / 'Bearish OB Formed' on the bar that finds
+ * a block (the bar of the pivot + `length`), 'Bullish OB Mitigated' / 'Bearish OB Mitigated' on a bar that removes
+ * at least one block of that side.
  *
  * Reference: "Order Block Detector [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -24,6 +27,7 @@ import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotCon
 import { executeScript, indicator as declareIndicator, box, line } from 'oakscriptjs/script';
 import type { BoxData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface OrderBlockDetectorInputs {
   /** Volume Pivot Length */
@@ -125,7 +129,7 @@ function removeMitigated(blocks: Blocks, target: number, bull: boolean): boolean
 export function calculate(
   bars: Bar[],
   inputs: Partial<OrderBlockDetectorInputs> = {},
-): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { length } = cfg;
   const n = bars.length;
@@ -146,6 +150,8 @@ export function calculate(
   const interval = barInterval(bars);
   const bullOb = new Array<number>(n).fill(NaN);
   const bearOb = new Array<number>(n).fill(NaN);
+  const mitigatedBull = new Array<boolean>(n).fill(false);
+  const mitigatedBear = new Array<boolean>(n).fill(false);
 
   const run = executeScript(() => {
     declareIndicator(metadata.title, { overlay: true, max_boxes_count: 500, max_labels_count: 500, max_lines_count: 500 });
@@ -191,8 +197,8 @@ export function calculate(
         bearOb[i] = back.high;
       }
 
-      removeMitigated(bull, targetBull[i], true);
-      removeMitigated(bear, targetBear[i], false);
+      mitigatedBull[i] = removeMitigated(bull, targetBull[i], true);
+      mitigatedBear[i] = removeMitigated(bear, targetBear[i], false);
     }
 
     // barstate.islast: the newest blocks get a box and an average line
@@ -221,7 +227,20 @@ export function calculate(
     plots: { plot0: shifted(bullOb, cfg.bullCss), plot1: shifted(bearOb, cfg.bearCss) },
     lines: run.result.lines ?? [],
     boxes: run.result.boxes ?? [],
+    // alertcondition(bull_ob / bear_ob (a price: na and 0 are false), mitigated_bull / mitigated_bear)
+    alerts: alertStates(alertConditions, bars, [
+      bullOb.map((v) => !Number.isNaN(v) && v !== 0), bearOb.map((v) => !Number.isNaN(v) && v !== 0),
+      mitigatedBull, mitigatedBear,
+    ]),
   };
 }
 
-export const OrderBlockDetector = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish OB Formed', message: 'Bullish order block detected' },
+  { id: 'alert1', title: 'Bearish OB Formed', message: 'bearish order block detected' },
+  { id: 'alert2', title: 'Bullish OB Mitigated', message: 'Bullish order block mitigated' },
+  { id: 'alert3', title: 'Bearish OB Mitigated', message: 'bearish order block mitigated' },
+];
+
+export const OrderBlockDetector = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

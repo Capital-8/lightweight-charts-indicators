@@ -17,6 +17,7 @@
  * - Candles, bar colour and background are red in a sell trade, green in a buy trade, dark grey otherwise.
  * - A table on the last bar counts the winning and losing trades and the profit for the given risk per trade.
  * At most 500 lines and 500 labels are kept.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY' and 'Sell', true on the bars on which a buy / sell trade opens.
  *
  * The inputs "Line Style" and the two colours after it are not used by the original script.
  *
@@ -37,6 +38,7 @@ import type {
 import { barInterval, barTime } from '../bar-time';
 import { periodStarts } from '../anchor-period';
 import { mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RangesWithTargetsInputs {
   filter: boolean;
@@ -138,14 +140,14 @@ export function calculate(
   barColors: BarColorData[];
   bgColors: BgColorData[];
   plotCandles: Record<string, PlotCandleData[]>;
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const MINTICK = mintickOf(chart);
   const slOnClose = cfg.slType === 'Close';
   const meta = { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay };
   if (n === 0) {
-    return { metadata: meta, plots: {}, lines: [], labels: [], linefills: [], tables: [], barColors: [], bgColors: [], plotCandles: { candles: [] } };
+    return { metadata: meta, plots: {}, lines: [], labels: [], linefills: [], tables: [], barColors: [], bgColors: [], plotCandles: { candles: [] }, alerts: alertStates(alertConditions, bars, []) };
   }
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
 
@@ -232,6 +234,8 @@ export function calculate(
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
   const candles: PlotCandleData[] = [];
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -270,6 +274,8 @@ export function calculate(
     const long = buy && !tradeIsOn;
     const short = sell && !tradeIsOn;
     const tradeFire = long || short;
+    longFlags.push(long);
+    shortFlags.push(short);
     if (long && !tradeIsOn) {
       longTrade = true;
       shortTrade = false;
@@ -381,8 +387,16 @@ export function calculate(
     barColors,
     bgColors,
     plotCandles: { candles },
+    // alertcondition(Long, "BUY") / alertcondition(Short, "Sell")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Sell', message: 'Alert Fired!' },
+];
 
 export const RangesWithTargets = {
   calculate,
@@ -390,4 +404,5 @@ export const RangesWithTargets = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

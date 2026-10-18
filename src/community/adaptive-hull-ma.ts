@@ -9,12 +9,19 @@
  *   - Strong trend + inactive charger = light color
  *   - Consolidation (|slope| < flat threshold) = yellow
  * Also plots a faster minor HMA+ with the same adaptive logic.
+ * Characters (plotchar, absolute prices): buy / sell (first bar of a strong slope with the charger on), fast exits
+ * (strong slope, charger off, close on the wrong side of the minor HMA+) and warnings (high / low beyond the outer
+ * distance zone). Alerts (alert() calls, `alertCalls` of the result, once per bar close): one per signal, as the
+ * original's alert() calls.
  *
  * Reference: "72s: Adaptive Hull Moving Average+" by io72signals
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BgColorData } from '../types';
+import { ta, Series, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import type { AlertCall, MarkerData, BgColorData } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface AdaptiveHullMAInputs {
   charger: string;
@@ -129,7 +136,10 @@ function hmaAt(arr: number[], endIdx: number, length: number): number {
   return num / den;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<AdaptiveHullMAInputs> = {}): Omit<IndicatorResult, 'markers'> {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<AdaptiveHullMAInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; alertCalls: AlertCall[] } {
   const { charger, minLength, maxLength, flat, showMinor, minorMin, minorMax, showZone, mult, showSignals, useBg } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const adaptPct = 0.03141;
@@ -179,9 +189,12 @@ export function calculate(bars: Bar[], inputs: Partial<AdaptiveHullMAInputs> = {
   // Compute adaptive HMA values bar-by-bar
   const dynamicHMA: number[] = new Array(n);
   const minorHMA: number[] = new Array(n);
+  // minorHMA = xhma(src, int(minorLength)): computed for the exits even when the minor line is hidden
+  const minorFull: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
     dynamicHMA[i] = hmaAt(closeArr, i, dynamicLengths[i]);
-    minorHMA[i] = showMinor ? hmaAt(closeArr, i, minorLengths[i]) : NaN;
+    minorFull[i] = hmaAt(closeArr, i, minorLengths[i]);
+    minorHMA[i] = showMinor ? minorFull[i] : NaN;
   }
 
   // Slope calculation
@@ -269,54 +282,55 @@ export function calculate(bars: Bar[], inputs: Partial<AdaptiveHullMAInputs> = {
     return { time: bars[i].time, value: v - (mult / 2) * atr40[i] };
   });
 
-  // Markers: buy/sell signals, fast exits, warning signs (from Pine plotchar)
+  // Signals and characters (plotchar, location.absolute, size.tiny) at dynamicHMA -/+ atrPos (atrPos = 0.72 * atr(5))
+  const atr5 = ta.atr(bars, 5).toArray().map((v) => v ?? NaN);
   const markers: MarkerData[] = [];
-  for (let i = warmup + 1; i < n; i++) {
-    const slope = dynSlopes[i];
-    const prevSlope = dynSlopes[i - 1];
+  const alertCalls: AlertCall[] = [];
+  const GREEN = '#4CAF50'; // color.green (v4)
+  const RED = '#FF5252'; // color.red (v4)
+  const ORANGE = '#FF9800'; // color.orange (v4)
+  const char = (i: number, id: string, price: number, ch: string, col: string) => {
+    if (!isNaN(price)) markers.push({ id, time: bars[i].time, position: 'atPriceMiddle', price, shape: 'circle', char: ch, color: col, size: 'tiny' });
+  };
+  // Slopes of the warm-up bars are 0 here (na in the original): both compare false with +-flat (flat >= 1)
+  const upSig = (i: number) => dynSlopes[i] >= flat && plugged[i];
+  const dnSig = (i: number) => dynSlopes[i] <= -flat && plugged[i];
+  const upExitAt = (i: number) => dynSlopes[i] >= flat && !plugged[i] && bars[i].close < minorFull[i];
+  const dnExitAt = (i: number) => dynSlopes[i] <= -flat && !plugged[i] && bars[i].close > minorFull[i];
+  const topTL = (i: number) => dynamicHMA[i] + (mult * 2) * atr40[i];
+  const botTL = (i: number) => dynamicHMA[i] - (mult * 2) * atr40[i];
+  const topWarnAt = (i: number) => bars[i].high > topTL(i);
+  const botWarnAt = (i: number) => bars[i].low < botTL(i);
+  for (let i = 0; i < n; i++) {
+    const close = bars[i].close;
+    const atrPos = 0.72 * atr5[i];
+    // buy = _upSig and not _upSig[1]; sell = _dnSig and not _dnSig[1]
+    const buy = upSig(i) && !(i > 0 && upSig(i - 1));
+    const sell = dnSig(i) && !(i > 0 && dnSig(i - 1));
+    const upExit = upExitAt(i);
+    const dnExit = dnExitAt(i);
+    const fastExits = (upExit && !(i > 0 && upExitAt(i - 1))) || (dnExit && !(i > 0 && dnExitAt(i - 1)));
+    const topWarn = topWarnAt(i);
+    const botWarn = botWarnAt(i);
+    const warningSigns = (topWarn && !(i > 0 && topWarnAt(i - 1))) || (botWarn && !(i > 0 && botWarnAt(i - 1)));
 
-    // Buy: slope >= flat and plugged, first bar of condition
-    const upSig = slope >= flat && plugged[i];
-    const prevUpSig = prevSlope >= flat && plugged[i - 1];
-    if (showSignals && upSig && !prevUpSig) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#00FF00', text: 'BUY' });
+    if (showSignals && buy) char(i, 'char0', dynamicHMA[i] - atrPos, '⬆', GREEN);
+    if (showSignals && sell) char(i, 'char1', dynamicHMA[i] + atrPos, '⬇', RED);
+    // _upExit ? minorHMA + atrPos : _dnExit ? minorHMA - atrPos : na; color = _upExit ? green : red
+    if (showSignals && fastExits) {
+      char(i, 'char2', upExit ? minorFull[i] + atrPos : minorFull[i] - atrPos, 'ⓧ', upExit ? GREEN : RED);
     }
+    // _topWarn ? high + atrPos : _botWarn ? low - atrPos : na
+    if (showSignals && warningSigns) char(i, 'char3', topWarn ? bars[i].high + atrPos : bars[i].low - atrPos, '⚠', ORANGE);
 
-    // Sell: slope <= -flat and plugged, first bar of condition
-    const dnSig = slope <= -flat && plugged[i];
-    const prevDnSig = prevSlope <= -flat && plugged[i - 1];
-    if (showSignals && dnSig && !prevDnSig) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#FF0000', text: 'SELL' });
-    }
-
-    // Fast exits (minor HMA based)
-    if (showSignals && showMinor && !isNaN(minorHMA[i])) {
-      const _upExit = slope >= flat && !plugged[i] && bars[i].close < minorHMA[i];
-      const prevUpExit = prevSlope >= flat && !plugged[i - 1] && bars[i - 1].close < minorHMA[i - 1];
-      const _dnExit = slope <= -flat && !plugged[i] && bars[i].close > minorHMA[i];
-      const prevDnExit = prevSlope <= -flat && !plugged[i - 1] && bars[i - 1].close > minorHMA[i - 1];
-      if ((_upExit && !prevUpExit) || (_dnExit && !prevDnExit)) {
-        const exitColor = _upExit ? '#00FF00' : '#FF0000';
-        markers.push({ time: bars[i].time, position: 'inBar', shape: 'xcross', color: exitColor, text: 'Exit' });
-      }
-    }
-
-    // Warning signs: price crossed outer distance zone (Pine: plotchar "⚠")
-    if (showSignals && !isNaN(atr40[i]) && !isNaN(dynamicHMA[i])) {
-      const topZone = dynamicHMA[i] + (mult * 2) * atr40[i];
-      const botZone = dynamicHMA[i] - (mult * 2) * atr40[i];
-      const _topWarn = bars[i].high > topZone;
-      const _botWarn = bars[i].low < botZone;
-      const prevTopZone = !isNaN(dynamicHMA[i - 1]) && !isNaN(atr40[i - 1])
-        ? dynamicHMA[i - 1] + (mult * 2) * atr40[i - 1] : NaN;
-      const prevBotZone = !isNaN(dynamicHMA[i - 1]) && !isNaN(atr40[i - 1])
-        ? dynamicHMA[i - 1] - (mult * 2) * atr40[i - 1] : NaN;
-      const prevTopWarn = !isNaN(prevTopZone) && bars[i - 1].high > prevTopZone;
-      const prevBotWarn = !isNaN(prevBotZone) && bars[i - 1].low < prevBotZone;
-      if ((_topWarn && !prevTopWarn) || (_botWarn && !prevBotWarn)) {
-        markers.push({ time: bars[i].time, position: _topWarn ? 'aboveBar' : 'belowBar', shape: 'diamond', color: '#FFA500', text: 'Warn' });
-      }
-    }
+    // alert(..., alert.freq_once_per_bar_close)
+    const call = (message: string) => alertCalls.push({ time: bars[i].time, message, freq: 'once_per_bar_close' });
+    if (buy) call('Possible Buy Signal at' + str.tostring(close));
+    if (sell) call('Possible Sell Signal at' + str.tostring(close));
+    if (fastExits && upExit) call('Price has just crossed down minor xHMA+ at' + str.tostring(close));
+    if (fastExits && dnExit) call('Price has just crossed up minor xHMA+ at' + str.tostring(close));
+    if (warningSigns && topWarn) call('Price has just crossed above top xHMA+ zone');
+    if (warningSigns && botWarn) call('Price has just crossed below bottom xHMA+ zone');
   }
 
   // Background colors: consolidation/low volatility shading (from Pine bgcolor)
@@ -334,7 +348,7 @@ export function calculate(bars: Bar[], inputs: Partial<AdaptiveHullMAInputs> = {
     }
   }
 
-  // Fill between stop zone lines (Pine: fill(sutl, sltl, color=purple, transp=90))
+  // Fill between stop zone lines (fill(sutl, sltl, color = colZone, transp = 90); colZone transparent without the zone)
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -343,12 +357,14 @@ export function calculate(bars: Bar[], inputs: Partial<AdaptiveHullMAInputs> = {
       'topTL': topTLPlot, 'botTL': botTLPlot,
       'stopupperTL': stopupperTLPlot, 'stoplowerTL': stoplowerTLPlot,
     },
-    fills: showZone
-      ? [{ plot1: 'stopupperTL', plot2: 'stoplowerTL', options: { color: 'rgba(128,0,128,0.10)' } }]
-      : [],
+    fills: [{
+      plot1: 'stopupperTL', plot2: 'stoplowerTL',
+      options: { title: 'Plots Background', color: showZone ? 'rgba(128,0,128,0.10)' : 'rgba(255,255,255,0)' },
+    }],
     markers,
     bgColors,
-  } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] };
+    alertCalls,
+  };
 }
 
-export const AdaptiveHullMA = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const AdaptiveHullMA = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

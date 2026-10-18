@@ -6,6 +6,8 @@
  * (sell) signal needs a bullish (bearish) engulfing candle or a strong body (body > 1.2 * average body), a close
  * above the upper (below the lower) band and a rising cycle power; after a signal, no new signal for the cooldown
  * bars. Signals draw BUY / SELL labels and a background colour.
+ * Alerts (alertcondition, `alerts` of the result): 'Cycle Breakout BUY' / 'Cycle Breakout SELL', true on the bars of
+ * the buy / sell signals (also with the signals hidden).
  *
  * Reference: "Cycle-Synced Channel Breakout-v1" by TradeTechanalysis
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CycleSyncedChannelBreakoutInputs {
   /** Keltner length (EMA and ATR) */
@@ -74,7 +77,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<CycleSyncedChannelBreakoutInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -104,6 +107,7 @@ export function calculate(
   const bullBg = String(color.new(color.green, 85));
   const bearBg = String(color.new(color.red, 85));
   let lastSignalBar = NaN; // var int lastSignalBar = na
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const p = i > 0 ? bars[i - 1] : undefined;
@@ -120,6 +124,8 @@ export function calculate(
     const bullFinal = bullRaw && cooldownOK;
     const bearFinal = bearRaw && cooldownOK;
     if (bullFinal || bearFinal) lastSignalBar = i;
+    buyFlags.push(bullFinal);
+    sellFlags.push(bearFinal);
 
     // plotshape(showEngulfing and bullEngulf, "Bull Engulf", location.belowbar, color.green, shape.triangleup, size.tiny)
     if (cfg.showEngulfing && bullEngulf) {
@@ -152,8 +158,16 @@ export function calculate(
     },
     markers,
     bgColors,
+    // alertcondition(bullFinal, "Cycle Breakout BUY") / alertcondition(bearFinal, "Cycle Breakout SELL")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cycle Breakout BUY', message: 'Cycle-Synced Channel Breakout: BUY' },
+  { id: 'alert1', title: 'Cycle Breakout SELL', message: 'Cycle-Synced Channel Breakout: SELL' },
+];
 
 export const CycleSyncedChannelBreakout = {
   calculate,
@@ -161,4 +175,5 @@ export const CycleSyncedChannelBreakout = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

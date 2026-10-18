@@ -33,8 +33,11 @@
  * thrown.
  *
  * Chart values read: the chart foreground colour (channel box, mid line, texts, breakout label texts, gauge pointer,
- * table). Without a chart context it is the dark theme colour #DBDBDB. A gauge pointer without a value (na) is not drawn and is left out. The 3 alert conditions of the
- * script have no output.
+ * table). Without a chart context it is the dark theme colour #DBDBDB. A gauge pointer without a value (na) is not
+ * drawn and is left out.
+ *
+ * Alerts (alertcondition, `alerts` of the result): 'New Channel Formation' on the bars where a channel is made,
+ * 'Bullish Breakout' / 'Bearish Breakout' on the bars where a channel is broken above / below.
  *
  * Chart timeframe: `timeframe` of the chart context (optional third argument of calculate) when given; without it
  * the chart timeframe is read from the bar spacing (the most frequent gap between two bars).
@@ -52,6 +55,7 @@ import type { BoxData, LabelData, LineDrawingData, MarkerData, PineSize, PlotCan
 import { chartTimeframe } from '../anchor-period';
 import { foregroundColorOf, type ChartContext } from '../chart-context';
 import { upDownVolumeOfChartBars } from '../lower-tf-volume';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SmartMoneyBreakoutChannelsInputs {
   /** Nested Channels: several channels can run at the same time */
@@ -163,7 +167,7 @@ export function calculate(
     boxes: BoxData[];
     labels: LabelData[];
     tables: TableData[];
-  } {
+  } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { overlap, strong, length, volMode } = cfg;
   // chart.fg_color
@@ -228,6 +232,8 @@ export function calculate(
   const tables: TableData[] = [];
   let hvold = NaN;
   let lvold = NaN;
+  // newChannelFormed / bullishBreakout / bearishBreakout of each bar
+  const flags: boolean[][] = [new Array(n).fill(false), new Array(n).fill(false), new Array(n).fill(false)];
 
   try {
     for (let i = 0; i < n; i++) {
@@ -263,6 +269,7 @@ export function calculate(
           bandBoxes.add(boxesU[0]).add(boxesL[0]);
           const centerY = (h + l) / 2;
           centerLines.unshift(line.new(left, centerY, i, centerY, 'bar_index', 'none', fg50, 'dashed', 1));
+          flags[0][i] = true;
         }
       }
 
@@ -276,6 +283,7 @@ export function calculate(
         if (isUp || gt(bottom, price)) {
           if (isUp) upbreak = bottom;
           else downbreak = top;
+          flags[isUp ? 1 : 2][i] = true;
           boxes.splice(k, 1);
           boxesU.splice(k, 1);
           boxesL.splice(k, 1);
@@ -417,7 +425,15 @@ export function calculate(
     boxes: boxOut,
     labels,
     tables,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const SmartMoneyBreakoutChannels = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New Channel Formation', message: 'A new breakout channel has been formed' },
+  { id: 'alert1', title: 'Bullish Breakout', message: 'Price has broken out above the channel (bullish signal)' },
+  { id: 'alert2', title: 'Bearish Breakout', message: 'Price has broken out below the channel (bearish signal)' },
+];
+
+export const SmartMoneyBreakoutChannels = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

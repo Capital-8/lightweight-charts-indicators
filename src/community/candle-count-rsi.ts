@@ -226,7 +226,7 @@ export function calculate(
     return histNeutral;
   });
 
-  // Backgrounds, in the order of the Pine bgcolor calls (a later call is drawn on top)
+  // Backgrounds, in the order of the Pine bgcolor calls (a later call is drawn on top); id bgcolor<k> = k-th call
   const bgColors: BgColorData[] = [];
   const glowOn = cfg.masterGlowToggle && cfg.showGlow;
   const divOn = cfg.masterGlowToggle && cfg.showDivBG;
@@ -252,9 +252,10 @@ export function calculate(
       [divOn && cfg.showDivChart && bullDiv, divBull, true],
       [divOn && cfg.showDivChart && bearDiv, divBear, true],
     ];
-    for (const [on, col, overlay] of layers) {
-      if (on && col !== null) bgColors.push(overlay ? { time, color: col, forceOverlay: true } : { time, color: col });
-    }
+    layers.forEach(([on, col, overlay], k) => {
+      const id = `bgcolor${k}`;
+      if (on && col !== null) bgColors.push(overlay ? { id, time, color: col, forceOverlay: true } : { id, time, color: col });
+    });
   }
 
   const hist = cfg.showDirectionHistogram;

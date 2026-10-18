@@ -23,8 +23,11 @@
  * TK = KJ test; fallback 0.01) and `chart.foregroundColor` (label, box and panel texts; fallback the dark theme
  * colour).
  *
- * Limits of the port: the 22 alert conditions give no output (the S/R retest / contact and median crossing state
- * that only feeds them is not computed). The Chikou line width and the S/R line width come from inputs: the plot
+ * Alerts: the original's 22 alert conditions (signals, S/R zone flip / retest / breaks / median crossing, TK-Range
+ * breakouts and median crossing, swings, waves, price targets reached, Kihon / Taito time windows, time x price
+ * confluence, panel consensus change), each computed per bar as the original does.
+ *
+ * Limits of the port: the Chikou line width and the S/R line width come from inputs: the plot
  * width of the fixed Chikou plot is the default 1.
  *
  * Reference: "Ichimoku Kinko Hyo (一目均衡表)" by RickSimpson
@@ -38,6 +41,7 @@ import {
   type Box, type Label, type Line, type Table, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
 
 type SourceName = 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'hlcc4' | 'ohlc4' | 'volume';
@@ -633,6 +637,9 @@ interface SrZone {
   leftX: number;
   firstTouched: boolean;
   broken: boolean;
+  /** Retest confirmed on the bar before (price in contact with the zone) */
+  inContact: boolean;
+  medianBroken: boolean;
 }
 
 interface TkrZone {
@@ -677,11 +684,36 @@ const KIHON_MODE: Record<IchimokuKinkHyInputs['kihonAnchor'], string> = {
   'Wave Completion': 'Wave',
 };
 
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Signal: Bullish Reversal ▲', message: 'SIGNAL: Bullish Reversal — All Ichimoku filters aligned ▲ — {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert1', title: 'Signal: Bearish Reversal ▼', message: 'SIGNAL: Bearish Reversal — All Ichimoku filters aligned ▼ — {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert2', title: 'S/R: Zone Flipped (S↔R)', message: 'Ichimoku: S/R zone flipped type (Support ↔ Resistance) - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert3', title: 'S/R: Zone Retested', message: 'Ichimoku: S/R zone retested (price rejected at level) - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert4', title: 'S/R: Resistance Broken ↑', message: 'Ichimoku: Resistance broken upward (bullish breakout) - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert5', title: 'S/R: Support Broken ↓', message: 'Ichimoku: Support broken downward (bearish breakdown) - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert6', title: 'S/R: Median (Equilibrium) Crossed', message: 'Ichimoku: S/R equilibrium (median) crossed — Hosoda balance point breached - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert7', title: 'TK-Range: Bullish Breakout ↑', message: 'TK-RANGE BREAKOUT: Price broke ABOVE TK/KJ consolidation zone - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert8', title: 'TK-Range: Bearish Breakdown ↓', message: 'TK-RANGE BREAKDOWN: Price broke BELOW TK/KJ consolidation zone - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert9', title: 'TK-Range: Median (Equilibrium) Crossed', message: 'TK-RANGE MEDIAN: Equilibrium crossed within extended consolidation zone - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert10', title: 'Swing: High Detected', message: 'SWING HIGH detected - Structural pivot confirmed - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert11', title: 'Swing: Low Detected', message: 'SWING LOW detected - Structural pivot confirmed - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert12', title: 'Wave: Bullish Pattern Detected', message: 'WAVE THEORY: Bullish wave pattern completed (I/V/N/P/Y/W) - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert13', title: 'Wave: Bearish Pattern Detected', message: 'WAVE THEORY: Bearish wave pattern completed (I/V/N/P/Y/W) - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert14', title: 'Price Target: Bullish Target Reached ↑', message: 'PRICE THEORY: Bullish N-wave target reached (V/N/E/NT/2E/3E) - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert15', title: 'Price Target: Bearish Target Reached ↓', message: 'PRICE THEORY: Bearish N-wave target reached (V/N/E/NT/2E/3E) - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert16', title: 'Kihon: Time Cycle Window', message: 'KIHON SŪCHI: Time cycle window active (±1 bar) - Potential reversal timing - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert17', title: 'Taito: Time Symmetry Window', message: 'TAITO SŪCHI: Time symmetry projection reached (±1 bar) - Duration echo detected - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert18', title: 'TxP: Time Window with Active Targets', message: 'TIME x PRICE: Kihon/Taito window active with unreached price targets — watch for confluence - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert19', title: 'TxP: Bullish Confluence CONFIRMED ◆', message: 'TIME x PRICE CONFLUENCE CONFIRMED ◆ — Bullish target reached during time cycle window - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert20', title: 'TxP: Bearish Confluence CONFIRMED ◆', message: 'TIME x PRICE CONFLUENCE CONFIRMED ◆ — Bearish target reached during time cycle window - {{ticker}} {{interval}} @ {{close}}' },
+  { id: 'alert21', title: 'Panel: Consensus Direction Changed', message: 'PANEL: CONSENSUS DIRECTION CHANGED - Check panel for new bias - {{ticker}} {{interval}} @ {{close}}' },
+];
+
 export function calculate(
   bars: Bar[],
   inputs: Partial<IchimokuKinkHyInputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const mintick = mintickOf(chart);
@@ -1172,7 +1204,9 @@ export function calculate(
       bot = b.low;
     }
     const zc = isRes ? bearEv : bullEv;
-    const z: SrZone = { isRes, frozen: false, level, top, bot, leftX: i, firstTouched: false, broken: false };
+    const z: SrZone = {
+      isRes, frozen: false, level, top, bot, leftX: i, firstTouched: false, broken: false, inContact: false, medianBroken: false,
+    };
     if (lineMode) z.line = line.new(i, level, i, level, 'bar_index', undefined, zc, 'solid', cfg.srZoneWidth);
     if (zoneMode) {
       z.box = box.new(i, top, i, bot, zc, cfg.srZoneWidth, undefined, undefined, 'bar_index', cnew(zc, 100), undefined, undefined, WHITE);
@@ -1184,7 +1218,17 @@ export function calculate(
     }
     srZones.push(z);
   };
-  const updateSrZones = (i: number) => {
+  /**
+   * update_sr_zones(): the zones on bar i; gives the original's flags [resistance broken up, support broken down,
+   * median crossed up, median crossed down, zone flipped, zone retested]
+   */
+  const updateSrZones = (i: number): boolean[] => {
+    let resBrokenUp = false;
+    let supBrokenDown = false;
+    let medCrossedUp = false;
+    let medCrossedDown = false;
+    let zoneFlipped = false;
+    let zoneRetested = false;
     const c = close[i];
     const c1 = i > 0 ? close[i - 1] : NaN;
     const frozenOffset = atrSlow[i] * 0.5;
@@ -1196,22 +1240,46 @@ export function calculate(
       const wasFrozen = z.frozen;
       let level = z.level;
       const { top, bot, leftX } = z;
-      const wasTouched = z.firstTouched;
+      const wasContact = z.inContact;
+      let wasTouched = z.firstTouched;
       const wasBroken = z.broken;
+      const wasMedBroken = z.medianBroken;
       let zoneColor = isRes ? bearEv : bullEv;
       const fresh = i === leftX;
       let justBroke = false;
       let justFlipped = false;
-      // STEP 1: breakout (a zone born beyond the price is reconciled silently)
+      // STEP 1: breakout (a zone born beyond the price is reconciled silently: no alert)
       if (!fresh && !wasBroken) {
+        let brokeUp = false;
+        let isCatchup = false;
         if (byLevel) {
-          if ((isRes && gt(c, level) && le(c1, level)) || (!isRes && lt(c, level) && ge(c1, level))) justBroke = true;
-        } else if ((isRes && gt(c, top) && le(c1, top)) || (!isRes && lt(c, bot) && ge(c1, bot))) justBroke = true;
+          if (isRes && gt(c, level) && le(c1, level)) {
+            justBroke = true;
+            brokeUp = true;
+          } else if (!isRes && lt(c, level) && ge(c1, level)) justBroke = true;
+        } else if (isRes && gt(c, top) && le(c1, top)) {
+          justBroke = true;
+          brokeUp = true;
+        } else if (!isRes && lt(c, bot) && ge(c1, bot)) justBroke = true;
         if (!justBroke) {
           const beyond = byLevel ? (isRes ? gt(c, level) : lt(c, level)) : (isRes ? gt(c, top) : lt(c, bot));
-          if (beyond) justBroke = true;
+          if (beyond) {
+            justBroke = true;
+            brokeUp = isRes;
+            isCatchup = true;
+          }
         }
         if (justBroke) {
+          if (!isCatchup) {
+            if (brokeUp) resBrokenUp = true;
+            else supBrokenDown = true;
+            // In Zone + Median the breakout is the median crossing
+            if (zoneMode && medianPlacement) {
+              if (brokeUp) medCrossedUp = true;
+              else medCrossedDown = true;
+              z.medianBroken = true;
+            }
+          }
           if (cfg.srFlipEnabled) {
             z.isRes = !isRes;
             isRes = !isRes;
@@ -1225,8 +1293,11 @@ export function calculate(
             }
             zoneColor = isRes ? bearEv : bullEv;
             justFlipped = true;
+            zoneFlipped = true;
             z.frozen = false;
             z.firstTouched = false;
+            z.medianBroken = false;
+            z.inContact = true;
             if (z.label) {
               label.set_text(z.label, srText(z.isRes, level));
               label.set_textcolor(z.label, zoneColor);
@@ -1237,14 +1308,37 @@ export function calculate(
           }
         }
       }
+      // STEP 2: retest (wick touches the level / entry lip, close rejects), only without a break
+      let retest = false;
+      if (!justBroke && !fresh && !wasBroken) {
+        retest = byLevel
+          ? (isRes ? ge(high[i], level) && lt(c, level) : le(low[i], level) && gt(c, level))
+          : (isRes ? ge(high[i], bot) && lt(c, bot) : le(low[i], top) && gt(c, top));
+      }
       // STEP 3: first touch (wick reaches the zone)
       let justTouched = false;
       if (!fresh && !wasBroken && !wasTouched) {
         justTouched = byLevel ? (isRes ? ge(high[i], level) : le(low[i], level)) : (isRes ? ge(high[i], bot) : le(low[i], top));
       }
-      if (justTouched) z.firstTouched = true;
+      if (justTouched) {
+        z.firstTouched = true;
+        wasTouched = true;
+      }
       // Freeze on first touch (Extend OFF only)
       if (!cfg.srExtend && justTouched) z.frozen = true;
+      if (wasTouched && retest && !wasContact && !z.frozen && !justTouched) zoneRetested = true;
+      z.inContact = retest;
+      // STEP 4: median crossing (Zone layout)
+      if (zoneMode && !fresh && !wasBroken && !wasMedBroken && !justBroke) {
+        const my = (top + bot) / 2;
+        if (gt(c, my) && le(c1, my)) {
+          medCrossedUp = true;
+          z.medianBroken = true;
+        } else if (lt(c, my) && ge(c1, my)) {
+          medCrossedDown = true;
+          z.medianBroken = true;
+        }
+      }
       const nowFrozen = z.frozen;
       const shouldExtend = !nowFrozen || justFlipped || justTouched;
       if (z.line) {
@@ -1287,6 +1381,7 @@ export function calculate(
         }
       }
     }
+    return [resBrokenUp, supBrokenDown, medCrossedUp, medCrossedDown, zoneFlipped, zoneRetested];
   };
 
   const waveColor = (tag: string) => {
@@ -1338,6 +1433,13 @@ export function calculate(
     + 20;
   const maxChikouLines = Math.max(50, 500 - reservedLines);
 
+  // Alert flags per bar, in the original's declaration order (alert0 .. alert21)
+  const af: boolean[][] = alertConditions.map(() => new Array<boolean>(n).fill(false));
+  // TK-Range state of the bar before: consecutive bars inside, top and bottom of the TK / KJ band
+  let tkrConsecPrev = 0;
+  let tkrTopPrev = NaN;
+  let tkrBotPrev = NaN;
+
   for (let i = 0; i < n; i++) {
     const isLast = i === n - 1;
     setDrawingBar(i, isLast);
@@ -1346,6 +1448,12 @@ export function calculate(
     const kj = kijun[i];
 
     // ═══ § 9. TK-Range ═══
+    // tkr_inside / tkr_top / tkr_bot are series of every bar (the breakout alerts read them)
+    const tkrHave = !isNaN(tk) && !isNaN(kj);
+    const tkrTopNow = tkrHave ? Math.max(tk, kj) : NaN;
+    const tkrBotNow = tkrHave ? Math.min(tk, kj) : NaN;
+    const tkrInsideNow = tkrHave && ge(Math.abs(tk - kj), atr14[i] * 0.10) && ge(c, tkrBotNow - mintick * 0.5)
+      && le(c, tkrTopNow + mintick * 0.5);
     if (cfg.tkrEnabled) {
       const haveLines = !isNaN(tk) && !isNaN(kj);
       const top = haveLines ? Math.max(tk, kj) : NaN;
@@ -1461,13 +1569,43 @@ export function calculate(
         tkrMerge(i, atr14[i]);
       }
     }
+    // TK-Range breakout and median crossing alerts
+    {
+      const wasInside = tkrConsecPrev >= cfg.tkrMinBars;
+      af[7][i] = wasInside && !tkrInsideNow && gt(c, tkrTopPrev);
+      af[8][i] = wasInside && !tkrInsideNow && lt(c, tkrBotPrev);
+      let medUp = false;
+      let medDown = false;
+      if (cfg.tkrEnabled && cfg.tkrExtend && cfg.tkrShowMedian) {
+        const c1 = i > 0 ? close[i - 1] : NaN;
+        for (const z of tkrZones) {
+          if (z.active) continue;
+          const mid = (z.top + z.bot) / 2;
+          if (ge(c, z.bot) && le(c, z.top)) {
+            if (gt(c, mid) && le(c1, mid)) medUp = true;
+            if (lt(c, mid) && ge(c1, mid)) medDown = true;
+          }
+        }
+      }
+      af[9][i] = cfg.tkrExtend && (medUp || medDown);
+      tkrConsecPrev = tkrConsec;
+      tkrTopPrev = tkrTopNow;
+      tkrBotPrev = tkrBotNow;
+    }
 
     // ═══ § 10. Support & resistance ═══
     if (cfg.srEnabled) {
       if (flipBull[i]) createSrZone(i, false);
       if (flipBear[i]) createSrZone(i, true);
     }
-    updateSrZones(i);
+    const srFlags = updateSrZones(i);
+    af[0][i] = flipBull[i];
+    af[1][i] = flipBear[i];
+    af[2][i] = srFlags[4];
+    af[3][i] = srFlags[5];
+    af[4][i] = srFlags[0];
+    af[5][i] = srFlags[1];
+    af[6][i] = zoneMode && (srFlags[2] || srFlags[3]);
     // ATR distance pruning (radius max zones x 1.5 slow ATR)
     const srMaxDist = atrSlow[i] * (cfg.srMaxZones * 1.5);
     if (cfg.srEnabled && srZones.length > 0 && !isNaN(srMaxDist) && gt(srMaxDist, 0)) {
@@ -1580,6 +1718,8 @@ export function calculate(
     // ═══ § 13. Swing detection ═══
     const ph = swingPh[i];
     const pl = swingPl[i];
+    af[10][i] = cfg.swingEnabled && !isNaN(ph);
+    af[11][i] = cfg.swingEnabled && !isNaN(pl);
     if (cfg.swingEnabled) {
       const swingBar = i - swingLen;
       // Consecutive pivots of one side: keep the highest high / lowest low
@@ -1882,10 +2022,22 @@ export function calculate(
       });
       ptAlertBias = waveDir;
     }
+    af[12][i] = waveCompleted && waveDir === 1;
+    af[13][i] = waveCompleted && waveDir === -1;
     if (ptAlertBias === 1 && !isNaN(ptAlert[0])) {
-      for (let k = 0; k < 6; k++) if (!ptReached[k] && ge(high[i], ptAlert[k])) ptReached[k] = true;
+      for (let k = 0; k < 6; k++) {
+        if (!ptReached[k] && ge(high[i], ptAlert[k])) {
+          ptReached[k] = true;
+          af[14][i] = true;
+        }
+      }
     } else if (ptAlertBias === -1 && !isNaN(ptAlert[0])) {
-      for (let k = 0; k < 6; k++) if (!ptReached[k] && le(low[i], ptAlert[k])) ptReached[k] = true;
+      for (let k = 0; k < 6; k++) {
+        if (!ptReached[k] && le(low[i], ptAlert[k])) {
+          ptReached[k] = true;
+          af[15][i] = true;
+        }
+      }
     }
 
     // Kihon Suchi anchor events
@@ -1983,6 +2135,16 @@ export function calculate(
 
     // ═══ § 16B. Time x price confluence: diamond at a confirmation ═══
     const hits = showPt.map((s, k) => s && ptReached[k] && !reachedBefore[k]);
+    {
+      const timeWindow = kihonWindow || taitoWindow;
+      const hasTargets = !isNaN(ptAlert[0]) && showPt.some((s, k) => s && !ptReached[k]);
+      const confirmed = cfg.txpEnabled && timeWindow && hits.some((h) => h);
+      af[16][i] = kihonWindow;
+      af[17][i] = taitoWindow;
+      af[18][i] = cfg.txpEnabled && timeWindow && hasTargets && !confirmed;
+      af[19][i] = confirmed && ptAlertBias === 1;
+      af[20][i] = confirmed && ptAlertBias === -1;
+    }
     if (cfg.txpEnabled && (kihonWindow || taitoWindow) && hits.some((h) => h)) {
       const confirmedBull = ptAlertBias === 1;
       const names: string[] = [];
@@ -2528,6 +2690,15 @@ export function calculate(
     }
   }
 
+  // Panel consensus direction change (calc_panel_scores() runs on every bar)
+  let prevDir = NaN;
+  for (let i = 0; i < n; i++) {
+    const cons = panelScores(i)[5];
+    const dir = cons > 0 ? 1 : cons < 0 ? -1 : 0;
+    af[21][i] = !isNaN(prevDir) && dir !== prevDir && (dir !== 0 || prevDir !== 0);
+    prevDir = dir;
+  }
+
   const off = effOffset - 1;
   const showFixedChikou = !chikouAdaptive && cfg.showChikou;
   return {
@@ -2543,6 +2714,7 @@ export function calculate(
     markers,
     barColors,
     ...drawingOutputs(bars),
+    alerts: alertStates(alertConditions, bars, af),
   };
 }
 
@@ -2552,4 +2724,5 @@ export const IchimokuKinkHy = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

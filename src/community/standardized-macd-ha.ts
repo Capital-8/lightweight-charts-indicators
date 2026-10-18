@@ -3,12 +3,20 @@
  *
  * Standardizes MACD by dividing by ATR-like range, then converts to Heikin-Ashi
  * candles with double HA transform. Signal line + histogram + OB/OS markers.
+ * Alerts (alertcondition, `alerts` of the result): Overbought / Oversold (HA close crossing its open beyond the
+ * reversion threshold), Midline Crossover / Crossunder (HA close crossing 0), Positive / Negative Heikin-Ashi (the
+ * crosses inside the threshold), MACD Bull / Bear Cross (HA close crossing the signal). alert() calls (`alertCalls`,
+ * once per bar close): on each bar where one of them is true, the message of the first true one in that order.
  *
  * Reference: "Standardized MACD Heikin-Ashi Transformed" by EliCobra
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BarColorData, PlotCandleData } from '../types';
+import type { AlertCall, MarkerData, BarColorData, PlotCandleData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface StandardizedMacdHAInputs {
   src: string;
@@ -52,7 +60,7 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<StandardizedMacdHAInputs> = {}): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]>; markers: MarkerData[]; barColors: BarColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<StandardizedMacdHAInputs> = {}): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]>; markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const { src, fast, slow, signalSrc, signalLength, reversionThreshold } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -228,6 +236,28 @@ export function calculate(bars: Bar[], inputs: Partial<StandardizedMacdHAInputs>
     });
   }
 
+  // alerts.new(...): crossunder(c, o) and h > revt, crossover(c, o) and l < -revt, crossover(c, 0), crossunder(c, 0),
+  // crossunder(c, o) and not h > revt, crossover(c, o) and not l < -revt, crossover(c, signal), crossunder(c, signal)
+  const cUnderO = crossedUnder(ha2Close, ha2Open);
+  const cOverO = crossedOver(ha2Close, ha2Open);
+  const sig = signalArr.map((v) => v ?? NaN);
+  const flags: boolean[][] = [
+    cUnderO.map((x, i) => x && ha2High[i] > reversionThreshold),
+    cOverO.map((x, i) => x && ha2Low[i] < -reversionThreshold),
+    crossedOver(ha2Close, 0),
+    crossedUnder(ha2Close, 0),
+    cUnderO.map((x, i) => x && !(ha2High[i] > reversionThreshold)),
+    cOverO.map((x, i) => x && !(ha2Low[i] < -reversionThreshold)),
+    crossedOver(ha2Close, sig),
+    crossedUnder(ha2Close, sig),
+  ];
+  // a.any().notify(): alert(<message of the first true condition>, alert.freq_once_per_bar_close)
+  const alertCalls: AlertCall[] = [];
+  for (let i = 0; i < n; i++) {
+    const k = flags.findIndex((f) => f[i]);
+    if (k >= 0) alertCalls.push({ time: bars[i].time as number, message: alertConditions[k].message!, freq: 'once_per_bar_close' });
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { signal: signalPlot, histogram: histPlot },
@@ -237,7 +267,21 @@ export function calculate(bars: Bar[], inputs: Partial<StandardizedMacdHAInputs>
     ],
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, flags),
+    alertCalls,
   };
 }
 
-export const StandardizedMacdHA = { calculate, metadata, defaultInputs, inputConfig, plotConfig, plotCandleConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Overbought', message: 'OB Signal' },
+  { id: 'alert1', title: 'Oversold  ', message: 'OS Signal' },
+  { id: 'alert2', title: 'Midline Crossover ', message: 'Bullish Trend' },
+  { id: 'alert3', title: 'Midline Crossunder', message: 'Bearish Trend' },
+  { id: 'alert4', title: 'Positive Heikin-Ashi', message: 'Heikin-Ashi Uptrend  ' },
+  { id: 'alert5', title: 'Negative Heikin-Ashi', message: 'Heikin-Ashi Downtrend' },
+  { id: 'alert6', title: 'MACD Bull Cross', message: 'MACD Bullish Cross' },
+  { id: 'alert7', title: 'MACD Bear Cross', message: 'MACD Bearish Cross' },
+];
+
+export const StandardizedMacdHA = { calculate, metadata, defaultInputs, inputConfig, plotConfig, plotCandleConfig, alertConditions, hasAlertFunction };

@@ -7,12 +7,25 @@
  * slope of the line; six fills fade from the line to the price, markers show the slope reversals, and bars and
  * background can take the trend colour.
  *
+ * Alerts (alertcondition, `alerts` of the result): bullish / bearish / any kernel reversal, source crossing above the
+ * upper / below the lower residual band (the bands as computed, also when they are not shown).
+ *
  * Reference: "Nadaraya-Watson Trend [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Kernel Reversal', message: 'Nadaraya-Watson Trend: BULLISH kernel reversal on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Kernel Reversal', message: 'Nadaraya-Watson Trend: BEARISH kernel reversal on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Any Kernel Reversal', message: 'Nadaraya-Watson Trend: Kernel path direction changed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert3', title: 'Source Cross Above Upper Band', message: 'Nadaraya-Watson Trend: Source crossed above upper residual band on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert4', title: 'Source Cross Below Lower Band', message: 'Nadaraya-Watson Trend: Source crossed below lower residual band on {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 const KERNELS = ['Gaussian', 'Epanechnikov', 'Triangular', 'Quartic', 'Cosine', 'Rational Quadratic'];
 const COLOR_PAIRS: Record<string, [string, string]> = {
@@ -125,7 +138,7 @@ function kernelWeight(dist: number, h: number, ktype: string, rq: number): numbe
 export function calculate(
   bars: Bar[],
   inputs: Partial<NadarayaWatsonTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const lookback = cfg.preset === 'Fast Response' ? 25 : cfg.preset === 'Smooth Trend' ? 100 : cfg.lookback;
   const bandwidth = cfg.preset === 'Fast Response' ? 5 : cfg.preset === 'Smooth Trend' ? 12 : cfg.bandwidth;
@@ -172,6 +185,8 @@ export function calculate(
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
   const fillTransp = [60, 68, 76, 84, 92, 96];
+  const turnedBull: boolean[] = new Array(n).fill(false);
+  const turnedBear: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const cur = nw[i];
@@ -190,6 +205,8 @@ export function calculate(
 
     // turned_bullish: nw[1] < nw[2] and nw > nw[1] (all three not na); turned_bearish the other way
     const valid = !isNaN(cur) && !isNaN(p1) && !isNaN(p2);
+    turnedBull[i] = valid && p1 < p2 && cur > p1;
+    turnedBear[i] = valid && p1 > p2 && cur < p1;
     if (cfg.showMarkers && valid && p1 < p2 && cur > p1) {
       markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: c(bullish, 0), size: 'small' });
     }
@@ -199,6 +216,9 @@ export function calculate(
     if (cfg.showCandles && !isNaN(cur)) barColors.push({ time: t, color: c(trend, cfg.barTrans) });
     if (cfg.showBgcolor && !isNaN(cur)) bgColors.push({ time: t, color: c(trend, cfg.bgTrans) });
   }
+  // band_cross_up = not na(upper) and ta.crossover(src, upper); band_cross_dn the same with lower / crossunder
+  const crossUp = crossedOver(src, upper).map((f, i) => f && !isNaN(upper[i]));
+  const crossDn = crossedUnder(src, lower).map((f, i) => f && !isNaN(lower[i]));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -215,6 +235,7 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [turnedBull, turnedBear, turnedBull.map((f, i) => f || turnedBear[i]), crossUp, crossDn]),
   };
 }
 
@@ -224,4 +245,5 @@ export const NadarayaWatsonTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

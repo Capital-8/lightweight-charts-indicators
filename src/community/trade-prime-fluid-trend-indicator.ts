@@ -6,6 +6,8 @@
  * The centre line is the bull colour in an uptrend, the bear colour in a downtrend; the ribbon shows only the active
  * side (the lower edge in an uptrend, the upper edge in a downtrend), filled to the centre line. A trend flip with a
  * known ATR draws a triangle (and optionally a BUY / SELL label) at the smoothed channel edge.
+ * Alerts (alertcondition, `alerts` of the result): 'TP Fluid Buy' / 'TP Fluid Sell' on the bars of a valid buy / sell
+ * flip (also when the triangles are not shown).
  *
  * Reference: "Trade Prime - Fluid Trend Indicator" by tradeprime01
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TradePrimeFluidTrendIndicatorInputs {
   /** Trading Mode */
@@ -74,7 +77,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TradePrimeFluidTrendIndicatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -177,10 +180,14 @@ export function calculate(
   const showLower = (i: number) => trendArr[i] === 0 && cfg.showChannels;
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
   for (let i = 1; i < n; i++) {
     const t = bars[i].time;
     const validBuy = !isNaN(arrowUp[i]) && trendArr[i] === 0 && trendArr[i - 1] === 1;
     const validSell = !isNaN(arrowDown[i]) && trendArr[i] === 1 && trendArr[i - 1] === 0;
+    buyFlags[i] = validBuy;
+    sellFlags[i] = validSell;
     const lo = atrLowFluid[i];
     const hi = atrHighFluid[i];
     // plotshape(showArrows and validBuy ? atrLowFluid : na, style = shape.triangleup, location = location.absolute,
@@ -219,8 +226,16 @@ export function calculate(
         colors: bars.map((_b, i) => (showLower(i) ? bullFill : 'transparent')) },
     ],
     markers,
+    // alertcondition(validBuy, 'TP Fluid Buy') / alertcondition(validSell, 'TP Fluid Sell')
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'TP Fluid Buy', message: 'Fluid Buy, {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'TP Fluid Sell', message: 'Fluid Sell, {{exchange}}:{{ticker}}' },
+];
 
 export const TradePrimeFluidTrendIndicator = {
   calculate,
@@ -228,4 +243,5 @@ export const TradePrimeFluidTrendIndicator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

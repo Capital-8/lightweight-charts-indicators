@@ -4,12 +4,16 @@
  * Combined indicator using SAR, EMA200, and MACD histogram for buy/sell signals.
  * Buy: SAR below price AND close > EMA200 AND MACD histogram > 0.
  * Sell: SAR above price AND close < EMA200 AND MACD histogram < 0.
+ * Alerts (alertcondition, `alerts` of the result), with the original's rule: buy = SAR below the low, the MACD
+ * histogram (EMA 12 - EMA 26 minus its EMA 9) crossing above 0 and ohlc4 not below the EMA 200; sell = SAR above the
+ * high, the histogram crossing below 0 and ohlc4 below the EMA 200.
  *
  * Reference: "Parabolic SAR + EMA 200 + MACD Signals" (community)
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SAREMAMACDInputs {
   sarStart: number;
@@ -43,7 +47,15 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<SAREMAMACDInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+/** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
+const EPS = 1e-10;
+const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
+
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<SAREMAMACDInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { sarStart, sarInc, sarMax, emaLen } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -136,11 +148,34 @@ export function calculate(bars: Bar[], inputs: Partial<SAREMAMACDInputs> = {}): 
     value: (v == null || i < warmup) ? NaN : v,
   }));
 
+  // The original's alert rule: SAR = ta.sar(start, inc, max); main_trend = ohlc4 < EMA_200 ? "Bearish" : "Bullish"
+  // (na EMA = Bullish); buy_signal = SAR < low and ta.crossover(delta, 0) and Bullish; sell_signal = SAR > high and
+  // ta.crossunder(delta, 0) and Bearish
+  const pineSar = ta.sar(bars, sarStart, sarInc, sarMax).toArray().map((v) => v ?? NaN);
+  const delta = macdHistArr.map((v) => v ?? NaN);
+  const deltaUp = crossedOver(delta, 0);
+  const deltaDown = crossedUnder(delta, 0);
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
+  for (let i = 0; i < n; i++) {
+    const b = bars[i];
+    const bearish = lt((b.open + b.high + b.low + b.close) / 4, ema200Arr[i] ?? NaN);
+    buyFlags.push(lt(pineSar[i], b.low) && deltaUp[i] && !bearish);
+    sellFlags.push(gt(pineSar[i], b.high) && deltaDown[i] && bearish);
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1 },
     markers,
+    // alertcondition(buy_signal, 'SAR EMA200 MACD Buy signal!') / alertcondition(sell_signal, '... Sell signal!')
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
 
-export const SAREMAMACDSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'SAR EMA200 MACD Buy signal!', message: 'Buy signal' },
+  { id: 'alert1', title: 'SAR EMA200 MACD Sell signal!', message: 'Sell signal' },
+];
+
+export const SAREMAMACDSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

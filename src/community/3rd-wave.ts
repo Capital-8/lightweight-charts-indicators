@@ -17,6 +17,9 @@
  *
  * Drawings are kept up to 500 lines, 500 labels and 50 boxes (the oldest are removed).
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Breakout Long' / 'Breakout Short', true on the bars of a breakout
+ * (with volume support) in an up / down zigzag direction.
+ *
  * The zigzag functions are those of version 1 of the library "CreateAndShowZigzag" by LonesomeTheBlue (getZigzag,
  * showZigzag), written in this file.
  *
@@ -28,6 +31,7 @@
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ThirdWaveInputs {
   /** ZigZag Period */
@@ -159,7 +163,7 @@ class Live<T extends { dead: boolean }> {
 export function calculate(
   bars: Bar[],
   inputs: Partial<ThirdWaveInputs> = {},
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -190,6 +194,8 @@ export function calculate(
   let prevDir = NaN;
   let canCheckIt = true;
   let zzline: Ln | null = null;
+  const longFlags: boolean[] = new Array(n).fill(false);
+  const shortFlags: boolean[] = new Array(n).fill(false);
 
   const addToZigzag = (value: number, bindex: number) => {
     zigzag.unshift(bindex);
@@ -249,6 +255,9 @@ export function calculate(
         && ((dir === 1 && gt(high, zigzag[4])) || (dir === -1 && lt(low, zigzag[4])))) {
         canCheckIt = false;
         if (volSupport()) {
+          // thereisbo := true: alertcondition(thereisbo and dir == 1) / alertcondition(thereisbo and dir == -1)
+          longFlags[i] = dir === 1;
+          shortFlags[i] = dir === -1;
           const x7 = Math.round(zigzag[7]);
           const x5 = Math.round(zigzag[5]);
           const x3 = Math.round(zigzag[3]);
@@ -304,7 +313,14 @@ export function calculate(
       time1: T(b.left), price1: b.top, time2: T(b.right), price2: b.bottom,
       bgColor: b.bg, borderColor: BLUE, borderWidth: 1, borderStyle: 'dotted' as const,
     })),
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
-export const ThirdWave = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Breakout Long', message: 'Breakout Long' },
+  { id: 'alert1', title: 'Breakout Short', message: 'Breakout Short' },
+];
+
+export const ThirdWave = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -9,6 +9,7 @@
  * - a pullback for a buy is seen when the lips cross below the teeth (reset when the close is below the trend line);
  *   BUY when the lips then cross above the teeth with the close above the trend line.
  * Signals draw a label and a background colour.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY Signal' and 'SELL Signal', true on the bars of the signals.
  *
  * Reference: "Spira Alligator" by Markedsignaler
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -17,6 +18,7 @@
 import { taCore, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 const MA_TYPES = ['SMA', 'EMA', 'SMMA (RMA)', 'WMA', 'VWMA', 'HullMA', 'TMA', 'HybridMA',
   'ZeroLagEMA', 'SuperEMA', 'TrendMA', 'HMA', 'THMA', 'EHMA', 'DEMA', 'TEMA',
@@ -262,7 +264,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<SpiraAlligatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = toArr(getSourceSeries(bars, cfg.aliSrc).toArray());
@@ -280,6 +282,8 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const buyBg = String(color.new(color.lime, 88));
   const sellBg = String(color.new(color.red, 88));
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   let bearPullbackSeen = false; // var bool
   let bullPullbackSeen = false; // var bool
   for (let i = 0; i < n; i++) {
@@ -295,6 +299,8 @@ export function calculate(
     const buy = bullPullbackSeen && crossUp && gt(c, trend[i]);
     if (sell) bearPullbackSeen = false;
     if (buy) bullPullbackSeen = false;
+    buyFlags.push(buy);
+    sellFlags.push(sell);
 
     const time = bars[i].time;
     if (cfg.showSignals && buy) {
@@ -329,8 +335,16 @@ export function calculate(
     },
     markers,
     bgColors,
+    // alertcondition(buy_signal, "BUY Signal") / alertcondition(sell_signal, "SELL Signal")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY Signal', message: '🟢 SPKOA BUY  — Lips krysset over Teeth, pris over EMA 144' },
+  { id: 'alert1', title: 'SELL Signal', message: '🔴 SPKOA SELL — Lips krysset under Teeth, pris under EMA 144' },
+];
 
 export const SpiraAlligator = {
   calculate,
@@ -338,4 +352,5 @@ export const SpiraAlligator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

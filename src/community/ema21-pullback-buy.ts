@@ -6,6 +6,8 @@
  * The tests are counted while the trend holds (optional limit). A valid test colours the bar white and draws a
  * circle below it. The first bullish candle (close > open > EMA21) that takes out the high of the latest test, while
  * the trend holds and the close stays above both averages, draws a "Buy" triangle above the bar.
+ * Alerts (alertcondition, `alerts` of the result): 'EMA21 test' on the valid test candles and 'Buy bullish reversal'
+ * on the Buy bars.
  *
  * Reference: "EMA21 Pullback Buy" by Kennedy08
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface Ema21PullbackBuyInputs {
   emaLen: number;
@@ -82,7 +85,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<Ema21PullbackBuyInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -104,6 +107,8 @@ export function calculate(
   const lime = String(color.new(color.lime, 0));
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const testFlags: boolean[] = [];
+  const buyFlags: boolean[] = [];
 
   let testCount = 0; // var int testCount = 0
   let lastTestHigh = NaN; // var float lastTestHigh = na
@@ -164,6 +169,8 @@ export function calculate(
     const isBullish = gt(b.close, b.open) && gt(b.open, e21) && gt(b.close, e21);
     const isBuy = cfg.showBuySignal && hasTest && trendOk && !buyTriggered && takesOutHigh && isBullish;
     if (isBuy) buyTriggered = true;
+    testFlags.push(isValidTest);
+    buyFlags.push(isBuy);
     // plotshape(isBuy, style = shape.triangleup, location = location.abovebar, size = size.small, text = "Buy")
     if (isBuy) {
       markers.push({ time: b.time as number, position: 'aboveBar', shape: 'triangleUp', color: lime, size: 'small',
@@ -179,8 +186,16 @@ export function calculate(
     },
     markers,
     barColors,
+    // alertcondition(isValidTest, "EMA21 test") / alertcondition(isBuy, "Buy bullish reversal")
+    alerts: alertStates(alertConditions, bars, [testFlags, buyFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'EMA21 test', message: 'EMA21 test in strong uptrend, price went below ema21 and closed back above.' },
+  { id: 'alert1', title: 'Buy bullish reversal', message: 'First bullish reversal that takes out high of latest EMA21 test candle in strong uptrend.' },
+];
 
 export const Ema21PullbackBuy = {
   calculate,
@@ -188,4 +203,5 @@ export const Ema21PullbackBuy = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

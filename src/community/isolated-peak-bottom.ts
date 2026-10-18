@@ -6,12 +6,16 @@
  *   - Peak Type 2 (PEAK1): high[1] is highest of bars 0..3, confirmed by low breakdown
  *   - Bottom Type 1 (BOT2): low[2] is lowest of bars 0..4, confirmed by high breakout
  *   - Bottom Type 2 (BOT1): low[1] is lowest of bars 0..3, confirmed by high breakout
+ * Alerts (alertcondition, `alerts` of the result, on the bar that confirms the pattern): 'SELL Alarm' ISOPEAK 1
+ * (PEAK2) and ISOPEAK 2 (PEAK1), 'BUY Alarm' ISOBOTTOM 1 (BOT2) and ISOBOTTOM 2, which the original also gives on
+ * BOT2 (its condition is the same as ISOBOTTOM 1).
  *
  * Reference: "Isolated Peak and Bottom" (community) by KivancOzbilgic
  */
 
 import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface IsolatedPeakBottomInputs {
   // No user-configurable inputs in the original PineScript
@@ -31,7 +35,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], _inputs: Partial<IsolatedPeakBottomInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], _inputs: Partial<IsolatedPeakBottomInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const n = bars.length;
   const markers: MarkerData[] = [];
   const plot0 = bars.map((b) => ({ time: b.time, value: NaN }));
@@ -80,11 +84,37 @@ export function calculate(bars: Bar[], _inputs: Partial<IsolatedPeakBottomInputs
     }
   }
 
+  // Alert flags on the current bar (na history: the comparisons are false)
+  const hi = (i: number) => (i >= 0 ? bars[i].high : NaN);
+  const lo = (i: number) => (i >= 0 ? bars[i].low : NaN);
+  const peak1: boolean[] = [];
+  const peak2: boolean[] = [];
+  const bot1: boolean[] = [];
+  for (let i = 0; i < n; i++) {
+    const minL = Math.min(lo(i - 3), lo(i - 2));
+    peak1.push(hi(i - 2) > hi(i) && hi(i - 2) >= hi(i - 1) && hi(i - 2) > hi(i - 3) && hi(i - 2) > hi(i - 4)
+      && lo(i - 1) > minL && lo(i) < minL);
+    peak2.push(hi(i - 1) > hi(i) && hi(i - 1) > hi(i - 2) && hi(i - 1) > hi(i - 3) && lo(i) < Math.min(lo(i - 2), lo(i - 1)));
+    const maxH = Math.max(hi(i - 3), hi(i - 2));
+    bot1.push(lo(i - 2) < lo(i) && lo(i - 2) < lo(i - 1) && lo(i - 2) < lo(i - 3) && lo(i - 2) < lo(i - 4)
+      && hi(i - 1) < maxH && hi(i) > maxH);
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0 },
     markers,
+    // alertcondition(bool(izotepe1)), alertcondition(bool(izotepe2)), alertcondition(bool(izodip1)) twice
+    alerts: alertStates(alertConditions, bars, [peak1, peak2, bot1, bot1]),
   };
 }
 
-export const IsolatedPeakBottom = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'SELL Alarm', message: 'ISOPEAK 1!' },
+  { id: 'alert1', title: 'SELL Alarm', message: 'ISOPEAK 2!' },
+  { id: 'alert2', title: 'BUY Alarm', message: 'ISOBOTTOM 1!' },
+  { id: 'alert3', title: 'BUY Alarm', message: 'ISOBOTTOM 2!' },
+];
+
+export const IsolatedPeakBottom = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

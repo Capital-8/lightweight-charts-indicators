@@ -138,12 +138,12 @@ export function calculate(
     // plotshape(direction != direction[1] and direction == 1 ? lower : na, circle, tiny col_up / small col_up 70)
     const changed = i > 0 && direction[i] !== direction[i - 1];
     if (changed && direction[i] === 1 && !isNaN(lower[i])) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: lower[i], shape: 'circle', color: colUp, size: 'tiny' });
-      markers.push({ time: t, position: 'atPriceMiddle', price: lower[i], shape: 'circle', color: col(colUp, 70), size: 'small' });
+      markers.push({ id: 'shape0', time: t, position: 'atPriceMiddle', price: lower[i], shape: 'circle', color: colUp, size: 'tiny' });
+      markers.push({ id: 'shape1', time: t, position: 'atPriceMiddle', price: lower[i], shape: 'circle', color: col(colUp, 70), size: 'small' });
     }
     if (changed && direction[i] === -1 && !isNaN(upper[i])) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: upper[i], shape: 'circle', color: colDn, size: 'tiny' });
-      markers.push({ time: t, position: 'atPriceMiddle', price: upper[i], shape: 'circle', color: col(colDn, 70), size: 'small' });
+      markers.push({ id: 'shape2', time: t, position: 'atPriceMiddle', price: upper[i], shape: 'circle', color: colDn, size: 'tiny' });
+      markers.push({ id: 'shape3', time: t, position: 'atPriceMiddle', price: upper[i], shape: 'circle', color: col(colDn, 70), size: 'small' });
     }
   }
 

@@ -7,6 +7,8 @@
  * the previous bar is a burst peak: a stack of 1 + int(magnitude / stepATR) diamonds (at most maxLevels) is drawn on
  * it above the high (below the low), coloured by a cool-to-hot gradient of magnitude / heatSat; a triangle above
  * (below) the stack when it has at least fadeMin diamonds, and an optional background tint at the full stack.
+ * Alerts (alertcondition, `alerts` of the result): up / down burst peak and extreme up / down (peak at the full
+ * stack), true on the bar that confirms the peak.
  *
  * Last bar: with 'Confirm on bar close' a burst peak is detected on a closed bar only. The port reads the state of
  * the last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
@@ -17,6 +19,7 @@
 
 import { ta, Series, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface StrongBurstFaderInputs {
@@ -122,7 +125,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<StrongBurstFaderInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -171,6 +174,8 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  // alertcondition(upPeak / dnPeak / upXtreme / dnXtreme): upXtreme = upPeak and upLvlPk >= maxLevels
+  const flags: boolean[][] = [new Array(n).fill(false), new Array(n).fill(false), new Array(n).fill(false), new Array(n).fill(false)];
   for (let i = 2; i < n; i++) {
     const at = (m: number[], k: number) => m[i - k];
     const okBar = cfg.confirmBar ? barIsConfirmed(i) : true; // okBar = confirmBar ? barstate.isconfirmed : true
@@ -183,31 +188,36 @@ export function calculate(
     const dnLvlPk = Math.min(cfg.maxLevels, 1 + Math.trunc(dnPk / cfg.stepATR));
     const upColPk = heatCol(upPk / cfg.heatSat);
     const dnColPk = heatCol(dnPk / cfg.heatSat);
+    flags[0][i] = upPeak;
+    flags[1][i] = dnPeak;
+    flags[2][i] = upPeak && upLvlPk >= cfg.maxLevels;
+    flags[3][i] = dnPeak && dnLvlPk >= cfg.maxLevels;
     const aPk = atr[i - 1];
     const baseUp = bars[i - 1].high;
     const baseDn = bars[i - 1].low;
     // offset = -1: drawn on the peak bar i - 1
     const time = bars[i - 1].time;
-    const diamond = (price: number, c: string) => {
-      if (!isNaN(price)) markers.push({ time, position: 'atPriceMiddle', price, shape: 'diamond', color: c, size: 'small' });
+    // id: the plotshape output ("Up 1".."Up 6" = shape0..shape5, "Dn 1".."Dn 6" = shape6..shape11)
+    const diamond = (price: number, c: string, id: string) => {
+      if (!isNaN(price)) markers.push({ time, position: 'atPriceMiddle', price, shape: 'diamond', color: c, size: 'small', id });
     };
     // u1..u6: upPeak and upLvlPk >= k ? baseUp + (baseGap + (k - 1) * rowGap) * aPk : na
     for (let k = 1; k <= 6; k++) {
-      if (upPeak && upLvlPk >= k) diamond(baseUp + (cfg.baseGap + (k - 1) * cfg.rowGap) * aPk, upColPk);
+      if (upPeak && upLvlPk >= k) diamond(baseUp + (cfg.baseGap + (k - 1) * cfg.rowGap) * aPk, upColPk, `shape${k - 1}`);
     }
     for (let k = 1; k <= 6; k++) {
-      if (dnPeak && dnLvlPk >= k) diamond(baseDn - (cfg.baseGap + (k - 1) * cfg.rowGap) * aPk, dnColPk);
+      if (dnPeak && dnLvlPk >= k) diamond(baseDn - (cfg.baseGap + (k - 1) * cfg.rowGap) * aPk, dnColPk, `shape${k + 5}`);
     }
     if (cfg.showFade && upPeak && upLvlPk >= cfg.fadeMin) {
       const price = baseUp + (cfg.baseGap + upLvlPk * cfg.rowGap) * aPk;
       if (!isNaN(price)) {
-        markers.push({ time, position: 'atPriceMiddle', price, shape: 'triangleDown', color: fadeShortColor, size: 'tiny' });
+        markers.push({ time, position: 'atPriceMiddle', price, shape: 'triangleDown', color: fadeShortColor, size: 'tiny', id: 'shape12' });
       }
     }
     if (cfg.showFade && dnPeak && dnLvlPk >= cfg.fadeMin) {
       const price = baseDn - (cfg.baseGap + dnLvlPk * cfg.rowGap) * aPk;
       if (!isNaN(price)) {
-        markers.push({ time, position: 'atPriceMiddle', price, shape: 'triangleUp', color: fadeLongColor, size: 'tiny' });
+        markers.push({ time, position: 'atPriceMiddle', price, shape: 'triangleUp', color: fadeLongColor, size: 'tiny', id: 'shape13' });
       }
     }
     // bgcolor(showBg and upPeak and upLvlPk >= maxLevels ? color.new(upColPk, 82) : showBg and dnPeak and ... , offset = -1)
@@ -223,7 +233,16 @@ export function calculate(
     plots: {},
     markers,
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const StrongBurstFader = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Burst Fader — Up burst (fade short)', message: 'Up burst peaked above the band — fade-short candidate.' },
+  { id: 'alert1', title: 'Burst Fader — Down burst (fade long)', message: 'Down burst peaked below the band — fade-long candidate.' },
+  { id: 'alert2', title: 'Burst Fader — Extreme up', message: 'Up burst peaked at max stack — heavily over-extended.' },
+  { id: 'alert3', title: 'Burst Fader — Extreme down', message: 'Down burst peaked at max stack — heavily over-extended.' },
+];
+
+export const StrongBurstFader = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

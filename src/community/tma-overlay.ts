@@ -9,6 +9,9 @@
  * start to the session end, and from the session start to the session end, in the time zone of the inputs, on the
  * chosen week days.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Engulfing' and 'Bearish Engulfing', true on the bars of
+ * an engulfing candle (also when its triangles are not shown).
+ *
  * The session is tested on the opening time of each bar, with the date of that bar in the chosen time zone. The
  * "Label" input is not used by the original script. The options "Asia/Sydney" and "Europe/Frankfurt" are not time
  * zone names: they throw the runtime error of the original script.
@@ -19,6 +22,7 @@
 
 import { ta, time, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TmaOverlayInputs {
   show100: boolean;
@@ -138,7 +142,8 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<TmaOverlayInputs> = {},
-): Omit<IndicatorResult, 'markers' | 'bgColors'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers' | 'bgColors'> & { markers: MarkerData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const closeSeries = new Series(bars, (b) => b.close);
@@ -178,6 +183,8 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  const bullFlags: boolean[] = new Array(n).fill(false);
+  const bearFlags: boolean[] = new Array(n).fill(false);
   const O = (i: number) => (i >= 0 ? bars[i].open : NaN);
   const C = (i: number) => (i >= 0 ? bars[i].close : NaN);
   const tz = cfg.timezone;
@@ -204,6 +211,8 @@ export function calculate(
     // Engulfing candles
     const bullishEngulfing = le(O(i), C(i - 1)) && lt(O(i), O(i - 1)) && gt(C(i), O(i - 1));
     const bearishEngulfing = ge(O(i), C(i - 1)) && gt(O(i), O(i - 1)) && lt(C(i), O(i - 1));
+    bullFlags[i] = bullishEngulfing;
+    bearFlags[i] = bearishEngulfing;
     if (cfg.showBullEngulfing && bullishEngulfing) {
       markers.push({ time: t(i), position: 'belowBar', shape: 'triangleUp', color: GREEN, size: 'tiny' });
     }
@@ -223,9 +232,9 @@ export function calculate(
     const endTime = time.timestamp(tz, y, mo, d, cfg.sessionEndHour, cfg.sessionEndMinute);
     const startTime = time.timestamp(tz, y, mo, d, cfg.startHour, cfg.startMinute);
     const startTime2 = time.timestamp(tz, y, mo, d, cfg.sessionStartHour, cfg.sessionStartMinute);
-    // Two bgcolor calls with the same colour: the second is drawn on top of the first
-    if (startTime <= ms && ms <= endTime) bgColors.push({ time: t(i), color: cfg.rangeColor });
-    if (startTime2 <= ms && ms <= endTime) bgColors.push({ time: t(i), color: cfg.rangeColor });
+    // Two bgcolor calls with the same colour (ids bgcolor0 / bgcolor1): the second is drawn on top of the first
+    if (startTime <= ms && ms <= endTime) bgColors.push({ id: 'bgcolor0', time: t(i), color: cfg.rangeColor });
+    if (startTime2 <= ms && ms <= endTime) bgColors.push({ id: 'bgcolor1', time: t(i), color: cfg.rangeColor });
   }
 
   return {
@@ -234,8 +243,16 @@ export function calculate(
     fills: [{ plot1: 'plot4', plot2: 'plot3', options: { title: 'Trend Fill' }, colors: fillColors }],
     markers,
     bgColors,
+    // alertcondition(bullishEngulfing, "Bullish Engulfing") / alertcondition(bearishEngulfing, "Bearish Engulfing")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Engulfing', message: '[CurrencyPair] [TimeFrame], Bullish candle engulfing previous candle' },
+  { id: 'alert1', title: 'Bearish Engulfing', message: '[CurrencyPair] [TimeFrame], Bearish candle engulfing previous candle' },
+];
 
 export const TmaOverlay = {
   calculate,
@@ -243,4 +260,5 @@ export const TmaOverlay = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

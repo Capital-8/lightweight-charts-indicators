@@ -6,6 +6,8 @@
  * upper band and no squeeze, -1 when below the smoothed lower band and no squeeze, 0 in a squeeze (kept otherwise).
  * The bands, the basis circles, the cloud fill and the candles take the trend colour. The Buy / Sell conditions of
  * the source require trend == 1 (or -1) and trend == 0 on the same bar, so they never fire (ported as written).
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Volatility Breakout' / 'Bearish Volatility Breakout' on
+ * the Buy / Sell conditions (so, as in the original, they never trigger).
  *
  * Reference: "Apex Volatility Squeeze & Breakout [Pineify]" by Pineify
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ApexVolatilitySqueezeBreakoutInputs {
   /** Lookback length of the SMA, stdev and ATR */
@@ -72,7 +75,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<ApexVolatilitySqueezeBreakoutInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -126,10 +129,13 @@ export function calculate(
   const crossUp = ta.crossover(S(close), S(smoothUpper)).toArray();
   const crossDown = ta.crossunder(S(close), S(smoothLower)).toArray();
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const isTrend = (k: number) => trendArr[i] === k;
     const longBreakout = !!crossUp[i] && isTrend(1) && isTrend(0);
     const shortBreakout = !!crossDown[i] && isTrend(-1) && isTrend(0);
+    longFlags.push(longBreakout);
+    shortFlags.push(shortBreakout);
     if (longBreakout) {
       markers.push({ time: t(i), position: 'belowBar', shape: 'labelUp', color: cfg.bullColor, text: 'BUY',
         textColor: color.white, size: 'small' });
@@ -146,8 +152,16 @@ export function calculate(
     fills,
     barColors,
     markers,
+    // alertcondition(long_breakout, ...) / alertcondition(short_breakout, ...)
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Volatility Breakout', message: 'Price broke out of the squeeze upwards. Buy Signal.' },
+  { id: 'alert1', title: 'Bearish Volatility Breakout', message: 'Price broke out of the squeeze downwards. Sell Signal.' },
+];
 
 export const ApexVolatilitySqueezeBreakout = {
   calculate,
@@ -155,4 +169,5 @@ export const ApexVolatilitySqueezeBreakout = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

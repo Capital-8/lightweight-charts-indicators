@@ -66,9 +66,9 @@ export function calculate(
     const bigDrop = ge(maxDrop, minMove);
     const bg = bigClimb ? up : bigDrop ? down : null;
     if (bg) {
-      // bgcolor(..., force_overlay = true): price pane; bgcolor(...): indicator pane
-      chartBg.push({ time: b.time, color: bg, forceOverlay: true });
-      paneBg.push({ time: b.time, color: bg });
+      // bgcolor(..., force_overlay = true): price pane (Style id bgcolor0); bgcolor(...): indicator pane (bgcolor1)
+      chartBg.push({ time: b.time, color: bg, forceOverlay: true, id: 'bgcolor0' });
+      paneBg.push({ time: b.time, color: bg, id: 'bgcolor1' });
     }
     plot0.push({ time: b.time, value: Number.isFinite(maxClimb) ? maxClimb : NaN });
     plot1.push({ time: b.time, value: Number.isFinite(maxDropNeg) ? maxDropNeg : NaN });

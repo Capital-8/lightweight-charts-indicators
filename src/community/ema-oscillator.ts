@@ -5,6 +5,9 @@
  * Threshold lines at +-mild / +-moderate / +-extreme: fixed sigma levels, or (default) percentages of the highest
  * |z| over the lookback. The z-score is a histogram coloured by its zone, with a background in the zone colour, and
  * circles on the price chart when z crosses above the extreme level (sell) or below minus the extreme level (buy).
+ * Alerts (alertcondition, `alerts` of the result): z crossing above the extreme / moderate level ('Extremely
+ * Overbought Alert' / 'Overbought Alert') and below minus the extreme / moderate level ('Extremely Oversold Alert' /
+ * 'Oversold Alert').
  *
  * Reference: "EMA Oscillator [Alpha Extract]" by AlphaExtract
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EMAOscillatorInputs {
   /** EMA period (also the stdev length) */
@@ -96,7 +100,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<EMAOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -152,10 +156,10 @@ export function calculate(
   // sell_signal = show_signals and ta.crossover(z_score, selected_extreme)
   // buy_signal = show_signals and ta.crossunder(z_score, -selected_extreme) (exact comparisons)
   const markers: MarkerData[] = [];
+  const zS = S(z);
+  const sell = A(ta.crossover(zS, S(extreme)));
+  const buy = A(ta.crossunder(zS, S(extreme.map((v) => -v))));
   if (cfg.showSignals) {
-    const zS = S(z);
-    const sell = A(ta.crossover(zS, S(extreme)));
-    const buy = A(ta.crossunder(zS, S(extreme.map((v) => -v))));
     const sellColor = String(color.rgb(255, 3, 3, 37));
     const buyColor = String(color.rgb(0, 255, 102, 43));
     for (let i = 0; i < n; i++) {
@@ -185,8 +189,24 @@ export function calculate(
     hlines: [{ value: 0, options: { title: 'Zero Line', color: '#005720', linestyle: 'solid', linewidth: 2 } }],
     bgColors,
     markers,
+    // alertcondition(ta.crossover(z_score, selected_extreme) / ta.crossunder(z_score, -selected_extreme) /
+    // ta.crossover(z_score, selected_moderate) / ta.crossunder(z_score, -selected_moderate)) (show_signals not used)
+    alerts: alertStates(alertConditions, bars, [
+      sell.map((v) => v === 1),
+      buy.map((v) => v === 1),
+      A(ta.crossover(zS, S(moderate))).map((v) => v === 1),
+      A(ta.crossunder(zS, S(moderate.map((v) => -v)))).map((v) => v === 1),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Extremely Overbought Alert', message: 'EMA Oscillator reached extremely overbought levels' },
+  { id: 'alert1', title: 'Extremely Oversold Alert', message: 'EMA Oscillator reached extremely oversold levels' },
+  { id: 'alert2', title: 'Overbought Alert', message: 'EMA Oscillator reached overbought levels' },
+  { id: 'alert3', title: 'Oversold Alert', message: 'EMA Oscillator reached oversold levels' },
+];
 
 export const EMAOscillator = {
   calculate,
@@ -195,4 +215,5 @@ export const EMAOscillator = {
   inputConfig,
   plotConfig,
   hlineConfig,
+  alertConditions,
 };

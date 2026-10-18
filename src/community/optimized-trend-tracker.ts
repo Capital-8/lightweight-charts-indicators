@@ -4,12 +4,15 @@
  * Smoothed moving average with percentage-based trailing stop.
  * Support line (MA) determines trend direction;
  * OTT = MA * (200 ± percent) / 200 based on which side of trailing stop.
+ * Alerts (alertcondition, `alerts` of the result): the 9 conditions of the original (OTT colour change, support
+ * line / OTT crosses, price / OTT crosses), on the series of the port (OTT[2] = OTT two bars back).
  *
  * Reference: "Optimized Trend Tracker" by KivancOzbilgic
  */
 
 import { getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface OTTInputs {
   source: SourceType;
@@ -41,6 +44,8 @@ export const inputConfig: InputConfig[] = [
 export const plotConfig: PlotConfig[] = [
   { id: 'plot0', title: 'Support Line', color: '#0585E1', lineWidth: 2 },
   { id: 'plot1', title: 'OTT', color: '#B800D9', lineWidth: 2 },
+  // mPlot = plot(ohlc4, display = display.none): one side of the highlighter fills
+  { id: 'plot2', title: 'OHLC4', color: '#2196F3', lineWidth: 1, style: 'circles', display: 'none' },
 ];
 
 export const metadata = {
@@ -49,7 +54,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<OTTInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<OTTInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { source, period, percent, highlight, showSignalsC, showSignalsR } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -116,14 +124,11 @@ export function calculate(bars: Bar[], inputs: Partial<OTTInputs> = {}): Omit<In
     return { time: bars[i].time, value: ottLag, color };
   });
 
-  // Dynamic fill colors: green when MAvg > OTT, red when MAvg < OTT
-  const fillColors = mavg.map((v, i) => {
-    if (i < warmup + 2) return 'transparent';
-    const ottLag = ott[i - 2];
-    if (v > ottLag) return 'rgba(0,128,0,0.15)';
-    if (v < ottLag) return 'rgba(255,0,0,0.15)';
-    return 'transparent';
-  });
+  // mPlot = plot(ohlc4, display = display.none)
+  const plot2 = bars.map((b) => ({ time: b.time, value: (b.open + b.high + b.low + b.close) / 4 }));
+  // fill(mPlot, pALL, "UpTrend Highligter", MAvg > OTT ? green : na) / fill(..., "DownTrend Highligter", MAvg < OTT ? red : na)
+  const upFill = mavg.map((v, i) => (i >= warmup + 2 && v > ott[i] ? 'rgba(0,128,0,0.15)' : 'transparent'));
+  const downFill = mavg.map((v, i) => (i >= warmup + 2 && v < ott[i] ? 'rgba(255,0,0,0.15)' : 'transparent'));
 
   // Markers: buy when MAvg crosses above OTT[2], sell when crosses below (support line signals - always shown)
   const markers: MarkerData[] = [];
@@ -132,9 +137,9 @@ export function calculate(bars: Bar[], inputs: Partial<OTTInputs> = {}): Omit<In
     const ottLagPrev = ott[i - 3];
     // Support line / MA crossover signals (showsignalsk - always on by default)
     if (mavg[i - 1] <= ottLagPrev && mavg[i] > ottLag) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008000', text: 'Buy' });
+      markers.push({ id: 'shape0', time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008000', text: 'Buy' });
     } else if (mavg[i - 1] >= ottLagPrev && mavg[i] < ottLag) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'Sell' });
+      markers.push({ id: 'shape1', time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'Sell' });
     }
 
     // Price/OTT crossing signals (Pine: buySignalc = crossover(src, OTT[2]))
@@ -142,9 +147,9 @@ export function calculate(bars: Bar[], inputs: Partial<OTTInputs> = {}): Omit<In
       const srcCur = srcArr[i] ?? 0;
       const srcPrev = srcArr[i - 1] ?? 0;
       if (srcPrev <= ottLagPrev && srcCur > ottLag) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008000', text: 'Buy' });
+        markers.push({ id: 'shape2', time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008000', text: 'Buy' });
       } else if (srcPrev >= ottLagPrev && srcCur < ottLag) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'Sell' });
+        markers.push({ id: 'shape3', time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'Sell' });
       }
     }
 
@@ -159,21 +164,52 @@ export function calculate(bars: Bar[], inputs: Partial<OTTInputs> = {}): Omit<In
       const prevOtt3 = ott[i - 4]; // at bar i-1, OTT[3] = ott[(i-1)-3] = ott[i-4]
       // crossover(OTT[2], OTT[3]): prevOtt2 <= prevOtt3 && curOtt2 > curOtt3
       if (prevOtt2 <= prevOtt3 && curOtt2 > curOtt3) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008000', text: 'Buy' });
+        markers.push({ id: 'shape4', time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008000', text: 'Buy' });
       }
       // crossunder(OTT[2], OTT[3]): prevOtt2 >= prevOtt3 && curOtt2 < curOtt3
       if (prevOtt2 >= prevOtt3 && curOtt2 < curOtt3) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'Sell' });
+        markers.push({ id: 'shape5', time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: 'Sell' });
       }
     }
   }
 
+  // Alerts: OTT[2] / OTT[3] (na on the first bars), MAvg and the source of the port
+  const ott2 = ott.map((_v, i) => (i >= 2 ? ott[i - 2] : NaN));
+  const ott3 = ott.map((_v, i) => (i >= 3 ? ott[i - 3] : NaN));
+  const srcVals = srcArr.map((v) => v ?? NaN);
+  const either = (a: boolean[], b: boolean[]) => a.map((v, i) => v || b[i]);
+  const colorUp = crossedOver(ott2, ott3), colorDown = crossedUnder(ott2, ott3);
+  const supUp = crossedOver(mavg, ott2), supDown = crossedUnder(mavg, ott2);
+  const priceUp = crossedOver(srcVals, ott2), priceDown = crossedUnder(srcVals, ott2);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1 },
-    fills: [{ plot1: 'plot0', plot2: 'plot1', colors: fillColors }],
+    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2 },
+    fills: [
+      { plot1: 'plot2', plot2: 'plot1', options: { title: 'UpTrend Highligter' }, colors: upFill },
+      { plot1: 'plot2', plot2: 'plot1', options: { title: 'DownTrend Highligter' }, colors: downFill },
+    ],
     markers,
+    // alertcondition(cross / crossover / crossunder of OTT[2] and OTT[3], MAvg and OTT[2], src and OTT[2])
+    alerts: alertStates(alertConditions, bars, [
+      either(colorUp, colorDown), colorUp, colorDown,
+      either(supUp, supDown), supUp, supDown,
+      either(priceUp, priceDown), priceUp, priceDown,
+    ]),
   };
 }
 
-export const OptimizedTrendTracker = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Color ALARM', message: 'OTT Has Changed Color!' },
+  { id: 'alert1', title: 'GREEN ALERT', message: 'OTT GREEN BUY SIGNAL!' },
+  { id: 'alert2', title: 'RED ALERT', message: 'OTT RED SELL SIGNAL!' },
+  { id: 'alert3', title: 'Cross Alert', message: 'OTT - Support Line Crossing!' },
+  { id: 'alert4', title: 'Crossover Alarm', message: 'Support Line BUY SIGNAL!' },
+  { id: 'alert5', title: 'Crossunder Alarm', message: 'Support Line SELL SIGNAL!' },
+  { id: 'alert6', title: 'Price Cross Alert', message: 'OTT - Price Crossing!' },
+  { id: 'alert7', title: 'Price Crossover Alarm', message: 'PRICE OVER OTT - BUY SIGNAL!' },
+  { id: 'alert8', title: 'Price Crossunder Alarm', message: 'PRICE UNDER OTT - SELL SIGNAL!' },
+];
+
+export const OptimizedTrendTracker = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

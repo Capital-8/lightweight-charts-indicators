@@ -6,12 +6,17 @@
  * squeeze off (green): they are outside; else no squeeze (blue). The momentum histogram is the linear regression of
  * close - average(average(highest high, lowest low), SMA of the close) over the KC length: lime / green above zero
  * (rising / falling), red / maroon below zero (falling / rising).
+ * Alerts (alertcondition, `alerts` of the result): 'Squeeze Fired' (squeeze on the bar before, not on this bar),
+ * 'Long Momentum' / 'Short Momentum' (the momentum crosses above / below zero).
  *
  * Reference: "15-Minute Squeeze Scalper (Traffic Light Edition)" by Universal_Scalper_Pro
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import {
+  alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState,
+} from '../alert-states';
 
 export interface SqueezeMomentumScalperInputs {
   /** Bollinger Bands length */
@@ -58,7 +63,10 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<SqueezeMomentumScalperInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<SqueezeMomentumScalperInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -85,6 +93,12 @@ export function calculate(bars: Bar[], inputs: Partial<SqueezeMomentumScalperInp
   const val = A(ta.linreg(S(momSource), cfg.lengthKC, 0));
 
   const nz = (v: number) => (Number.isFinite(v) ? v : 0);
+  const sqzOnAt = (i: number) => gt(lowerBB[i], lowerKC[i]) && lt(upperBB[i], upperKC[i]);
+
+  // squeezeFired = sqzOn[1] and not sqzOn; longEntry = ta.crossover(val, 0); shortEntry = ta.crossunder(val, 0)
+  const squeezeFired = bars.map((_, i) => i > 0 && sqzOnAt(i - 1) && !sqzOnAt(i));
+  const longEntry = crossedOver(val, 0);
+  const shortEntry = crossedUnder(val, 0);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -97,14 +111,22 @@ export function calculate(bars: Bar[], inputs: Partial<SqueezeMomentumScalperInp
       }),
       // scolor = noSqz ? blue : sqzOn ? red : green
       plot1: bars.map((b, i) => {
-        const sqzOn = gt(lowerBB[i], lowerKC[i]) && lt(upperBB[i], upperKC[i]);
+        const sqzOn = sqzOnAt(i);
         const sqzOff = lt(lowerBB[i], lowerKC[i]) && gt(upperBB[i], upperKC[i]);
         const noSqz = !sqzOn && !sqzOff;
         return { time: b.time, value: 0, color: noSqz ? color.blue : sqzOn ? color.red : color.green };
       }),
     },
+    alerts: alertStates(alertConditions, bars, [squeezeFired, longEntry, shortEntry]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Squeeze Fired', message: 'Volatility Squeeze has FIRED! Check histogram for direction.' },
+  { id: 'alert1', title: 'Long Momentum', message: 'Momentum has crossed bullish.' },
+  { id: 'alert2', title: 'Short Momentum', message: 'Momentum has crossed bearish.' },
+];
 
 export const SqueezeMomentumScalper = {
   calculate,
@@ -112,4 +134,5 @@ export const SqueezeMomentumScalper = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

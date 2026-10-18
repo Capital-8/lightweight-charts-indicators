@@ -7,6 +7,7 @@
  * `lookback` bars (Quant), by the ratio to its 20-bar SMA (Classic), or by both (Hybrid: Classic or z-score < -1).
  * Squeeze dots on zero mark `minSqueeze` squeeze bars in a row; a diamond marks the first bar after a squeeze. Zones
  * between 2 and 3 and between -2 and -3 are filled.
+ * Alerts (alertcondition, `alerts` of the result): 'Squeeze Fired', true on the bars of the diamonds.
  *
  * Reference: "Quant Z-Score Squeeze [Gold Edition]" by CustomQuantLabs (published as "Quant VWAP System 3.8")
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +17,12 @@ import {
   ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Squeeze Fired', message: 'Volatility Squeeze has fired!' },
+];
 
 export type QuantSqueezeModel = 'Smart Hybrid (Universal)' | 'Classic Ratio (Scalping)' | 'Quant Z-Score (Swing)';
 
@@ -117,7 +124,7 @@ const finite = (v: number) => (Number.isFinite(v) ? v : NaN);
 export function calculate(
   bars: Bar[],
   inputs: Partial<QuantVwapSystem38Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -154,6 +161,8 @@ export function calculate(
   };
 
   const markers: MarkerData[] = [];
+  // squeeze_fired = is_valid_squeeze[1] and not is_valid_squeeze (false on bar 0)
+  const fired = isValid.map((v, i) => i > 0 && isValid[i - 1] && !v);
   for (let i = 1; i < n; i++) {
     // plotshape(squeeze_fired ? 0 : na, "Squeeze Fired", shape.diamond, location.absolute, color.white, size.tiny)
     if (isValid[i - 1] && !isValid[i]) {
@@ -182,6 +191,8 @@ export function calculate(
       { plot1: 'hline_l2', plot2: 'hline_l3', options: { title: 'Bull Zone' }, colors: new Array<string>(n).fill(bullZone) },
     ],
     markers,
+    // alertcondition(squeeze_fired, "Squeeze Fired")
+    alerts: alertStates(alertConditions, bars, [fired]),
   };
 }
 
@@ -193,4 +204,5 @@ export const QuantVwapSystem38 = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

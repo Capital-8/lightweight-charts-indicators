@@ -5,6 +5,7 @@
  * with the same length). The trend is up when the baseline rose over the last 2 bars, down when it fell, else
  * unchanged. Bands, baseline and the layered fills take the trend colour; a circle marks the baseline on a trend
  * change. Buy: the close crosses above the baseline in an uptrend; sell: the close crosses below it in a downtrend.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal', 'Sell Signal' and 'Trend Change' (the trend flips).
  *
  * Reference: "Lumina Trend Channels [Pineify]" by Pineify
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LuminaTrendChannelsInputs {
   /** Length of the EMA baseline and of the ATR */
@@ -59,7 +61,7 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<LuminaTrendChannelsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -74,6 +76,7 @@ export function calculate(
   const plots: Record<string, Point[]> = { plot0: [], plot1: [], plot2: [], plot3: [], plot4: [], plot5: [] };
   const fillCols: string[][] = [[], [], [], []];
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [], changeFlags: boolean[] = [];
   let trend = 1; // var int trend = 1
   let lastClose = NaN; // ta.crossover / crossunder: the last bar where both values were not na
   let lastBasis = NaN;
@@ -96,7 +99,9 @@ export function calculate(
     fillCols[2].push(c70);
     fillCols[3].push(c85);
     // plot(ta.change(trend) != 0 ? basis : na): ta.change is na on the first bar
-    plots.plot5.push({ time: b.time, value: i > 0 && trend !== prevTrend ? bs : NaN, color: css });
+    const changed = i > 0 && trend !== prevTrend;
+    plots.plot5.push({ time: b.time, value: changed ? bs : NaN, color: css });
+    changeFlags.push(changed);
 
     let crossUp = false;
     let crossDown = false;
@@ -110,6 +115,8 @@ export function calculate(
       lastBasis = bs;
     }
     // plotshape(buySignal, "Buy Signal", shape.triangleup, location.belowbar, color = bullCss, size = size.small)
+    buyFlags.push(crossUp && trend === 1);
+    sellFlags.push(crossDown && trend === -1);
     if (crossUp && trend === 1) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: cfg.bullColor, size: 'small' });
     }
@@ -129,8 +136,17 @@ export function calculate(
       { plot1: 'plot3', plot2: 'plot4', options: { title: 'Outer Lower Fill' }, colors: fillCols[3] },
     ],
     markers,
+    // alertcondition(buySignal, ...) / alertcondition(sellSignal, ...) / alertcondition(ta.change(trend) != 0, ...)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, changeFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Lumina Channels: Bullish Entry Detected' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Lumina Channels: Bearish Entry Detected' },
+  { id: 'alert2', title: 'Trend Change', message: 'Lumina Channels: Channel Trend Changed Color' },
+];
 
 export const LuminaTrendChannels = {
   calculate,
@@ -138,4 +154,5 @@ export const LuminaTrendChannels = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

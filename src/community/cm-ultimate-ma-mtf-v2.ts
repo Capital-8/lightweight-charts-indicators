@@ -220,10 +220,15 @@ export function calculate(bars: Bar[], inputs: Partial<CmUltimateMaMtfV2Inputs> 
     plot1.push({ time, value: cfg.doma2 && truthy(out2[i]) ? out2[i] : NaN, color: cfg.cc2 ? direction : WHITE });
     plot2.push({ time, value: cfg.sd && crossed[i] ? out2[i] : NaN });
 
-    // barcolor: yellow when the bar opens on one side of an average and closes on the other side
+    // barcolor: yellow when the bar opens on one side of an average and closes on the other side, one entry per
+    // barcolor() call of the original (cr_up, cr_Down of the first average, cr_up2, cr_Down2 of the second)
     const { open, close } = bars[i];
-    const across = (ma: number) => (lt(open, ma) && gt(close, ma)) || (gt(open, ma) && lt(close, ma));
-    if ((cfg.spc && across(out1[i])) || (cfg.spc2 && across(out2[i]))) barColors.push({ time, color: BAR_YELLOW });
+    const up = (ma: number) => lt(open, ma) && gt(close, ma);
+    const down = (ma: number) => gt(open, ma) && lt(close, ma);
+    if (cfg.spc && up(out1[i])) barColors.push({ id: 'barcolor0', time, color: BAR_YELLOW });
+    if (cfg.spc && down(out1[i])) barColors.push({ id: 'barcolor1', time, color: BAR_YELLOW });
+    if (cfg.spc2 && up(out2[i])) barColors.push({ id: 'barcolor2', time, color: BAR_YELLOW });
+    if (cfg.spc2 && down(out2[i])) barColors.push({ id: 'barcolor3', time, color: BAR_YELLOW });
   }
 
   return {

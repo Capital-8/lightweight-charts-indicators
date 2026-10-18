@@ -7,6 +7,8 @@
  * the previous bar gives a BUY label (the sweep is then reset). A signal opens a long (BUY) or short (SELL) position
  * state; a long that saw RSI >= 70 on the previous bar and now has RSI < 70 gives a TP label (short: RSI <= 30, then
  * RSI > 30), which closes the position state.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY Alert' / 'SELL Alert' on the signals, 'RSI LONG TP' /
+ * 'RSI SHORT TP' on the TP labels.
  *
  * Reference: "Liquidity Sweep Confirmation" by filipiti
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LiquiditySweepConfirmationInputs {
   /** Pivot bars on each side of a swing */
@@ -53,7 +56,7 @@ const PINE_TEXT = '#2962FF';
 export function calculate(
   bars: Bar[],
   inputs: Partial<LiquiditySweepConfirmationInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -76,6 +79,7 @@ export function calculate(
   let inShort = false;
   let prevLongExtreme = false; // rsiLongExtreme[1] (false on bar 0)
   let prevShortExtreme = false;
+  const flags: boolean[][] = [[], [], [], []];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     if (!isNaN(ph[i])) lastHigh = ph[i];
@@ -113,6 +117,10 @@ export function calculate(
     prevShortExtreme = rsiShortExtreme;
     if (longTP) inLong = false;
     if (shortTP) inShort = false;
+    flags[0].push(buySignal);
+    flags[1].push(sellSignal);
+    flags[2].push(longTP);
+    flags[3].push(shortTP);
 
     if (longTP) {
       markers.push({ time: b.time, position: 'aboveBar', shape: 'labelDown', color: color.blue, text: 'TP',
@@ -128,8 +136,17 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY Alert', message: 'Liquidity Sweep BUY' },
+  { id: 'alert1', title: 'SELL Alert', message: 'Liquidity Sweep SELL' },
+  { id: 'alert2', title: 'RSI LONG TP', message: 'RSI TP LONG' },
+  { id: 'alert3', title: 'RSI SHORT TP', message: 'RSI TP SHORT' },
+];
 
 export const LiquiditySweepConfirmation = {
   calculate,
@@ -137,4 +154,5 @@ export const LiquiditySweepConfirmation = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

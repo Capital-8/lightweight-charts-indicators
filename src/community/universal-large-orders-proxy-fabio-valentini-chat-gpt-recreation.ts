@@ -8,6 +8,8 @@
  * high and a small upper wick (and the close above the EMA with the trend filter); sell signals mirror it. A cooldown
  * of `cooldownBars` bars applies after a signal. Circles at (low + close) / 2 (buy) or (high + close) / 2 (sell) are
  * small, medium or large for a z-score above sigma, sigma + 1 or sigma + 2.
+ * Alerts (alertcondition, `alerts` of the result): 'Large Buy Pressure' / 'Large Sell Pressure' on every buy / sell
+ * signal (z-score above sigma), 'Extreme Buy Pressure' / 'Extreme Sell Pressure' above sigma + 2.
  *
  * Reference: "Universal Large Orders Proxy" by boss11233
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { taCore, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface UniversalLargeOrdersProxyInputs {
   lookback: number;
@@ -97,7 +100,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<UniversalLargeOrdersProxyInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const lb = cfg.lookback;
@@ -142,6 +145,7 @@ export function calculate(
   const emaColor = String(color.new(color.yellow, 0));
   let lastBuyBar = NaN;
   let lastSellBar = NaN;
+  const flags: boolean[][] = [[], [], [], []];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     // A plain division: x / 0 is +-infinity (0 / 0 NaN); stdBuy == 0.0 is the Pine guard
@@ -178,19 +182,23 @@ export function calculate(
     const sell3 = rawSell3 && sellCooldownOk;
     if (buy1 || buy2 || buy3) lastBuyBar = i;
     if (sell1 || sell2 || sell3) lastSellBar = i;
+    flags[0].push(buy1);
+    flags[1].push(sell1);
+    flags[2].push(buy3);
+    flags[3].push(sell3);
 
     // math.avg(low, close) / math.avg(high, close); plotshape(..., shape.circle, location.absolute)
     const buyPos = (b.low + b.close) / 2;
     const sellPos = (b.high + b.close) / 2;
-    const circle = (price: number, c: string, size: 'small' | 'normal' | 'large') => {
-      if (!isNaN(price)) markers.push({ time: b.time, position: 'atPriceMiddle', price, shape: 'circle', color: c, size });
+    const circle = (price: number, c: string, size: 'small' | 'normal' | 'large', id: string) => {
+      if (!isNaN(price)) markers.push({ time: b.time, position: 'atPriceMiddle', price, shape: 'circle', color: c, size, id });
     };
-    if (buy1 && !buy2) circle(buyPos, cfg.buyColor, 'small');
-    if (buy2 && !buy3) circle(buyPos, cfg.buyColor, 'normal');
-    if (buy3) circle(buyPos, cfg.buyColor, 'large');
-    if (sell1 && !sell2) circle(sellPos, cfg.sellColor, 'small');
-    if (sell2 && !sell3) circle(sellPos, cfg.sellColor, 'normal');
-    if (sell3) circle(sellPos, cfg.sellColor, 'large');
+    if (buy1 && !buy2) circle(buyPos, cfg.buyColor, 'small', 'shape0');
+    if (buy2 && !buy3) circle(buyPos, cfg.buyColor, 'normal', 'shape1');
+    if (buy3) circle(buyPos, cfg.buyColor, 'large', 'shape2');
+    if (sell1 && !sell2) circle(sellPos, cfg.sellColor, 'small', 'shape3');
+    if (sell2 && !sell3) circle(sellPos, cfg.sellColor, 'normal', 'shape4');
+    if (sell3) circle(sellPos, cfg.sellColor, 'large', 'shape5');
 
     plot0.push({ time: b.time, value: cfg.showEMA ? ema[i] : NaN, color: emaColor });
   }
@@ -199,8 +207,18 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     markers,
+    // alertcondition(buy1) / (sell1) / (buy3) / (sell3)
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Large Buy Pressure', message: 'Large buy pressure detected' },
+  { id: 'alert1', title: 'Large Sell Pressure', message: 'Large sell pressure detected' },
+  { id: 'alert2', title: 'Extreme Buy Pressure', message: 'Extreme buy pressure detected' },
+  { id: 'alert3', title: 'Extreme Sell Pressure', message: 'Extreme sell pressure detected' },
+];
 
 export const UniversalLargeOrdersProxy = {
   calculate,
@@ -208,4 +226,5 @@ export const UniversalLargeOrdersProxy = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

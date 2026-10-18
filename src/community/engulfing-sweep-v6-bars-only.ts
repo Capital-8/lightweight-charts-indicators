@@ -10,12 +10,16 @@
  * Last bar: a signal needs a closed confirmation bar. The port reads the state of the last bar from the optional
  * third argument (see src/chart-context.ts); without it every bar is taken as closed.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Confirmed Bullish Engulfing + Low Sweep' and 'Confirmed Bearish
+ * Engulfing + High Sweep', true on the confirmation bar (the bar after the coloured one).
+ *
  * Reference: "Engulfing + Sweep (Confirmed Only) v6 — bars only" by fanta-grapefruit
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface EngulfingSweepV6BarsOnlyInputs {
@@ -66,7 +70,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<EngulfingSweepV6BarsOnlyInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -97,6 +101,8 @@ export function calculate(
   }
 
   const barColors: BarColorData[] = [];
+  const bullFlags: boolean[] = new Array(n).fill(false);
+  const bearFlags: boolean[] = new Array(n).fill(false);
   for (let i = 2; i < n; i++) {
     const b = bars[i];
     // confirmation_bull = requireConfirmation ? (bullNow and barstate.isconfirmed) : barstate.isconfirmed
@@ -105,6 +111,8 @@ export function calculate(
     const any = cfg.enableBullish || cfg.enableBearish;
     const bullSignal = bullEngulf[i - 1] && confirmationBull && any;
     const bearSignal = bearEngulf[i - 1] && confirmationBear && any;
+    bullFlags[i] = bullSignal;
+    bearFlags[i] = bearSignal;
     // barcolor(..., offset = -1): drawn on the engulfing bar i - 1
     if (bullSignal) barColors.push({ time: bars[i - 1].time, color: cfg.bullColor });
     else if (bearSignal) barColors.push({ time: bars[i - 1].time, color: cfg.bearColor });
@@ -114,8 +122,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     barColors,
+    // alertcondition(bullSignal, ...) / alertcondition(bearSignal, ...)
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Confirmed Bullish Engulfing + Low Sweep', message: 'Confirmed Bullish Engulfing + Low Sweep on {{ticker}} @ {{interval}}' },
+  { id: 'alert1', title: 'Confirmed Bearish Engulfing + High Sweep', message: 'Confirmed Bearish Engulfing + High Sweep on {{ticker}} @ {{interval}}' },
+];
 
 export const EngulfingSweepV6BarsOnly = {
   calculate,
@@ -123,4 +139,5 @@ export const EngulfingSweepV6BarsOnly = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

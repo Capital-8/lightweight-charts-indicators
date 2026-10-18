@@ -25,6 +25,11 @@
  * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
  * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
+ * Alerts (alertcondition, `alerts` of the result, in the order of the original): the bullish / bearish entries, the
+ * trend crosses of 0 (over, under, either) of the chart and of each of the five timeframes (their trend on each chart
+ * bar: the one of their latest completed bar, as the table), and the two entries again ('Bullish Entry' /
+ * 'Bearish Entry').
+ *
  * Reference: "Zero Lag Trend Signals (MTF) [AlgoAlpha]" by AlgoAlpha
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © AlgoAlpha
@@ -34,6 +39,7 @@ import { ta, Series, color, timeframe, type IndicatorResult, type InputConfig, t
 import type { MarkerData, TableData, TableCellData } from '../types';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import { backgroundColorOf, foregroundColorOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ZeroLagTrendSignalsInputs {
   /** Look-back window of the zero-lag EMA */
@@ -131,7 +137,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ZeroLagTrendSignalsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; tables: TableData[] } {
+): IndicatorResult & { markers: MarkerData[]; tables: TableData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   // chart.bg_color / chart.fg_color
   const CHART_BG = backgroundColorOf(chart);
@@ -143,13 +149,15 @@ export function calculate(
   const green90 = String(color.new(green, 90));
   const red90 = String(color.new(red, 90));
 
-  // The trend of the five other timeframes on the last bar (request.security(syminfo.tickerid, tf, trend))
-  const signals = [cfg.t1, cfg.t2, cfg.t3, cfg.t4, cfg.t5].map((tf) => {
+  // The trend of the five other timeframes on each chart bar (request.security(syminfo.tickerid, tf, trend)): the
+  // trend of their latest completed bar (na before the first one)
+  const tfTrends = [cfg.t1, cfg.t2, cfg.t3, cfg.t4, cfg.t5].map((tf) => {
     const { htf, latest } = timeframeBars(bars, tf, chart);
-    if (n === 0) return NaN;
-    const k = latest[n - 1];
-    return k >= 0 ? trendOf(htf, cfg.length, cfg.mult).trend[k] : NaN;
+    const htfTrend = n === 0 ? [] : trendOf(htf, cfg.length, cfg.mult).trend;
+    return latest.map((k) => (k >= 0 ? htfTrend[k] : NaN));
   });
+  // The table: their trend on the last bar
+  const signals = tfTrends.map((s) => (n === 0 ? NaN : s[n - 1]));
 
   const { closeS, zlema, volatility, upperBand, lowerBand, trend } = trendOf(bars, cfg.length, cfg.mult);
   const zlemaS = Series.fromArray(bars, zlema);
@@ -161,6 +169,8 @@ export function calculate(
   const plot1: Point[] = [];
   const plot2: Point[] = [];
   const markers: MarkerData[] = [];
+  const bullEntryFlags: boolean[] = new Array(n).fill(false);
+  const bearEntryFlags: boolean[] = new Array(n).fill(false);
   const mid: number[] = [];
   for (let i = 0; i < n; i++) {
     const time = bars[i].time;
@@ -173,19 +183,21 @@ export function calculate(
 
     // ta.crossunder(trend, 0) / ta.crossover(trend, 0): a label at the band
     if (tr < 0 && tr1 >= 0 && !isNaN(upperBand[i])) {
-      markers.push({ time, position: 'atPriceTop', price: upperBand[i], shape: 'labelDown', color: red, text: '▼', textColor: CHART_FG, size: 'small' });
+      markers.push({ id: 'shape0', time, position: 'atPriceTop', price: upperBand[i], shape: 'labelDown', color: red, text: '▼', textColor: CHART_FG, size: 'small' });
     }
     if (tr > 0 && tr1 <= 0 && !isNaN(lowerBand[i])) {
-      markers.push({ time, position: 'atPriceBottom', price: lowerBand[i], shape: 'labelUp', color: green, text: '▲', textColor: CHART_FG, size: 'small' });
+      markers.push({ id: 'shape1', time, position: 'atPriceBottom', price: lowerBand[i], shape: 'labelUp', color: green, text: '▲', textColor: CHART_FG, size: 'small' });
     }
     // plotchar: a cross of the close and the basis in the direction of a trend that is at least one bar old
+    bullEntryFlags[i] = !!closeOver[i] && tr === 1 && tr1 === 1;
+    bearEntryFlags[i] = !!closeUnder[i] && tr === -1 && tr1 === -1;
     const bullEntry = zlema[i] - volatility[i] * 1.5;
-    if (closeOver[i] && tr === 1 && tr1 === 1 && !isNaN(bullEntry)) {
-      markers.push({ time, position: 'atPriceMiddle', price: bullEntry, shape: 'circle', color: 'transparent', text: '▲', textColor: green, size: 'tiny' });
+    if (bullEntryFlags[i] && !isNaN(bullEntry)) {
+      markers.push({ id: 'char2', time, position: 'atPriceMiddle', price: bullEntry, shape: 'circle', char: '▲', color: green, size: 'tiny' });
     }
     const bearEntry = zlema[i] + volatility[i] * 1.5;
-    if (closeUnder[i] && tr === -1 && tr1 === -1 && !isNaN(bearEntry)) {
-      markers.push({ time, position: 'atPriceMiddle', price: bearEntry, shape: 'circle', color: 'transparent', text: '▼', textColor: red, size: 'tiny' });
+    if (bearEntryFlags[i] && !isNaN(bearEntry)) {
+      markers.push({ id: 'char3', time, position: 'atPriceMiddle', price: bearEntry, shape: 'circle', char: '▼', color: red, size: 'tiny' });
     }
   }
 
@@ -209,6 +221,14 @@ export function calculate(
     });
   }
 
+  // alertcondition() calls: ta.crossover / ta.crossunder / ta.cross of the trends with 0
+  const trendFlags = [trend, ...tfTrends].flatMap((s) => {
+    const over = crossedOver(s, 0);
+    const under = crossedUnder(s, 0);
+    return [over, under, over.map((v, i) => v || under[i])];
+  });
+  const alerts = alertStates(alertConditions, bars, [bullEntryFlags, bearEntryFlags, ...trendFlags, bullEntryFlags, bearEntryFlags]);
+
   const fillArr = <T,>(v: T): T[] => new Array<T>(n).fill(v);
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -223,7 +243,21 @@ export function calculate(
     ],
     markers,
     tables,
+    alerts,
   };
 }
 
-export const ZeroLagTrendSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+const TREND_ALERTS = ['', ' Time Frame 1', ' Time Frame 2', ' Time Frame 3', ' Time Frame 4', ' Time Frame 5'].flatMap((tf) => [
+  `Bullish Trend${tf}`, `Bearish Trend${tf}`, `(Bullish or Bearish) Trend${tf}`,
+]);
+
+/** alertcondition() calls of the original (a condition without a message: 'Alert Fired!') */
+export const alertConditions: AlertConditionDecl[] = [
+  { title: 'Bullish Entry Signal', message: 'Bullish Entry Signal detected. Consider entering a long position.' },
+  { title: 'Bearish Entry Signal', message: 'Bearish Entry Signal detected. Consider entering a short position.' },
+  ...TREND_ALERTS.map((title) => ({ title, message: 'Alert Fired!' })),
+  { title: 'Bullish Entry', message: 'Alert Fired!' },
+  { title: 'Bearish Entry', message: 'Alert Fired!' },
+].map((d, k) => ({ id: `alert${k}`, ...d }));
+
+export const ZeroLagTrendSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

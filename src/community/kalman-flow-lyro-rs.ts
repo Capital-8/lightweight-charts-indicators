@@ -8,6 +8,8 @@
  * down when the close is below the lower band with a negative velocity; otherwise it holds. The baseline (with a
  * glow), the bands, their fill and the candles take the trend colour (gray before the first trend), and Long / Short
  * labels mark the trend flips.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend Flip', 'Bearish Trend Flip' and 'Any Trend Flip' on
+ * the bars of the flips.
  *
  * Reference: "Kalman Flow | Lyro RS" by LyroRS
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface KalmanFlowLyroRsInputs {
   /** Price series fed into the Kalman filter */
@@ -101,7 +104,8 @@ const PALETTES: Record<KalmanFlowLyroRsInputs['colMode'], [string, string]> = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<KalmanFlowLyroRsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = getSourceSeries(bars, cfg.src).toArray().map((v) => v ?? NaN);
@@ -159,14 +163,16 @@ export function calculate(
   const trendCol = trend.map((t) => (t === 1 ? upC : t === -1 ? dnC : color.gray));
   const markers: MarkerData[] = [];
   const candles: PlotCandleData[] = [];
+  // flipUp = trend == 1 and trend[1] != 1 (trend[1] is na on the first bar: the comparison is false)
+  const flipUp = trend.map((t, i) => i > 0 && t === 1 && trend[i - 1] !== 1);
+  const flipDown = trend.map((t, i) => i > 0 && t === -1 && trend[i - 1] !== -1);
   for (let i = 0; i < n; i++) {
     const b = bars[i];
-    // flipUp = trend == 1 and trend[1] != 1 (trend[1] is na on the first bar: the comparison is false)
-    if (cfg.showSignals && i > 0 && trend[i] === 1 && trend[i - 1] !== 1) {
+    if (cfg.showSignals && flipUp[i]) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'labelUp', color: upC, text: '𝓛𝓸𝓷𝓰',
         textColor: '#000000', size: 'small' });
     }
-    if (cfg.showSignals && i > 0 && trend[i] === -1 && trend[i - 1] !== -1) {
+    if (cfg.showSignals && flipDown[i]) {
       markers.push({ time: b.time, position: 'aboveBar', shape: 'labelDown', color: dnC, text: '𝓢𝓱𝓸𝓻𝓽',
         textColor: '#000000', size: 'small' });
     }
@@ -192,8 +198,17 @@ export function calculate(
     }],
     markers,
     plotCandles: { candlePlot: candles },
+    // alertcondition(flipUp), alertcondition(flipDown), alertcondition(flipUp or flipDown)
+    alerts: alertStates(alertConditions, bars, [flipUp, flipDown, flipUp.map((f, i) => f || flipDown[i])]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend Flip', message: 'Kalman Flow | Lyro RS: Bullish trend flip on {{ticker}} ({{interval}})' },
+  { id: 'alert1', title: 'Bearish Trend Flip', message: 'Kalman Flow | Lyro RS: Bearish trend flip on {{ticker}} ({{interval}})' },
+  { id: 'alert2', title: 'Any Trend Flip', message: 'Kalman Flow | Lyro RS: Trend flip on {{ticker}} ({{interval}})' },
+];
 
 export const KalmanFlowLyroRs = {
   calculate,
@@ -201,4 +216,5 @@ export const KalmanFlowLyroRs = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

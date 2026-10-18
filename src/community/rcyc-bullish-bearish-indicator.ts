@@ -6,6 +6,8 @@
  * midline sets the bullish state, a crossunder the bearish state. The price candles are redrawn in the state colour:
  * red on the bullish cross bar, then navy; yellow on the bearish cross bar, then aqua; gray while neutral. The
  * initial state is an input; 'Auto' takes the side of J on the first bar where J is known.
+ * Alerts (alertcondition, `alerts` of the result): 'Red Candle Alert' (J crosses over the midline) and 'Yellow
+ * Candle Alert' (J crosses under the midline).
  *
  * Reference: "RCYC - Bullish Bearish Indicator" by bizarro29
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RcycBullishBearishIndicatorInputs {
   /** KDJ length (highest high / lowest low window) */
@@ -59,7 +62,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<RcycBullishBearishIndicatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { plotCandles: Record<string, PlotCandleData[]> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -107,7 +110,15 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     plotCandles: { candles },
+    // alertcondition(crossOverMid, "Red Candle Alert") / alertcondition(crossUnderMid, "Yellow Candle Alert")
+    alerts: alertStates(alertConditions, bars, [bars.map((_, i) => !!crossOver[i]), bars.map((_, i) => !!crossUnder[i])]),
   };
 }
 
-export const RcycBullishBearishIndicator = { calculate, metadata, defaultInputs, inputConfig, plotConfig, plotCandleConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Red Candle Alert', message: 'Red Candle Signal: J Value has crossed above the selected midline.' },
+  { id: 'alert1', title: 'Yellow Candle Alert', message: 'Yellow Candle Signal: J Value has crossed below the selected midline.' },
+];
+
+export const RcycBullishBearishIndicator = { calculate, metadata, defaultInputs, inputConfig, plotConfig, plotCandleConfig, alertConditions };

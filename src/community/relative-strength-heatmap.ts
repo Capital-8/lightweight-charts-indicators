@@ -4,7 +4,9 @@
  * Twenty RSIs of the source, with lengths round((len + step * k) * mult) for k = 0..19. Each RSI is drawn as a
  * one-unit tile (an area from k to k + 1) coloured by its value with a ten-step palette (Viridis, Jet, ...). Two
  * lines count the RSIs above 70 and below 30. When 10 or more RSIs are above 70 (below 30) the price pane background
- * takes the colour of the first (last) RSI tile at 90 % transparency (two layers, as the Pine script).
+ * takes the colour of the first (last) RSI tile at 90 % transparency (two layers, as the original).
+ * Alerts (alertcondition, `alerts` of the result): 'RSI Heatmap Strong Bull' (10 or more RSIs above 70) and 'RSI
+ * Heatmap Strong Bear' (10 or more RSIs below 30).
  *
  * Reference: "Relative Strength Heatmap [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type HeatmapPalette = 'Viridis' | 'Jet' | 'Plasma' | 'Custom Heat' | 'Gray' | 'Cividis' | 'Inferno' | 'Magma'
   | 'Turbo' | 'Rainbow';
@@ -121,7 +124,7 @@ function coloring(v: number, type: HeatmapPalette): string {
 export function calculate(
   bars: Bar[],
   inputs: Partial<RelativeStrengthHeatmapInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = Series.fromArray(bars, getSourceSeries(bars, cfg.src).toArray().map((v) => v ?? NaN));
@@ -163,11 +166,11 @@ export function calculate(
     const t = bars[i].time;
     if (bullCount[i] >= 10) {
       const c = String(color.new(coloring(rs[0][i], cfg.palType), 90));
-      bgColors.push({ time: t, color: c, forceOverlay: true }, { time: t, color: c, forceOverlay: true });
+      bgColors.push({ time: t, color: c, forceOverlay: true, id: 'bgcolor0' }, { time: t, color: c, forceOverlay: true, id: 'bgcolor1' });
     }
     if (bearCount[i] >= 10) {
       const c = String(color.new(coloring(rs[19][i], cfg.palType), 90));
-      bgColors.push({ time: t, color: c, forceOverlay: true }, { time: t, color: c, forceOverlay: true });
+      bgColors.push({ time: t, color: c, forceOverlay: true, id: 'bgcolor2' }, { time: t, color: c, forceOverlay: true, id: 'bgcolor3' });
     }
   }
 
@@ -175,8 +178,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
     bgColors,
+    // strongBull = bullCount >= 10, strongBear = bearCount >= 10
+    alerts: alertStates(alertConditions, bars, [bullCount.map((c) => c >= 10), bearCount.map((c) => c >= 10)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RSI Heatmap Strong Bull', message: 'RSI heatmap strongly overbought cluster {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'RSI Heatmap Strong Bear', message: 'RSI heatmap strongly oversold cluster {{exchange}}:{{ticker}}' },
+];
 
 export const RelativeStrengthHeatmap = {
   calculate,
@@ -184,4 +195,5 @@ export const RelativeStrengthHeatmap = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -7,6 +7,8 @@
  * marked with '💥' below a bull bar (close > open) or above any other bar; a contraction with '↗' below a bull bar or
  * '⤵' above any other bar.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Volume Spike' on a spike and 'Volume Contraction' on a contraction.
+ *
  * Last bar: a volume contraction is marked on a closed bar only. The port reads the state of the last bar from the
  * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
  *
@@ -18,6 +20,7 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolumeSpikeAndContractionInputs {
   /** Length of the volume SMA and stdev */
@@ -57,7 +60,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeSpikeAndContractionInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -82,25 +85,39 @@ export function calculate(
   const aqua = String(color.aqua);
   const markers: MarkerData[] = [];
   // plotchar(..., char, location, color, size = size.small, force_overlay = true): transparent shape, the char as text
-  const mark = (time: number, position: 'aboveBar' | 'belowBar', text: string, textColor: string) =>
-    markers.push({ time, position, shape: 'circle', color: 'transparent', text, textColor, size: 'small',
+  const mark = (id: string, time: number, position: 'aboveBar' | 'belowBar', text: string, textColor: string) =>
+    markers.push({ id, time, position, shape: 'circle', color: 'transparent', text, textColor, size: 'small',
       forceOverlay: true });
+  const spikeFlags: boolean[] = [];
+  const contractionFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const isBullCandle = gt(b.close, b.open);
     const spike = !!volumeSpike[i];
     const contraction = !!volumeContraction[i];
-    if (spike && isBullCandle) mark(b.time, 'belowBar', '💥', yellow);
-    if (spike && !isBullCandle) mark(b.time, 'aboveBar', '💥', yellow);
-    if (contraction && isBullCandle) mark(b.time, 'belowBar', '↗', aqua);
-    if (contraction && !isBullCandle) mark(b.time, 'aboveBar', '⤵', aqua);
+    spikeFlags.push(spike);
+    contractionFlags.push(contraction);
+    if (spike && isBullCandle) mark('char0', b.time, 'belowBar', '💥', yellow);
+    if (spike && !isBullCandle) mark('char1', b.time, 'aboveBar', '💥', yellow);
+    if (contraction && isBullCandle) mark('char2', b.time, 'belowBar', '↗', aqua);
+    if (contraction && !isBullCandle) mark('char3', b.time, 'aboveBar', '⤵', aqua);
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    // alertcondition(volumeSpike, 'Volume Spike') / alertcondition(volumeContraction, 'Volume Contraction')
+    alerts: alertStates(alertConditions, bars, [spikeFlags, contractionFlags]),
   };
 }
 
-export const VolumeSpikeAndContractionIndicator = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions (no message: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Volume Spike', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Volume Contraction', message: 'Alert Fired!' },
+];
+
+export const VolumeSpikeAndContractionIndicator = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions,
+};

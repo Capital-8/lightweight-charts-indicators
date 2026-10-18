@@ -8,12 +8,14 @@
  * (value^2 + (period / 2pi * (value - value[1]))^2). The wave is the first harmonic plus each higher harmonic scaled
  * by sqrt(its energy / the energy of the harmonic before). The quadrature is period / 4pi * (wave - wave[2]).
  * Optional threshold bands: k * 0.6745 * stdev (MAD mode), k * stdev, or a percentile (nearest rank) of |wave|.
+ * Alerts (alertcondition, `alerts` of the result): the wave crossing the bands (when they are shown) and zero.
  *
  * Reference: "Fourier Series Model of the Market" by e2e4
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface FourierSeriesModelOfTheMarketInputs {
   /** Price series to decompose into harmonic components */
@@ -113,7 +115,7 @@ const TWO_PI = 2.0 * Math.PI;
 const FOUR_PI = 4.0 * Math.PI;
 const MAD_SCALE = 0.6745;
 
-export function calculate(bars: Bar[], inputs: Partial<FourierSeriesModelOfTheMarketInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<FourierSeriesModelOfTheMarketInputs> = {}): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { period, bandwidth, numHarmonics } = cfg;
@@ -197,8 +199,24 @@ export function calculate(bars: Bar[], inputs: Partial<FourierSeriesModelOfTheMa
     hlines: cfg.showZeroLine
       ? [{ value: 0, options: { title: 'Zero', color: cfg.colorZeroLine, linestyle: 'dashed' } }]
       : [],
+    // crossedAboveThreshold = showThreshold and ta.crossover(wave, thresholdVal); crossedBelowThreshold = showThreshold
+    // and ta.crossunder(wave, -thresholdVal); ta.crossover / crossunder(wave, 0)
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(wave, threshold).map((c) => cfg.showThreshold && c),
+      crossedUnder(wave, threshold.map((v) => -v)).map((c) => cfg.showThreshold && c),
+      crossedOver(wave, 0),
+      crossedUnder(wave, 0),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'FSMM: Above +Threshold', message: 'FSMM: wave crossed above +threshold' },
+  { id: 'alert1', title: 'FSMM: Below -Threshold', message: 'FSMM: wave crossed below -threshold' },
+  { id: 'alert2', title: 'FSMM: Above Zero', message: 'FSMM: wave crossed above zero' },
+  { id: 'alert3', title: 'FSMM: Below Zero', message: 'FSMM: wave crossed below zero' },
+];
 
 export const FourierSeriesModelOfTheMarket = {
   calculate,
@@ -206,4 +224,5 @@ export const FourierSeriesModelOfTheMarket = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -9,6 +9,8 @@
  * Three lines extended to the left mark the latest bullish block and three the latest bearish block. Six invisible
  * series keep the latest levels for the data window. Two optional labels: a panel with the latest levels and a
  * documentation label with a tooltip.
+ * Alerts (alertcondition, `alerts` of the result): 'New Bullish OB detected' / 'New Bearish OB detected' on the bar
+ * that finds the block (`periods + 1` bars after the block candle).
  *
  * The six "Latest ..." series are invisible characters (transparency 100) in the Pine script, there only for the data
  * window: they are ported as plots with display 'data_window'.
@@ -23,6 +25,7 @@
 import { str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LineDrawingData, LabelData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface OrderBlockFinderInputs {
   /** Colour scheme: DARK (white / blue) or BRIGHT (green / red) */
@@ -106,7 +109,8 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<OrderBlockFinderInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const periods = Math.trunc(cfg.periods);
@@ -142,6 +146,7 @@ export function calculate(
   let latestBearHigh = 0, latestBearAvg = 0, latestBearLow = 0;
   // chper = time - time[1]; chper := change(chper) > 0 ? chper[1] : chper
   let chper = NaN;
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const ob = at(i, obPeriod);
@@ -171,6 +176,9 @@ export function calculate(
     const obBearHigh = obBear && ob ? ob.high : NaN;
     const obBearLow = obBear && ob ? (cfg.usewicks ? ob.low : ob.open) : NaN;
     const obBearAvg = (obBearLow + obBearHigh) / 2;
+    // alertcondition(OB_bull) / alertcondition(OB_bear)
+    bullFlags.push(obBull);
+    bearFlags.push(obBear);
 
     // Plots, shapes and fills with offset = -ob_period: the value of bar i is drawn on bar i - ob_period
     const j = i - obPeriod;
@@ -186,19 +194,19 @@ export function calculate(
         bearFill[j] = bearcolor;
       }
       if (obBull) {
-        markers.push({ time: tj, position: 'belowBar', shape: 'triangleUp', color: bullcolor, text: 'Bullish OB',
+        markers.push({ id: 'shape0', time: tj, position: 'belowBar', shape: 'triangleUp', color: bullcolor, text: 'Bullish OB',
           textColor: bullcolor, size: 'tiny' });
       }
       if (!isNaN(obBullAvg)) {
-        markers.push({ time: tj, position: 'atPriceMiddle', price: obBullAvg, shape: 'cross', color: bullcolor,
+        markers.push({ id: 'shape1', time: tj, position: 'atPriceMiddle', price: obBullAvg, shape: 'cross', color: bullcolor,
           size: 'normal' });
       }
       if (obBear) {
-        markers.push({ time: tj, position: 'aboveBar', shape: 'triangleDown', color: bearcolor, text: 'Bearish OB',
+        markers.push({ id: 'shape2', time: tj, position: 'aboveBar', shape: 'triangleDown', color: bearcolor, text: 'Bearish OB',
           textColor: bearcolor, size: 'tiny' });
       }
       if (!isNaN(obBearAvg)) {
-        markers.push({ time: tj, position: 'atPriceMiddle', price: obBearAvg, shape: 'cross', color: bearcolor,
+        markers.push({ id: 'shape3', time: tj, position: 'atPriceMiddle', price: obBearAvg, shape: 'cross', color: bearcolor,
           size: 'normal' });
       }
     }
@@ -270,7 +278,14 @@ export function calculate(
     ],
     lines: [...bullLines, ...bearLines],
     labels,
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
 
-export const OrderBlockFinder = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New Bullish OB detected', message: 'New Bullish OB detected - This is NOT a BUY signal!' },
+  { id: 'alert1', title: 'New Bearish OB detected', message: 'New Bearish OB detected - This is NOT a SELL signal!' },
+];
+
+export const OrderBlockFinder = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

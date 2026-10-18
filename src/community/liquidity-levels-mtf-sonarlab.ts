@@ -31,7 +31,10 @@
  * Without them the port uses the UTC calendar and the bars, as described in this header. `timeframe`, when given,
  * is the chart timeframe; without it the chart timeframe is read from the bar spacing.
  *
- * The four alert inputs and their texts only drive alerts, which the port does not have.
+ * Alerts (alertcondition, `alerts` of the result): 'New High' / 'New Low' on the bars where a level of the chart
+ * timeframe is mitigated, 'New HTF High' / 'New HTF Low' for the levels of the higher timeframe. The alert inputs
+ * drive the alert() calls (`alertCalls` of the result, once per bar): their text on the same bars when the input is
+ * on.
  *
  * Reference: "Liquidity Levels - Sonarlab" by vuetratrading
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -44,9 +47,13 @@ import {
 } from 'oakscriptjs';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
-import type { BoxData, LineDrawingData } from '../types';
+import type { AlertCall, BoxData, LineDrawingData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type StyleName = 'Solid' | 'Dashed' | 'Dotted';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface LiquidityLevelsMtfSonarlabInputs {
   currentTF: boolean;
@@ -242,7 +249,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<LiquidityLevelsMtfSonarlabInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'boxes' | 'lines'> & { lines: LineDrawingData[]; boxes: BoxData[] } {
+): Omit<IndicatorResult, 'boxes' | 'lines'> & { lines: LineDrawingData[]; boxes: BoxData[]; alertCalls: AlertCall[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -294,7 +302,8 @@ export function calculate(
   const lowHTF = makeSide(false);
 
   // remove_mitigated_lines() / remove_mitigated_boxes(): the mitigated copies use the chart timeframe colours
-  const removeMitigatedLines = (i: number, arr: Line[], isHigh: boolean) => {
+  const removeMitigatedLines = (i: number, arr: Line[], isHigh: boolean): boolean => {
+    let m = false;
     if (arr.length > 0 && cfg.removeMitigated) {
       const b = bars[i];
       const prevClose = i > 0 ? bars[i - 1].close : NaN;
@@ -310,13 +319,16 @@ export function calculate(
             line.new(line.get_x1(l), level, b.time, level, 'bar_time', 'none', String(color.new(isHigh ? cfg.highLineColor : cfg.lowLineColor, 70)));
           }
           line.delete(l);
+          m = true;
         }
       }
     }
     // display_limit_line()
     if (arr.length > limit) line.delete(arr.shift() as Line);
+    return m;
   };
-  const removeMitigatedBoxes = (i: number, arr: Box[], isHigh: boolean) => {
+  const removeMitigatedBoxes = (i: number, arr: Box[], isHigh: boolean): boolean => {
+    let m = false;
     if (arr.length > 0 && cfg.removeMitigated) {
       const b = bars[i];
       const prevClose = i > 0 ? bars[i - 1].close : NaN;
@@ -336,11 +348,13 @@ export function calculate(
             );
           }
           box.delete(l);
+          m = true;
         }
       }
     }
     // display_limit_box()
     if (arr.length > limit) box.delete(arr.shift() as Box);
+    return m;
   };
 
   // extend_line_to_current() / extend_box_to_current() (the setters of a deleted object do nothing)
@@ -355,6 +369,8 @@ export function calculate(
     for (const o of arr) box.set_right(o, timeExt);
   };
 
+  const flags: boolean[][] = [[], [], [], []];
+  const alertCalls: AlertCall[] = [];
   try {
     for (let i = 0; i < n; i++) {
       setDrawingBar(i, i === n - 1);
@@ -383,10 +399,10 @@ export function calculate(
         }
       }
 
-      removeMitigatedLines(i, high.lineArray, true);
-      removeMitigatedLines(i, low.lineArray, false);
-      removeMitigatedBoxes(i, high.boxArray, true);
-      removeMitigatedBoxes(i, low.boxArray, false);
+      const highLineAlert = removeMitigatedLines(i, high.lineArray, true);
+      const lowLineAlert = removeMitigatedLines(i, low.lineArray, false);
+      const highBoxAlert = removeMitigatedBoxes(i, high.boxArray, true);
+      const lowBoxAlert = removeMitigatedBoxes(i, low.boxArray, false);
 
       if (extentionCurrent) {
         extendLines(i, high.lineArray);
@@ -394,6 +410,15 @@ export function calculate(
         extendBoxes(i, high.boxArray);
         extendBoxes(i, low.boxArray);
       }
+
+      // alertcondition(highLineAlert or highBoxAlert, "New High") / (lowLineAlert or lowBoxAlert, "New Low"), and
+      // if (...) and alertNewHigh: alert(alertNewHighTxt, alert.freq_once_per_bar) (same for the low)
+      const newHigh = highLineAlert || highBoxAlert;
+      const newLow = lowLineAlert || lowBoxAlert;
+      flags[0].push(newHigh);
+      flags[1].push(newLow);
+      if (newHigh && cfg.alertNewHigh) alertCalls.push({ time: bars[i].time, message: cfg.alertNewHighTxt, freq: 'once_per_bar' });
+      if (newLow && cfg.alertNewLow) alertCalls.push({ time: bars[i].time, message: cfg.alertNewLowTxt, freq: 'once_per_bar' });
 
       // Higher timeframe levels
       if (cfg.htfBool) {
@@ -429,10 +454,10 @@ export function calculate(
         }
       }
 
-      removeMitigatedLines(i, highHTF.lineArray, true);
-      removeMitigatedLines(i, lowHTF.lineArray, false);
-      removeMitigatedBoxes(i, highHTF.boxArray, true);
-      removeMitigatedBoxes(i, lowHTF.boxArray, false);
+      const highLineAlertHTF = removeMitigatedLines(i, highHTF.lineArray, true);
+      const lowLineAlertHTF = removeMitigatedLines(i, lowHTF.lineArray, false);
+      const highBoxAlertHTF = removeMitigatedBoxes(i, highHTF.boxArray, true);
+      const lowBoxAlertHTF = removeMitigatedBoxes(i, lowHTF.boxArray, false);
 
       if (extentionCurrent) {
         extendLines(i, highHTF.lineArray);
@@ -440,6 +465,14 @@ export function calculate(
         extendBoxes(i, highHTF.boxArray);
         extendBoxes(i, lowHTF.boxArray);
       }
+
+      // alertcondition(... "New HTF High") / ("New HTF Low") and their alert() calls
+      const newHighHTF = highLineAlertHTF || highBoxAlertHTF;
+      const newLowHTF = lowLineAlertHTF || lowBoxAlertHTF;
+      flags[2].push(newHighHTF);
+      flags[3].push(newLowHTF);
+      if (newHighHTF && cfg.alertNewHighHTF) alertCalls.push({ time: bars[i].time, message: cfg.alertNewHighHTFTxt, freq: 'once_per_bar' });
+      if (newLowHTF && cfg.alertNewLowHTF) alertCalls.push({ time: bars[i].time, message: cfg.alertNewLowHTFTxt, freq: 'once_per_bar' });
     }
   } finally {
     setDrawingBar(null);
@@ -464,7 +497,19 @@ export function calculate(
     plots: {},
     lines,
     boxes,
+    alerts: alertStates(alertConditions, bars, flags),
+    alertCalls,
   };
 }
 
-export const LiquidityLevelsMtfSonarlab = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New High', message: 'Price is breaking out!' },
+  { id: 'alert1', title: 'New Low', message: 'Price is breaking down!' },
+  { id: 'alert2', title: 'New HTF High', message: 'Price is breaking out!' },
+  { id: 'alert3', title: 'New HTF Low', message: 'Price is breaking down!' },
+];
+
+export const LiquidityLevelsMtfSonarlab = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction,
+};

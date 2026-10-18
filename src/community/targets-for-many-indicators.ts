@@ -12,6 +12,8 @@
  * current target is reached before a new one, and a new target as soon as one is reached. Candles take the colour of
  * the latest new target until a target is reached. A dashboard counts the targets and the reached ones; invalid
  * settings are listed in it. Optional plots of the two sources (not for the oscillator-type sources).
+ * Alerts (alertcondition, `alerts` of the result): 'Target 1 New', 'Target 1 Reached', 'Target 2 New' and 'Target 2
+ * Reached', true on the bars on which a target is set / reached.
  *
  * Indicator rules of the original: EMA, DEMA, TEMA, the Keltner channel and MACD use an EMA seeded with the SMA of
  * the bar before; RMA and ATR start with an SMA; RSI and Supertrend use their own running averages; LINREG uses
@@ -36,6 +38,15 @@ import { executeScript, ta as scriptTa, close as scriptClose } from 'oakscriptjs
 import type { BarColorData, LabelData, LineDrawingData, TableData } from '../types';
 import { chartTimeframe, hasCalendar } from '../anchor-period';
 import { mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Target 1 New', message: 'Target 1 New' },
+  { id: 'alert1', title: 'Target 1 Reached', message: 'Target 1 Reached' },
+  { id: 'alert2', title: 'Target 2 New', message: 'Target 2 New' },
+  { id: 'alert3', title: 'Target 2 Reached', message: 'Target 2 Reached' },
+];
 
 const SOURCES_A = ['External', 'ACCDIST', 'ATR', 'BB Middle', 'BB Upper', 'BB Lower', 'CCI', 'CMO', 'COG', 'DC High',
   'DC Mid', 'DC Low', 'DEMA', 'EMA', 'HMA', 'III', 'KC Middle', 'KC Upper', 'KC Lower', 'LINREG', 'MACD', 'MACD-signal',
@@ -471,7 +482,7 @@ export function calculate(
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'lines' | 'labels' | 'tables' | 'barColors'> & {
   lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[]; barColors: BarColorData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const mintick = mintickOf(chart);
@@ -525,6 +536,9 @@ export function calculate(
       obj: { value: NaN, reached: true, active: false } as Target,
       count: 0,
       countReached: 0,
+      // isNewTarget<k> / isTgReached<k> of every bar
+      isNew: new Array<boolean>(n).fill(false),
+      isReached: new Array<boolean>(n).fill(false),
     };
   };
   const t1 = setup(1);
@@ -557,6 +571,7 @@ export function calculate(
           o.reached = true;
           o.active = false;
           t.countReached += 1;
+          t.isReached[i] = true;
           css = null;
           if (o.lbl) label.set_color(o.lbl, t.css);
         }
@@ -574,6 +589,7 @@ export function calculate(
           created.v = line.new(i, bar.close, i, targetValue, 'bar_index', undefined, t.css, t.style);
           created.h = line.new(i, targetValue, i, targetValue, 'bar_index', undefined, t.css, t.style);
           t.count += 1;
+          t.isNew[i] = true;
         }
       }
       if (cfg.candleColoring && css !== null) barColors.push({ time: bar.time, color: css });
@@ -640,6 +656,7 @@ export function calculate(
     lines: drawn.lines ?? [],
     labels: drawn.labels ?? [],
     tables: drawn.tables ?? [],
+    alerts: alertStates(alertConditions, bars, [t1.isNew, t1.isReached, t2.isNew, t2.isReached]),
   };
 }
 
@@ -649,4 +666,5 @@ export const TargetsForManyIndicators = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

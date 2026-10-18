@@ -127,10 +127,10 @@ export function calculate(
     const t = bars[i].time;
     // plotshape(crossUp ? 0 : na, shape.circle, location.absolute, size = size.tiny)
     if (crossUp[i] === 1) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: 0, shape: 'circle', color: cfg.bullColor, size: 'tiny' });
+      markers.push({ id: 'shape0', time: t, position: 'atPriceMiddle', price: 0, shape: 'circle', color: cfg.bullColor, size: 'tiny' });
     }
     if (crossDown[i] === 1) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: 0, shape: 'circle', color: cfg.bearColor, size: 'tiny' });
+      markers.push({ id: 'shape1', time: t, position: 'atPriceMiddle', price: 0, shape: 'circle', color: cfg.bearColor, size: 'tiny' });
     }
     if (gt(smoothed[i], 50)) bgColors.push({ time: t, color: bullBg });
     else if (lt(smoothed[i], -50)) bgColors.push({ time: t, color: bearBg });

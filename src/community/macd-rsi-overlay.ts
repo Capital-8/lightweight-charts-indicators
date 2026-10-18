@@ -6,6 +6,9 @@
  * (1 - scalingFactor) * the previous adaptive average. The MACD line is the WMA (Smooth) of its 5-bar RMA, the RSI
  * line the WMA (Smooth) of its 1-bar RMA, and the signal line its SMA. The RSI line is coloured by the RSI(14) of
  * the close against the overbought / oversold levels. A one-cell table shows the trend of the last bar.
+ * Alerts (alertcondition, `alerts` of the result): the MACD and RSI lines crossing over / under the signal line, the
+ * close crossing over / under the MACD and RSI lines and the RSI line crossing over / under the MACD line (whatever
+ * lines are shown).
  *
  * Chart values read: the chart background colour (table frame and border). Without a chart context the dark theme
  * colour is used.
@@ -18,6 +21,7 @@
 import { taCore, math, color, compare, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { TableData, TablePosition, PineSize } from '../types';
 import { backgroundColorOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MacdRsiOverlayInputs {
   /** Lines shown: MACD, RSI 14 or both */
@@ -103,7 +107,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<MacdRsiOverlayInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { tables: TableData[] } {
+): IndicatorResult & { tables: TableData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const close = bars.map((b) => b.close);
@@ -167,8 +171,30 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2 },
     tables: n > 0 ? [table] : [],
+    // indicatorcross(macd / rsi) against the signal, srccross(close, macd / rsi), srccross(rsi, macd)
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(macd, signal), crossedUnder(macd, signal),
+      crossedOver(rsi, signal), crossedUnder(rsi, signal),
+      crossedOver(close, macd), crossedUnder(close, macd),
+      crossedOver(close, rsi), crossedUnder(close, rsi),
+      crossedOver(rsi, macd), crossedUnder(rsi, macd),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'MACD Crosses Over Signal Line', message: 'MACD Crosses Over Signal Line' },
+  { id: 'alert1', title: 'MACD Crosses Under Signal Line', message: 'MACD Crosses Under Signal Line' },
+  { id: 'alert2', title: 'RSI Crosses Over Signal Line', message: 'RSI Crosses Over Signal Line' },
+  { id: 'alert3', title: 'RSI Crosses Under Signal Line', message: 'RSI Crosses Under Signal Line' },
+  { id: 'alert4', title: 'Close Crosses Over MACD', message: 'Close Crosses Over MACD' },
+  { id: 'alert5', title: 'Close Crosses Under MACD', message: 'Close Crosses Under MACD' },
+  { id: 'alert6', title: 'Close Crosses Over RSI', message: 'Close Crosses Over RSI' },
+  { id: 'alert7', title: 'Close Crosses Under RSI', message: 'Close Crosses Under RSI' },
+  { id: 'alert8', title: 'RSI Crosses Over MACD', message: 'RSI Crosses Over MACD' },
+  { id: 'alert9', title: 'RSI Crosses Under MACD', message: 'RSI Crosses Under MACD' },
+];
 
 export const MacdRsiOverlay = {
   calculate,
@@ -176,4 +202,5 @@ export const MacdRsiOverlay = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

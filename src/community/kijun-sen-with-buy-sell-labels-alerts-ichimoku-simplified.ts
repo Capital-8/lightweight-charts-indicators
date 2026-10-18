@@ -5,6 +5,8 @@
  * above it, red when the close is below it, gray otherwise. A "B" label is drawn below the bar when the close crosses
  * over the line or a new uptrend starts; an "S" label above the bar when the close crosses under the line or a new
  * downtrend starts.
+ * Alerts (alertcondition, `alerts` of the result): trend change (a new uptrend or downtrend), close crossing over /
+ * under the line.
  *
  * Reference: "Kijun-Sen with Buy / Sell Labels & Alerts - Ichimoku simplified" by TaureaYinYang
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface KijunSenWithAlertsInputs {
   /** Base periods of the Kijun-Sen */
@@ -45,7 +48,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<KijunSenWithAlertsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -65,11 +68,14 @@ export function calculate(
   const crossDown = B(ta.crossunder(close, kijunS));
 
   const markers: MarkerData[] = [];
+  const trendChange: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // uptrend[1] / downtrend[1] are false on the first bar (bool history)
     const prevUp = i > 0 && uptrend[i - 1];
     const prevDown = i > 0 && downtrend[i - 1];
+    // trend_change = uptrend and not uptrend[1] or downtrend and not downtrend[1]
+    trendChange.push((uptrend[i] && !prevUp) || (downtrend[i] && !prevDown));
     // buy_signal = price_cross_up or uptrend and not uptrend[1]
     if (crossUp[i] || (uptrend[i] && !prevUp)) {
       markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: color.green, text: 'B',
@@ -91,8 +97,16 @@ export function calculate(
       })),
     },
     markers,
+    alerts: alertStates(alertConditions, bars, [trendChange, crossUp, crossDown]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Color Change Alert', message: 'Kijun-Sen Color Change: Trend Changed!' },
+  { id: 'alert1', title: 'Price Crosses Kijun Up', message: 'Price crossed Kijun-Sen upwards!' },
+  { id: 'alert2', title: 'Price Crosses Kijun Down', message: 'Price crossed Kijun-Sen downwards!' },
+];
 
 export const KijunSenWithAlerts = {
   calculate,
@@ -100,4 +114,5 @@ export const KijunSenWithAlerts = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

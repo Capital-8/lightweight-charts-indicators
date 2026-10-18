@@ -10,6 +10,8 @@
  * Triangles mark a close that crosses back over a level of the bar before, in the direction against the trend
  * ("Show Fib Entries?"); the triangles of the three levels are spaced by 1, 1.5 and 2 times the 14-bar average of the
  * true range.
+ * Alerts (alertcondition, `alerts` of the result): the six level crosses of the triangles (whatever "Show Fib
+ * Entries?") and 'Stop Line Change' (the Fib 1 level, na bars skipped, differs from the bar before).
  *
  * Reference: "SwingArm ATR Trend Indicator" by vsnfnd (script title "Blackflag FTS")
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +20,18 @@
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'cross over Fib1', message: 'Price crossed below Fib1 level in long trend' },
+  { id: 'alert1', title: 'cross over Fib2', message: 'Price crossed below Fib2 level in long trend' },
+  { id: 'alert2', title: 'cross over Fib3', message: 'Price crossed below Fib3 level in long trend' },
+  { id: 'alert3', title: 'cross under Fib1', message: 'Price crossed above Fib1 level in short trend' },
+  { id: 'alert4', title: 'cross under Fib2', message: 'Price crossed above Fib2 level in short trend' },
+  { id: 'alert5', title: 'cross under Fib3', message: 'Price crossed above Fib3 level in short trend' },
+  { id: 'alert6', title: 'Stop Line Change', message: 'Stop Line Change' },
+];
 
 export interface SwingarmAtrTrendIndicatorInputs {
   trailType: 'modified' | 'unmodified';
@@ -75,7 +89,7 @@ const max = (...v: number[]) => (v.some((x) => isNaN(x)) ? NaN : Math.max(...v))
 const min = (...v: number[]) => (v.some((x) => isNaN(x)) ? NaN : Math.min(...v));
 const nz = (x: number, r = 0) => (isNaN(x) ? r : x);
 
-export function calculate(bars: Bar[], inputs: Partial<SwingarmAtrTrendIndicatorInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<SwingarmAtrTrendIndicatorInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -169,22 +183,38 @@ export function calculate(bars: Bar[], inputs: Partial<SwingarmAtrTrendIndicator
     for (let j = 0; j < 3; j++) {
       const v = l[i] - k[j] * atr[i];
       if (long[i - 1] && under[j][i] && !isNaN(v) && v !== 0) {
-        markers.push({ time: time(i), position: 'belowBar', shape: 'triangleUp', color: YELLOW, size: 'tiny' });
+        // plotshape LS1 / LS2 / LS3: ids shape0..shape2
+        markers.push({ time: time(i), position: 'belowBar', shape: 'triangleUp', color: YELLOW, size: 'tiny', id: `shape${j}` });
       }
     }
     for (let j = 0; j < 3; j++) {
       const v = h[i] + k[j] * atr[i];
       if (!long[i - 1] && over[j][i] && !isNaN(v) && v !== 0) {
-        markers.push({ time: time(i), position: 'aboveBar', shape: 'triangleDown', color: PURPLE, size: 'tiny' });
+        // plotshape SS1 / SS2 / SS3: ids shape3..shape5
+        markers.push({ time: time(i), position: 'aboveBar', shape: 'triangleDown', color: PURPLE, size: 'tiny', id: `shape${j + 3}` });
       }
     }
   }
+
+  // alertcondition(l1..l3, s1..s3): state[1] == "long" / "short" (na on the first bar) and the cross
+  const flags: boolean[][] = [];
+  for (let j = 0; j < 3; j++) flags.push(bars.map((_b, i) => i > 0 && long[i - 1] && !!under[j][i]));
+  for (let j = 0; j < 3; j++) flags.push(bars.map((_b, i) => i > 0 && !long[i - 1] && !!over[j][i]));
+  // alertcondition(fixnan(f1) != fixnan(f1[1])): na (before the first value) compares false
+  const fixed: number[] = [];
+  let lastF1 = NaN;
+  for (let i = 0; i < n; i++) {
+    if (!isNaN(f1[i])) lastF1 = f1[i];
+    fixed.push(lastF1);
+  }
+  flags.push(fixed.map((v, i) => i > 0 && !isNaN(v) && !isNaN(fixed[i - 1]) && !(Math.abs(v - fixed[i - 1]) <= EPS)));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
     fills,
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
@@ -194,4 +224,5 @@ export const SwingarmAtrTrendIndicator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

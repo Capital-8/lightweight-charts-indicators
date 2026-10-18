@@ -9,8 +9,12 @@
  * third colour when the close is inside it.
  *
  * In the original the levels are picked on the chart (interactive price inputs, default 0): here they are plain
- * inputs with the same defaults. The alerts of the original (zone broken, price in a zone) have no output; their
- * inputs are kept.
+ * inputs with the same defaults.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result), on the last bar only as the original: "Support Broken, ..." /
+ * "Resistance Broken, ..." (close against close[1] through the lower / upper edge of a zone, frequency "SR Broken
+ * Alert") when "SR Broken Alert" is on, and "Price in SR Zone, ..." (close inside a zone, its own frequency) when
+ * "Price in SR Zone Alert" is on; the last zone of the list that matches is named.
  *
  * Chart context (optional third argument): the prices of the label text are rounded to the symbol tick
  * (`chart.mintick`). Without it the tick is 0.01.
@@ -21,9 +25,12 @@
  */
 
 import { ta, str, math, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BoxData, LabelData } from '../types';
+import type { AlertCall, BoxData, LabelData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { mintickOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface SupportResistanceInteractiveInputs {
   /** Number of S/R levels shown (1 to 5) */
@@ -111,13 +118,14 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceInteractiveInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'boxes' | 'labels'> & { boxes: BoxData[]; labels: LabelData[] } {
+): Omit<IndicatorResult, 'boxes' | 'labels'> & { boxes: BoxData[]; labels: LabelData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // syminfo.mintick
   const MINTICK = mintickOf(chart);
   const boxes: BoxData[] = [];
   const labels: LabelData[] = [];
+  const alertCalls: AlertCall[] = [];
 
   if (n > 0) {
     const last = n - 1;
@@ -131,6 +139,14 @@ export function calculate(
     const interval = barInterval(bars);
     const T = (index: number) => barTime(bars, index, interval);
     const tick = (v: number) => str.tostring(math.round_to_mintick(v, MINTICK) as number);
+
+    // variables of the alerts: the index of the zone, -1 for none
+    let supportBroken = -1;
+    let resistanceBroken = -1;
+    let priceisSRzone = -1;
+    const close1 = last > 0 ? bars[last - 1].close : NaN;
+    const le = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !gt(a, b);
+    const ge = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !lt(a, b);
 
     // if barstate.islast
     for (let x = 0; x <= 4; x++) {
@@ -153,6 +169,36 @@ export function calculate(
           color: col, textColor: tcol,
         });
       }
+      // check for the alerts
+      if (le(close1, sr + thold) && gt(close, sr + thold)) resistanceBroken = x;
+      if (ge(close1, sr - thold) && lt(close, sr - thold)) supportBroken = x;
+      if (ge(close, sr - thold) && le(close, sr + thold)) priceisSRzone = x;
+    }
+
+    const time = bars[last].time;
+    const closeText = str.tostring(close);
+    if (cfg.enablesrbroken) {
+      if (supportBroken >= 0) {
+        alertCalls.push({
+          time, freq: cfg.supporsrbrknfreq,
+          message: 'Support Broken, Close :' + closeText + ' Support :' + tick(levels[supportBroken] - thold),
+        });
+      }
+      if (resistanceBroken >= 0) {
+        alertCalls.push({
+          time, freq: cfg.supporsrbrknfreq,
+          message: 'Resistance Broken, Close :' + closeText + ' Resistance :' + tick(levels[resistanceBroken] + thold),
+        });
+      }
+    }
+    // the band prices: the level rounded to the tick, then +- the threshold
+    if (cfg.enablepiz && priceisSRzone >= 0) {
+      const rounded = math.round_to_mintick(levels[priceisSRzone], MINTICK) as number;
+      alertCalls.push({
+        time, freq: cfg.pizfreq,
+        message: 'Price in SR Zone, Close :' + closeText + ' Upper Band :' + str.tostring(rounded + thold)
+          + ' Lower Band :' + str.tostring(rounded - thold),
+      });
     }
   }
 
@@ -161,6 +207,7 @@ export function calculate(
     plots: {},
     boxes,
     labels,
+    alertCalls,
   };
 }
 
@@ -170,4 +217,5 @@ export const SupportResistanceInteractive = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

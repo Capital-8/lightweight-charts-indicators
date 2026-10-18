@@ -8,6 +8,7 @@
  * lighter when it falls. Buy / sell conditions (oscillator, stochastic CCI, ADX, volume above its SMA) colour the
  * background. Optional volume panel: volume candles coloured by the volume level, the highest volume (30) and the
  * volume SMA and excess levels of the previous bar.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY' and 'SELL', on the bars of the buy / sell conditions.
  *
  * Reference: "Gorgo's Hybrid Oscillator STrategy" by Gorgomannaro
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +16,7 @@
 
 import { ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface GorgosHybridOscillatorStrategyInputs {
   /** Overbought level of the stochastic CCI and of the oscillator */
@@ -102,7 +104,8 @@ const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
 export function calculate(
   bars: Bar[],
   inputs: Partial<GorgosHybridOscillatorStrategyInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -196,6 +199,8 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const buyBg = String(color.new('#ff0000', 75));
   const sellBg = String(color.new('#ffffff', 75));
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const sd = stochD[i];
@@ -216,6 +221,8 @@ export function calculate(
       && ge(sd, midline)
       && ge(volume[i], mvPrev);
     sell = sell || (ge(volume[i], mvPrev * 2.0) && ge(osc[i], oscPrev) && ge(osc[i], 60.0));
+    buyFlags.push(buy);
+    sellFlags.push(sell);
     // sfondo := buy ? red 75 : sfondo; sfondo := sell ? white 75 : sfondo
     const bg = sell ? sellBg : buy ? buyBg : null;
     if (bg) bgColors.push({ time: b.time, color: bg });
@@ -270,8 +277,16 @@ export function calculate(
     ],
     bgColors,
     plotCandles: { volume: candles },
+    // alertcondition(buy_signal, 'BUY') / alertcondition(sell_signal, 'SELL')
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY', message: '00_buy signal @ {{close}}' },
+  { id: 'alert1', title: 'SELL', message: '00_sell signal @ {{close}}' },
+];
 
 export const GorgosHybridOscillatorStrategy = {
   calculate,
@@ -280,4 +295,5 @@ export const GorgosHybridOscillatorStrategy = {
   inputConfig,
   plotConfig,
   hlineConfig,
+  alertConditions,
 };

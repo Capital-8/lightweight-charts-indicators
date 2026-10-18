@@ -8,6 +8,9 @@
  * line is coloured by the trend, with four fill layers to zero, threshold lines and optional window lines, bar and
  * background colours. Presets override the windows, the threshold and the conviction.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend Signal', 'Bearish Trend Signal', 'Trend Lost /
+ * Neutral' (the trend direction turns 1 / -1 / 0) and 'Any Trend Change' (turns bullish or bearish).
+ *
  * Reference: "Monotonic Trend Consensus [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © QuantAlgo
@@ -15,6 +18,7 @@
 
 import { getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MonotonicTrendConsensusInputs {
   preset: 'Default' | 'Fast Response' | 'Smooth Trend';
@@ -134,7 +138,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<MonotonicTrendConsensusInputs> = {},
-): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } {
+): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   let { e1, e2, e3, e4, e5, l1, l2, l3, l4, threshold, minConviction } = cfg;
@@ -253,6 +257,14 @@ export function calculate(
     if (cfg.showBgcolor) bgColors.push({ time: time(i), color: String(color.new(lineColor[i], cfg.bgTrans)) });
   }
 
+  // turned_bullish = trend_dir == 1 and trend_dir[1] != 1 (and -1 / 0); trend_changed = turned_bullish or turned_bearish
+  // (trend_dir[1] is na on the first bar: false)
+  const turned = (d: number) => trendDir.map((v, i) => i > 0 && v === d && trendDir[i - 1] !== d);
+  const turnedBull = turned(1);
+  const turnedBear = turned(-1);
+  const turnedNeutral = turned(0);
+  const trendChanged = turnedBull.map((v, i) => v || turnedBear[i]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
@@ -264,8 +276,17 @@ export function calculate(
     fills,
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [turnedBull, turnedBear, turnedNeutral, trendChanged]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend Signal', message: 'Monotonic Trend Consensus: BULLISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Trend Signal', message: 'Monotonic Trend Consensus: BEARISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Trend Lost / Neutral', message: 'Monotonic Trend Consensus: trend lost, consensus flat on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert3', title: 'Any Trend Change', message: 'Monotonic Trend Consensus: trend direction changed on {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const MonotonicTrendConsensus = {
   calculate,
@@ -273,4 +294,5 @@ export const MonotonicTrendConsensus = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

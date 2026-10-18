@@ -6,13 +6,18 @@
  * crosses under MA 1 or MA 2; a sell signal is a downtrend bar where the high crosses over MA 1 or MA 2. The MAs are
  * blue / red / grey by the trend; bars are orange when the RSI is above the overbought or below the oversold level,
  * else blue / red by the trend.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): "ALERTA DE COMPRA" on a buy signal and
+ * "ALERTA DE VENDA" on a sell signal.
  *
  * Reference: "ANDROMEDA - TrendSync" by Pedro_Canto
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
-import type { BarColorData, MarkerData } from '../types';
+import type { AlertCall, BarColorData, MarkerData } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface AndromedaTrendSyncInputs {
   /** Length of moving average 1 */
@@ -112,7 +117,7 @@ function crossSite(over: boolean) {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AndromedaTrendSyncInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -129,6 +134,7 @@ export function calculate(
   const plot1: { time: number; value: number; color: string }[] = [];
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const alertCalls: AlertCall[] = [];
   const cuMa1 = crossSite(false);
   const cuMa2 = crossSite(false);
   const coMa1 = crossSite(true);
@@ -144,6 +150,9 @@ export function calculate(
     const crossOver = coMa1(b.high, ma1[i]) || coMa2(b.high, ma2[i]);
     const buySignal = trendBuy && crossUnder;
     const sellSignal = trendSell && crossOver;
+    // if buy_signal: alert("ALERTA DE COMPRA", alert.freq_once_per_bar) / if sell_signal: alert("ALERTA DE VENDA", ...)
+    if (buySignal) alertCalls.push({ time: b.time, message: 'ALERTA DE COMPRA', freq: 'once_per_bar' });
+    if (sellSignal) alertCalls.push({ time: b.time, message: 'ALERTA DE VENDA', freq: 'once_per_bar' });
 
     const maColor = trendBuy ? color.blue : trendSell ? color.red : color.gray;
     plot0.push({ time: b.time, value: ma1[i], color: maColor });
@@ -165,6 +174,7 @@ export function calculate(
     plots: { plot0, plot1 },
     markers,
     barColors,
+    alertCalls,
   };
 }
 
@@ -174,4 +184,5 @@ export const AndromedaTrendSync = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

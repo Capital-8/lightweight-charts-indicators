@@ -9,7 +9,7 @@
  * - EMA 13 and EMA 21 coloured by direction (lime rising, red falling, na colour otherwise)
  * - Hull MA (black, linewidth 3)
  * - Buy/Sell markers from TEMA/DEMA signal logic
- * - Supertrend arrows on trend change
+ * - Supertrend arrows on trend change (the original's plotarrow outputs: `arrows` of the result)
  * - Fills: body channel (black), resistance (red), support (green)
  *
  * Pine v1/v2 source: plots without transp use transparency 35.
@@ -19,6 +19,7 @@
 
 import { ta, Series, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import type { ArrowData } from 'oakscriptjs';
 
 export interface VdubSniperInputs {
   src: SourceType;
@@ -103,7 +104,10 @@ export const metadata = {
 
 type Pt = { time: number; value: number; color?: string };
 
-export function calculate(bars: Bar[], inputs: Partial<VdubSniperInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<VdubSniperInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; arrows: ArrowData[] } {
   const {
     channel2, channel,
     bodyChannelPeriod,
@@ -280,14 +284,15 @@ export function calculate(bars: Bar[], inputs: Partial<VdubSniperInputs> = {}): 
     trend[i] = closeArr[i] > td1 ? 1 : closeArr[i] < tu1 ? -1 : (i > 0 ? trend[i - 1] : 0);
   }
 
-  // plotarrow(Trend == 1 and Trend[1] == -1 ? Trend : na, colorup = lime, transp = 85)
-  // plotarrow(Trend == -1 and Trend[1] == 1 ? Trend : na, colordown = red, transp = 85)
+  // plotarrow(Trend == 1 and Trend[1] == -1 ? Trend : na, "Up Entry Arrow", colorup = lime, transp = 85)
+  // plotarrow(Trend == -1 and Trend[1] == 1 ? Trend : na, "Down Entry Arrow", colordown = red, transp = 85)
+  const arrows: ArrowData[] = [];
   for (let i = 1; i < n; i++) {
     if (trend[i] === 1 && trend[i - 1] === -1) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#00FF0026', text: '' });
+      arrows.push({ time: bars[i].time, id: 'arrow0', value: trend[i], color: '#00FF0026' });
     }
     if (trend[i] === -1 && trend[i - 1] === 1) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#FF000026', text: '' });
+      arrows.push({ time: bars[i].time, id: 'arrow1', value: trend[i], color: '#FF000026' });
     }
   }
 
@@ -316,6 +321,7 @@ export function calculate(bars: Bar[], inputs: Partial<VdubSniperInputs> = {}): 
       { plot1: 'channelBottom', plot2: 'srBottom', options: { color: 'rgba(0,128,0,0.25)', title: 'Fill' } },
     ],
     markers,
+    arrows,
   };
 }
 

@@ -5,6 +5,8 @@
  * The RTI line is green when it at least doubles after a value at or below 20 (range expansion), blue otherwise.
  * An orange dot marks every bar after two or more consecutive bars below 20. Zones 0-5 (red) and 5-20 (green) are
  * shaded, with bounds at 0 and 100.
+ * Alerts (alertcondition, `alerts` of the result): 'Orange Dot Triggered' (two or more bars in a row below 20), 'RTI
+ * Below 20 Triggered' and 'Range Expansion Triggered' (the green RTI bars).
  *
  * Reference: "Range Tightening Indicator (RTI)" by Ollie_AllCaps
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,14 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Orange Dot Triggered', message: 'Orange Dot Condition Met!' },
+  { id: 'alert1', title: 'RTI Below 20 Triggered', message: 'RTI is Below 20!' },
+  { id: 'alert2', title: 'Range Expansion Triggered', message: 'RTI Range Expansion Condition Met!' },
+];
 
 export type RTILookbackOption = '5' | '15' | 'Custom Lookback';
 
@@ -57,7 +67,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<RangeTighteningIndicatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { lookbackOption, customLength } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // length = lookback_option == '5' ? 5 : lookback_option == '15' ? 15 : custom_length
@@ -79,6 +89,9 @@ export function calculate(
   const rtiPlot: { time: number; value: number; color: string }[] = [];
   const markers: MarkerData[] = [];
   let consecutiveCount = 0; // var int consecutive_count = 0
+  const dotFlags: boolean[] = [];
+  const below20Flags: boolean[] = [];
+  const expansionFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const r = rti[i];
@@ -89,6 +102,9 @@ export function calculate(
     rtiPlot.push({ time: t, value: r, color: expansion ? color.green : color.blue });
     // below_20 = rti < 20: consecutive_count + 1, else 0
     consecutiveCount = lt(r, 20) ? consecutiveCount + 1 : 0;
+    dotFlags.push(consecutiveCount >= 2);
+    below20Flags.push(lt(r, 20));
+    expansionFlags.push(expansion);
     // plotshape(consecutive_count >= 2 ? rti : na, location.absolute, shape.circle, size.tiny, color.orange)
     if (consecutiveCount >= 2 && !isNaN(r)) {
       markers.push({ time: t, position: 'atPriceMiddle', price: r, shape: 'circle', color: color.orange, size: 'tiny' });
@@ -118,6 +134,8 @@ export function calculate(
       { value: 0, options: { title: 'RTI Lower Bound', color: color.gray, linestyle: 'dashed' } },
     ],
     markers,
+    // alertcondition(dot_condition), (below_20_condition), (range_expansion_condition)
+    alerts: alertStates(alertConditions, bars, [dotFlags, below20Flags, expansionFlags]),
   };
 }
 
@@ -127,4 +145,5 @@ export const RangeTighteningIndicator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

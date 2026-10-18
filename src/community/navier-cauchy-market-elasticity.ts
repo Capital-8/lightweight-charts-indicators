@@ -9,6 +9,10 @@
  * dots and lines on extreme values, an optional momentum ribbon and background zones show the stress level. The
  * colours go from a light to a strong bullish / bearish colour with the stress size.
  *
+ * Alerts (alertcondition, `alerts` of the result): the smoothed stress crossing above the upper band / 1.5 times it
+ * ("High Stress" / "Extreme High Stress") and below the lower band / 1.5 times it ("High Compression" / "Extreme
+ * Compression"), with the bands as computed (also when they are not shown).
+ *
  * Reference: "Navier-Cauchy Market Elasticity [PhenLabs]" by PhenLabs
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © PhenLabs
@@ -16,6 +20,15 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'High Stress', message: 'Market under high tension' },
+  { id: 'alert1', title: 'High Compression', message: 'Market under high compression' },
+  { id: 'alert2', title: 'Extreme High Stress', message: 'Market under extreme tension' },
+  { id: 'alert3', title: 'Extreme Compression', message: 'Market under extreme compression' },
+];
 
 export type NcmeDisplayStyle = 'Histogram' | 'Line' | 'Both' | 'Advanced';
 export type NcmeColorScheme = 'Modern' | 'Classic' | 'Neon' | 'Ocean' | 'Fire';
@@ -144,7 +157,7 @@ const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
 export function calculate(
   bars: Bar[],
   inputs: Partial<NavierCauchyMarketElasticityInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -256,11 +269,11 @@ export function calculate(
     // plotshape(dotHigh / dotLow, shape.circle, location.absolute, size.tiny)
     if (showDots && gt(s, ub2) && Number.isFinite(s)) {
       markers.push({ time: t, position: 'atPriceMiddle', price: s, shape: 'circle',
-        color: String(color.new(bullishStrongColor, 30)), size: 'tiny' });
+        color: String(color.new(bullishStrongColor, 30)), size: 'tiny', id: 'shape0' });
     }
     if (showDots && lt(s, lb2) && Number.isFinite(s)) {
       markers.push({ time: t, position: 'atPriceMiddle', price: s, shape: 'circle',
-        color: String(color.new(bearishStrongColor, 30)), size: 'tiny' });
+        color: String(color.new(bearishStrongColor, 30)), size: 'tiny', id: 'shape1' });
     }
 
     // Momentum Ribbon
@@ -272,7 +285,14 @@ export function calculate(
     plots.plot9.push({ time: t, value: lt(s, lb2) && adv ? fin(lb2) : NaN, color: extremeLowColor });
   }
 
-  // alertcondition: 4 crossings of the smoothed stress with the bands (no output)
+  // alertcondition: crossover(smoothedStress, upperBand) / crossunder(.., lowerBand) / the same with the 1.5x bands
+  const lowerBand = upperBand.map((v) => -v);
+  const alerts = alertStates(alertConditions, bars, [
+    crossedOver(smoothed, upperBand),
+    crossedUnder(smoothed, lowerBand),
+    crossedOver(smoothed, upperBand.map((v) => v * 1.5)),
+    crossedUnder(smoothed, lowerBand.map((v) => v * 1.5)),
+  ]);
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
@@ -282,6 +302,7 @@ export function calculate(
     fills: [{ plot1: 'plot3', plot2: 'plot4', options: { title: 'Band Fill', color: fillColor }, colors: fillColors }],
     markers,
     bgColors,
+    alerts,
   };
 }
 
@@ -291,4 +312,5 @@ export const NavierCauchyMarketElasticity = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -22,6 +22,10 @@
  *
  * The line widths are inputs in the original; the plots here have the default width of 1.
  *
+ * Alerts (alertcondition, `alerts` of the result): the original's 12 conditions, the close crossing above / below
+ * each average and each average crossing above / below a later one (the values on the chart timeframe, the step
+ * values of a higher timeframe).
+ *
  * Reference: "Bjorgum MTF MA" by Bjorgum
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -31,6 +35,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { periodStarts, chartTimeframe, higherTimeframeBars, hasCalendar } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
 
@@ -241,7 +246,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<BjorgumMtfMaInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -417,14 +422,43 @@ export function calculate(
     }
   }
 
+  // maSig = tf == "" ? ma : ma step; crossover / crossunder of the close and of the averages
+  const close = bars.map((b) => b.close);
+  const flags = [
+    crossedOver(close, s1.sig), crossedUnder(close, s1.sig),
+    crossedOver(close, s2.sig), crossedUnder(close, s2.sig),
+    crossedOver(close, s3.sig), crossedUnder(close, s3.sig),
+    crossedOver(s1.sig, s2.sig), crossedUnder(s1.sig, s2.sig),
+    crossedOver(s1.sig, s3.sig), crossedUnder(s1.sig, s3.sig),
+    crossedOver(s2.sig, s3.sig), crossedUnder(s2.sig, s3.sig),
+  ];
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2 },
     barColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Close crossed above MA 1', message: 'Close crossed above MA 1 on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert1', title: 'Close crossed below MA 1', message: 'Close crossed below MA 1 on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert2', title: 'Close crossed above MA 2', message: 'Close crossed above MA 2 on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert3', title: 'Close crossed below MA 2', message: 'Close crossed below MA 2 on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert4', title: 'Close crossed above MA 3', message: 'Close crossed above MA 3 on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert5', title: 'Close crossed below MA 3', message: 'Close crossed below MA 3 on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert6', title: 'MA 1 crossed above MA 2', message: "MA 1 crossed above MA 2 on {{interval}} chart. Price is {{close}}'" },
+  { id: 'alert7', title: 'MA 1 crossed below MA 2', message: "MA 1 crossed below MA 2 on {{interval}} chart. Price is {{close}}'" },
+  { id: 'alert8', title: 'MA 1 crossed above MA 3', message: "MA 1 crossed above MA 3 on {{interval}} chart. Price is {{close}}'" },
+  { id: 'alert9', title: 'MA 1 crossed below MA 3', message: "MA 1 crossed below MA 3 on {{interval}} chart. Price is {{close}}'" },
+  { id: 'alert10', title: 'MA 2 crossed above MA 3', message: "MA 2 crossed above MA 3 on {{interval}} chart. Price is {{close}}'" },
+  { id: 'alert11', title: 'MA 2 crossed below MA 3', message: "MA 2 crossed below MA 3 on {{interval}} chart. Price is {{close}}'" },
+];
+
 export const BjorgumMtfMa = {
+  alertConditions,
   calculate,
   metadata,
   defaultInputs,

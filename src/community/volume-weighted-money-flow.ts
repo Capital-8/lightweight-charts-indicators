@@ -7,6 +7,9 @@
  * strength is the share of the five measures above 50. The background is coloured by the side of the oscillator (or
  * of the strength), with an opacity that grows with the number of measures on that side.
  *
+ * Alerts (alertcondition, `alerts` of the result): the oscillator crossing above / below 50, a bullish (bearish)
+ * strength of 60 to 99 % and of 100 %.
+ *
  * Reference: "Volume-Weighted Money Flow [sgbpulse]" by sgbpulse
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © sgbpulse
@@ -14,6 +17,7 @@
 
 import { ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolumeWeightedMoneyFlowInputs {
   /** Weight of the OBV (%) */
@@ -91,13 +95,15 @@ const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 const ne = (a: number, b: number) => Math.abs(a - b) > EPS;
+const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
 const CENTER = 50.0;
 
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeWeightedMoneyFlowInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = cfg.volumeFlowMaLength;
@@ -164,6 +170,15 @@ export function calculate(
     }
   }
 
+  // The alertconditions of the original
+  const prevOf = (i: number) => (i > 0 ? combined[i - 1] : NaN);
+  const crossAbove = combined.map((v, i) => gt(v, CENTER) && le(prevOf(i), CENTER));
+  const crossBelow = combined.map((v, i) => lt(v, CENTER) && ge(prevOf(i), CENTER));
+  const bullHigh = bullStrength.map((v) => ge(v, 60) && lt(v, 100));
+  const bullAll = bullStrength.map((v) => ge(v, 100));
+  const bearHigh = bearStrength.map((v) => ge(v, 60) && lt(v, 100));
+  const bearAll = bearStrength.map((v) => ge(v, 100));
+
   const t = (i: number) => bars[i].time;
   const sideColor = (v: number) => (gt(v, CENTER) ? cfg.bullishColor : cfg.bearishColor);
   const comp = (arr: number[]) => arr.map((v, i) => ({ time: t(i), value: fin(v), color: sideColor(v) }));
@@ -183,8 +198,19 @@ export function calculate(
     plots,
     hlines: [{ value: CENTER, options: { title: 'Center Line', color: color.gray, linestyle: 'dashed' } }],
     bgColors,
+    alerts: alertStates(alertConditions, bars, [crossAbove, crossBelow, bullHigh, bullAll, bearHigh, bearAll]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'VWMF Cross Above 50', message: '{{ticker}}: Volume-Weighted Money Flow crossed above 50. Possible bullish momentum shift.' },
+  { id: 'alert1', title: 'VWMF Cross Below 50', message: '{{ticker}}: Volume-Weighted Money Flow crossed below 50. Possible bearish momentum shift.' },
+  { id: 'alert2', title: 'Bullish Strength: High But Not Absolute Consensus', message: '{{ticker}}: Bullish strength is high (between 60% and 80% consensus).' },
+  { id: 'alert3', title: 'Bullish Strength: Absolute Consensus (100%)', message: '{{ticker}}: All 5 indicators show bullish strength.' },
+  { id: 'alert4', title: 'Bearish Strength: High But Not Absolute Consensus', message: '{{ticker}}: Bearish strength is high (between 60% and 80% consensus).' },
+  { id: 'alert5', title: 'Bearish Strength: Absolute Consensus (100%)', message: '{{ticker}}: All 5 indicators show bearish strength.' },
+];
 
 export const VolumeWeightedMoneyFlow = {
   calculate,
@@ -192,4 +218,5 @@ export const VolumeWeightedMoneyFlow = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

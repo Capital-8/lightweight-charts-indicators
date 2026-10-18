@@ -11,6 +11,8 @@
  *   (bearish). Bar colour (transparent by default) and circle markers.
  * The three barcolor calls are layers: the last non-na colour of a bar is drawn (Momentum over Engulfing over
  * Imbalance).
+ * Alerts (alertcondition, `alerts` of the result): the original's 7 conditions on the sweep and standard engulfing /
+ * momentum candles (both types, whatever the selected type).
  *
  * Reference: "Sweep Candle [odnac]" by odnac
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,6 +21,18 @@
 
 import { ta, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'All-Candles', message: 'Candles detected!' },
+  { id: 'alert1', title: 'All-Sweep Candles', message: 'Sweep Candle detected!' },
+  { id: 'alert2', title: 'All-Standard Candles', message: 'Standard Candle detected!' },
+  { id: 'alert3', title: 'Sweep-Engulfing', message: 'Sweep Engulfing detected!' },
+  { id: 'alert4', title: 'Sweep-Momentum', message: 'Sweep Momentum detected!' },
+  { id: 'alert5', title: 'Standard-Engulfing', message: 'Standard Engulfing detected!' },
+  { id: 'alert6', title: ' Standard-Momentum', message: 'Standard Momentum detected!' },
+];
 
 export type SweepCandleType = 'Standard' | 'Sweep';
 
@@ -88,7 +102,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<SweepCandleInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const atr = ta.atr(bars, cfg.atrLength).toArray().map((v) => v ?? NaN);
 
@@ -97,6 +111,7 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const flags: boolean[][] = alertConditions.map(() => []);
   bars.forEach((b, i) => {
     const p = i > 0 ? bars[i - 1] : undefined;
     const open1 = p ? p.open : NaN;
@@ -126,6 +141,14 @@ export function calculate(
     const momentumBearish = cfg.momentumType === 'Standard' ? momentumBearishStandard : momentumBearishSweep;
     const momentum = momentumBullish || momentumBearish;
 
+    // alertcondition() expressions, in the original's order
+    const sweepEn = enBullishSweep || enBearishSweep;
+    const sweepMom = momentumBullishSweep || momentumBearishSweep;
+    const stdEn = enBullishStandard || enBearishStandard;
+    const stdMom = momentumBullishStandard || momentumBearishStandard;
+    [sweepEn || sweepMom || stdEn || stdMom, sweepEn || sweepMom, stdEn || stdMom, sweepEn, sweepMom, stdEn, stdMom]
+      .forEach((v, k) => flags[k].push(v));
+
     // barcolor layers: the last non-na colour is drawn
     let barColor: string | null = null;
     if (cfg.imbalancePlot && isImbalanceHigh) barColor = cfg.imbalanceColor;
@@ -148,13 +171,13 @@ export function calculate(
     }
   });
 
-  // 7 alertcondition() calls: no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const SweepCandle = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const SweepCandle = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

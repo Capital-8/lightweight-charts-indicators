@@ -4,6 +4,8 @@
  * The percent change of the close over a number of bars, 100 * (close - close[lookback]) / close[lookback]. A change
  * at or below -threshold draws a red circle at the top of the chart (quick drop), a change at or above +threshold a
  * green circle at the bottom (quick rise).
+ * Alerts (alertcondition, `alerts` of the result): 'Quick Price Drop' and 'Quick Price Rise', true on the bars of the
+ * circles.
  *
  * Reference: "SPX500 Quick Drop & Rise Alerts" by PaperChains
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +13,7 @@
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface Spx500QuickDropRiseAlertsInputs {
   /** Drop Threshold (%) */
@@ -46,9 +49,11 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<Spx500QuickDropRiseAlertsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const markers: MarkerData[] = [];
+  const dropFlags: boolean[] = [];
+  const riseFlags: boolean[] = [];
   bars.forEach((b, i) => {
     const pastPrice = i - cfg.lookbackBars >= 0 ? bars[i - cfg.lookbackBars].close : NaN;
     // a non-zero x / 0 is +-infinity in Pine, compared as it is by >= / <=
@@ -56,6 +61,8 @@ export function calculate(
 
     const dropCondition = le(changePct, -cfg.dropThreshold);
     const riseCondition = ge(changePct, cfg.dropThreshold);
+    dropFlags.push(dropCondition);
+    riseFlags.push(riseCondition);
 
     // plotshape(dropCondition, "Quick Drop", location.top, color.red, shape.circle, size.tiny)
     if (dropCondition) {
@@ -67,12 +74,19 @@ export function calculate(
     }
   });
 
-  // alertcondition(dropCondition, "Quick Price Drop") and alertcondition(riseCondition, "Quick Price Rise"): no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    // alertcondition(dropCondition, "Quick Price Drop") / alertcondition(riseCondition, "Quick Price Rise")
+    alerts: alertStates(alertConditions, bars, [dropFlags, riseFlags]),
   };
 }
 
-export const Spx500QuickDropRiseAlerts = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions (the {{...}} placeholders are kept as the original writes them) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Quick Price Drop', message: 'SPX500 dropped more than {{dropThreshold}}% in {{lookbackBars}} bars!' },
+  { id: 'alert1', title: 'Quick Price Rise', message: 'SPX500 rose more than {{dropThreshold}}% in {{lookbackBars}} bars!' },
+];
+
+export const Spx500QuickDropRiseAlerts = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

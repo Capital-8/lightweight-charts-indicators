@@ -21,8 +21,10 @@
  * pivot close.
  *
  * Eight data-window plots give 1 when a divergence of each type was found on the bar (Current; also when it was not
- * drawn) and the type of the last drawn divergence while it is not broken (Last). The alerts of the script
- * (`alert()`, chosen with the four "Alerts" inputs) have no output.
+ * drawn) and the type of the last drawn divergence while it is not broken (Last).
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): on each drawn divergence of a type whose
+ * "Alerts" input is on, "Alert : " followed by the label tooltip (type, prices, ratios and directions).
  *
  * As the original (`calc_bars_count = 500`), only the last 500 bars are calculated: the bars before have no values
  * and every function starts on the first of these bars.
@@ -41,7 +43,7 @@ import {
   ta, Series, math, str, compare, line, label, resetDrawings, setDrawingBar, drawingOutputs,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line, type Label,
 } from 'oakscriptjs';
-import type { LabelData, LineDrawingData } from '../types';
+import type { AlertCall, LabelData, LineDrawingData } from '../types';
 import { backgroundColorOf, type ChartContext } from '../chart-context';
 
 type OscillatorType = 'rsi' | 'cci' | 'cmo' | 'cog' | 'mfi' | 'roc' | 'stoch' | 'wpr';
@@ -61,7 +63,7 @@ export interface DivergenceScreenerInputs {
   externalTrendSignal: SourceName;
   zigzagLength: number;
   repaint: boolean;
-  /** Alert on bullish divergence (alerts only: no output) */
+  /** Alert on bullish divergence (the alert() calls, `alertCalls`; no effect on the other outputs) */
   bullishDivergenceAlert: boolean;
   bullishHiddenDivergenceAlert: boolean;
   bearishDivergenceAlert: boolean;
@@ -205,7 +207,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<DivergenceScreenerInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'lines' | 'labels'> & { lines: LineDrawingData[]; labels: LabelData[] } {
+): Omit<IndicatorResult, 'lines' | 'labels'> & { lines: LineDrawingData[]; labels: LabelData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { gt, ge, lt } = compare;
   const n = bars.length;
@@ -382,6 +384,14 @@ export function calculate(
   const trendMethodInt = cfg.trendMethod === 'Zigzag' ? 1 : cfg.trendMethod === 'External' ? 3 : 2;
   const startIndex = cfg.repaint ? 0 : 1;
   const divergenceObjects: DivergenceObject[] = [];
+  const alertCalls: AlertCall[] = [];
+  const allowedDivergenceTypes: Record<string, boolean> = {
+    [DivergenceType.BullishDivergence]: cfg.bullishDivergenceAlert,
+    [DivergenceType.BullishHiddenDivergence]: cfg.bullishHiddenDivergenceAlert,
+    [DivergenceType.BearishDivergence]: cfg.bearishDivergenceAlert,
+    [DivergenceType.BearishHiddenDivergence]: cfg.bearishHiddenDivergenceAlert,
+  };
+  let alertTime = 0; // time of the bar being calculated
 
   /** divergence(zigzag, divergenceObjects, properties): the divergence type found on the bar */
   const divergence = (): DivergenceType => {
@@ -449,6 +459,10 @@ export function calculate(
               const text = regular ? 'D' : 'H';
               const tooltip = `${divergenceType}\nPrice : ${str.tostring(lastPrice)} ( ${str.tostring(priceRatio)} ) - ${priceDirection}\n`
                 + `Oscillator :${str.tostring(lastMa)} ( ${str.tostring(oscRatio)} ) - ${oscillatorDirection}`;
+              // if allowedDivergenceTypes.get(divergenceType): alert('Alert : ' + priceTooltipText, alert.freq_once_per_bar_close)
+              if (allowedDivergenceTypes[divergenceType]) {
+                alertCalls.push({ time: alertTime, message: 'Alert : ' + tooltip, freq: 'once_per_bar_close' });
+              }
               const css = TYPE_COLOR[divergenceType];
               const bullish = divergenceType === DivergenceType.BullishDivergence
                 || divergenceType === DivergenceType.BullishHiddenDivergence;
@@ -481,6 +495,7 @@ export function calculate(
   for (let j = 0; j < m; j++) {
     setDrawingBar(j, j === m - 1);
     const i = start + j;
+    alertTime = bars[i].time as number;
     plots[0][i] = osc[j];
     zigzagCalculate(j);
     const currentDivergence = divergence();
@@ -509,7 +524,11 @@ export function calculate(
     plots: plotData,
     lines: (out.lines ?? []) as LineDrawingData[],
     labels: (out.labels ?? []) as LabelData[],
+    alertCalls,
   };
 }
 
-export const DivergenceScreener = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
+
+export const DivergenceScreener = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

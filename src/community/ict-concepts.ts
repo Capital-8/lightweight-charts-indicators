@@ -1165,10 +1165,11 @@ export function calculate(
 
       // ---- Background: killzones ----
       if (per) {
-        if (ny) bgColors.push({ time: bars[i].time, color: cfg.nyCss });
-        if (ldn_open) bgColors.push({ time: bars[i].time, color: cfg.ldnoCss });
-        if (ldn_close) bgColors.push({ time: bars[i].time, color: cfg.ldncCss });
-        if (asian) bgColors.push({ time: bars[i].time, color: cfg.asiaCss });
+        // ids: the original's bgcolor() calls bgcolor0..bgcolor3
+        if (ny) bgColors.push({ time: bars[i].time, color: cfg.nyCss, id: 'bgcolor0' });
+        if (ldn_open) bgColors.push({ time: bars[i].time, color: cfg.ldnoCss, id: 'bgcolor1' });
+        if (ldn_close) bgColors.push({ time: bars[i].time, color: cfg.ldncCss, id: 'bgcolor2' });
+        if (asian) bgColors.push({ time: bars[i].time, color: cfg.asiaCss, id: 'bgcolor3' });
       }
 
       imbUP1 = imbalanceUP;

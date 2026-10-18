@@ -6,7 +6,8 @@
  * The WMA lines take the up colour when the half WMA is above the full WMA, the HMA and signal lines when the HMA is
  * above the signal; fills join the lower band and the half WMA (gradient) and the signal and the HMA. An optional
  * pair of EMAs (10 / 12) of WMA(SMA(close, 3), 5) is lime / red by their cross, with a fill between them.
- * The Pine "TMA Candle" plotcandle (display.none: never drawn) and its 'Candle Lookback' input are not ported.
+ * "TMA Candle": candles from tma[gap] to tma (tma = WMA(half WMA, length / 2), gap = 'Candle Lookback'), up colour
+ * when tma rises over the gap; hidden by default (display.none in the original).
  *
  * Reference: "HMA Breakdown [NLR]" by NonLinearRookie
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,10 +15,13 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import type { PlotCandleData } from '../types';
 
 export interface HmaBreakdownInputs {
   /** HMA length */
   length: number;
+  /** Candle Lookback: bars back of the TMA candle open */
+  candleGap: number;
   /** Uptrend colour */
   up: string;
   /** Downtrend colour */
@@ -32,6 +36,7 @@ export interface HmaBreakdownInputs {
 
 export const defaultInputs: HmaBreakdownInputs = {
   length: 50,
+  candleGap: 1,
   up: color.lime,
   down: color.fuchsia,
   showMaCross: true,
@@ -41,6 +46,7 @@ export const defaultInputs: HmaBreakdownInputs = {
 
 export const inputConfig: InputConfig[] = [
   { id: 'length', type: 'int', title: 'HMA Length', defval: 50 },
+  { id: 'candleGap', type: 'int', title: 'Candle Lookback', defval: 1 },
   { id: 'up', type: 'color', title: 'Uptrend Color', defval: color.lime },
   { id: 'down', type: 'color', title: 'Downtrend Color', defval: color.fuchsia },
   { id: 'showMaCross', type: 'bool', title: 'Show EMA Cross', defval: true },
@@ -58,6 +64,13 @@ export const plotConfig: PlotConfig[] = [
   { id: 'plot6', title: 'Slow EMA', color: color.lime, lineWidth: 1 },
 ];
 
+/** plotcandle(tmax, tma, tmax, tma, "TMA Candle", ..., display = display.none) */
+export const plotCandleConfig = [{ id: 'tmaCandle', title: 'TMA Candle', display: 'none' as const }];
+
+/** Pine plotcandle without wickcolor / bordercolor: the style defaults of the plot */
+const CANDLE_WICK = '#737375';
+const CANDLE_BORDER = '#000000';
+
 export const metadata = {
   title: 'HMA Breakdown [NLR]',
   shortTitle: 'HMA Breakdown [NLR]',
@@ -67,7 +80,10 @@ export const metadata = {
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const gt = (a: number, b: number) => a - b > 1e-10;
 
-export function calculate(bars: Bar[], inputs: Partial<HmaBreakdownInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<HmaBreakdownInputs> = {},
+): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -91,6 +107,20 @@ export function calculate(bars: Bar[], inputs: Partial<HmaBreakdownInputs> = {})
   const wmaClr = wmaHalf.map((h, i) => (gt(h, wmaFull[i]) ? cfg.up : cfg.down));
   const hmaClr = hma.map((h, i) => (gt(h, signal[i]) ? cfg.up : cfg.down));
   const mxClr = mx1.map((v, i) => (gt(v, mx2[i]) ? color.lime : '#ff0000'));
+  // tma = ta.wma(wma_half, half_len); tmax = tma[candle_gap];
+  // plotcandle(tmax, tma, tmax, tma, "TMA Candle", tma > tmax ? up : down): no candle when a value is na
+  const tma = A(ta.wma(S(wmaHalf), halfLen));
+  const gap = Math.trunc(cfg.candleGap);
+  const tmaCandles: PlotCandleData[] = [];
+  for (let i = 0; i < n; i++) {
+    const tmax = i - gap >= 0 && i - gap < n ? tma[i - gap] : NaN;
+    if (isNaN(tmax) || isNaN(tma[i])) continue;
+    tmaCandles.push({
+      time: bars[i].time as number, open: tmax, high: tma[i], low: tmax, close: tma[i],
+      color: gt(tma[i], tmax) ? cfg.up : cfg.down, wickColor: CANDLE_WICK, borderColor: CANDLE_BORDER,
+    });
+  }
+
   const line = (v: number[], c: (i: number) => string) => bars.map((b, i) => ({ time: b.time, value: v[i], color: c(i) }));
 
   return {
@@ -120,6 +150,7 @@ export function calculate(bars: Bar[], inputs: Partial<HmaBreakdownInputs> = {})
       { plot1: 'plot5', plot2: 'plot6', options: { title: 'Fast / Slow EMA' },
         colors: mxClr.map((c) => String(color.new(c, 80))) },
     ],
+    plotCandles: { tmaCandle: tmaCandles },
   };
 }
 
@@ -129,4 +160,5 @@ export const HmaBreakdown = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  plotCandleConfig,
 };

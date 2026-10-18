@@ -9,6 +9,8 @@
  * it gives back the midline) or its ALMA(len, 0.85, 6). Bands at the fair value -/+ 1, 2 and 3 times
  * mult * stdev(close, len) are filled; the line and the fills are green while the fair value rises and red while
  * it falls (they keep the last colour on a flat bar).
+ * Alerts (alertcondition, `alerts` of the result): 'Trend - Long' / 'Trend - Short' on the bars where the slope of the
+ * fair value turns positive / negative (slope > 0 and slope[1] <= 0, and the mirror).
  *
  * Reference: "Weighted Regression Bands (Zeiierman)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface WeightedRegressionBandsInputs {
   /** Length of the weighting window, the regression / ALMA and the stdev */
@@ -75,6 +78,8 @@ export const metadata = {
 /** Pine a > b: a - b > 1e-10 (false with na) */
 const gt = (a: number, b: number) => a - b > 1e-10;
 const lt = (a: number, b: number) => b - a > 1e-10;
+const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > 1e-10);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > 1e-10);
 /** Pine x / y: na when y is 0 */
 const div = (x: number, y: number) => (y === 0 ? NaN : x / y);
 
@@ -93,7 +98,9 @@ function makeKf(sLen: number): (x: number) => number {
   };
 }
 
-export function calculate(bars: Bar[], inputs: Partial<WeightedRegressionBandsInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[], inputs: Partial<WeightedRegressionBandsInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = cfg.len;
@@ -184,10 +191,16 @@ export function calculate(bars: Bar[], inputs: Partial<WeightedRegressionBandsIn
 
   // bandColor := slope > 0 ? upper_col : slope < 0 ? lower_col : bandColor[1] (na on the first bar)
   const bandColor: (string | null)[] = new Array(n);
+  const slopes: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const slope = i > 0 ? fair[i] - fair[i - 1] : NaN;
+    slopes[i] = slope;
     bandColor[i] = gt(slope, 0) ? cfg.upperCol : lt(slope, 0) ? cfg.lowerCol : i > 0 ? bandColor[i - 1] : null;
   }
+  // bullishFlip = slope > 0 and slope[1] <= 0; bearishFlip = slope < 0 and slope[1] >= 0
+  const prevSlope = (i: number) => (i > 0 ? slopes[i - 1] : NaN);
+  const bullishFlip = slopes.map((v, i) => gt(v, 0) && le(prevSlope(i), 0));
+  const bearishFlip = slopes.map((v, i) => lt(v, 0) && ge(prevSlope(i), 0));
 
   const line = (k: number) => bars.map((b, i) => ({ time: b.time, value: fair[i] + dev[i] * k }));
   // color.new(na, t) is black with transparency t
@@ -209,8 +222,15 @@ export function calculate(bars: Bar[], inputs: Partial<WeightedRegressionBandsIn
       { plot1: 'plot2', plot2: 'plot5', colors: fillCol(92) },
       { plot1: 'plot3', plot2: 'plot6', colors: fillCol(96) },
     ],
+    alerts: alertStates(alertConditions, bars, [bullishFlip, bearishFlip]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Trend - Long', message: 'Trend turned bullish for {{ticker}}' },
+  { id: 'alert1', title: 'Trend - Short', message: 'Trend turned bearish for {{ticker}}' },
+];
 
 export const WeightedRegressionBands = {
   calculate,
@@ -218,4 +238,5 @@ export const WeightedRegressionBands = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

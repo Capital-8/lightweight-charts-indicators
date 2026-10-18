@@ -9,6 +9,8 @@
  * (oscillator - its EMA) / 2. Colours move between the primary and secondary colours with the momentum intensity.
  * Circles mark the turns of the oscillator, crosses / triangles the turns beyond +/-90, and pivot divergences
  * (regular and hidden) give lines and labels.
+ * Alerts (alertcondition, `alerts` of the result): the oscillator crossing its signal line, and the same crosses
+ * beyond -80 / +80 (reversals).
  *
  * Reference: "FSVZO [Alpha Extract]" by AlphaExtract
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 
 export type FsvzoGradientStyle = 'Modern' | 'Ocean' | 'Sunset' | 'Aurora' | 'Neon';
@@ -156,7 +159,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<FsvzoInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -368,6 +371,10 @@ export function calculate(
       } },
   ];
 
+  // Alerts: ta.crossover / ta.crossunder(volume_oscillator, oscillator_ema)
+  const bullFlow = crossedOver(vzo, signal);
+  const bearFlow = crossedUnder(vzo, signal);
+
   // ── Markers ──
   const markers: MarkerData[] = [];
   const showFlips = cfg.enableVolumeDynamics && cfg.enableSignalMarkers;
@@ -388,11 +395,11 @@ export function calculate(
     if (showFlips && i > 0 && !isNaN(vzo[i - 1])) {
       if (flipBull) {
         markers.push({ time: t(i - 1), position: 'atPriceMiddle', price: vzo[i - 1], shape: 'circle',
-          color: dynColor(true, intensity[i]), size: 'tiny' });
+          color: dynColor(true, intensity[i]), size: 'tiny', id: 'shape0' });
       }
       if (flipBear) {
         markers.push({ time: t(i - 1), position: 'atPriceMiddle', price: vzo[i - 1], shape: 'circle',
-          color: dynColor(false, intensity[i]), size: 'tiny' });
+          color: dynColor(false, intensity[i]), size: 'tiny', id: 'shape1' });
       }
     }
     // bull_signal = ta.crossover(vzo, vzo[1]); bear_signal = ta.crossover(vzo[1], vzo)
@@ -402,24 +409,25 @@ export function calculate(
     const v2 = i > 1 ? vzo[i - 2] : NaN;
     const bullSignal = v0 > v1 && v1 <= v2;
     const bearSignal = v1 > v0 && v2 <= v1;
-    const char = (price: number, text: string, textColor: string) => markers.push({ time: t(i), position: 'atPriceMiddle',
-      price, shape: 'circle', color: 'transparent', text, textColor, size: 'tiny' });
-    if (bullSignal && gt(v0, 90)) char(125, '×', white80);
-    if (bearSignal && lt(v0, -90)) char(-125, '×', white80);
-    if (bullSignal && lt(v0, -90)) char(-125, '▲', bullFull);
-    if (bearSignal && gt(v0, 90)) char(125, '▼', bearFull);
+    // plotchar outputs char2..char5
+    const char = (price: number, text: string, textColor: string, id: string) => markers.push({ time: t(i),
+      position: 'atPriceMiddle', price, shape: 'circle', color: 'transparent', text, textColor, size: 'tiny', id });
+    if (bullSignal && gt(v0, 90)) char(125, '×', white80, 'char2');
+    if (bearSignal && lt(v0, -90)) char(-125, '×', white80, 'char3');
+    if (bullSignal && lt(v0, -90)) char(-125, '▲', bullFull, 'char4');
+    if (bearSignal && gt(v0, 90)) char(125, '▼', bearFull, 'char5');
     // divergence labels (offset = -pivot_bars_right, at volume_oscillator[pivot_bars_right])
     const o = vzoR(i);
     if (i - rb >= 0 && !isNaN(o)) {
       const lt0 = barTime(bars, i - rb, interval);
       if (bullDiv[i]) markers.push({ time: lt0, position: 'atPriceBottom', price: o, shape: 'labelUp', color: bullLabel,
-        text: ' BULL ', textColor: color.white, size: 'tiny' });
+        text: ' BULL ', textColor: color.white, size: 'tiny', id: 'shape6' });
       if (hiddenBullDiv[i]) markers.push({ time: lt0, position: 'atPriceBottom', price: o, shape: 'labelUp',
-        color: hiddenBullColor, text: ' H.BULL ', textColor: color.white, size: 'tiny' });
+        color: hiddenBullColor, text: ' H.BULL ', textColor: color.white, size: 'tiny', id: 'shape7' });
       if (bearDiv[i]) markers.push({ time: lt0, position: 'atPriceTop', price: o, shape: 'labelDown', color: bearLabel,
-        text: ' BEAR ', textColor: color.white, size: 'tiny' });
+        text: ' BEAR ', textColor: color.white, size: 'tiny', id: 'shape8' });
       if (hiddenBearDiv[i]) markers.push({ time: lt0, position: 'atPriceTop', price: o, shape: 'labelDown',
-        color: hiddenBearColor, text: ' H.BEAR ', textColor: color.white, size: 'tiny' });
+        color: hiddenBearColor, text: ' H.BEAR ', textColor: color.white, size: 'tiny', id: 'shape9' });
     }
   }
 
@@ -428,8 +436,21 @@ export function calculate(
     plots,
     fills,
     markers,
+    // alertcondition(ta.crossover(volume_oscillator, oscillator_ema)) / crossunder(...) / crossover(...) and
+    // volume_oscillator < -80 / crossunder(...) and volume_oscillator > 80
+    alerts: alertStates(alertConditions, bars, [
+      bullFlow, bearFlow, bullFlow.map((c, i) => c && lt(vzo[i], -80)), bearFlow.map((c, i) => c && gt(vzo[i], 80)),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Enhanced Bullish Flow Alert', message: '🟢 Enhanced Bullish Flow Detected! {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Enhanced Bearish Flow Alert', message: '🔴 Enhanced Bearish Flow Detected! {{exchange}}:{{ticker}}' },
+  { id: 'alert2', title: 'Enhanced Bullish Reversal Alert', message: '🚀 Strong Enhanced Bullish Reversal! {{exchange}}:{{ticker}}' },
+  { id: 'alert3', title: 'Enhanced Bearish Reversal Alert', message: '💥 Strong Enhanced Bearish Reversal! {{exchange}}:{{ticker}}' },
+];
 
 export const Fsvzo = {
   calculate,
@@ -437,4 +458,5 @@ export const Fsvzo = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

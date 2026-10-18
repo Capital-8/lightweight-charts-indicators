@@ -7,6 +7,8 @@
  * ribbon. Its colour shows the trend (fast above slow) and the acceleration (fast rising): bullish / bearish
  * acceleration or deceleration. The ribbon fill and the price bars use the same colour. Presets replace the
  * calculation inputs.
+ * Alerts (alertcondition, `alerts` of the result): ribbon crosses (bullish, bearish, any) and the first bar of each
+ * acceleration / deceleration state (and of any acceleration, any deceleration).
  *
  * Reference: "Adaptive Kinetic Ribbon [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type KineticMaType = 'SMA' | 'EMA' | 'WMA' | 'HMA' | 'VWMA' | 'RMA';
 
@@ -103,7 +106,7 @@ const PRESET_COLORS: Record<string, [string, string, string, string]> = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AdaptiveKineticRibbonInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -163,6 +166,19 @@ export function calculate(
     if (cfg.enableBarColoring) barColors.push({ time: bars[i].time, color: String(color.new(rc, cfg.barTransparency)) });
   }
 
+  // bullCross = ta.crossover(ribbon_fast, ribbon_slow); bearCross = ta.crossunder(ribbon_fast, ribbon_slow)
+  const bullCross = crossedOver(fast, slow);
+  const bearCross = crossedUnder(fast, slow);
+  // states (trend_up = fast > slow, acceleration = fast > fast[1]); trigger = state and not state[1] (false before bar 0)
+  const trendUp = fast.map((f, i) => gt(f, slow[i]));
+  const accel = fast.map((f, i) => i > 0 && gt(f, fast[i - 1]));
+  const trigger = (state: (i: number) => boolean) => bars.map((_b, i) => state(i) && !(i > 0 && state(i - 1)));
+  const bullAccelT = trigger((i) => trendUp[i] && accel[i]);
+  const bullDecelT = trigger((i) => trendUp[i] && !accel[i]);
+  const bearAccelT = trigger((i) => !trendUp[i] && !accel[i]);
+  const bearDecelT = trigger((i) => !trendUp[i] && accel[i]);
+  const or = (a: boolean[], b: boolean[]) => a.map((v, i) => v || b[i]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -172,8 +188,25 @@ export function calculate(
     // fill(p1, p2, color = css, title = 'Ribbon Fill')
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Ribbon Fill' }, colors: css }],
     barColors,
+    alerts: alertStates(alertConditions, bars, [
+      bullCross, bearCross, or(bullCross, bearCross),
+      bullAccelT, bullDecelT, bearAccelT, bearDecelT, or(bullAccelT, bearAccelT), or(bullDecelT, bearDecelT),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Crossover', message: 'Adaptive Kinetic Ribbon: BULLISH crossover on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Crossover', message: 'Adaptive Kinetic Ribbon: BEARISH crossover on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Any Ribbon Crossover', message: 'Adaptive Kinetic Ribbon: Crossover detected! Check chart {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert3', title: 'Bullish Acceleration', message: 'Adaptive Kinetic Ribbon: BULLISH ACCELERATION on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert4', title: 'Bullish Deceleration', message: 'Adaptive Kinetic Ribbon: BULLISH DECELERATION on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert5', title: 'Bearish Acceleration', message: 'Adaptive Kinetic Ribbon: BEARISH ACCELERATION on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert6', title: 'Bearish Deceleration', message: 'Adaptive Kinetic Ribbon: BEARISH DECELERATION on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert7', title: 'Any Acceleration', message: 'Adaptive Kinetic Ribbon: ACCELERATION state entered on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert8', title: 'Any Deceleration', message: 'Adaptive Kinetic Ribbon: DECELERATION state entered on {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const AdaptiveKineticRibbon = {
   calculate,
@@ -181,4 +214,5 @@ export const AdaptiveKineticRibbon = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

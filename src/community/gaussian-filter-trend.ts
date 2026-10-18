@@ -8,6 +8,7 @@
  * after a step down. The line takes the trend colour, four "star" circle plots orbit around it (sine / cosine of
  * bar_index * 0.52 times the 14-bar SMA of the bar range), with optional bar and background colours. The presets
  * replace the filter and width inputs, the colour presets replace the bullish / bearish colours, as in Pine.
+ * Alerts (alertcondition, `alerts` of the result): the trend turning bullish, turning bearish, and either.
  *
  * Reference: "Gaussian Filter Trend [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +16,7 @@
 
 import { ta, math, getSourceSeries, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type GaussianFilterTrendPreset = 'Default' | 'Fast Response' | 'Smooth Trend';
 export type GaussianFilterTrendColorPreset = 'Custom' | 'Classic' | 'Aqua' | 'Cosmic' | 'Cyber' | 'Neon';
@@ -135,7 +137,8 @@ const gt = (a: number, b: number): boolean => a - b > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<GaussianFilterTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   let { gaussianLength, gaussianPoles, atrLength, fixedMultiplier, efficiencyLength, trendMultiplier, chopMultiplier,
     efficiencySmooth } = cfg;
@@ -243,14 +246,38 @@ export function calculate(
     if (cfg.showBg && trendDir[i] !== 0) bgColors.push({ time: t, color: String(color.new(c, cfg.bgTransparency)) });
   }
 
+  // turned_bull = trend_dir == 1 and trend_dir[1] != 1 (na != 1 is false on the first bar), turned_bear the mirror
+  const turnedBull = trendDir.map((d, i) => d === 1 && i > 0 && trendDir[i - 1] !== 1);
+  const turnedBear = trendDir.map((d, i) => d === -1 && i > 0 && trendDir[i - 1] !== -1);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2, plot3, plot4 },
     markers: [],
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [turnedBull, turnedBear, turnedBull.map((f, i) => f || turnedBear[i])]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0',
+    title: 'Bullish Trend Signal',
+    message: 'Gaussian Filter Trend: BULLISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}',
+  },
+  {
+    id: 'alert1',
+    title: 'Bearish Trend Signal',
+    message: 'Gaussian Filter Trend: BEARISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}',
+  },
+  {
+    id: 'alert2',
+    title: 'Any Trend Change',
+    message: 'Gaussian Filter Trend: Trend state changed on {{exchange}}:{{ticker}} - {{interval}}',
+  },
+];
 
 export const GaussianFilterTrend = {
   calculate,
@@ -258,4 +285,5 @@ export const GaussianFilterTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

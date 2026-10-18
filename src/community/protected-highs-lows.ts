@@ -12,6 +12,8 @@
  * protected level. Their colours are set on the bar after the break, as in the original. "Show Retracements" draws a
  * box over the previous leg with lines at 30, 50 and 70 %, extended bar after bar. At most 500 lines, labels and
  * boxes are kept. The trail width is an input of the original; the plot width here is its default, 2.
+ * Alerts (alertcondition, `alerts` of the result): 'BOS Any', 'MSS Any', 'BOS Bear', 'BOS Bull', 'MSS Bear' and
+ * 'MSS Bull', true on the bar after each break of that kind (the original reads the flags one bar back).
  *
  * Reference: "Protected Highs & Lows [TFO]" by tradeforopp
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -23,6 +25,7 @@ import {
   type Box, type Label, type Line, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BarColorData, BoxData, LabelData, LineDrawingData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ProtectedHighsLowsInputs {
   /** Pivot Strength: bars on each side of a pivot */
@@ -137,7 +140,8 @@ interface Pullback {
 export function calculate(
   bars: Bar[],
   inputs: Partial<ProtectedHighsLowsInputs> = {},
-): IndicatorResult & { barColors: BarColorData[]; lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[] } {
+): IndicatorResult & { barColors: BarColorData[]; lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const ps = Math.trunc(cfg.ps);
@@ -183,6 +187,8 @@ export function calculate(
 
   const plot0: Array<{ time: number; value: number; color?: string }> = [];
   const barColors: BarColorData[] = [];
+  // Per bar: bos_bear, bos_bull, mss_bear, mss_bull of that bar
+  const bosBearAt: boolean[] = [], bosBullAt: boolean[] = [], mssBearAt: boolean[] = [], mssBullAt: boolean[] = [];
 
   const pbSet = (p: Pullback, price: number, idx: number) => {
     p.price = price;
@@ -381,6 +387,10 @@ export function calculate(
       }
     }
     prevChange = change;
+    bosBearAt.push(bosBear);
+    bosBullAt.push(bosBull);
+    mssBearAt.push(mssBear);
+    mssBullAt.push(mssBull);
     prevBear = bosBear || mssBear;
     prevBullBreak = bosBull || mssBull;
 
@@ -403,6 +413,9 @@ export function calculate(
     return bars[lo].time;
   };
   const C = (c: unknown) => (c === null || c === undefined ? 'transparent' : String(c));
+  // x[1]: the flag of the bar before (false on the first bar)
+  const prev1 = (a: boolean[]) => a.map((_v, i) => i > 0 && a[i - 1]);
+  const bosBear1 = prev1(bosBearAt), bosBull1 = prev1(bosBullAt), mssBear1 = prev1(mssBearAt), mssBull1 = prev1(mssBullAt);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -422,8 +435,22 @@ export function calculate(
       time1: T(bx.left), price1: bx.top, time2: T(bx.right), price2: bx.bottom,
       bgColor: C(bx.bgcolor), borderColor: C(bx.border_color),
     })),
+    alerts: alertStates(alertConditions, bars, [
+      bosBear1.map((v, i) => v || bosBull1[i]), mssBear1.map((v, i) => v || mssBull1[i]),
+      bosBear1, bosBull1, mssBear1, mssBull1,
+    ]),
   };
 }
+
+/** The original's alertconditions (no message given: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BOS Any', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'MSS Any', message: 'Alert Fired!' },
+  { id: 'alert2', title: 'BOS Bear', message: 'Alert Fired!' },
+  { id: 'alert3', title: 'BOS Bull', message: 'Alert Fired!' },
+  { id: 'alert4', title: 'MSS Bear', message: 'Alert Fired!' },
+  { id: 'alert5', title: 'MSS Bull', message: 'Alert Fired!' },
+];
 
 export const ProtectedHighsLows = {
   calculate,
@@ -431,4 +458,5 @@ export const ProtectedHighsLows = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

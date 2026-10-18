@@ -8,6 +8,8 @@
  * by trend; four fills of fading transparency go from the line to the source; a "⦿" marks the line value on the bar
  * before each direction change. Optional bar and background colours by trend. Presets override the multiplier and
  * the lookback.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend Signal' / 'Bearish Trend Signal' on the bars where
+ * the direction turns to 1 from -1 / to -1 from 1, 'Any Trend Change' on both.
  *
  * Reference: "Asymmetric Volatility Trend Line [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -17,6 +19,7 @@
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AsymmetricVolatilityTrendLineInputs {
   /** 'Default' | 'Fast Response' | 'Smooth Trend' (the presets override thresholdMult and lookback) */
@@ -96,7 +99,8 @@ const COLOR_PRESETS: Record<string, [string, string]> = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AsymmetricVolatilityTrendLineInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   let { thresholdMult, lookback } = cfg;
@@ -116,6 +120,7 @@ export function calculate(
   const line: number[] = new Array(n);
   const lineColor: string[] = new Array(n);
   const reversal: boolean[] = new Array(n);
+  const dirs: number[] = new Array(n);
   let tl = NaN; // var float trend_line = na
   let dir = 0; // var int trend_dir = 0
   let prevDir = 0; // var int prev_dir = 0
@@ -146,7 +151,13 @@ export function calculate(
     // is_reversal = trend_dir != prev_dir and bar_index > 0 (prev_dir is 0 on the first bar, as trend_dir)
     reversal[i] = dir !== prevDir && i > 0;
     lineColor[i] = dir === 1 ? bullish : bearish;
+    dirs[i] = dir;
   }
+
+  // turned_bullish = trend_dir == 1 and trend_dir[1] == -1; turned_bearish the mirror; trend_changed = either
+  const turnedBullish = dirs.map((d, i) => i > 0 && d === 1 && dirs[i - 1] === -1);
+  const turnedBearish = dirs.map((d, i) => i > 0 && d === -1 && dirs[i - 1] === 1);
+  const trendChanged = turnedBullish.map((f, i) => f || turnedBearish[i]);
 
   const t = (i: number) => bars[i].time;
   const plot = (f: (i: number) => number, c?: (i: number) => string) =>
@@ -191,8 +202,25 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [turnedBullish, turnedBearish, trendChanged]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0', title: 'Bullish Trend Signal',
+    message: 'Asymmetric Volatility Trend Line: BULLISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}',
+  },
+  {
+    id: 'alert1', title: 'Bearish Trend Signal',
+    message: 'Asymmetric Volatility Trend Line: BEARISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}',
+  },
+  {
+    id: 'alert2', title: 'Any Trend Change',
+    message: 'Asymmetric Volatility Trend Line: Trend direction changed on {{exchange}}:{{ticker}} - {{interval}}',
+  },
+];
 
 export const AsymmetricVolatilityTrendLine = {
   calculate,
@@ -200,4 +228,5 @@ export const AsymmetricVolatilityTrendLine = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

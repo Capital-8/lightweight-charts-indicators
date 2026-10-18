@@ -12,6 +12,8 @@
  * bottoms, bar colours on the zigzag points, and harmonic patterns from the ratios of the last five zigzag points
  * (AB=CD, Bat, Alt Bat, Butterfly, Gartley, Crab, Shark, 5-O, Wolf Wave, Head and Shoulders, Contracting and
  * Expanding Triangle; bearish ones at the top of the pane, bullish ones at the bottom).
+ * Alerts (alertcondition, `alerts` of the result): 'all patterns', true when every bearish and every bullish
+ * pattern starts on the same bar, as the original's expression.
  *
  * Other timeframe: its bars are built from the chart bars. With the exchange time zone and the session of the symbol
  * in the chart context (optional third argument of calculate) the periods are those of the exchange calendar;
@@ -30,6 +32,7 @@ import type { BarColorData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface FractalsV9Inputs {
   showPatterns: boolean;
@@ -165,7 +168,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<FractalsV9Inputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers' | 'barColors'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers' | 'barColors'> & { markers: MarkerData[]; barColors: BarColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const H = (i: number) => (i >= 0 ? bars[i].high : NaN);
@@ -285,21 +289,24 @@ export function calculate(
     const add = (on: boolean, time: number | null, m: Omit<MarkerData, 'time'>) => {
       if (on && time !== null) markers.push({ time, ...m });
     };
-    add(top[i], at2, { position: 'aboveBar', shape: 'triangleDown', color: RED });
-    add(bot[i], at2, { position: 'belowBar', shape: 'triangleUp', color: LIME });
-    add(cfg.showHHLL && higherHigh[i], at2, { position: 'aboveBar', shape: 'square', color: MAROON, text: '[HH]' });
-    add(cfg.showHHLL && lowerHigh[i], at2, { position: 'aboveBar', shape: 'square', color: MAROON, text: '[LH]' });
-    add(cfg.showHHLL && higherLow[i], at2, { position: 'belowBar', shape: 'square', color: GREEN, text: '[HL]' });
-    add(cfg.showHHLL && lowerLow[i], at2, { position: 'belowBar', shape: 'square', color: GREEN, text: '[LL]' });
-    add(cfg.showTimeFractals1 && higherHHigh[i], at2, { position: 'aboveBar', shape: 'square', color: MAROON, text: '[TH]' });
-    add(cfg.showTimeFractals1 && lowerLLow[i], at2, { position: 'belowBar', shape: 'square', color: GREEN, text: '[TL]' });
+    // ids shape0..shape31: the plotshapes in the original's order (bearish patterns shape8..19, bullish 20..31)
+    add(top[i], at2, { position: 'aboveBar', shape: 'triangleDown', color: RED, id: 'shape0' });
+    add(bot[i], at2, { position: 'belowBar', shape: 'triangleUp', color: LIME, id: 'shape1' });
+    add(cfg.showHHLL && higherHigh[i], at2, { position: 'aboveBar', shape: 'square', color: MAROON, text: '[HH]', id: 'shape2' });
+    add(cfg.showHHLL && lowerHigh[i], at2, { position: 'aboveBar', shape: 'square', color: MAROON, text: '[LH]', id: 'shape3' });
+    add(cfg.showHHLL && higherLow[i], at2, { position: 'belowBar', shape: 'square', color: GREEN, text: '[HL]', id: 'shape4' });
+    add(cfg.showHHLL && lowerLow[i], at2, { position: 'belowBar', shape: 'square', color: GREEN, text: '[LL]', id: 'shape5' });
+    add(cfg.showTimeFractals1 && higherHHigh[i], at2, { position: 'aboveBar', shape: 'square', color: MAROON, text: '[TH]', id: 'shape6' });
+    add(cfg.showTimeFractals1 && lowerLLow[i], at2, { position: 'belowBar', shape: 'square', color: GREEN, text: '[TL]', id: 'shape7' });
     if (cfg.showPatterns) {
       // The first two bearish patterns are drawn two bars back, the others on the current bar
       PATTERNS.forEach((p, k) => add(bear[k][i], k < 2 ? at2 : T(i), {
         position: 'top', shape: 'labelDown', color: MAROON, text: k === 0 ? '\nAB=CD' : p.text, textColor: WHITE,
+        id: `shape${8 + k}`,
       }));
       PATTERNS.forEach((p, k) => add(bull[k][i], T(i), {
         position: 'bottom', shape: 'labelUp', color: GREEN, text: k === 0 ? 'AB=CD\n' : p.text, textColor: WHITE,
+        id: `shape${20 + k}`,
       }));
     }
     // barcolor(showBarColors ? bc : na, offset = -2)
@@ -316,8 +323,17 @@ export function calculate(
     plots,
     markers,
     barColors,
+    // all_patterns = bear_patterns and bull_patterns: every pattern flag (bear_abcd and ... and bull_exptria)
+    alerts: alertStates(alertConditions, bars, [
+      bars.map((_b, i) => bear.every((f) => f[i]) && bull.every((f) => f[i])),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'all patterns', message: 'The Patterns' },
+];
 
 export const FractalsV9 = {
   calculate,
@@ -325,4 +341,5 @@ export const FractalsV9 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -6,6 +6,9 @@
  * follows the TFO; the histogram is TFO - signal (green at or above 0, red below). The ADX (Wilder DI with a
  * fixnan, ADX smoothing by RMA) is scaled as (adx - 25) / 25 and clipped to -1.5..1.5. The background is gray where
  * |TFO| > 1.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Hist Cross' / 'Bearish Hist Cross' when the histogram
+ * crosses over / under 0; 'Extreme High Alert' (TFO crosses under 1 and is above 1) and 'Extreme Low Alert' (TFO
+ * crosses over -1 and is below -1) as the original writes them, so they are never true.
  *
  * Reference: "TFO + ADX with Histogram & Signal" by WalrusQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +17,7 @@
 
 import { taCore, math, color, fixnan, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type TfoSignalType = 'EMA' | 'WMA' | 'HMA';
 
@@ -83,7 +87,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TfoAdxWithHistogramSignalInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const high = bars.map((b) => b.high);
@@ -154,13 +158,34 @@ export function calculate(
     if (gt(Math.abs(tfo[i]), 1.0)) bgColors.push({ time: t, color: extremeColor });
   }
 
+  // bullCross = ta.crossover(hist, 0), bearCross = ta.crossunder(hist, 0)
+  // extremeHigh = ta.crossunder(tfo, 1.0) and tfo > 1.0, extremeLow = ta.crossover(tfo, -1.0) and tfo < -1.0
+  const lt = (a: number, b: number) => b - a > EPS;
+  const xHigh = crossedUnder(tfo, 1.0);
+  const xLow = crossedOver(tfo, -1.0);
+  const flags = [
+    crossedOver(hist, 0),
+    crossedUnder(hist, 0),
+    tfo.map((v, i) => xHigh[i] && gt(v, 1.0)),
+    tfo.map((v, i) => xLow[i] && lt(v, -1.0)),
+  ];
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
+    alerts: alertStates(alertConditions, bars, flags),
     hlines: hlineConfig.map((h) => ({ value: h.price, options: { title: h.title, color: h.color, linestyle: h.linestyle } })),
     bgColors,
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Hist Cross', message: 'TFO Hist Bullish Cross!' },
+  { id: 'alert1', title: 'Bearish Hist Cross', message: 'TFO Hist Bearish Cross!' },
+  { id: 'alert2', title: 'Extreme High Alert', message: 'TFO Extreme High - Potential Reversal!' },
+  { id: 'alert3', title: 'Extreme Low Alert', message: 'TFO Extreme Low - Potential Reversal!' },
+];
 
 export const TfoAdxWithHistogramSignal = {
   calculate,
@@ -169,4 +194,5 @@ export const TfoAdxWithHistogramSignal = {
   inputConfig,
   plotConfig,
   hlineConfig,
+  alertConditions,
 };

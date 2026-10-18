@@ -23,7 +23,11 @@
  * and the bar close times of the "24 Hours" / "30 Days" statistics follow the exchange calendar. Without a context:
  * tick 0.01, dark palette, timeframe from the bar spacing, last bar closed, UTC calendar and bars.
  * The bars of the bias timeframe are built from the chart bars, so its EMA starts at the first chart bar. A bias
- * timeframe below the chart timeframe is an error, as in the original. The alerts of the original have no output.
+ * timeframe below the chart timeframe is an error, as in the original.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close) when "Enable Alerts" is on: SWEEP (once per
+ * side and cycle), DIST (the reference trade opens), OUTCOME (target / stop / ambiguous / timeout) and, when
+ * "CANCELED events" is on, CANCELED (EXPIRED / 2-SIDE / TOO DEEP / BREAKOUT / FAILED), in text or webhook JSON format,
+ * with the ticker id, the chart timeframe and the exchange time zone of the chart context.
  * At most 500 boxes, lines and labels are kept in the original; the trimming of old cycles keeps the counts far below.
  *
  * Reference: "AMD Po3 with Live Edge Stats [WillyAlgoTrader]" by WillyAlgoTrader
@@ -35,12 +39,15 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type {
-  BgColorData, BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TableMergeData,
+  AlertCall, BgColorData, BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TableMergeData,
   TablePosition,
 } from '../types';
 import { barTime } from '../bar-time';
 import { periodStarts, chartTimeframe, securityBars, hasCalendar } from '../anchor-period';
-import { backgroundColorOf, lastBarConfirmedOf, mintickOf, type ChartContext } from '../chart-context';
+import { backgroundColorOf, lastBarConfirmedOf, mintickOf, tickeridOf, timezoneOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type LineStyleName = 'Solid' | 'Dashed' | 'Dotted';
 type FontSize = 'Tiny' | 'Small' | 'Normal' | 'Large' | 'Huge';
@@ -104,7 +111,7 @@ export interface AmdPo3WithLiveEdgeStatsInputs {
   showCycleSec: boolean;
   showStatsSec: boolean;
   statsPeriod: '24 Hours' | '30 Days' | 'All-Time';
-  /** Alert inputs of the original (alerts have no output here) */
+  /** Alert inputs: the alert() calls (`alertCalls`); no effect on the other outputs */
   alertsOn: boolean;
   webhook: boolean;
   sweepAlert: boolean;
@@ -495,6 +502,7 @@ export function calculate(
   chart?: ChartContext,
 ): IndicatorResult & {
     boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[]; bgColors: BgColorData[];
+    alertCalls: AlertCall[];
   } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -748,6 +756,22 @@ export function calculate(
     }
   };
 
+  // alert() calls, with the de-duplication flags of the cycle (reset on T1)
+  const alertCalls: AlertCall[] = [];
+  const tickerid = tickeridOf(chart);
+  const tz = timezoneOf(chart);
+  let aSweepH = false;
+  let aSweepL = false;
+  let aDist = false;
+  let aOut = false;
+  const alertAt = (i: number, message: string) => alertCalls.push({ time: bars[i].time, message, freq: 'once_per_bar_close' });
+  const cancelAlert = (i: number, why: string) => {
+    if (cfg.alertsOn && cfg.cancelAlert) {
+      alertAt(i, `⚪ CANCELED (${why}) | ${tickerid} | TF: ${chartTf} | cycle ${str.tostring(cycleId)}`);
+    }
+  };
+  const cycleKey = () => `${tickerid}|${chartTf}|${str.tostring(rangeStartBar)}|${str.tostring(cycleId)}`;
+
   const bgColors: BgColorData[] = [];
   const kzColor = C(String(color.blue), 94);
   const lastConfirmed = lastBarConfirmedOf(chart);
@@ -832,6 +856,10 @@ export function calculate(
             firstSweepSide = 0;
             cycleId += 1;
             trim();
+            aSweepH = false;
+            aSweepL = false;
+            aDist = false;
+            aOut = false;
             accBox = null;
             if (cfg.showBoxes) accBox = newBox(rangeStartBar, rangeHigh, i, rangeLow, C(cfg.colAcc, 0), 'dashed', cfg.colAcc);
             state = 'accum';
@@ -846,6 +874,7 @@ export function calculate(
             accBox.x2 = i;
             accBox.border = C(GRAY, 40);
           }
+          cancelAlert(i, 'EXPIRED');
           if (cfg.showLabels) newLabel(i, rangeMid, 'EXPIRED', 'label_left', mutedLabel, TEXT_MUTED, signalSize);
           endCycle(i);
         } else if (breachHigh && breachLow) {
@@ -882,6 +911,18 @@ export function calculate(
               if (cfg.showBoxes) {
                 swBox = newBox(sweepBar, side === 1 ? sweepExtreme : rangeLow, i, side === 1 ? rangeHigh : sweepExtreme,
                   manBorder, 'dashed', manPending);
+              }
+              if (cfg.alertsOn && cfg.sweepAlert && ((side === 1 && !aSweepH) || (side === -1 && !aSweepL))) {
+                const swSideStr = side === 1 ? 'HIGH' : 'LOW';
+                const swPxStr = str.tostring(cl, 'mintick', mintick);
+                const swTimeStr = str.format_time(timeMs(i), 'yyyy-MM-dd HH:mm', tz);
+                const swJson = `{"schema":1,"ind":"${INDICATOR_VERSION}","id":"${cycleKey()}","event":"sweep","side":"${swSideStr}"`
+                  + `,"ticker":"${tickerid}","tf":"${chartTf}","price":${swPxStr},"cycle":${str.tostring(cycleId)}}`;
+                const swText = `🌀 SWEEP ${swSideStr} | ${tickerid} | TF: ${chartTf} | Price: ${swPxStr} | Time: ${swTimeStr}`
+                  + ` | cycle ${str.tostring(cycleId)}`;
+                alertAt(i, cfg.webhook ? swJson : swText);
+                if (side === 1) aSweepH = true;
+                else aSweepL = true;
               }
               state = 'sweepPending';
               // the close is back inside on the same bar (a wick sweep)
@@ -945,17 +986,20 @@ export function calculate(
         if (oppBreach) {
           newsN += 1;
           if (swBox) swBox.x2 = i;
+          cancelAlert(i, '2-SIDE');
           if (cfg.showLabels) newLabel(i, cl, '2-SIDE', 'label_left', mutedLabel, TEXT_MUTED, signalSize);
           endCycle(i);
         } else if (depthBust) {
           brkN += 1;
           if (swBox) swBox.x2 = i;
+          cancelAlert(i, 'TOO DEEP');
           if (cfg.showLabels) newLabel(i, sweepExtreme, 'TOO DEEP', sideStyle, grayLabel, textOn(GRAY), signalSize);
           endCycle(i);
         } else if (i - sweepBar > cfg.sweepReturnBars) {
           // the deadline is over: a breakout, whatever the close
           brkN += 1;
           if (swBox) swBox.x2 = i;
+          cancelAlert(i, 'BREAKOUT');
           if (cfg.showLabels) newLabel(i, sweepExtreme, 'BREAKOUT', sideStyle, grayLabel, textOn(GRAY), signalSize);
           endCycle(i);
         } else if (insideRng) {
@@ -1046,6 +1090,16 @@ export function calculate(
               const oBase = hitT && !hitS ? cfg.colTgt : timedOut && !hitS && !hitT ? GRAY : cfg.colStop;
               newLabel(i, distDir === 1 ? hi : lo, outcome, distDir === 1 ? 'label_down' : 'label_up', C(oBase, 20), textOn(oBase), signalSize);
             }
+            if (cfg.alertsOn && cfg.outcomeAlert && !aOut) {
+              const outTag = hitT && hitS ? '🛑 STOP (AMBIGUOUS)' : hitT ? '🎯 TARGET REACHED' : hitS ? '🛑 STOP HIT' : '⏱ TIMEOUT';
+              const outRes = hitT && hitS ? 'ambiguous' : hitT ? 'target' : hitS ? 'stop' : 'timeout';
+              const outJson = `{"schema":1,"ind":"${INDICATOR_VERSION}","id":"${cycleKey()}","event":"outcome","result":"${outRes}"`
+                + `,"ticker":"${tickerid}","tf":"${chartTf}","r":${str.tostring(rr, '#.##')},"cycle":${str.tostring(cycleId)}}`;
+              const outText = `${outTag} | ${tickerid} | TF: ${chartTf} | ${outcome} | Ref entry: ${fmtPrice(entryPrice)}`
+                + ` | cycle ${str.tostring(cycleId)}`;
+              alertAt(i, cfg.webhook ? outJson : outText);
+              aOut = true;
+            }
             endCycle(i);
           }
         }
@@ -1109,6 +1163,19 @@ export function calculate(
                   cfg.colTgt, textOn(cfg.colTgt), slTpLabelSize);
               }
             }
+            // one DIST event at the M / D bar
+            if (cfg.alertsOn && cfg.distAlert && !aDist) {
+              const dSideStr = sweepSide === 1 ? 'HIGH' : 'LOW';
+              const dTimeStr = str.format_time(timeMs(i), 'yyyy-MM-dd HH:mm', tz);
+              const dJson = `{"schema":1,"ind":"${INDICATOR_VERSION}","id":"${cycleKey()}","confirm":${str.tostring(closeOfBar(i))}`
+                + `,"event":"dist_confirmed","dir":"${dir === 1 ? 'up' : 'down'}","side":"${dSideStr}","ticker":"${tickerid}"`
+                + `,"tf":"${chartTf}","entry":${entPxStr},"stop":${stpPxStr},"target":${tgtPxStr},"rr":${dRrStr}`
+                + `,"cycle":${str.tostring(cycleId)},"doubleSweep":${rearmUsed ? 'true' : 'false'}}`;
+              const dText = `${dir === 1 ? '🟢 DIST ▲ UP' : '🔴 DIST ▼ DOWN'} (manip ${dSideStr}) | ${tickerid} | TF: ${chartTf}`
+                + ` | Entry: ${entPxStr} | Stop: ${stpPxStr} | Target: ${tgtPxStr} | R:R: ${dRrStr} | Time: ${dTimeStr}`;
+              alertAt(i, cfg.webhook ? dJson : dText);
+              aDist = true;
+            }
             state = 'dist';
           }
         } else if (htfNa) {
@@ -1126,6 +1193,7 @@ export function calculate(
           state = 'accum'; // the same range waits for a sweep of the other side
         } else {
           failN += 1;
+          cancelAlert(i, 'FAILED');
           if (manLab) {
             (manLab as LabelObj).text = 'M ✗';
             (manLab as LabelObj).color = C(GRAY, 40);
@@ -1360,6 +1428,7 @@ export function calculate(
     labels,
     tables,
     bgColors,
+    alertCalls,
   };
 }
 
@@ -1369,4 +1438,5 @@ export const AmdPo3WithLiveEdgeStats = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

@@ -8,6 +8,8 @@
  * re-entry pause after the last signal and can be filtered by RSI, MFI, Stochastic and Supertrend ranges and by an
  * alternation rule (wait for the opposite signal). Signals are drawn as triangles on the price chart (Buy / Sell) and
  * at the top / bottom of the MACD pane (H / MA). A hidden connector plot gives 1 (buy), -1 (sell) or 0.
+ * Alerts (alertcondition, `alerts` of the result): 'MACD Buy Signal' / 'MACD Sell Signal', true on the bars of an
+ * enabled histogram or MA buy / sell signal.
  *
  * Reference: "MACD Sniper [trade_lexx]" by trade_lexx
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 const MA_TYPES = ['SMA', 'EMA', 'WMA', 'VWMA', 'KAMA', 'HMA', 'ZLEMA', 'TEMA', 'ALMA', 'DEMA'] as const;
 export type MacdSniperMaType = (typeof MA_TYPES)[number];
@@ -170,7 +173,7 @@ function pineRange(a: number, b: number): number[] {
 export function calculate(
   bars: Bar[],
   inputs: Partial<MacdSniperInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -260,6 +263,7 @@ export function calculate(
   let plotMaBuy = false;
   let plotMaSell = false;
   const finalSignal: number[] = new Array(n);
+  const buyFlags: boolean[] = new Array(n), sellFlags: boolean[] = new Array(n);
   const markers: MarkerData[] = [];
   const green = color.green;
   const red = color.red;
@@ -350,9 +354,12 @@ export function calculate(
     const finalBuy = (cfg.useHistSignals && preciseBuy) || (cfg.useMaSignals && maBuy);
     const finalSell = (cfg.useHistSignals && preciseSell) || (cfg.useMaSignals && maSell);
     finalSignal[i] = finalBuy ? 1 : finalSell ? -1 : 0;
+    buyFlags[i] = finalBuy;
+    sellFlags[i] = finalSell;
 
     const t = bars[i].time;
-    const shape = (on: boolean, buy: boolean, onPrice: boolean, text: string) => {
+    // id: the plotshape output (shape0 .. shape7 in declaration order)
+    const shape = (on: boolean, buy: boolean, onPrice: boolean, text: string, id: string) => {
       if (!on) return;
       markers.push({
         time: t,
@@ -362,16 +369,17 @@ export function calculate(
         text,
         textColor,
         ...(onPrice ? { forceOverlay: true } : {}),
+        id,
       });
     };
-    shape(plotHistBuy, true, true, 'Buy');
-    shape(plotHistSell, false, true, 'Sell');
-    shape(plotHistBuy, true, false, 'H');
-    shape(plotHistSell, false, false, 'H');
-    shape(plotMaBuy, true, true, 'Buy');
-    shape(plotMaSell, false, true, 'Sell');
-    shape(plotMaBuy, true, false, 'MA');
-    shape(plotMaSell, false, false, 'MA');
+    shape(plotHistBuy, true, true, 'Buy', 'shape0');
+    shape(plotHistSell, false, true, 'Sell', 'shape1');
+    shape(plotHistBuy, true, false, 'H', 'shape2');
+    shape(plotHistSell, false, false, 'H', 'shape3');
+    shape(plotMaBuy, true, true, 'Buy', 'shape4');
+    shape(plotMaSell, false, true, 'Sell', 'shape5');
+    shape(plotMaBuy, true, false, 'MA', 'shape6');
+    shape(plotMaSell, false, false, 'MA', 'shape7');
   }
 
   const histColor = (i: number) => {
@@ -395,8 +403,16 @@ export function calculate(
     },
     hlines: [{ value: 0, options: { title: 'Zero Line', color: String(color.new('#787B86', 50)), linestyle: 'dashed' } }],
     markers,
+    // alertcondition(final_buy_signal, ...) / alertcondition(final_sell_signal, ...)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'MACD Buy Signal', message: 'MACD Buy Signal Triggered' },
+  { id: 'alert1', title: 'MACD Sell Signal', message: 'MACD Sell Signal Triggered' },
+];
 
 export const MacdSniper = {
   calculate,
@@ -404,4 +420,5 @@ export const MacdSniper = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

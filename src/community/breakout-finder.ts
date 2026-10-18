@@ -7,6 +7,9 @@
  * 300-bar price range). A bearish breakout is the same with pivot lows. Each breakout draws a rectangle of four
  * lines from the oldest tested pivot to the breakout bar, and a triangle below (bullish) or above (bearish) the bar.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Breakout', 'Breakdown' and 'Breakout or Breakdown', true on the
+ * bars of the bullish / bearish breakouts / either.
+ *
  * The original keeps at most 400 lines (max_lines_count): the oldest rectangles are removed.
  * The "Line Style" options are the values of the original: sol (solid), dsh (dashed), dot (dotted).
  *
@@ -17,6 +20,14 @@
 
 import { ta, Series, callsite, compare, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LineDrawingData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Breakout', message: 'Breakout' },
+  { id: 'alert1', title: 'Breakdown', message: 'Breakdown' },
+  { id: 'alert2', title: 'Breakout or Breakdown', message: 'Breakout or Breakdown' },
+];
 
 export interface BreakoutFinderInputs {
   /** Pivot period (left / right) */
@@ -83,7 +94,7 @@ function get<T>(arr: T[], i: number): T {
 export function calculate(
   bars: Bar[],
   inputs: Partial<BreakoutFinderInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { prd, mintest, bocolorup, bocolordown } = cfg;
   const boLen = cfg.boLen;
@@ -110,6 +121,8 @@ export function calculate(
   const plloc: number[] = [];
 
   const markers: MarkerData[] = [];
+  const breakoutFlags: boolean[] = new Array(n).fill(false);
+  const breakdownFlags: boolean[] = new Array(n).fill(false);
   // Lines alive, oldest first (Pine object limit): bar indexes and prices
   const live: Array<{ x1: number; y1: number; x2: number; y2: number; color: string }> = [];
   const newLine = (x1: number, y1: number, x2: number, y2: number, color: string) => {
@@ -175,6 +188,7 @@ export function calculate(
       }
     }
     const breakout = !Number.isNaN(bomax) && num >= mintest;
+    breakoutFlags[i] = breakout;
     if (breakout) {
       newLine(i, bomax, bostart, bomax, bocolorup);
       newLine(i, bomax - chwidth, bostart, bomax - chwidth, bocolorup);
@@ -208,6 +222,7 @@ export function calculate(
       }
     }
     const breakdown = !Number.isNaN(bomin) && num1 >= mintest;
+    breakdownFlags[i] = breakdown;
     if (breakdown) {
       newLine(i, bomin, bostart, bomin, bocolordown);
       newLine(i, bomin + chwidth, bostart, bomin + chwidth, bocolordown);
@@ -229,7 +244,9 @@ export function calculate(
     plots: {},
     markers,
     lines,
+    // alertcondition(breakout, "Breakout") / (breakdown, "Breakdown") / (breakout or breakdown, ...)
+    alerts: alertStates(alertConditions, bars, [breakoutFlags, breakdownFlags, breakoutFlags.map((f, i) => f || breakdownFlags[i])]),
   };
 }
 
-export const BreakoutFinder = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BreakoutFinder = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

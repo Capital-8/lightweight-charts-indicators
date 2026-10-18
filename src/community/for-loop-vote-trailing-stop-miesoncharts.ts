@@ -7,6 +7,7 @@
  * short) the regime turns short with stop = src + atrK * ATR. Otherwise the stop ratchets: max(stop, src - offset)
  * in a long regime, min(stop, src + offset) in a short regime. The stop is green in a long regime, red otherwise;
  * triangles mark the regime flips.
+ * Alerts (alertcondition, `alerts` of the result): 'Vote Stop Long' / 'Vote Stop Short' on the regime flips.
  *
  * Reference: "For-Loop Vote Trailing Stop | Mies" by MiesOnCharts
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +16,7 @@
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ForLoopVoteTrailingStopMiesonchartsInputs {
   /** Source */
@@ -75,7 +77,7 @@ const le = (x: number, y: number) => !isNaN(x) && !isNaN(y) && !(x - y > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<ForLoopVoteTrailingStopMiesonchartsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = getSourceSeries(bars, cfg.src).toArray().map((v) => v ?? NaN);
@@ -86,6 +88,8 @@ export function calculate(
   let prevDir = NaN; // dir[1] (na on the first bar)
   const plot0: { time: number; value: number; color: string }[] = new Array(n);
   const markers: MarkerData[] = [];
+  const upFlags: boolean[] = [];
+  const dnFlags: boolean[] = [];
   // for i = a to b: counts down when a > b
   const step = cfg.a <= cfg.b ? 1 : -1;
 
@@ -126,6 +130,8 @@ export function calculate(
     if (flipDn) {
       markers.push({ time: bars[k].time, position: 'aboveBar', shape: 'triangleDown', color: DN_COLOR, size: 'small' });
     }
+    upFlags.push(flipUp);
+    dnFlags.push(flipDn);
     prevDir = dir;
   }
 
@@ -133,8 +139,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     markers,
+    // alertcondition(flipUp, "Vote Stop Long") / alertcondition(flipDn, "Vote Stop Short")
+    alerts: alertStates(alertConditions, bars, [upFlags, dnFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Vote Stop Long', message: 'Multi-horizon vote crossed long threshold' },
+  { id: 'alert1', title: 'Vote Stop Short', message: 'Multi-horizon vote crossed short threshold' },
+];
 
 export const ForLoopVoteTrailingStopMiesoncharts = {
   calculate,
@@ -142,4 +156,5 @@ export const ForLoopVoteTrailingStopMiesoncharts = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

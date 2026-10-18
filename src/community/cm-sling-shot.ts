@@ -3,12 +3,14 @@
  *
  * Two-EMA crossover system that keeps traders on the trending side of the market.
  * EMA cloud with silver fill, bar coloring for pullback (yellow) and entry (aqua)
- * signals, persistent per-bar trend triangles, and conservative entry arrows.
+ * signals, persistent per-bar trend triangles, and conservative entry arrows (the original's two plotarrow outputs,
+ * `arrows` of the result). "Show Letters" adds the original's 'B' / 'S' characters at low - true range / high + true
+ * range on the entry bars.
  *
  * Reference: "CM Sling Shot System" by ChrisMoody
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type ArrowData } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
 
 export interface CMSlingShotInputs {
@@ -40,7 +42,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<CMSlingShotInputs> = {}): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<CMSlingShotInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; markers: MarkerData[]; arrows: ArrowData[] } {
   const { emaFast, emaSlow, showLetters } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -102,8 +107,9 @@ export function calculate(bars: Bar[], inputs: Partial<CMSlingShotInputs> = {}):
     // No barcolor push when neither condition met (leave candle default)
   }
 
-  // Markers: persistent trend triangles every bar + conservative entry arrows
+  // Markers: persistent trend triangles every bar; arrows: conservative entries
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   for (let i = warmup; i < n; i++) {
     const fast = emaFastArr[i] ?? 0;
     const slow = emaSlowArr[i] ?? 0;
@@ -121,14 +127,27 @@ export function calculate(bars: Bar[], inputs: Partial<CMSlingShotInputs> = {}):
       markers.push({ time: bars[i].time as number, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: '' });
     }
 
-    // Pine: plotarrow(pa and codiff, colorup=lime) - conservative entry up
-    // Pine: plotchar(sl and codiff ? low - tr : na, char='B', color=lime)
+    // tr: true range (na on the first bar)
+    const b = bars[i];
+    const tr = i > 0 ? Math.max(b.high - b.low, Math.abs(b.high - bars[i - 1].close), Math.abs(b.low - bars[i - 1].close)) : NaN;
+
+    // Pine: plotarrow(pa and codiff ? codiff : na, "Up Entry Arrow", colorup=lime) - conservative entry up
+    // Pine: plotchar(sl and codiff ? low - tr : na, "Buy Entry", char='B', location.absolute, color=lime)
     if (fast > slow && prevClose < prevFast && close > fast) {
-      markers.push({ time: bars[i].time as number, position: 'belowBar', shape: 'arrowUp', color: '#00FF00', text: showLetters ? 'B' : 'Buy' });
+      arrows.push({ time: b.time as number, id: 'arrow0', value: 1, color: '#00FF00' });
+      if (showLetters && !isNaN(tr)) {
+        markers.push({ time: b.time as number, position: 'atPriceMiddle', price: b.low - tr, shape: 'circle', color: 'transparent',
+          text: 'B', textColor: '#00FF00' });
+      }
     }
-    // Pine: plotchar(sl and codiff2 ? high + tr : na, char='S', color=red)
+    // Pine: plotarrow(pa and codiff2*-1 ? codiff2*-1 : na, "Down Entry Arrow", colordown=red)
+    // Pine: plotchar(sl and codiff2 ? high + tr : na, "Short Entry", char='S', location.absolute, color=red)
     if (fast < slow && prevClose > prevFast && close < fast) {
-      markers.push({ time: bars[i].time as number, position: 'aboveBar', shape: 'arrowDown', color: '#FF0000', text: showLetters ? 'S' : 'Sell' });
+      arrows.push({ time: b.time as number, id: 'arrow1', value: -1, color: '#FF0000' });
+      if (showLetters && !isNaN(tr)) {
+        markers.push({ time: b.time as number, position: 'atPriceMiddle', price: b.high + tr, shape: 'circle', color: 'transparent',
+          text: 'S', textColor: '#FF0000' });
+      }
     }
   }
 
@@ -138,6 +157,7 @@ export function calculate(bars: Bar[], inputs: Partial<CMSlingShotInputs> = {}):
     fills: [{ plot1: 'plot0', plot2: 'plot1', colors: fillColors }],
     barColors,
     markers,
+    arrows,
   };
 }
 

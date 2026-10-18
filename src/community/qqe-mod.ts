@@ -5,12 +5,21 @@
  * Primary QQE: RSI smoothed via EMA, with dynamic ATR-RSI bands.
  * Secondary QQE: Same logic, different parameters.
  * BB on primary QQE trend line highlights strong momentum zones.
+ * Alerts (alertcondition, `alerts` of the result): 'Primary RSI Cross Above Zero' / 'Primary RSI Cross Below Zero',
+ * the smoothed primary RSI crossing over / under 50.
  *
  * Reference: "QQE MOD"
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Primary RSI Cross Above Zero', message: 'Primary RSI crossed above zero' },
+  { id: 'alert1', title: 'Primary RSI Cross Below Zero', message: 'Primary RSI crossed below zero' },
+];
 
 export interface QQEModInputs {
   rsiLengthPrimary: number;
@@ -67,7 +76,7 @@ function calculateQQE(
   rsiLength: number,
   smoothingFactor: number,
   qqeFactor: number,
-): { trendLine: number[]; smoothedRsi: number[] } {
+): { trendLine: number[]; smoothedRsi: number[]; smoothedRsiNa: number[] } {
   const wildersLength = rsiLength * 2 - 1;
   const rsi = ta.rsi(source, rsiLength);
   const smoothedRsiSeries = ta.ema(rsi, smoothingFactor);
@@ -124,10 +133,15 @@ function calculateQQE(
     trendLine[i] = trendDir[i] === 1 ? longBand[i] : shortBand[i];
   }
 
-  return { trendLine, smoothedRsi: smoothedRsiArr.map((v) => v ?? 0) };
+  return {
+    trendLine,
+    smoothedRsi: smoothedRsiArr.map((v) => v ?? 0),
+    // na kept (NaN), for the alert crosses
+    smoothedRsiNa: smoothedRsiArr.map((v) => (v === null || v === undefined ? NaN : v)),
+  };
 }
 
-export function calculate(bars: Bar[], inputs: Partial<QQEModInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<QQEModInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const close = new Series(bars, (b) => b.close);
 
@@ -231,7 +245,12 @@ export function calculate(bars: Bar[], inputs: Partial<QQEModInputs> = {}): Omit
     hlines: [{ value: 0, options: { color: '#787B86', linestyle: 'dotted', title: 'Zero' } }],
     markers,
     barColors,
+    // alertcondition(ta.crossover(primaryRSI, 50)) / alertcondition(ta.crossunder(primaryRSI, 50))
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(primary.smoothedRsiNa, 50),
+      crossedUnder(primary.smoothedRsiNa, 50),
+    ]),
   };
 }
 
-export const QQEMod = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const QQEMod = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -38,7 +38,11 @@
  * - "Live Exchange Rates" with an account currency other than USD reads another symbol: the port throws an Error.
  *   A higher timeframe below the chart timeframe reads lower timeframe bars: the port throws an Error.
  * - Trend mode with VWAP on intraday bars needs the exchange time zone and session of the context (else an Error).
- * - The alerts (13 alert conditions and the alert() messages) give no output.
+ *
+ * Alerts: the 13 alert conditions (`alerts` of the result: breakout up / down, retest up / down, failed break up /
+ * down, stage complete, entry, stop loss hit, TP1 / TP1.5 / TP2 / TP3 hit; the trade ones only with targets on and
+ * the TP ones only for the targets shown) and the alert() messages (`alertCalls`, once per bar close) of a completed
+ * stage, a breakout, a failed break and a shown retest.
  *
  * Reference: "Luxy BIG beautiful Dynamic ORB" by orenluxy
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -50,7 +54,10 @@ import {
   type Box, type Label, type Line, type IndicatorResult, type InputConfig, type PlotConfig, type FillConfig, type Bar,
 } from 'oakscriptjs';
 import { executeScript, ta as scriptTa } from 'oakscriptjs/script';
-import type { BoxData, LabelData, LineDrawingData, TableCellData, TableData, TableMergeData, TablePosition } from '../types';
+import type {
+  AlertCall, BoxData, LabelData, LineDrawingData, TableCellData, TableData, TableMergeData, TablePosition,
+} from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { chartTimeframe, higherTimeframeBars, periodStarts, timeAfterLastBar, type SecurityBars } from '../anchor-period';
 import {
   currencyOf, lastBarConfirmedOf, nowOf, symbolTypeOf, tickerOf, timezoneOf, type ChartContext,
@@ -446,7 +453,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<LuxyBigBeautifulDynamicOrbInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[]; tables: TableData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[]; tables: TableData[] }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const ms = n > 0 && bars[0].time >= 1e12;
@@ -675,6 +683,13 @@ export function calculate(
 
   const simulate = (atrArr: number[] | null) => {
     const needAtrFlags: boolean[] = new Array(n).fill(false);
+    // alertcondition flags (index = declaration order of alertConditions) and the alert() calls
+    const alertFlags: boolean[][] = Array.from({ length: 13 }, () => new Array<boolean>(n).fill(false));
+    const alertCalls: AlertCall[] = [];
+    // sendAlert(message) => alert(message, alert.freq_once_per_bar_close) (enableAlerts is a constant true)
+    const sendAlert = (i: number, message: string) => {
+      alertCalls.push({ time: bars[i].time as number, message, freq: 'once_per_bar_close' });
+    };
     resetDrawings(LIMITS);
 
     // ORB objects
@@ -1112,6 +1127,15 @@ export function calculate(
         orbNavigationCached = true;
       }
 
+      // stage complete: alert of every stage completed on this bar
+      for (const o of allORBs) {
+        if (o.isEnabled && o.isComplete && o.completionBar === i) {
+          const rangePct = ((o.high - o.low) / o.low) * 100;
+          sendAlert(i, `✅ ${o.name} COMPLETE - ${ticker} | Range: $${fmt(o.high, '#.##')} - $${fmt(o.low, '#.##')} (${fmt(rangePct, '#.#')}%)`);
+          alertFlags[6][i] = true;
+        }
+      }
+
       // trend values of the bar (var floats assigned while the filter is on)
       const trendVWAP = wantVwap ? vwapArr[i] : NaN;
       const trendEMA12 = wantEma12 ? ema12Arr[i] : NaN;
@@ -1215,6 +1239,8 @@ export function calculate(
             }
           }
         }
+        // alertEntryTriggered := true (the condition also needs enableTargets)
+        alertFlags[7][i] = cfg.enableTargets;
         if (pendingLongDue) {
           pendingLongEntry = false;
           pendingLongBar = NaN;
@@ -1311,6 +1337,9 @@ export function calculate(
             const y = b.high + cachedATR * LABEL_OFFSET_ATR_MULTIPLIER;
             cleanupLabel(label.new(i, y, text, 'bar_index', 'price', cnew(C_GREEN, 0), 'label_down', C_WHITE, labelSize, 'center'));
           }
+          sendAlert(i, `🔼 BREAKOUT UP${str.tostring(sessionBreakoutsUp)} - ${ticker} @ ${fmt(b.close, '#.##')} | ${ao.name}`
+            + (cfg.godModeEnabled && !isNa(godLastScore) ? ` | ⚡${fmt(godLastScore, '#')} ${godGrade(godLastScore)}` : ''));
+          alertFlags[0][i] = true;
           pendingLongEntry = true;
           pendingLongBar = i;
         }
@@ -1344,6 +1373,9 @@ export function calculate(
             const y = b.low - cachedATR * LABEL_OFFSET_ATR_MULTIPLIER;
             cleanupLabel(label.new(i, y, text, 'bar_index', 'price', cnew(C_RED, 0), 'label_up', C_WHITE, labelSize, 'center'));
           }
+          sendAlert(i, `🔽 BREAKOUT DOWN #${str.tostring(sessionBreakoutsDown)} - ${ticker} @ ${fmt(b.close, '#.##')} | ${ao.name}`
+            + (cfg.godModeEnabled && !isNa(godLastScore) ? ` | ⚡${fmt(godLastScore, '#')} ${godGrade(godLastScore)}` : ''));
+          alertFlags[1][i] = true;
           pendingShortEntry = true;
           pendingShortBar = i;
         }
@@ -1376,6 +1408,9 @@ export function calculate(
           const since = i - breakUpBarIndex;
           const isFailed = everHadBreakUp && since > 0 && since <= MAX_BARS_FAILED_BREAK && backInside && !isCommitted;
           if (isFailed) {
+            const orbStageName = activeORB !== null ? activeORB.name : 'None';
+            sendAlert(i, `⚠️ FAILED BREAK UP - ${ticker} @ $${fmt(b.close, '#.##')} | ${orbStageName} - Price back inside range after ${str.tostring(since)} bars`);
+            alertFlags[4][i] = true;
             if (cyclesUp > 0) cyclesUp -= 1;
             godFailedBreaks += 1;
             hadBreakUp = false;
@@ -1395,6 +1430,9 @@ export function calculate(
               const text = str.format('🔁 RETEST UP #{0}', str.tostring(sessionRetestsUp));
               const y = b.high + cachedATR * LABEL_OFFSET_ATR_MULTIPLIER;
               cleanupLabel(label.new(i, y, text, 'bar_index', 'price', cnew(C_ORANGE, 20), 'label_down', C_WHITE, labelSize));
+              const orbStageName = activeORB !== null ? activeORB.name : 'None';
+              sendAlert(i, `🔁 RETEST UP #${str.tostring(retestCyclesUp)} - ${ticker} @ $${fmt(b.close, '#.##')} | Back to ${orbStageName} range`);
+              alertFlags[2][i] = true;
             }
           }
         }
@@ -1404,6 +1442,9 @@ export function calculate(
           const since = i - breakDownBarIndex;
           const isFailed = everHadBreakDown && since > 0 && since <= MAX_BARS_FAILED_BREAK && backInside && !isCommitted;
           if (isFailed) {
+            const orbStageName = activeORB !== null ? activeORB.name : 'None';
+            sendAlert(i, `⚠️ FAILED BREAK DOWN - ${ticker} @ $${fmt(b.close, '#.##')} | ${orbStageName} - Price back inside range after ${str.tostring(since)} bars`);
+            alertFlags[5][i] = true;
             if (cyclesDown > 0) cyclesDown -= 1;
             godFailedBreaks += 1;
             hadBreakDown = false;
@@ -1423,6 +1464,9 @@ export function calculate(
               const text = str.format('🔁 RETEST DOWN #{0}', str.tostring(sessionRetestsDown));
               const y = b.low - cachedATR * LABEL_OFFSET_ATR_MULTIPLIER;
               cleanupLabel(label.new(i, y, text, 'bar_index', 'price', cnew(C_ORANGE, 20), 'label_up', C_WHITE, labelSize));
+              const orbStageName = activeORB !== null ? activeORB.name : 'None';
+              sendAlert(i, `🔁 RETEST DOWN #${str.tostring(retestCyclesDown)} - ${ticker} @ $${fmt(b.close, '#.##')} | Back to ${orbStageName} range`);
+              alertFlags[3][i] = true;
             }
           }
         }
@@ -1469,6 +1513,7 @@ export function calculate(
           const p = tpPrices[k];
           if (!tpHit[k] && !isNa(p) && showTPs[k] && i >= orbEntryBar && (isLong ? ge(b.high, p) : le(b.low, p))) {
             tpHit[k] = true;
+            alertFlags[9 + k][i] = cfg.enableTargets; // alertTP<k>Triggered (showTP<k> is checked above)
             const lab = tpLabels[k].value;
             if (lab) {
               label.set_text(lab, cfg.labelFormat === 'Simple' ? `✅ ${tpNames[k]}` : str.format(`✅ ${tpNames[k]}: \${0}`, fmt(p, '#.##')));
@@ -1485,6 +1530,7 @@ export function calculate(
         if (lastTPHit) orbLinesFrozen = true;
         if (!orbSLHit && !isNa(orbSLPrice) && i >= orbEntryBar && (isLong ? le(b.low, orbSLPrice) : ge(b.high, orbSLPrice))) {
           orbSLHit = true;
+          alertFlags[8][i] = cfg.enableTargets; // alertSLTriggered
           orbLinesFrozen = true;
           if (activeORB !== null) {
             if (isLong) activeORB.breakoutUp = false;
@@ -1628,7 +1674,7 @@ export function calculate(
       prevInSession = inSession;
     }
     setDrawingBar(null);
-    return { needAtrFlags, plotVals, table };
+    return { needAtrFlags, plotVals, table, alertFlags, alertCalls };
   };
 
   // ---------------------------------------------------------------- stop, targets, position size
@@ -2184,7 +2230,7 @@ export function calculate(
     const flags = simulate(null).needAtrFlags;
     atrUse = callsite.whenCalled(flags, (x) => taCore.rma(x, cfg.atrLength), trArr).map((v) => v ?? NaN);
   }
-  const { plotVals, table } = simulate(atrUse);
+  const { plotVals, table, alertFlags, alertCalls } = simulate(atrUse);
 
   const drawings = drawingOutputs(bars, ms ? 'ms' : 's');
   // a label on a bar after the last bar (bar_index + 2): the time of that bar
@@ -2217,8 +2263,30 @@ export function calculate(
     labels,
     boxes: drawings.boxes ?? [],
     tables: table ? [table] : [],
+    alerts: alertStates(alertConditions, bars, alertFlags),
+    alertCalls,
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '🔼 ORB Breakout UP', message: '{{ticker}} - Breakout ABOVE ORB High @ ${{close}}' },
+  { id: 'alert1', title: '🔽 ORB Breakout DOWN', message: '{{ticker}} - Breakout BELOW ORB Low @ ${{close}}' },
+  { id: 'alert2', title: '🔁 ORB Retest UP', message: '{{ticker}} - Retesting ORB after breakout UP @ ${{close}}' },
+  { id: 'alert3', title: '🔁 ORB Retest DOWN', message: '{{ticker}} - Retesting ORB after breakout DOWN @ ${{close}}' },
+  { id: 'alert4', title: '⚠️ ORB Failed Break UP', message: '{{ticker}} - Failed breakout UP, back inside ORB @ ${{close}}' },
+  { id: 'alert5', title: '⚠️ ORB Failed Break DOWN', message: '{{ticker}} - Failed breakout DOWN, back inside ORB @ ${{close}}' },
+  { id: 'alert6', title: '✅ ORB Stage Complete', message: '{{ticker}} - ORB Stage completed' },
+  { id: 'alert7', title: '🎯 ENTRY Triggered', message: '{{ticker}} - ENTRY @ ${{close}} | Trade setup activated' },
+  { id: 'alert8', title: '❌ STOP LOSS Hit', message: '{{ticker}} - STOP LOSS HIT @ ${{close}} | Trade closed with loss' },
+  { id: 'alert9', title: '✅ TP1 Hit (1R)', message: '{{ticker}} - TP1 HIT @ ${{close}} | 1R profit target reached' },
+  { id: 'alert10', title: '✅ TP1.5 Hit (1.5R)', message: '{{ticker}} - TP1.5 HIT @ ${{close}} | 1.5R profit target reached' },
+  { id: 'alert11', title: '✅ TP2 Hit (2R)', message: '{{ticker}} - TP2 HIT @ ${{close}} | 2R profit target reached' },
+  { id: 'alert12', title: '✅ TP3 Hit (3R)', message: '{{ticker}} - TP3 HIT @ ${{close}} | 3R profit target reached' },
+];
+
+/** The original calls alert() */
+export const hasAlertFunction = true;
 
 export const LuxyBigBeautifulDynamicOrb = {
   calculate,
@@ -2227,4 +2295,6 @@ export const LuxyBigBeautifulDynamicOrb = {
   inputConfig,
   plotConfig,
   fillConfig,
+  alertConditions,
+  hasAlertFunction,
 };

@@ -12,7 +12,8 @@
  * Buy / Sell labels mark the crosses of T3 and PMax, and the area between the RSI and PMax is green when T3 is above
  * PMax, red when it is below.
  *
- * The "Source" input is only used by the alert conditions of the original, which give no output here.
+ * Alerts (alertcondition, `alerts` of the result): crosses of T3 and PMax (either way, over, under) and crosses of
+ * the "Source" input (a price, compared with PMax as in the original) and PMax.
  *
  * Reference: "PMax on Rsi w T3" by KivancOzbilgic
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -20,13 +21,14 @@
  */
 
 import {
-  ta, Series, color,
+  ta, Series, color, getSourceSeries,
   type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PmaxOnRsiWithTillsonT3Inputs {
-  /** Only used by the alert conditions of the original */
+  /** Source of the price cross alert conditions */
   src: SourceType;
   multiplier: number;
   /** Tillson T3 length */
@@ -115,7 +117,7 @@ const max3 = (a: number, b: number, c: number) => (isNaN(a) || isNaN(b) || isNaN
 export function calculate(
   bars: Bar[],
   inputs: Partial<PmaxOnRsiWithTillsonT3Inputs> = {},
-): IndicatorResult & { markers: MarkerData[] } {
+): IndicatorResult & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { multiplier, length, t3a1, periods, rsiLength } = cfg;
@@ -203,6 +205,10 @@ export function calculate(
   const pmaxS = S(pmax);
   const buy = ta.crossover(mavgS, pmaxS).toArray();
   const sell = ta.crossunder(mavgS, pmaxS).toArray();
+  // crossover(src, PMax) / crossunder(src, PMax)
+  const srcS = getSourceSeries(bars, cfg.src);
+  const srcOver = ta.crossover(srcS, pmaxS).toArray();
+  const srcUnder = ta.crossunder(srcS, pmaxS).toArray();
 
   type Point = { time: number; value: number };
   const plot0: Point[] = [];
@@ -246,7 +252,22 @@ export function calculate(
       { plot1: 'plot3', plot2: 'plot2', options: { title: 'DownTrend Highligter' }, colors: downFill },
     ],
     markers,
+    // alertcondition(cross(MAvg, PMax)) / crossover / crossunder; cross(src, PMax) / crossover / crossunder
+    alerts: alertStates(alertConditions, bars, [
+      buy.map((v, i) => !!v || !!sell[i]), buy.map(Boolean), sell.map(Boolean),
+      srcOver.map((v, i) => !!v || !!srcUnder[i]), srcOver.map(Boolean), srcUnder.map(Boolean),
+    ]),
   };
 }
 
-export const PmaxOnRsiWithTillsonT3 = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cross Alert', message: 'PMax - Moving Avg Crossing!' },
+  { id: 'alert1', title: 'Crossover Alarm', message: 'Moving Avg BUY SIGNAL!' },
+  { id: 'alert2', title: 'Crossunder Alarm', message: 'Moving Avg SELL SIGNAL!' },
+  { id: 'alert3', title: 'Price Cross Alert', message: 'PMax - Price Crossing!' },
+  { id: 'alert4', title: 'Price Crossover Alarm', message: 'PRICE OVER PMax - BUY SIGNAL!' },
+  { id: 'alert5', title: 'Price Crossunder Alarm', message: 'PRICE UNDER PMax - SELL SIGNAL!' },
+];
+
+export const PmaxOnRsiWithTillsonT3 = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig, alertConditions };

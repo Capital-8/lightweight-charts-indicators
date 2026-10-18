@@ -9,6 +9,8 @@
  * faded by its age), and counts its breakouts; after "Breakouts Until Level Deletes" breakouts or "Bars Until Level
  * Deletes" bars it stops updating (or is deleted, or takes the unique colour). The labels show on the last 20,000
  * bars (show_last).
+ * Alerts (alertcondition, `alerts` of the result): the eight conditions of the original (new support / resistance
+ * re-test, support / resistance re-test broken downside / upside, any downside / upside break).
  *
  * Chart values read: whether the last bar is closed (`barstate.isconfirmed`: the script only works on closed bars).
  *
@@ -23,6 +25,7 @@ import {
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type Line = ReturnType<typeof line.new>;
 
@@ -106,7 +109,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<RetestSupportResistanceSignalsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[] } {
+): IndicatorResult & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { gt, lt, le, ge } = compare;
@@ -123,6 +126,8 @@ export function calculate(
   const secondPhaseLow: Array<{ price: number; index: number }> = [];
   const flips: FlipLevel[] = [];
   const markers: MarkerData[] = [];
+  // alertcondition flags in the original's order
+  const flags: boolean[][] = [0, 1, 2, 3, 4, 5, 6, 7].map(() => new Array<boolean>(n).fill(false));
 
   resetDrawings({ line: MAX_LINES });
   for (let bi = 0; bi < n; bi++) {
@@ -132,6 +137,10 @@ export function calculate(
     const { high, low, close, open } = bars[bi];
     let newTestedSupport = false;
     let newTestedResistance = false;
+    let supportBrokeDownside = false;
+    let supportBrokeUpside = false;
+    let resistanceBrokeDownside = false;
+    let resistanceBrokeUpside = false;
 
     if (!Number.isNaN(pivotHigh[bi])) firstPhaseHigh.push({ price: pivotHigh[bi], index: bi - cfg.rightBars });
     if (!Number.isNaN(pivotLow[bi])) firstPhaseLow.push({ price: pivotLow[bi], index: bi - cfg.rightBars });
@@ -193,18 +202,22 @@ export function calculate(
         if (lv.phase === 1 && lt(close, linePrice)) {
           lv.flips += 1;
           lv.phase = -1;
+          supportBrokeDownside = true;
         } else if (lv.phase === -1 && gt(close, linePrice)) {
           lv.flips += 1;
           lv.phase = 1;
+          supportBrokeUpside = true;
         }
       }
       if (lv.variation === 'Resistance') {
         if (lv.phase === -1 && gt(close, linePrice)) {
           lv.flips += 1;
           lv.phase = 1;
+          resistanceBrokeUpside = true;
         } else if (lv.phase === 1 && lt(close, linePrice)) {
           lv.flips += 1;
           lv.phase = -1;
+          resistanceBrokeDownside = true;
         }
       }
       if (lv.flips >= cfg.flipsUntilDeletion || lineAge >= cfg.ageUntilDeletion) {
@@ -215,6 +228,15 @@ export function calculate(
         flips.splice(i, 1);
       }
     }
+
+    flags[0][bi] = newTestedSupport;
+    flags[1][bi] = newTestedResistance;
+    flags[2][bi] = supportBrokeDownside;
+    flags[3][bi] = supportBrokeUpside;
+    flags[4][bi] = resistanceBrokeDownside;
+    flags[5][bi] = resistanceBrokeUpside;
+    flags[6][bi] = supportBrokeDownside || resistanceBrokeDownside;
+    flags[7][bi] = supportBrokeUpside || resistanceBrokeUpside;
 
     // plotshape(newTestedSupport, "R", size.tiny, show_last = 20000) and the resistance one
     if (bi >= n - SHOW_LAST) {
@@ -238,8 +260,21 @@ export function calculate(
     plots: {},
     markers,
     ...drawingOutputs(bars),
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions (no message given: the default message) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New Support Re-Test', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'New Resistance Re-Test', message: 'Alert Fired!' },
+  { id: 'alert2', title: 'Support Re-Test Downside Break', message: 'Alert Fired!' },
+  { id: 'alert3', title: 'Support Re-Test Upside Break', message: 'Alert Fired!' },
+  { id: 'alert4', title: 'Resistance Re-Test Downside Break', message: 'Alert Fired!' },
+  { id: 'alert5', title: 'Resistance Re-Test Upside Break', message: 'Alert Fired!' },
+  { id: 'alert6', title: 'Any Downside Break', message: 'Alert Fired!' },
+  { id: 'alert7', title: 'Any Upside Break', message: 'Alert Fired!' },
+];
 
 export const RetestSupportResistanceSignals = {
   calculate,
@@ -247,4 +282,5 @@ export const RetestSupportResistanceSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

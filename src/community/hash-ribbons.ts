@@ -18,7 +18,8 @@
  * value of the previous bar except on the last bar of the day, and the value of the developing daily bar is not
  * modelled (it only changes the buy signal of that bar).
  *
- * Limit of the port: the three alert conditions give no output.
+ * Alerts (alertcondition, `alerts` of the result): 'Alert - Capitulation', 'Alert - Recovered' on the bars of these
+ * signals, 'Alert - Buy' on the first bar of a buy signal.
  *
  * Reference: "Hash Ribbons" by capriole_charles
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,6 +30,7 @@ import {
   type Bar, type IndicatorResult, type InputConfig, type PlotConfig,
 } from 'oakscriptjs';
 import type { BgColorData, MarkerData, TableData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { chartTimeframe, higherTimeframeBars, periodChanges } from '../anchor-period';
 import { lastBarConfirmedOf, symbolBarsOf, timezoneOf, type ChartContext, type SymbolRequest } from '../chart-context';
 import { otherSymbolChart, securityOtherValues } from '../other-symbol';
@@ -103,7 +105,7 @@ const gt = (a: number, b: number) => a - b > EPS;
 
 export function calculate(
   bars: Bar[], inputs: Partial<HashRibbonsInputs> = {}, chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; bgColors: BgColorData[]; tables: TableData[] } {
+): IndicatorResult & { markers: MarkerData[]; bgColors: BgColorData[]; tables: TableData[] } & { alerts: AlertConditionState[] } {
   const { type, lenS, lenL, signals, plotHalvings, raw, source } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const [hr] = symbolBarsOf(requiredSymbols({ source }), chart);
@@ -178,6 +180,7 @@ export function calculate(
   const fillColors: string[] = [];
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  const buyFlags: boolean[] = [];
   const tz = timezoneOf(chart);
   const unit = chart?.timeUnit === 'ms' || (chart?.timeUnit === undefined && n > 0 && bars[0].time >= 1e12) ? 1 : 1000;
   // timestamp(y, m, d, 0, 0) in the exchange time zone; the band of 2 days on each side
@@ -195,6 +198,7 @@ export function calculate(
     const buy = (s10Up[i] && lt(sinceRecovered[i], sinceS10Down[i]) && lt(sinceRecovered[i], sinceCapitulation[i]))
       || (gt(s10[i], s20[i]) && recovered[i]);
     const diff = ((short - long) / short) * 100;
+    buyFlags.push(buy);
 
     const num = (v: number) => (Number.isFinite(v) ? v : NaN);
     plot0.push({ time: t, value: raw ? num(hrRawS[i]) : NaN });
@@ -205,19 +209,19 @@ export function calculate(
 
     if (signals) {
       if (capitulation[i]) {
-        markers.push({ time: t, position: 'top', shape: 'circle', color: '#787B8680', size: 'normal', text: 'Capitulation', textColor: '#363A4580' });
+        markers.push({ time: t, position: 'top', shape: 'circle', color: '#787B8680', size: 'normal', text: 'Capitulation', textColor: '#363A4580', id: 'shape0' });
       }
-      if (minerCapitulation) markers.push({ time: t, position: 'top', shape: 'circle', color: '#4CAF501A', size: 'normal' });
-      if (recovering) markers.push({ time: t, position: 'top', shape: 'circle', color: '#4CAF5080', size: 'normal' });
-      if (recovered[i]) markers.push({ time: t, position: 'top', shape: 'circle', color: LIME, size: 'normal', textColor: '#FFFFFF' });
-      if (buy) markers.push({ time: t, position: 'top', shape: 'circle', color: BLUE, size: 'normal', text: 'Buy', textColor: BLUE });
+      if (minerCapitulation) markers.push({ time: t, position: 'top', shape: 'circle', color: '#4CAF501A', size: 'normal', id: 'shape1' });
+      if (recovering) markers.push({ time: t, position: 'top', shape: 'circle', color: '#4CAF5080', size: 'normal', id: 'shape2' });
+      if (recovered[i]) markers.push({ time: t, position: 'top', shape: 'circle', color: LIME, size: 'normal', textColor: '#FFFFFF', id: 'shape3' });
+      if (buy) markers.push({ time: t, position: 'top', shape: 'circle', color: BLUE, size: 'normal', text: 'Buy', textColor: BLUE, id: 'shape4' });
     }
 
     // three bgcolor() calls, one per halving
     const ms = t * unit;
-    for (const h of halvings) {
-      if (plotHalvings && ms >= h - band && ms <= h + band) bgColors.push({ time: t, color: HALVING_BG });
-    }
+    halvings.forEach((h, k) => {
+      if (plotHalvings && ms >= h - band && ms <= h + band) bgColors.push({ time: t, color: HALVING_BG, id: `bgcolor${k}` });
+    });
   }
 
   return {
@@ -233,8 +237,17 @@ export function calculate(
         width: 20, height: 7, textSize: 'normal', textHAlign: 'left',
       }],
     }] : [],
+    // alertcondition(capitulation) / alertcondition(recovered) / alertcondition(buy and not buy[1])
+    alerts: alertStates(alertConditions, bars, [capitulation, recovered, buyFlags.map((b, i) => b && !(i > 0 && buyFlags[i - 1]))]),
   };
 }
+
+/** The original's alertconditions (no message: the default message) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Alert - Capitulation', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Alert - Recovered', message: 'Alert Fired!' },
+  { id: 'alert2', title: 'Alert - Buy', message: 'Alert Fired!' },
+];
 
 export const HashRibbons = {
   calculate,
@@ -243,4 +256,5 @@ export const HashRibbons = {
   inputConfig,
   plotConfig,
   requiredSymbols,
+  alertConditions,
 };

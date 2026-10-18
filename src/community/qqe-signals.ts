@@ -8,12 +8,20 @@
  * Pine display elements:
  *   - plotshape: "QQE long"  (labelup, belowbar, green, text "Long", textcolor white)
  *   - plotshape: "QQE short" (labeldown, abovebar, red, text "Short", textcolor white)
+ * Alerts (alertcondition, `alerts` of the result): 'Long' and 'Short', true on the bars of each label.
  *
  * Reference: "QQE signals" by colinmck
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long', message: 'Long' },
+  { id: 'alert1', title: 'Short', message: 'Short' },
+];
 
 export interface QQESignalsInputs {
   rsiLen: number;
@@ -44,7 +52,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<QQESignalsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<QQESignalsInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { rsiLen, smoothFactor, qqeFactor } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const wildersLen = rsiLen * 2 - 1;
@@ -154,7 +165,13 @@ export function calculate(bars: Bar[], inputs: Partial<QQESignalsInputs> = {}): 
   const warmup = wildersLen + smoothFactor;
 
   const markers: MarkerData[] = [];
+  // alertcondition(qqeLong) / alertcondition(qqeShort): the float as a condition (na and 0 are false)
+  const longFlags: boolean[] = new Array(n).fill(false);
+  const shortFlags: boolean[] = new Array(n).fill(false);
   for (let i = warmup; i < n; i++) {
+    const value1 = i > 0 ? trailing[i - 1] - 50 : NaN;
+    longFlags[i] = qqeXlong[i] === 1 && Number.isFinite(value1) && value1 !== 0;
+    shortFlags[i] = qqeXshort[i] === 1 && Number.isFinite(value1) && value1 !== 0;
     if (qqeXlong[i] === 1) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#4CAF50', text: 'Long' });
     }
@@ -167,7 +184,8 @@ export function calculate(bars: Bar[], inputs: Partial<QQESignalsInputs> = {}): 
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
-export const QQESignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const QQESignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

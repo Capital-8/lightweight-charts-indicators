@@ -6,6 +6,8 @@
  * index. The average of the active votes is smoothed by an ALMA; the flow is 1 above 0.1, -1 below -0.1, else 0.
  * A DEMA(200) signal line and the candles take the flow colour; a Supertrend(3, 10) is drawn as up / down bands, with
  * gradient fills from the Supertrend and from the close to the signal line.
+ * Alerts (alertcondition, `alerts` of the result): 'KAE Long' when the smoothed vote crosses over 0.1, 'KAE Short'
+ * when it crosses under -0.1.
  *
  * Reference: "Keltner-Aroon-EFI Flow" by D_QUANT
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { PlotCandleData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface KeltnerAroonEfiFlowInputs {
   kcLength: number;
@@ -92,7 +95,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<KeltnerAroonEfiFlowInputs> = {},
-): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -212,8 +215,17 @@ export function calculate(
     plots: { plot0, plot1, plot2, plot3 },
     fills,
     plotCandles: { barColor: candles },
+    // alertcondition(ta.crossover(avgIndicatorSignal, 0.1), "KAE Long");
+    // alertcondition(ta.crossunder(avgIndicatorSignal, -0.1), "KAE Short")
+    alerts: alertStates(alertConditions, bars, [crossedOver(avgSignal, 0.1), crossedUnder(avgSignal, -0.1)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'KAE Long', message: 'KAE Flow turned Bullish' },
+  { id: 'alert1', title: 'KAE Short', message: 'KAE Flow turned Bearish' },
+];
 
 export const KeltnerAroonEfiFlow = {
   calculate,
@@ -221,4 +233,5 @@ export const KeltnerAroonEfiFlow = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

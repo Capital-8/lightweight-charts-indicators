@@ -261,10 +261,14 @@ export function calculate(bars: Bar[], inputs: Partial<VwapPeriodicCloseInputs> 
   }
   setDrawingBar(null);
 
-  // bgcolor(theme == 'Day' ? #ffffff : theme == 'Night' ? #000000 : na), twice (the second with offset 1001): the
-  // same opaque colour on every bar
+  // bgcolor(theme == 'Day' ? #ffffff : theme == 'Night' ? #000000 : na), twice: the same opaque colour on every bar
+  // (bgcolor0), then on every bar shifted 1001 bars to the right (bgcolor1, offset 1001: from bar 1001 on)
   const bg = cfg.theme === 'Day' ? '#FFFFFF' : cfg.theme === 'Night' ? '#000000' : null;
-  const bgColors: BgColorData[] = bg === null ? [] : bars.map((b) => ({ time: b.time, color: bg }));
+  const bgColors: BgColorData[] = [];
+  if (bg !== null) {
+    for (const b of bars) bgColors.push({ time: b.time, color: bg, id: 'bgcolor0' });
+    for (let i = 1001; i < n; i++) bgColors.push({ time: bars[i].time, color: bg, id: 'bgcolor1' });
+  }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },

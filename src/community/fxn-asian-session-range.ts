@@ -11,6 +11,8 @@
  * - Lines mark the high and low of the previous day and of the previous week (and of the current week as an option),
  *   with a label (PWH / PWL, YH / YL, WH / WL) at the start of the day.
  * - Option: labels with the time of the high and of the low of the day (HOD / LOD) at 16:45.
+ * - Alert (alertcondition, `alerts` of the result): 'Asian Range Break', a close that crosses the high or the low of
+ *   the Asian session during the tradable session (end of the Asian session to the end of the New York session).
  * The lines are drawn again on every bar, so only those of the last bar remain.
  *
  * Notes on the port:
@@ -51,6 +53,14 @@ import {
 import type { BgColorData, LineDrawingData, LabelData, PineSize } from '../types';
 import { chartTimeframe, hasCalendar, periodStarts, securityBars } from '../anchor-period';
 import { mintickOf, nowOf, timezoneOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
+const EPS = 1e-10;
+const gtE = (a: number, b: number) => a - b > EPS;
+const ltE = (a: number, b: number) => b - a > EPS;
+const geE = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const leE = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
 type StyleName = 'solid' | 'dashed' | 'dotted';
 type SizeName = 'tiny' | 'small' | 'normal' | 'large';
@@ -336,7 +346,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<FxnAsianSessionRangeInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { bgColors: BgColorData[]; lines: LineDrawingData[]; labels: LabelData[] } {
+): IndicatorResult & { bgColors: BgColorData[]; lines: LineDrawingData[]; labels: LabelData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   // syminfo.mintick, and syminfo.timezone: the clock of the bars, the session hours and the days are read in the
   // exchange time zone; when it is UTC the original adds 4 hours to every hour input
@@ -387,6 +397,9 @@ export function calculate(
   const asian = session(cfg.userSsth, cfg.userSstm, cfg.userEsth, cfg.userEstm);
   const london = session(cfg.londonSsth, cfg.londonSstm, cfg.londonEsth, cfg.londonEstm);
   const ny = session(cfg.nySsth, cfg.nySstm, cfg.nyEsth, cfg.nyEstm);
+  // trd_ses = user_esth + user_estm + "-" + ny_esth + ny_estm: the tradable session, end of Asia to the end of NY
+  const trdSes = `${asian.endText}${cfg.userEstm}-${ny.endText}${cfg.nyEstm}`;
+  const rangeBreak: boolean[] = [];
   const endLineHour = exchangeHour(cfg.userElth, EXCHANGE_OFFSET).hour;
   const endLineMinute = minuteOf(cfg.userEltm);
   const supportHour = 17 + EXCHANGE_OFFSET;
@@ -502,6 +515,14 @@ export function calculate(
       }
     }
     const pipsRange = (s: typeof asian) => (s.prevHigh - s.prevLow) / MINTICK / 10;
+    // isCloseBelow: inTradableSession and close[1] >= rth_low and close < rth_low; isCloseAbove: the mirror with rth_high
+    {
+      const inTradable = inSession(tMs, trdSes);
+      const prevClose = i > 0 ? bars[i - 1].close : NaN;
+      const below = inTradable && geE(prevClose, asian.low) && ltE(bar.close, asian.low);
+      const above = inTradable && leE(prevClose, asian.high) && gtE(bar.close, asian.high);
+      rangeBreak.push(below || above);
+    }
 
     // ---- Asian session
     const startTimeDelta = 24 - asian.startHour + 1;
@@ -590,7 +611,7 @@ export function calculate(
     const asianFill = inFill(asian);
     plots.plot0.push({ time: bar.time, value: asianFill ? asian.high : NaN });
     plots.plot1.push({ time: bar.time, value: asianFill ? asian.low : NaN });
-    if (validResolution && asian.active) bgColors.push({ time: bar.time, color: bgSilver });
+    if (validResolution && asian.active) bgColors.push({ time: bar.time, color: bgSilver, id: 'bgcolor0' });
     if (!asian.active && asian.prevActive && validResolution) {
       let text = `A = ${str.tostring(pipsRange(asian))}`;
       if (info !== null && (info.isintraday || info.isdaily) && cfg.showADR && now - tMs < ONE_DAY * dailyAdr && day) {
@@ -602,7 +623,7 @@ export function calculate(
     const londonFill = cfg.showLondonSession && inFill(london);
     plots.plot2.push({ time: bar.time, value: londonFill ? london.high : NaN });
     plots.plot3.push({ time: bar.time, value: londonFill ? london.low : NaN });
-    if (londonFill) bgColors.push({ time: bar.time, color: bgSilver });
+    if (londonFill) bgColors.push({ time: bar.time, color: bgSilver, id: 'bgcolor1' });
     if (cfg.showLondonSessionRng && !london.active && london.prevActive && validResolution) {
       rangeLabel(i, london, `L = ${str.tostring(pipsRange(london))}`, col(cfg.luserTextColor), size(cfg.luserLabelSize));
     }
@@ -610,7 +631,7 @@ export function calculate(
     const nyFill = cfg.showNySession && inFill(ny);
     plots.plot4.push({ time: bar.time, value: nyFill ? ny.high : NaN });
     plots.plot5.push({ time: bar.time, value: nyFill ? ny.low : NaN });
-    if (nyFill) bgColors.push({ time: bar.time, color: bgSilver });
+    if (nyFill) bgColors.push({ time: bar.time, color: bgSilver, id: 'bgcolor2' });
     if (cfg.showNySessionRng && !ny.active && ny.prevActive && validResolution) {
       rangeLabel(i, ny, `N = ${str.tostring(pipsRange(ny))}`, col(cfg.nuserTextColor), nlabelsize);
     }
@@ -696,8 +717,15 @@ export function calculate(
     bgColors,
     lines: lines.filter((l) => ok(l.time1, l.price1, l.time2, l.price2)),
     labels: outLabels,
+    // alertcondition(isCloseBelow or isCloseAbove, 'Asian Range Break')
+    alerts: alertStates(alertConditions, bars, [rangeBreak]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Asian Range Break', message: 'Price has closed outside the Asian Session Range.' },
+];
 
 export const FxnAsianSessionRange = {
   calculate,
@@ -705,4 +733,5 @@ export const FxnAsianSessionRange = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

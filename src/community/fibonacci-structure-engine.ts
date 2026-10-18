@@ -29,6 +29,13 @@
  *   panel is the close of that bar on the exchange calendar (session end, early closes, holidays). Without them:
  *   the end of the period.
  * - Chart background colour (theme 'Auto': dark below 128 of red). Without it: #0F0F0F, a dark chart.
+ * - Ticker id (`tickerid`): the ticker of the alert messages. Without it: an empty string.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): on each closed bar with events, one call
+ * that lists them, as a JSON payload ("Structured JSON payload", the default) or as text lines. The events: confirmed
+ * signals (buy / sell), scenario outcomes (target, ambiguous, expired, replaced, invalidated), approach / touch of the
+ * setup zone, structure breaks (initial, bos, choch) and liquidity sweeps, each when its alert input is on. The bar
+ * close time of the payload is the bar time plus the chart timeframe.
  *
  * Limits of the port:
  * - The bars of the higher timeframe and the days (previous day high / low) are built from the chart bars with the
@@ -37,7 +44,6 @@
  *   not used by the script.
  * - A time between two bars is given as the time of the next bar, where it is drawn. Objects without a price and
  *   tables without a cell are not returned (nothing is drawn).
- * - The alert inputs are kept but alerts have no output.
  *
  * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
  * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
@@ -55,7 +61,11 @@ import {
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PineSize, TableCellData, TableData, TablePosition } from '../types';
 import { securityStarts, chartTimeframe, hasCalendar } from '../anchor-period';
-import { backgroundColorOf, lastBarConfirmedOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
+import { backgroundColorOf, lastBarConfirmedOf, mintickOf, tickeridOf, timezoneOf, type ChartContext } from '../chart-context';
+import type { AlertCall } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface FibonacciStructureEngineInputs {
   swingLen: number;
@@ -133,7 +143,7 @@ export interface FibonacciStructureEngineInputs {
   fibColor: string;
   zoneColor: string;
   liqColor: string;
-  /** Alert inputs: kept, without output */
+  /** Alert inputs: the alert() call and the events it lists */
   jsonAlerts: boolean;
   alertEntries: boolean;
   alertLifecycle: boolean;
@@ -396,6 +406,8 @@ interface Swing {
   broken: boolean;
 }
 interface Liquidity {
+  /** stamp * 2 + 1 for a high, stamp * 2 for a low */
+  id: number;
   side: number;
   lo: number;
   hi: number;
@@ -477,7 +489,11 @@ function periodEnd(start: number, tf: string): number {
   return start + timeframe.in_seconds(tf) * 1000;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineInputs> = {}, chart?: ChartContext): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<FibonacciStructureEngineInputs> = {},
+  chart?: ChartContext,
+): IndicatorResult & { alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   // syminfo.mintick, barstate.isconfirmed on the last bar, syminfo.timezone (date texts), chart.bg_color
   const MINTICK = mintickOf(chart);
@@ -650,6 +666,10 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
   const labels: LabelData[] = [];
   const boxes: BoxData[] = [];
   const tables: TableData[] = [];
+  const alertCalls: AlertCall[] = [];
+  const TICKERID = tickeridOf(chart);
+  const jnum = (value: number) => (na(value) ? 'null' : str.tostring(value, 'mintick', MINTICK));
+  const escapeJson = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 
   // A time between two bars is drawn on the next bar
   const drawnTime = (tm: number): number => {
@@ -688,6 +708,29 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
     let breakKind = '';
     let breakDirection = 0;
     let structureConflict = false;
+    // array.clear(events) / array.clear(eventTexts) on every bar
+    const events: string[] = [];
+    const eventTexts: string[] = [];
+    const emitEvent = (kind: string, direction: number, identity: number, level: number, snapshot: Scenario | null) => {
+      const eventId = `${TICKERID}|${chartTf}|${str.tostring(time)}|${kind}|${str.tostring(identity)}`;
+      let record = `{"event_id":"${escapeJson(eventId)}","type":"${kind}","direction":${str.tostring(direction)},"entity_id":`
+        + `${na(identity) ? 'null' : str.tostring(identity)},"scenario_id":${snapshot === null ? 'null' : str.tostring(snapshot.id)},`
+        + `"level":${jnum(level)}`;
+      if (snapshot !== null) {
+        record += `,"state":${str.tostring(snapshot.state)},"trigger":"${escapeJson(snapshot.trigger)}","entry":${jnum(snapshot.entry)}`
+          + `,"invalidation":${jnum(snapshot.invalid)},"stop":${jnum(snapshot.stop)},"target":${jnum(snapshot.target)}`
+          + `,"obstacle":${jnum(snapshot.obstacle)},"rr":${na(snapshot.rr) ? 'null' : str.tostring(snapshot.rr, '0.000')}`
+          + `,"room_r":${na(snapshot.room) ? 'null' : str.tostring(snapshot.room, '0.000')}`
+          + `,"fib_weight":${str.tostring(snapshot.independent, '0.0')},"stop_model":"${cfg.stopModel}","target_model":"${cfg.targetModel}"`;
+      }
+      events.push(record + '}');
+      let human = `${kind.toUpperCase()} · ${dirText(direction)} · ${px(level)}`;
+      if (snapshot !== null) {
+        human += ` | ${stateText(snapshot.state)} | ${snapshot.trigger} | E ${px(snapshot.entry)} SL ${px(snapshot.stop)}`
+          + ` TP ${px(snapshot.target)} | ${rrText(snapshot.rr)}`;
+      }
+      eventTexts.push(human);
+    };
 
     const mark = (stamp: number, value: number, title: string, side: number, col: string, tooltip: string) => {
       while (historyLabels.length >= 150) historyLabels.shift();
@@ -724,7 +767,7 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
         const removable = liquidity.findIndex((z) => z.state !== 0);
         liquidity.splice(removable >= 0 ? removable : 0, 1);
       }
-      liquidity.push({ side, lo, hi, startTime: firstTime, born: i, kind, state: 0 });
+      liquidity.push({ id: stamp * 2 + (side === 1 ? 1 : 0), side, lo, hi, startTime: firstTime, born: i, kind, state: 0 });
     };
 
     if (confirmed) {
@@ -806,6 +849,7 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
               sweepLow = sweepLow || z.side === -1;
               if (z.side === 1) sweepHighPrice = na(sweepHighPrice) ? z.hi : Math.max(sweepHighPrice, z.hi);
               else sweepLowPrice = na(sweepLowPrice) ? z.lo : Math.min(sweepLowPrice, z.lo);
+              if (cfg.alertLiquidity) emitEvent(z.side === 1 ? 'sweep_high' : 'sweep_low', -z.side, z.id, z.side === 1 ? z.hi : z.lo, null);
             }
           }
         }
@@ -846,6 +890,7 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
           mark(Math.trunc((broken.stamp + time) / 2), broken.price, breakKind === 'choch' ? 'CHoCH' : breakKind.toUpperCase(), upBreak ? 1 : -1,
             upBreak ? bullColor : bearColor, 'Close-confirmed structure');
         }
+        if (cfg.alertStructure) emitEvent(breakKind, breakDirection, time, broken.price, null);
       }
 
       // Fibonacci leg
@@ -941,6 +986,11 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
           }
           history.unshift({ ...scenario });
           if (history.length > 8) history.pop();
+          if (cfg.alertLifecycle) {
+            const kind = resolved === 6 ? 'target' : resolved === 7 ? 'ambiguous' : resolved === 5 ? 'expired'
+              : resolved === 8 ? 'replaced' : 'invalidated';
+            emitEvent(kind, scenario.direction, scenario.id, close, scenario);
+          }
         }
       }
 
@@ -982,6 +1032,7 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
         shortWeight = direction === -1 ? weight : 0;
         const touch = le(low, sc.zoneHi) && ge(high, sc.zoneLo);
         const distance = lt(close, sc.zoneLo) ? sc.zoneLo - close : gt(close, sc.zoneHi) ? close - sc.zoneHi : 0;
+        const oldState = sc.state;
         if (i > sc.born) {
           sc.touched = sc.touched || touch;
           sc.state = sc.touched ? 2 : le(distance, atr[i] * cfg.nearAtr) ? 1 : 0;
@@ -1034,6 +1085,9 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
         sc.obstacle = obstacle;
         sc.rr = riskOk ? Math.abs(target - entry) / risk : NaN;
         sc.room = room;
+        if (cfg.alertApproach && sc.state !== oldState && (sc.state === 1 || sc.state === 2)) {
+          emitEvent(sc.state === 1 ? 'approach' : 'touch', direction, sc.id, close, sc);
+        }
         blockReason = i <= sc.born ? 'New zone: wait next bar' : !sc.touched ? 'No zone retest' : !trendOk ? 'Structure conflict'
           : conflict ? 'Directional conflict' : !locationOk ? 'Location confirmation missing'
             : !anyTrigger ? 'Waiting for sweep / engulf / CHoCH retest' : !cooled ? `Cooldown: ${cfg.cooldown - (i - lastSignalBar)}`
@@ -1049,6 +1103,7 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
           firstObserved = Number.isNaN(firstObserved) ? time : firstObserved;
           confirmedBuy = direction === 1;
           confirmedSell = direction === -1;
+          if (cfg.alertEntries) emitEvent(direction === 1 ? 'buy' : 'sell', direction, sc.id, entry, sc);
         }
         sc.reason = blockReason;
       }
@@ -1061,6 +1116,16 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
       }
     }
     prevInSession = inSession;
+
+    // if barstate.isconfirmed and array.size(events) > 0: alert(message, alert.freq_once_per_bar_close)
+    if (confirmed && events.length > 0) {
+      const closeTime = tfSeconds > 0 ? str.tostring(closeMs(i)) : 'null';
+      const payload = `{"schema_version":2,"indicator_version":"${VERSION}","ticker":"${escapeJson(TICKERID)}","tf":"${chartTf}",`
+        + `"bar_time":${str.tostring(time)},"bar_close_time":${closeTime},"price":${jnum(close)},"events":[${events.join(',')}]}`;
+      const message = cfg.jsonAlerts ? payload
+        : `FSE ${VERSION} | ${TICKERID} | ${chartTf} | ${str.format_time(time, 'yyyy-MM-dd HH:mm', TEXT_TZ)}\n${eventTexts.join('\n')}`;
+      alertCalls.push({ time: bar.time as number, message, freq: 'once_per_bar_close' });
+    }
 
     // Plots and BUY / SELL marks
     const t = bar.time;
@@ -1318,7 +1383,8 @@ export function calculate(bars: Bar[], inputs: Partial<FibonacciStructureEngineI
     labels,
     boxes,
     tables,
+    alertCalls,
   };
 }
 
-export const FibonacciStructureEngine = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const FibonacciStructureEngine = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

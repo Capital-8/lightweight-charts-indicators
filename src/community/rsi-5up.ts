@@ -6,6 +6,8 @@
  * SMA + Bollinger Bands, EMA, RMA, WMA or VWMA) of the RSI, with Bollinger Bands for "SMA + Bollinger Bands".
  * Optional regular divergences: RSI pivots (5 / 5 bars) whose RSI and price disagree with the previous pivot,
  * 5 to 60 bars apart, drawn on the pivot bar with Bull / Bear labels.
+ * Alerts (alertcondition, `alerts` of the result): 'Regular Bullish Divergence' / 'Regular Bearish Divergence', true
+ * on the bar that confirms the divergence (5 bars after its pivot); only with "Calculate Divergence" on.
  *
  * Reference: "RSI - 5UP" by Marrulk
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type MaType = 'None' | 'SMA' | 'SMA + Bollinger Bands' | 'EMA' | 'SMMA (RMA)' | 'WMA' | 'VWMA';
 
@@ -100,7 +103,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<Rsi5UpInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; visibility: Record<string, boolean> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; visibility: Record<string, boolean> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -251,8 +254,24 @@ export function calculate(
     ],
     markers,
     visibility: { enableMA, isBB },
+    // alertcondition(bullCond, ...) / alertcondition(bearCond, ...): on the bar the condition is found
+    alerts: alertStates(alertConditions, bars, [bullCond, bearCond]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0',
+    title: 'Regular Bullish Divergence',
+    message: 'Found a new Regular Bullish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.',
+  },
+  {
+    id: 'alert1',
+    title: 'Regular Bearish Divergence',
+    message: 'Found a new Regular Bearish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.',
+  },
+];
 
 export const Rsi5Up = {
   calculate,
@@ -262,4 +281,5 @@ export const Rsi5Up = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

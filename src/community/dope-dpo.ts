@@ -276,12 +276,16 @@ export function calculate(
       [high, syncGreen, syncGreenC],
       [high, syncRed, syncRedC],
     ];
-    // bgcolor(pane...) x 4, then bgcolor(overlay..., force_overlay = true) x 4
+    // bgcolor(pane...) x 4 (bgcolor0..3), then bgcolor(overlay..., force_overlay = true) x 4 (bgcolor4..7)
     if (cfg.showPaneFills) {
-      for (const [on, cond, c] of layers) if (on && cond) bgColors.push({ time: t(i), color: c });
+      layers.forEach(([on, cond, c], k) => {
+        if (on && cond) bgColors.push({ id: `bgcolor${k}`, time: t(i), color: c });
+      });
     }
     if (cfg.showOverlayFills) {
-      for (const [on, cond, c] of layers) if (on && cond) bgColors.push({ time: t(i), color: c, forceOverlay: true });
+      layers.forEach(([on, cond, c], k) => {
+        if (on && cond) bgColors.push({ id: `bgcolor${k + 4}`, time: t(i), color: c, forceOverlay: true });
+      });
     }
   }
 

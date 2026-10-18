@@ -156,8 +156,8 @@ export function calculate(bars: Bar[], inputs: Partial<DivergenceIndicatorInputs
       const value = overlayMain ? low : o;
       regBullPlot[p] = { time: bars[p].time, value, color: bullCond ? BULL_COLOR : NONE_COLOR };
       hidBullPlot[p] = { time: bars[p].time, value, color: hiddenBullCond ? HIDDEN_BULL_COLOR : NONE_COLOR };
-      if (bullCond) markers.push({ time: bars[p].time as number, position: 'atPriceBottom', price: value, shape: 'labelUp', color: BULL_COLOR, text: ' Bull ', textColor: TEXT_COLOR });
-      if (hiddenBullCond) markers.push({ time: bars[p].time as number, position: 'atPriceBottom', price: value, shape: 'labelUp', color: BULL_COLOR, text: ' H Bull ', textColor: TEXT_COLOR });
+      if (bullCond) markers.push({ id: 'shape0', time: bars[p].time as number, position: 'atPriceBottom', price: value, shape: 'labelUp', color: BULL_COLOR, text: ' Bull ', textColor: TEXT_COLOR });
+      if (hiddenBullCond) markers.push({ id: 'shape1', time: bars[p].time as number, position: 'atPriceBottom', price: value, shape: 'labelUp', color: BULL_COLOR, text: ' H Bull ', textColor: TEXT_COLOR });
       plLastOsc = o;
       plLastLow = low;
     }
@@ -173,8 +173,8 @@ export function calculate(bars: Bar[], inputs: Partial<DivergenceIndicatorInputs
       const value = overlayMain ? high : o;
       regBearPlot[p] = { time: bars[p].time, value, color: bearCond ? BEAR_COLOR : NONE_COLOR };
       hidBearPlot[p] = { time: bars[p].time, value, color: hiddenBearCond ? HIDDEN_BEAR_COLOR : NONE_COLOR };
-      if (bearCond) markers.push({ time: bars[p].time as number, position: 'atPriceTop', price: value, shape: 'labelDown', color: BEAR_COLOR, text: ' Bear ', textColor: TEXT_COLOR });
-      if (hiddenBearCond) markers.push({ time: bars[p].time as number, position: 'atPriceTop', price: value, shape: 'labelDown', color: BEAR_COLOR, text: ' H Bear ', textColor: TEXT_COLOR });
+      if (bearCond) markers.push({ id: 'shape2', time: bars[p].time as number, position: 'atPriceTop', price: value, shape: 'labelDown', color: BEAR_COLOR, text: ' Bear ', textColor: TEXT_COLOR });
+      if (hiddenBearCond) markers.push({ id: 'shape3', time: bars[p].time as number, position: 'atPriceTop', price: value, shape: 'labelDown', color: BEAR_COLOR, text: ' H Bear ', textColor: TEXT_COLOR });
       phLastOsc = o;
       phLastHigh = high;
     }

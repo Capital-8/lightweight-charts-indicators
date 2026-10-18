@@ -6,6 +6,8 @@
  * the MACD is above the signal, red otherwise. Crosses of the MACD and the signal give a dot on the signal line and
  * a triangle 0.005 below (up cross) / above (down cross) it; crosses of the MACD and zero give a circle at -0.01
  * (MACD rising) or a diamond at +0.01 (MACD falling).
+ * Alerts (alertcondition, `alerts` of the result): 'Rising to falling' (histogram from >= 0 to < 0) and 'Falling to
+ * rising' (histogram from <= 0 to > 0).
  *
  * Reference: "SCOTTGO Advanced MACD" by SCOTTGO (indicator title "MACD: Clean Visuals (Fixed Arrows)")
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ScottgoAdvancedMacdInputs {
   src: SourceType;
@@ -85,11 +88,12 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
 export function calculate(
   bars: Bar[],
   inputs: Partial<ScottgoAdvancedMacdInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -116,6 +120,7 @@ export function calculate(
   const fillColors: string[] = [];
   const noFill = String(color.new(color.white, 100));
   const markers: MarkerData[] = [];
+  const fallFlags: boolean[] = [], riseFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const h = hist[i];
@@ -123,6 +128,9 @@ export function calculate(
     // hist >= 0 ? hist > hist[1] ? #26a69a : #b2dfdb : hist > hist[1] ? #ffcdd2 : #ff5252
     const hColor = ge(h, 0) ? (gt(h, h1) ? '#26a69a' : '#b2dfdb') : (gt(h, h1) ? '#ffcdd2' : '#ff5252');
     plot0.push({ time: t, value: fin(h), color: hColor });
+    // alertcondition(hist[1] >= 0 and hist < 0, ...) / alertcondition(hist[1] <= 0 and hist > 0, ...)
+    fallFlags.push(ge(h1, 0) && lt(h, 0));
+    riseFlags.push(le(h1, 0) && gt(h, 0));
     plot1.push({ time: t, value: fin(macd[i]) });
     plot2.push({ time: t, value: fin(signal[i]) });
     plot3.push({ time: t, value: cfg.showShadow ? fin(macd[i]) : NaN });
@@ -132,23 +140,23 @@ export function calculate(
     const down = crossDown[i] === 1;
     // plotshape(showCrossoverCircles and crossoverEvent ? signal : na, shape.circle, location.absolute, size.small)
     if (cfg.showCrossoverCircles && (up || down) && Number.isFinite(signal[i])) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: signal[i], shape: 'circle', color: cfg.circleColor, size: 'small' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: signal[i], shape: 'circle', color: cfg.circleColor, size: 'small', id: 'shape0' });
     }
     // signal -/+ arrowGap (0.005), triangles, location.absolute, size.small
     if (cfg.showCrossoverMarkers && up && Number.isFinite(signal[i] - 0.005)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: signal[i] - 0.005, shape: 'triangleUp', color: color.lime, size: 'small' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: signal[i] - 0.005, shape: 'triangleUp', color: color.lime, size: 'small', id: 'shape1' });
     }
     if (cfg.showCrossoverMarkers && down && Number.isFinite(signal[i] + 0.005)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: signal[i] + 0.005, shape: 'triangleDown', color: color.red, size: 'small' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: signal[i] + 0.005, shape: 'triangleDown', color: color.red, size: 'small', id: 'shape2' });
     }
     // zeroCrossUp = ta.cross(macd, 0) and macd > macd[1]; zeroCrossDown = ta.cross(macd, 0) and macd < macd[1]
     const m1 = i > 0 ? macd[i - 1] : NaN;
     const cz = crossZero[i] === 1;
     if (cfg.showCrossoverMarkers && cz && gt(macd[i], m1)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: -0.01, shape: 'circle', color: color.green, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: -0.01, shape: 'circle', color: color.green, size: 'tiny', id: 'shape3' });
     }
     if (cfg.showCrossoverMarkers && cz && lt(macd[i], m1)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: 0.01, shape: 'diamond', color: color.red, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: 0.01, shape: 'diamond', color: color.red, size: 'tiny', id: 'shape4' });
     }
   }
 
@@ -159,8 +167,15 @@ export function calculate(
     // fill(plotShadow, plotSignal, color = fillColor, title = "Crossover Shadow")
     fills: [{ plot1: 'plot3', plot2: 'plot2', options: { title: 'Crossover Shadow' }, colors: fillColors }],
     markers,
+    alerts: alertStates(alertConditions, bars, [fallFlags, riseFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Rising to falling', message: 'MACD histogram switched from a rising to falling state' },
+  { id: 'alert1', title: 'Falling to rising', message: 'MACD histogram switched from a falling to rising state' },
+];
 
 export const ScottgoAdvancedMacd = {
   calculate,
@@ -168,4 +183,5 @@ export const ScottgoAdvancedMacd = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

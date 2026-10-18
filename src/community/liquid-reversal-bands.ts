@@ -9,6 +9,8 @@
  * back below the upper band a sell label (with an optional cooldown). Candles are redrawn with the position of the
  * source in the bands (bull colour at the lower band, bear colour at the upper band) or with the last signal colour.
  * Gradient fills from the bands to the fair value.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' / 'Sell Signal', true on the bars of the buy / sell
+ * labels.
  *
  * Reference: "Uptrick: Liquid Reversal Bands" by Uptrick
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 
 import { ta, getSourceSeries, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LiquidReversalBandsInputs {
   /** Source */
@@ -119,7 +122,7 @@ function colorGradient(ratio: number, colA: string, colB: string): string {
 export function calculate(
   bars: Bar[],
   inputs: Partial<LiquidReversalBandsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { fairLen, zLen, smoothLen, upperMult, lowerMult, outerUpperMult, outerLowerMult, cooldownBars,
     showOuterBands, lineSlopeLen, lineSlopeSensitivity } = cfg;
@@ -165,6 +168,8 @@ export function calculate(
   const candles: PlotCandleData[] = [];
   let lastSignalBar = NaN; // var int lastSignalBar
   let lastSignal = ''; // var string lastSignal
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const t = b.time;
@@ -180,6 +185,8 @@ export function calculate(
     const barsOk = isNaN(lastSignalBar) || i - lastSignalBar >= cooldownBars;
     const finalBuy = cfg.enableSignals && rawBuy && barsOk;
     const finalSell = cfg.enableSignals && rawSell && barsOk;
+    buyFlags[i] = finalBuy;
+    sellFlags[i] = finalSell;
     if (finalBuy) {
       lastSignalBar = i;
       lastSignal = 'bull';
@@ -245,8 +252,16 @@ export function calculate(
     ],
     markers,
     plotCandles: { liquidReversalCandles: candles },
+    // alertcondition(finalBuy, "Buy Signal") / alertcondition(finalSell, "Sell Signal")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Uptrick LRB: Close crossed above lower band' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Uptrick LRB: Close crossed below upper band' },
+];
 
 export const LiquidReversalBands = {
   calculate,
@@ -254,4 +269,5 @@ export const LiquidReversalBands = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

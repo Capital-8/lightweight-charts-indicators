@@ -8,6 +8,7 @@
  * and down when close crosses under the lower band. The line is the lower band in an up trend and the upper band in
  * a down trend (broken on the trend change bars), with a gradient shadow to hl2 and fractal labels drawn on the
  * fractal bars.
+ * Alerts (alertcondition, `alerts` of the result): 'Trend Up' / 'Trend Down' on the bars where the trend changes.
  *
  * Reference: "Fractals Trend [BigBeluga]" by BigBeluga
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type FractalsTrendBandsType = 'avg' | 'min/max' | 'median';
 
@@ -88,7 +90,7 @@ const arrMin = (a: number[]): number => (a.length === 0 ? NaN : Math.min(...a));
 export function calculate(
   bars: Bar[],
   inputs: Partial<FractalsTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { fractalLength: len, storage, bandsType } = cfg;
   const n = bars.length;
@@ -169,8 +171,19 @@ export function calculate(
       gradient: { topValue: fractalLine, bottomValue: hl2, topColor, bottomColor: new Array<string | null>(n).fill(null) },
     }],
     markers,
+    // alertcondition(trend != trend[1] and trend, "Trend Up") / (trend != trend[1] and not trend, "Trend Down")
+    alerts: alertStates(alertConditions, bars, [
+      trend.map((t, i) => t !== (i > 0 ? trend[i - 1] : false) && t),
+      trend.map((t, i) => t !== (i > 0 ? trend[i - 1] : false) && !t),
+    ]),
   };
 }
+
+/** The original's alertconditions (no message: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Trend Up', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Trend Down', message: 'Alert Fired!' },
+];
 
 export const FractalsTrend = {
   calculate,
@@ -178,4 +191,5 @@ export const FractalsTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

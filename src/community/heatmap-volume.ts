@@ -4,12 +4,15 @@
  * Volume heatmap using standard deviation distance from SMA.
  * 5-tier coloring: Extra High / High / Medium / Normal / Low based on
  * how many standard deviations volume is from the moving average.
+ * Heatmap zones ("Backgrounds"): fills between hidden level plots (ts1 + (ts1 - ts2), ts1 .. ts4 and 0).
+ * Alerts (alertcondition, `alerts` of the result): extra high / high / medium volume (any bar, up bar, down bar).
  *
  * Reference: "Heatmap Volume [xdecow]" by xdecow
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color as pineColor, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HeatmapVolumeInputs {
   maLength: number;
@@ -54,6 +57,13 @@ export const plotConfig: PlotConfig[] = [
   { id: 'tsHigh', title: 'High heatmap line', color: '#ff7800', lineWidth: 1 },
   { id: 'tsMedium', title: 'Medium heatmap line', color: '#ffcf03', lineWidth: 1 },
   { id: 'tsNormal', title: 'Normal heatmap line', color: '#a0d6dc', lineWidth: 1 },
+  // hidden heatmap lines to fill (display.none, editable = false)
+  { id: 'zoneTop', title: 'Zone top', color: 'transparent', lineWidth: 1, display: 'none', editable: false },
+  { id: 'zone0', title: 'Zone 0', color: 'transparent', lineWidth: 1, display: 'none', editable: false },
+  { id: 'zone1', title: 'Zone 1', color: 'transparent', lineWidth: 1, display: 'none', editable: false },
+  { id: 'zone2', title: 'Zone 2', color: 'transparent', lineWidth: 1, display: 'none', editable: false },
+  { id: 'zone3', title: 'Zone 3', color: 'transparent', lineWidth: 1, display: 'none', editable: false },
+  { id: 'zone4', title: 'Zone 4', color: 'transparent', lineWidth: 1, display: 'none', editable: false },
 ];
 
 export const metadata = {
@@ -81,7 +91,10 @@ const DN_MEDIUM = '#FF6060';
 const DN_NORMAL = '#FF8F8F';
 const DN_LOW = '#FFBFBF';
 
-export function calculate(bars: Bar[], inputs: Partial<HeatmapVolumeInputs> = {}): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<HeatmapVolumeInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -121,6 +134,8 @@ export function calculate(bars: Bar[], inputs: Partial<HeatmapVolumeInputs> = {}
   const tsMediumPlot: { time: number; value: number }[] = [];
   const tsNormalPlot: { time: number; value: number }[] = [];
   const barColors: BarColorData[] = [];
+  const zones: { time: number; value: number }[][] = [[], [], [], [], [], []]; // top, 0, ts1 .. ts4
+  const flags: boolean[][] = [[], [], [], [], [], [], [], [], []];
 
   for (let i = 0; i < n; i++) {
     const vol = bars[i].volume ?? 0;
@@ -145,19 +160,39 @@ export function calculate(bars: Bar[], inputs: Partial<HeatmapVolumeInputs> = {}
     tsHighPlot.push({ time: bars[i].time, value: i < warmup ? NaN : (showLines ? ts2 : NaN) });
     tsMediumPlot.push({ time: bars[i].time, value: i < warmup ? NaN : (showLines ? ts3 : NaN) });
     tsNormalPlot.push({ time: bars[i].time, value: i < warmup ? NaN : (showLines ? ts4 : NaN) });
+    // pt = plot(zshow_backgrounds ? tst : na) with tst = ts1 + (ts1 - ts2); p0 = 0; p1 .. p4 = ts1 .. ts4
+    [ts1 + (ts1 - ts2), 0, ts1, ts2, ts3, ts4].forEach((v, k) => {
+      zones[k].push({ time: bars[i].time, value: i < warmup || !showBgs ? NaN : v });
+    });
+
+    // conditionExtraHigh = stdbar > thresholdExtraHigh, conditionHigh / conditionMedium: the tiers below (na: false)
+    const sb = (vol - mean) / std;
+    const extraHigh = sb > cfg.thresholdExtraHigh;
+    const high = sb <= cfg.thresholdExtraHigh && sb > cfg.thresholdHigh;
+    const medium = sb <= cfg.thresholdHigh && sb > cfg.thresholdMedium;
+    const up = bars[i].open < bars[i].close;
+    const down = bars[i].open > bars[i].close;
+    [extraHigh, high, medium].forEach((c, k) => {
+      flags[3 * k].push(c);
+      flags[3 * k + 1].push(c && up);
+      flags[3 * k + 2].push(c && down);
+    });
 
     if (cfg.coloredBars && i >= warmup) {
       barColors.push({ time: bars[i].time, color });
     }
   }
 
-  // Build fills for background zones if enabled
+  // Heatmap fills between the hidden zone plots: fill(pt, p1, color.new(chm1, 85), title = 'Extra High heatmap zone') ...
+  const tpf = 85;
   const fills: any[] = [];
   if (showBgs) {
     fills.push(
-      { plot1: 'tsExtraHigh', plot2: 'tsHigh', options: { color: 'rgba(255,0,0,0.15)' } },
-      { plot1: 'tsHigh', plot2: 'tsMedium', options: { color: 'rgba(255,120,0,0.15)' } },
-      { plot1: 'tsMedium', plot2: 'tsNormal', options: { color: 'rgba(255,207,3,0.15)' } },
+      { plot1: 'zoneTop', plot2: 'zone1', options: { title: 'Extra High heatmap zone', color: String(pineColor.new(HM_EXTRA_HIGH, tpf)) } },
+      { plot1: 'zone1', plot2: 'zone2', options: { title: 'High heatmap zone', color: String(pineColor.new(HM_HIGH, tpf)) } },
+      { plot1: 'zone2', plot2: 'zone3', options: { title: 'Medium heatmap zone', color: String(pineColor.new(HM_MEDIUM, tpf)) } },
+      { plot1: 'zone3', plot2: 'zone4', options: { title: 'Normal heatmap zone', color: String(pineColor.new(HM_NORMAL, tpf)) } },
+      { plot1: 'zone4', plot2: 'zone0', options: { title: 'Low heatmap zone', color: String(pineColor.new(HM_LOW, tpf)) } },
     );
   }
 
@@ -170,10 +205,30 @@ export function calculate(bars: Bar[], inputs: Partial<HeatmapVolumeInputs> = {}
       tsHigh: tsHighPlot,
       tsMedium: tsMediumPlot,
       tsNormal: tsNormalPlot,
+      zoneTop: zones[0],
+      zone0: zones[1],
+      zone1: zones[2],
+      zone2: zones[3],
+      zone3: zones[4],
+      zone4: zones[5],
     },
     fills,
     barColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const HeatmapVolume = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Any Extra High Vol', message: 'Any Bar Extra High Volume Threshold' },
+  { id: 'alert1', title: 'Up Extra High', message: 'Up Bar Extra High Volume Threshold' },
+  { id: 'alert2', title: 'Down Extra High', message: 'Down Bar Extra High Volume Threshold' },
+  { id: 'alert3', title: 'Any High Vol', message: 'Any Bar High Volume Threshold' },
+  { id: 'alert4', title: 'Up High Vol', message: 'Up Bar High Volume Threshold' },
+  { id: 'alert5', title: 'Down High Vol', message: 'Down Bar High Volume Threshold' },
+  { id: 'alert6', title: 'Any Medium Vol', message: 'Any Bar Medium Volume Threshold' },
+  { id: 'alert7', title: 'Up Medium Vol', message: 'Up Bar Medium Volume Threshold' },
+  { id: 'alert8', title: 'Down Medium Vol', message: 'Down Bar Medium Volume Threshold' },
+];
+
+export const HeatmapVolume = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

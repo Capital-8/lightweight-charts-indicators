@@ -7,6 +7,8 @@
  * score is above the uptrend threshold and short when it is below the downtrend threshold; the score line, an SMA(14)
  * of the close on the price pane and optionally the candles take the trend colour. Labels on the price pane mark the
  * changes to the up / down state of the score (7.5 % below / above the weighted quartile).
+ * Alerts (alertcondition, `alerts` of the result): 'Quartile For-Loop Postive Trend' / 'Quartile For-Loop Negative
+ * Trend', true on every bar of the long / short signal state.
  *
  * Reference: "Quartile For Loop [SeerQuant]" by SeerQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,13 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Quartile For-Loop Postive Trend', message: 'Quartile For-Loop Bullish Signal on: {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Quartile For-Loop Negative Trend', message: 'Quartile For-Loop Bearish Signal on: {{exchange}}:{{ticker}}' },
+];
 
 export type QuartileForLoopColorScheme = 'Default' | 'Modern' | 'Cool' | 'Alternate' | 'Bright';
 
@@ -92,7 +101,7 @@ const lt = (a: number, b: number) => b - a > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<QuartileForLoopInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -110,6 +119,7 @@ export function calculate(
   const score: number[] = new Array(n);
   const histColor: string[] = new Array(n);
   const markers: MarkerData[] = [];
+  const signals: number[] = new Array(n);
   let signal = 0; // var signal = 0
   let prevTrendState = 0; // var int prevTrendState = 0
   for (let b = 0; b < n; b++) {
@@ -128,6 +138,7 @@ export function calculate(
     const goShort = lt(sum, cfg.thrDown);
     if (goLong && !goShort) signal = 1;
     if (goShort) signal = -1;
+    signals[b] = signal;
     histColor[b] = signal === 1 ? bull : signal === -1 ? bear : neutral;
 
     // currentTrendState: 1 above thrUp, -1 below thrDown, else 0
@@ -169,6 +180,8 @@ export function calculate(
     markers,
     // barcolor(paint ? hist_color : na)
     barColors: cfg.paint ? bars.map((b, i) => ({ time: b.time, color: histColor[i] })) : [],
+    // alertcondition(signal == 1) / alertcondition(signal == -1)
+    alerts: alertStates(alertConditions, bars, [signals.map((v) => v === 1), signals.map((v) => v === -1)]),
   };
 }
 
@@ -178,4 +191,5 @@ export const QuartileForLoop = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

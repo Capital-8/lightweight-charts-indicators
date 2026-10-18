@@ -25,7 +25,9 @@
  *
  * Chart values read: the chart foreground colour (grey box, mid line); without a chart context it is the dark theme
  * colour #DBDBDB. Chart timeframe: `timeframe` of the chart context when given, else read from the bar spacing.
- * The 2 alert conditions of the script have no output.
+ * Alerts (alertcondition, `alerts` of the result): 'Bearish Breakout and Retest' on a pivot high bar when the list of
+ * swing lows is not empty at the end of the bar (after the removal of the nearest one), 'Bullish Breakout and Retest'
+ * the same with a pivot low and the swing highs.
  *
  * Reference: "Breakout and Retest Signals [AlgoAlpha]" by AlgoAlpha
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -40,6 +42,13 @@ import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
 import { upDownVolumeOfChartBars } from '../lower-tf-volume';
 import { foregroundColorOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions (no message) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bearish Breakout and Retest', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Bullish Breakout and Retest', message: 'Alert Fired!' },
+];
 
 export interface BreakoutAndRetestSignalsInputs {
   /** Period */
@@ -128,7 +137,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<BreakoutAndRetestSignalsInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & { boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & { boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { memory, atrLength, atrMultiplier, bullColor, bearColor } = cfg;
   const x = Math.trunc(cfg.x);
@@ -199,6 +209,8 @@ export function calculate(
     return { minIndex, minDist };
   };
 
+  const bearFlags: boolean[] = new Array(n).fill(false);
+  const bullFlags: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === n - 1);
     const tolerance = atrVal[i] * atrMultiplier;
@@ -227,6 +239,9 @@ export function calculate(
       }
       swingHighs.splice(minIndex, 1);
     }
+    // alertcondition(not na(ph) and swingLows.size() > 0) / (not na(pl) and swingHighs.size() > 0), at the bar's end
+    bearFlags[i] = !Number.isNaN(ph[i]) && swingLows.length > 0;
+    bullFlags[i] = !Number.isNaN(pl[i]) && swingHighs.length > 0;
   }
   setDrawingBar(null);
 
@@ -247,6 +262,7 @@ export function calculate(
       time: T(l.x), price: l.y, text: l.text ?? '', color: String(l.color), textColor: String(l.textcolor),
       style: l.style as 'label_down' | 'label_up', size: 'tiny' as const,
     })),
+    alerts: alertStates(alertConditions, bars, [bearFlags, bullFlags]),
   };
 }
 
@@ -256,4 +272,5 @@ export const BreakoutAndRetestSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

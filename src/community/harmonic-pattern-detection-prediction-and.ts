@@ -22,7 +22,9 @@
  * version 76 / 66 through the other libraries: same code), reees/Draw (27, and 26 through Obj_XABCD_Harmonic),
  * reees/Utilities (5), reees/Pattern (1, the point type), reees/Obj_XABCD_Harmonic (10), reees/Fibonacci (4).
  *
- * Limit of the port: the alerts give no output ("Alert for" is kept as an input).
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close), as "Alert for" selects: "Potential <name> is
+ *   forming." when a potential pattern is added, "<name> has formed." when a complete pattern is added (name: "Bullish
+ *   Gartley", "Bearish Bat", ...).
  *
  * Reference: "Harmonic Pattern Detection, Prediction, and Backtesting System" by reees
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -33,7 +35,7 @@ import {
   ta, str, math, array, color, Series, barInterval, barTime, line, label, linefill, resetDrawings, setDrawingBar,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { LabelData, LabelStyle, LineDrawingData, LinefillData, PineSize, TableCellData, TableData } from '../types';
+import type { AlertCall, LabelData, LabelStyle, LineDrawingData, LinefillData, PineSize, TableCellData, TableData } from '../types';
 
 type Target1 = '.382 AD' | '.5 AD' | '.618 AD' | '.382 XA' | '.5 XA' | '.618 XA' | '1.272 XA' | '1.618 XA' | '.382 CD' | '.5 CD'
   | '.618 CD' | '1.272 CD' | '1.618 CD' | 'A' | 'B' | 'C';
@@ -107,7 +109,7 @@ export interface HarmonicPatternDetectionPredictionAndInputs {
   weightPrz: number;
   /** Weight of point D / PRZ level confluence */
   weightD: number;
-  /** Alert for (alerts give no output) */
+  /** Alert for: the alert() calls made (potential patterns, complete patterns or both) */
   alertType: 'Potential patterns' | 'Complete patterns' | 'Both';
   /** Bullish lines */
   bullLineColor: string;
@@ -577,7 +579,9 @@ interface Pat {
 export function calculate(
   bars: Bar[],
   inputs: Partial<HarmonicPatternDetectionPredictionAndInputs> = {},
-): IndicatorResult & { lines: LineDrawingData[]; linefills: LinefillData[]; labels: LabelData[]; tables: TableData[] } {
+): IndicatorResult & {
+  lines: LineDrawingData[]; linefills: LinefillData[]; labels: LabelData[]; tables: TableData[]; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const lastBarIndex = n - 1;
@@ -625,6 +629,12 @@ export function calculate(
   const pidOf = (p: Pat) => `${fmt(p.tp)}_${fmt(p.x.x)}_${fmt(p.a.x)}_${fmt(p.b.x)}_${fmt(p.c.x)}_${fmt(p.d.x)}`;
   const getName = (p: Pat) =>
     (p.bull ? 'Bullish' : 'Bearish') + ' ' + (['Gartley', 'Bat', 'Butterfly', 'Crab', 'Shark', 'Cypher'][p.tp - 1] ?? 'Undefined harmonic');
+
+  // alert(alertMsg(p), alert.freq_once_per_bar_close)
+  const alertCalls: AlertCall[] = [];
+  const alertMsg = (p: Pat) => (na(p.d.x) ? 'Potential ' + getName(p) + ' is forming.' : getName(p) + ' has formed.');
+  const fireAlert = (p: Pat) =>
+    alertCalls.push({ time: bars[bi].time as number, message: alertMsg(p), freq: 'once_per_bar_close' });
 
   /** init() with an explicit type: a new object, or `p` initialised again (its drawings are deleted) */
   const init = (
@@ -1051,6 +1061,7 @@ export function calculate(
         if (notLast(pat)) {
           inc.push(pat);
           if (cfg.incOn && (!na(eC) || !cfg.enterAfterC)) drawPattern(pat);
+          if (cfg.alertType === 'Potential patterns' || cfg.alertType === 'Both') fireAlert(pat);
         }
       }
     }
@@ -1099,6 +1110,8 @@ export function calculate(
     drawPattern(p);
     p.stop = stopOf(p);
     if (noEntry(p) === false) pending.push(p);
+    // fire an alert if appropriate
+    if (cfg.alertType === 'Complete patterns' || cfg.alertType === 'Both') fireAlert(p);
   };
 
   /** Add a pattern to the completed patterns, or update the last pattern of its type with a new point D */
@@ -1673,8 +1686,11 @@ export function calculate(
       ...(l.tooltip ? { tooltip: l.tooltip } : {}),
     })),
     tables,
+    alertCalls,
   };
 }
+
+export const hasAlertFunction = true;
 
 export const HarmonicPatternDetectionPredictionAnd = {
   calculate,
@@ -1682,4 +1698,5 @@ export const HarmonicPatternDetectionPredictionAnd = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

@@ -9,6 +9,9 @@
  * high, ADX lower high) and hidden bearish (price lower high, ADX higher high), with a sensitivity % on both legs.
  * Lines and labels are drawn on the pivot bar.
  *
+ * Alerts (alertcondition, `alerts` of the result): the four divergences (with the master toggle, whatever the
+ * per-kind display toggles), the ADX crossing over / under the extreme level and +DI crossing over / under -DI.
+ *
  * Reference: "ADX Extreme Zones + Divergences [tradeviZion]" by TradeVizion
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © TradeVizion
@@ -17,6 +20,7 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AdxExtremeZonesDivergencesInputs {
   /** DI length (first argument of ta.dmi) */
@@ -160,7 +164,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<AdxExtremeZonesDivergencesInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -191,6 +195,11 @@ export function calculate(
   const hiBullPlot: boolean[] = new Array(n).fill(false);
   const bearPlot: boolean[] = new Array(n).fill(false);
   const hiBearPlot: boolean[] = new Array(n).fill(false);
+  // div*Alert: the conditions without the per-kind display toggles (div*Plot = toggle and div*Alert)
+  const bullAlert: boolean[] = new Array(n).fill(false);
+  const hiBullAlert: boolean[] = new Array(n).fill(false);
+  const bearAlert: boolean[] = new Array(n).fill(false);
+  const hiBearAlert: boolean[] = new Array(n).fill(false);
   // ta.valuewhen(found, x, 1): x on the found bar before the latest one (the latest can be the current bar)
   const plAdx: number[] = [];
   const plLow: number[] = [];
@@ -228,19 +237,23 @@ export function calculate(
     // Regular bullish: price LL, ADX HL
     const adxHlReg = gt(a, bullSens * vwPlAdx) && plSpaced;
     const priceLlReg = lt(lo, bearSens * vwPlLow);
-    bullPlot[i] = cfg.showRegularBullish && cfg.showDivergences && priceLlReg && adxHlReg && plFound[i];
+    bullAlert[i] = cfg.showDivergences && priceLlReg && adxHlReg && plFound[i];
+    bullPlot[i] = cfg.showRegularBullish && bullAlert[i];
     // Hidden bullish: price HL, ADX LL
     const adxLlHi = lt(a, bearSens * vwPlAdx) && plSpaced;
     const priceHlHi = gt(lo, bullSens * vwPlLow);
-    hiBullPlot[i] = cfg.showHiddenBullish && cfg.showDivergences && priceHlHi && adxLlHi && plFound[i];
+    hiBullAlert[i] = cfg.showDivergences && priceHlHi && adxLlHi && plFound[i];
+    hiBullPlot[i] = cfg.showHiddenBullish && hiBullAlert[i];
     // Regular bearish: price HH, ADX LH
     const adxLhReg = lt(a, bearSens * vwPhAdx) && phSpaced;
     const priceHhReg = gt(hi, bullSens * vwPhHigh);
-    bearPlot[i] = cfg.showRegularBearish && cfg.showDivergences && priceHhReg && adxLhReg && phFound[i];
+    bearAlert[i] = cfg.showDivergences && priceHhReg && adxLhReg && phFound[i];
+    bearPlot[i] = cfg.showRegularBearish && bearAlert[i];
     // Hidden bearish: price LH, ADX HH
     const adxHhHi = gt(a, bullSens * vwPhAdx) && phSpaced;
     const priceLhHi = lt(hi, bearSens * vwPhHigh);
-    hiBearPlot[i] = cfg.showHiddenBearish && cfg.showDivergences && priceLhHi && adxHhHi && phFound[i];
+    hiBearAlert[i] = cfg.showDivergences && priceLhHi && adxHhHi && phFound[i];
+    hiBearPlot[i] = cfg.showHiddenBearish && hiBearAlert[i];
   }
 
   // Plots
@@ -284,16 +297,16 @@ export function calculate(
     const price = back(adx, i);
     if (isNaN(price)) continue;
     const time = barTime(bars, i - divR, interval);
-    const add = (on: boolean, text: string, up: boolean, col: string) => {
+    const add = (id: string, on: boolean, text: string, up: boolean, col: string) => {
       if (on) {
-        markers.push({ time, position: up ? 'atPriceBottom' : 'atPriceTop', price, shape: up ? 'labelUp' : 'labelDown',
+        markers.push({ id, time, position: up ? 'atPriceBottom' : 'atPriceTop', price, shape: up ? 'labelUp' : 'labelDown',
           color: col, text, textColor: cfg.divTextColor, size: 'tiny' });
       }
     };
-    add(bullPlot[i], 'Bull', true, cfg.regularBullishColor);
-    add(hiBullPlot[i], 'H Bull', true, cfg.hiddenBullishColor);
-    add(bearPlot[i], 'Bear', false, cfg.regularBearishColor);
-    add(hiBearPlot[i], 'H Bear', false, cfg.hiddenBearishColor);
+    add('shape0', bullPlot[i], 'Bull', true, cfg.regularBullishColor);
+    add('shape1', hiBullPlot[i], 'H Bull', true, cfg.hiddenBullishColor);
+    add('shape2', bearPlot[i], 'Bear', false, cfg.regularBearishColor);
+    add('shape3', hiBearPlot[i], 'H Bear', false, cfg.hiddenBearishColor);
   }
 
   // hline(showCutoff ? midLvl : na, ...), hline(showExtreme ? extLvl : na, ...): an na level draws no line
@@ -311,8 +324,27 @@ export function calculate(
     hlines,
     fills,
     markers,
+    // adxEnterExt / adxExitExt = ta.crossover / ta.crossunder(adxValue, extLvl);
+    // diBullCross / diBearCross = ta.crossover / ta.crossunder(diPlus, diMinus)
+    alerts: alertStates(alertConditions, bars, [
+      bullAlert, bearAlert, hiBullAlert, hiBearAlert,
+      crossedOver(adx, extLvl), crossedUnder(adx, extLvl),
+      crossedOver(diPlus, diMinus), crossedUnder(diPlus, diMinus),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'ADX divergence - regular bullish', message: 'tZv-ADXex: regular bullish divergence vs price.' },
+  { id: 'alert1', title: 'ADX divergence - regular bearish', message: 'tZv-ADXex: regular bearish divergence vs price.' },
+  { id: 'alert2', title: 'ADX divergence - hidden bullish', message: 'tZv-ADXex: hidden bullish divergence vs price.' },
+  { id: 'alert3', title: 'ADX divergence - hidden bearish', message: 'tZv-ADXex: hidden bearish divergence vs price.' },
+  { id: 'alert4', title: 'ADX enters extreme zone', message: 'tZv-ADXex: ADX crossed into the extreme zone.' },
+  { id: 'alert5', title: 'ADX exits extreme zone', message: 'tZv-ADXex: ADX crossed back below the extreme zone.' },
+  { id: 'alert6', title: 'DI cross - bullish (+DI over -DI)', message: 'tZv-ADXex: +DI crossed above -DI (bullish direction).' },
+  { id: 'alert7', title: 'DI cross - bearish (-DI over +DI)', message: 'tZv-ADXex: -DI crossed above +DI (bearish direction).' },
+];
 
 export const AdxExtremeZonesDivergences = {
   calculate,
@@ -320,4 +352,5 @@ export const AdxExtremeZonesDivergences = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

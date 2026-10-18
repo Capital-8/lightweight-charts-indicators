@@ -116,11 +116,11 @@ export function calculate(
     const time = bars[i].time;
     // plotchar(final_signal and upper_wick_dominant, 'Sell Signal', '🌟', location.abovebar, color.red, size.tiny)
     if (finalSignal && up(i)) {
-      markers.push({ time, position: 'aboveBar', shape: 'circle', color: 'transparent', text: STAR, textColor: color.red, size: 'tiny' });
+      markers.push({ id: 'char0', time, position: 'aboveBar', shape: 'circle', color: 'transparent', text: STAR, textColor: color.red, size: 'tiny' });
     }
     // plotchar(final_signal and lower_wick_dominant, 'Buy Signal', '🌟', location.belowbar, color.green, size.tiny)
     if (finalSignal && lo(i)) {
-      markers.push({ time, position: 'belowBar', shape: 'circle', color: 'transparent', text: STAR, textColor: color.green, size: 'tiny' });
+      markers.push({ id: 'char1', time, position: 'belowBar', shape: 'circle', color: 'transparent', text: STAR, textColor: color.green, size: 'tiny' });
     }
     // barstate.isconfirmed: every historical bar, the last bar when it is closed
     const confirmed = i < n - 1 || lastConfirmed;

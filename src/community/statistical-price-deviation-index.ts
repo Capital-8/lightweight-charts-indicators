@@ -7,6 +7,8 @@
  * with the displacement of the midpoint from its VWMA. Output on -1..+1 or 0..100, levels at mid / top / bottom with
  * a band fill, and a background when both lines are beyond the top or bottom level (confluence, optionally within a
  * window of bars) or, when enabled, when one line is.
+ * Alerts (alertcondition, `alerts` of the result): Price / VWMA Top and Bot (one line at or beyond its level, when the
+ * single-series alerts are enabled) and Confluence Top / Bottom (both lines, when confluence is enabled).
  *
  * Reference: "Statistical Price Deviation Index (MAD/VWMA)" by exploretranspose
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface StatisticalPriceDeviationIndexInputs {
   /** Lookback (median & MAD) */
@@ -160,7 +163,7 @@ const tanhMap = (x: number) => {
 export function calculate(
   bars: Bar[],
   inputs: Partial<StatisticalPriceDeviationIndexInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -214,11 +217,19 @@ export function calculate(
 
   // final_bg: confluence > price > vwma
   const bgColors: BgColorData[] = [];
+  const flags: boolean[][] = [[], [], [], [], [], []];
   for (let i = 0; i < n; i++) {
     const conflTop = cfg.confluenceEnable && priceTopOk[i] && vwmaTopOk[i];
     const conflBot = cfg.confluenceEnable && priceBotOk[i] && vwmaBotOk[i];
     const isVwmaTop = cfg.useVwmaLine && vwmaCondTop[i];
     const isVwmaBot = cfg.useVwmaLine && vwmaCondBot[i];
+    // alertcondition(alerts_price_only and price_final >= level_high, ...) and the other five, in declaration order
+    flags[0].push(cfg.alertsPriceOnly && priceCondTop[i]);
+    flags[1].push(cfg.alertsPriceOnly && priceCondBot[i]);
+    flags[2].push(cfg.alertsVwmaOnly && isVwmaTop);
+    flags[3].push(cfg.alertsVwmaOnly && isVwmaBot);
+    flags[4].push(cfg.confluenceEnable && conflTop);
+    flags[5].push(cfg.confluenceEnable && conflBot);
     let bg: string | null = null;
     if (conflTop && cfg.confluenceEnable) bg = cfg.topColor;
     else if (conflBot && cfg.confluenceEnable) bg = cfg.botColor;
@@ -256,8 +267,19 @@ export function calculate(
         colors: new Array<string>(n).fill(bandColor) },
     ],
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Price Top Alert', message: 'SPDI — Price MAD OSC entered TOP extreme' },
+  { id: 'alert1', title: 'Price Bot Alert', message: 'SPDI — Price MAD OSC entered BOTTOM extreme' },
+  { id: 'alert2', title: 'VWMA Top Alert', message: 'SPDI — VWMA DISP OSC entered TOP extreme' },
+  { id: 'alert3', title: 'VWMA Bot Alert', message: 'SPDI — VWMA DISP OSC entered BOTTOM extreme' },
+  { id: 'alert4', title: 'Confluence Top Alert', message: 'SPDI — BOTH Price MAD and VWMA DISP in TOP extreme (confluence).' },
+  { id: 'alert5', title: 'Confluence Bottom Alert', message: 'SPDI — BOTH Price MAD and VWMA DISP in BOTTOM extreme (confluence).' },
+];
 
 export const StatisticalPriceDeviationIndex = {
   calculate,
@@ -267,4 +289,5 @@ export const StatisticalPriceDeviationIndex = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

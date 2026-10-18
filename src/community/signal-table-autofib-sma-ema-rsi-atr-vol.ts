@@ -27,9 +27,11 @@
  *   Without them the VWAP is not known on intraday bars: its table cell shows "NaN", and "Show VWAP" throws.
  *   On daily and higher bars the VWAP is the hlc3 of the bar.
  *
- * Limits of the port: the 6 alert conditions give no output. The colour inputs of the script (EMA / SMA / RSI /
- * ATR / MOM / ADX / MACD / Fibonacci / pivot colours) are not read by the script itself: the colours come from the
- * theme.
+ * Alerts (alertcondition, `alerts` of the result): RSI >= 70, RSI <= 30, MACD crossing over / under its signal, close
+ * crossing over / under the EMA 200.
+ *
+ * Limits of the port: the colour inputs of the script (EMA / SMA / RSI / ATR / MOM / ADX / MACD / Fibonacci / pivot
+ * colours) are not read by the script itself: the colours come from the theme.
  *
  * Reference: "Multicator Table" by only_fibonacci
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -45,6 +47,9 @@ import type {
   BoxData, LabelData, LineDrawingData, MarkerData, PineSize, PolylineData, TableCellData, TableData, TablePosition,
 } from '../types';
 import { mintickOf, visibleRangeOf, type ChartContext } from '../chart-context';
+import {
+  alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState,
+} from '../alert-states';
 
 export interface MulticatorTableInputs {
   lang: 'EN' | 'TR';
@@ -420,7 +425,7 @@ type Point = { time: number; value: number; color: string };
 type Result = IndicatorResult & {
   markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[]; polylines: PolylineData[];
   tables: TableData[];
-};
+} & { alerts: AlertConditionState[] };
 
 export function calculate(bars: Bar[], inputs: Partial<MulticatorTableInputs> = {}, chart?: ChartContext): Result {
   const cfg = { ...defaultInputs, ...inputs };
@@ -484,7 +489,7 @@ export function calculate(bars: Bar[], inputs: Partial<MulticatorTableInputs> = 
   if (n === 0) {
     return {
       metadata: meta, plots: Object.fromEntries(plotIds.map((id) => [id, []])), fills: [], markers: [], lines: [], labels: [],
-      boxes: [], polylines: [], tables: [],
+      boxes: [], polylines: [], tables: [], alerts: alertStates(alertConditions, bars, []),
     };
   }
 
@@ -1038,8 +1043,29 @@ export function calculate(bars: Bar[], inputs: Partial<MulticatorTableInputs> = 
   }
   if (deskCells.length) tables.push({ position: tablePlace, columns: 6, rows: 10, cells: deskCells, ...frame });
 
-  return { metadata: meta, plots, fills, markers, lines, labels, boxes, polylines, tables };
+  // alertcondition(rsi >= 70 / rsi <= 30 / ta.crossover(macdLine, signalLine) / ta.crossunder(macdLine, signalLine)
+  //   / ta.crossover(close, emaRegime) / ta.crossunder(close, emaRegime))
+  const alerts = alertStates(alertConditions, bars, [
+    rsi.map((r) => ge(r, 70)),
+    rsi.map((r) => le(r, 30)),
+    crossedOver(macdLine, signalLine),
+    crossedUnder(macdLine, signalLine),
+    crossedOver(close, emaRegime),
+    crossedUnder(close, emaRegime),
+  ]);
+
+  return { metadata: meta, plots, fills, markers, lines, labels, boxes, polylines, tables, alerts };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RSI >= 70', message: 'RSI overbought' },
+  { id: 'alert1', title: 'RSI <= 30', message: 'RSI oversold' },
+  { id: 'alert2', title: 'MACD cross up', message: 'MACD bullish cross' },
+  { id: 'alert3', title: 'MACD cross down', message: 'MACD bearish cross' },
+  { id: 'alert4', title: 'Close x EMA200 up', message: 'Price crossed above EMA200' },
+  { id: 'alert5', title: 'Close x EMA200 down', message: 'Price crossed below EMA200' },
+];
 
 export const MulticatorTable = {
   calculate,
@@ -1047,4 +1073,5 @@ export const MulticatorTable = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

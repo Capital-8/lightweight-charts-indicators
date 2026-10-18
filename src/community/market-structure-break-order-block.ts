@@ -10,8 +10,10 @@
  * close leaves a box on the wrong side, the oldest box of that list is removed (deleted, or only left as it is when
  * "Delete Old/Broken Boxes" is off).
  *
- * The Pine script keeps at most 500 lines, 500 boxes and 50 labels (the oldest are deleted). It has one
- * alertcondition ("MSB") and alert() calls, which give no output.
+ * The Pine script keeps at most 500 lines, 500 boxes and 50 labels (the oldest are deleted).
+ * Alerts: the alertcondition "MSB" (`alerts` of the result, true on the bars of a break) and the alert() calls
+ * (`alertCalls`, once per bar) made for each box the close is in ("Price in the BU-OB zone", ...), as the loops of
+ * the original make them.
  *
  * Reference: "Market Structure Break & Order Block" by EmreKb
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,7 +21,11 @@
  */
 
 import { ta, Series, callsite, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { LineDrawingData, BoxData, LabelData, PineSize } from '../types';
+import type { AlertCall, LineDrawingData, BoxData, LabelData, PineSize } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 import { barInterval, barTime } from '../bar-time';
 
 export interface MarketStructureBreakOrderBlockInputs {
@@ -138,7 +144,8 @@ function register<T>(list: T[], obj: T, max: number, onDelete?: (o: T) => void):
 export function calculate(
   bars: Bar[],
   inputs: Partial<MarketStructureBreakOrderBlockInputs> = {},
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[] }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const zz = Math.trunc(cfg.zigzagLen);
@@ -191,6 +198,8 @@ export function calculate(
   let marketIn = 1; // market as the ta.change call of last_l0 / last_h0 saw it on the previous bar
   let lastL0 = NaN, lastH0 = NaN;
   let buObIndex = NaN, beObIndex = NaN, beBbIndex = NaN, buBbIndex = NaN;
+  const msbFlags: boolean[] = new Array(n).fill(false);
+  const alertCalls: AlertCall[] = [];
 
   // `for i = a to b`: counts down when a > b; no iteration when a bound is na
   const loop = (from: number, to: number, body: (k: number) => void) => {
@@ -260,6 +269,7 @@ export function calculate(
         : m0 === -1 && gt(h0, h1) && gt(h0, h1 + Math.abs(h1 - l0) * cfg.fibFactor) ? 1 : m0;
     const marketChanged = i > 0 && market !== marketPrev; // ta.change(market) != 0
     marketPrev = market;
+    msbFlags[i] = marketChanged;
 
     // Order block and breaker block candles: the last candle of the loop that has the wanted direction
     const l0iBack = i - zz >= 0 ? l0iHist[i - zz] : NaN; // l0i[zigzag_len]
@@ -313,23 +323,29 @@ export function calculate(
       for (let k = 0; k < arr.length; k++) body(arr[k]);
     };
 
+    // alert("Price in the ... zone"): alert.freq_once_per_bar (default)
+    const alert = (message: string) => alertCalls.push({ time: bars[i].time, message, freq: 'once_per_bar' });
     each(buObBoxes, (b) => {
       if (lt(close, bottom(b))) shiftBox(buObBoxes);
-      else if (lt(close, top(b))) { /* alert */ } else setRight(b);
+      else if (lt(close, top(b))) alert('Price in the BU-OB zone');
+      else setRight(b);
     });
     each(beObBoxes, (b) => {
       const tp = top(b);
       const bt = bottom(b);
       if (gt(close, tp)) shiftBox(beObBoxes);
-      if (gt(close, bt)) { /* alert */ } else setRight(b);
+      if (gt(close, bt)) alert('Price in the BE-OB zone');
+      else setRight(b);
     });
     each(beBbBoxes, (b) => {
       if (gt(close, top(b))) shiftBox(beBbBoxes);
-      else if (gt(close, bottom(b))) { /* alert */ } else setRight(b);
+      else if (gt(close, bottom(b))) alert('Price in the BE-BB zone');
+      else setRight(b);
     });
     each(buBbBoxes, (b) => {
       if (lt(close, bottom(b))) shiftBox(buBbBoxes);
-      else if (lt(close, top(b))) { /* alert */ } else setRight(b);
+      else if (lt(close, top(b))) alert('Price in the BU-BB zone');
+      else setRight(b);
     });
   }
 
@@ -366,7 +382,15 @@ export function calculate(
     lines,
     labels,
     boxes,
+    // alertcondition(ta.change(market) != 0, "MSB", "MSB")
+    alerts: alertStates(alertConditions, bars, [msbFlags]),
+    alertCalls,
   };
 }
 
-export const MarketStructureBreakOrderBlock = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [{ id: 'alert0', title: 'MSB', message: 'MSB' }];
+
+export const MarketStructureBreakOrderBlock = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction,
+};

@@ -14,6 +14,7 @@
  *   label shape at the low (high), a dashed line over the swept level with a "$" label, and a solid line at the
  *   level of the change of delivery. Bars are coloured from a signal until the trend turns against it.
  * At most 50 lines and 50 labels are kept (indicator default).
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish SFP' and 'Bearish SFP', true on the bars of each signal.
  *
  * The text colour of the signal shapes is the chart foreground colour (`chart.fg_color`): it comes from the chart
  * context (fallback: the dark theme colour).
@@ -30,6 +31,13 @@ import {
 import type { BarColorData, LabelData, LineDrawingData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { foregroundColorOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish SFP', message: 'Bullish Swing Failure Pattern Detected' },
+  { id: 'alert1', title: 'Bearish SFP', message: 'Bearish Swing Failure Pattern Detected' },
+];
 
 export interface SwingFailureSignalsInputs {
   /** Pivot Detection Length */
@@ -83,7 +91,7 @@ const ne = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && Mat
 /** Maximum history offset of the original loops */
 const MAX_BACK = 4999;
 
-export function calculate(bars: Bar[], inputs: Partial<SwingFailureSignalsInputs> = {}, chart?: ChartContext): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<SwingFailureSignalsInputs> = {}, chart?: ChartContext): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = Math.trunc(cfg.len);
@@ -117,6 +125,8 @@ export function calculate(bars: Bar[], inputs: Partial<SwingFailureSignalsInputs
   resetDrawings({ line: 50, label: 50 });
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === n - 1);
@@ -283,6 +293,9 @@ export function calculate(bars: Bar[], inputs: Partial<SwingFailureSignalsInputs
     if (bullsfp) draw(tempBull, bullCol, 'label_up');
     if (bearsfp) draw(tempBear, bearCol, 'label_down');
 
+    bullFlags.push(bullsfp);
+    bearFlags.push(bearsfp);
+
     // Bar colouring
     if (bullsfp) sfpTrendState = 1;
     else if (bearsfp) sfpTrendState = -1;
@@ -319,7 +332,9 @@ export function calculate(bars: Bar[], inputs: Partial<SwingFailureSignalsInputs
     barColors,
     lines,
     labels,
+    // alertcondition(bullsfp, 'Bullish SFP') / alertcondition(bearsfp, 'Bearish SFP')
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
 
-export const SwingFailureSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const SwingFailureSignals = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

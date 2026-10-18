@@ -5,6 +5,7 @@
  * is not above 0 (tr = true range, the high - low on the first bar). The signal line is the EMA of the KSI. The
  * histogram is green when the KSI is above the signal line, red otherwise. Horizontal lines at 0 and at the spike
  * level.
+ * Alert (alertcondition, `alerts` of the result): 'KSI Anomalous Spike', the KSI crossing over the spike level.
  *
  * Reference: "Kinetic Slippage Index (KSI)" by HPotter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +13,7 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface KineticSlippageIndexInputs {
   /** True range period (not used by the computation of the original script) */
@@ -56,7 +58,10 @@ export const metadata = {
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<KineticSlippageIndexInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<KineticSlippageIndexInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -72,6 +77,8 @@ export function calculate(bars: Bar[], inputs: Partial<KineticSlippageIndexInput
     return (den === 0 ? NaN : Math.pow(trueRange[i], 2) / den) * 1000000;
   });
   const signal = A(ta.ema(S(ksi), cfg.sigLength));
+  // isSpike = ta.crossover(ksi, sigSpike): with the Pine value of tr^2 / 0 (+infinity, na for 0 / 0)
+  const ksiPine = ksi.map((v, i) => (isNaN(v) && volume[i] * emaVolume[i] === 0 && Math.pow(trueRange[i], 2) > 0 ? Infinity : v));
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -83,8 +90,18 @@ export function calculate(bars: Bar[], inputs: Partial<KineticSlippageIndexInput
       { value: 0, options: { title: 'Zero Line', color: color.gray, linestyle: 'dashed' } },
       { value: cfg.sigSpike, options: { title: 'Spike Line', color: color.orange, linestyle: 'dashed' } },
     ],
+    alerts: alertStates(alertConditions, bars, [crossedOver(ksiPine, cfg.sigSpike)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0',
+    title: 'KSI Anomalous Spike',
+    message: 'KSI Alert! Anomalous volume/range divergence detected on {{exchange}}:{{ticker}}, TF: {{interval}}. Potential trend exhaustion or false breakout.',
+  },
+];
 
 export const KineticSlippageIndex = {
   calculate,
@@ -92,4 +109,5 @@ export const KineticSlippageIndex = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

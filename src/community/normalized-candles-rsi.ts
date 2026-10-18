@@ -9,6 +9,9 @@
  * a background fill, gradient fills above 70 and below 30, an optional smoothing moving average (with Bollinger
  * Bands for "SMA + Bollinger Bands") and optional regular divergences (RSI pivots 5 / 5).
  *
+ * Alerts (alertcondition, `alerts` of the result): regular bullish / bearish divergence (only with "Calculate
+ * Divergence" on, as in the original) and the normalised close crossing above 50, below 50, above 70 and below 30.
+ *
  * Reference: "Normalized Candles RSI [Jamallo]" by Jamallo22
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -16,6 +19,17 @@
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Regular Bullish Divergence', message: 'Found a new Regular Bullish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.' },
+  { id: 'alert1', title: 'Regular Bearish Divergence', message: 'Found a new Regular Bearish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.' },
+  { id: 'alert2', title: 'Norm Close Cross Above 50', message: 'FFD Normalized Close crossed above 50 — bullish regime shift.' },
+  { id: 'alert3', title: 'Norm Close Cross Below 50', message: 'FFD Normalized Close crossed below 50 — bearish regime shift.' },
+  { id: 'alert4', title: 'Norm Close Cross Above 70', message: 'FFD Normalized Close crossed above 70 — overbought.' },
+  { id: 'alert5', title: 'Norm Close Cross Below 30', message: 'FFD Normalized Close crossed below 30 — oversold.' },
+];
 
 type MaType = 'None' | 'SMA' | 'SMA + Bollinger Bands' | 'EMA' | 'SMMA (RMA)' | 'WMA' | 'VWMA';
 
@@ -148,7 +162,7 @@ export function calculate(
   markers: MarkerData[];
   plotCandles: Record<string, PlotCandleData[]>;
   visibility: Record<string, boolean>;
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -200,11 +214,13 @@ export function calculate(
     return 100.0 / (1.0 + Math.exp(-scaledZ));
   };
   const candles: PlotCandleData[] = [];
+  const normClose: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const o = normalize(fdOpen[i], i);
     const h = normalize(fdHigh[i], i);
     const l = normalize(fdLow[i], i);
     const c = normalize(fdClose[i], i);
+    normClose[i] = c;
     // candleColor = norm_close >= norm_open ? bullColor : bearColor
     const col = ge(c, o) ? cfg.bullColor : cfg.bearColor;
     // plotcandle draws no candle when a value is na
@@ -350,6 +366,10 @@ export function calculate(
     markers,
     plotCandles: { ffdNormalizedCandles: candles },
     visibility: { enableMA, isBB },
+    alerts: alertStates(alertConditions, bars, [
+      bullCond, bearCond,
+      crossedOver(normClose, 50), crossedUnder(normClose, 50), crossedOver(normClose, 70), crossedUnder(normClose, 30),
+    ]),
   };
 }
 
@@ -361,4 +381,5 @@ export const NormalizedCandlesRsi = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

@@ -8,6 +8,10 @@
  * The bands, the band fill and the optional candle paint take the regime colour (lime / red, grey before the first
  * regime). Length and volatility smoothing come from the mode presets or the custom inputs.
  *
+ * Alerts (alertcondition, `alerts` of the result): the bull / bear regime starting, on confirmed bars
+ * (`barstate.isconfirmed`: the last bar only when the chart context, the optional third argument, says it is closed,
+ * `lastBarConfirmed`; true without a context).
+ *
  * Reference: "ALMA SD Bands | RakoQuant" by RakoQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © RakoQuant
@@ -15,6 +19,8 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface AlmaSdBandsRakoquantInputs {
   /** Mode: length and volatility smoothing from the daily / intraday presets or the custom inputs */
@@ -107,7 +113,9 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AlmaSdBandsRakoquantInputs> = {},
-): IndicatorResult & { barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
+  chart?: ChartContext,
+): IndicatorResult & { barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -141,7 +149,11 @@ export function calculate(
   const fillColors: string[] = [];
   const barColors: BarColorData[] = [];
   const candles: PlotCandleData[] = [];
+  const lastConfirmed = lastBarConfirmedOf(chart);
+  const buyAlert: boolean[] = new Array(n).fill(false);
+  const sellAlert: boolean[] = new Array(n).fill(false);
   let state = 0; // var int state = 0
+  let prevState = NaN; // state[1]
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const upper = basis[i] + cfg.mult * vol[i];
@@ -154,6 +166,12 @@ export function calculate(
     } else {
       state = gt(b.close, basis[i] + dead) ? 1 : -1;
     }
+    // bullFlip = bull and not bull[1], bearFlip = bear and not bear[1];
+    // buyAlert / sellAlert = barstate.isconfirmed and bullFlip / bearFlip
+    const confirmed = i < n - 1 || lastConfirmed;
+    buyAlert[i] = confirmed && state === 1 && prevState !== 1;
+    sellAlert[i] = confirmed && state === -1 && prevState !== -1;
+    prevState = state;
     const col = state === 1 ? color.lime : state === -1 ? color.red : NEUTRAL_COL;
     const bandCol = String(color.new(col, 0));
     plot0.push({ time: b.time, value: upper, color: bandCol });
@@ -176,8 +194,15 @@ export function calculate(
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Plots Background' }, colors: fillColors }],
     barColors,
     plotCandles: { paintCandles: candles },
+    alerts: alertStates(alertConditions, bars, [buyAlert, sellAlert]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RQ ALMA SD BANDS — BULL', message: 'RQ ALMA SD BANDS BULL regime on {{exchange}}:{{ticker}} (close={{close}})' },
+  { id: 'alert1', title: 'RQ ALMA SD BANDS — BEAR', message: 'RQ ALMA SD BANDS BEAR regime on {{exchange}}:{{ticker}} (close={{close}})' },
+];
 
 export const AlmaSdBandsRakoquant = {
   calculate,
@@ -185,4 +210,5 @@ export const AlmaSdBandsRakoquant = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

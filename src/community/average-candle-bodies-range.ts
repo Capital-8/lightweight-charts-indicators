@@ -6,7 +6,9 @@
  * of the ACBR (highest / lowest over a period, or the mean of six periods 5..200 in the RexDog mode) divided by the
  * height input. Background and bar colours show the ACBR beyond the baselines or the signal line, optionally only
  * with a rising / falling signal line, and bar colours can mark the crosses. Arrows mark continuation trades and
- * crosses mark the slow exits.
+ * crosses mark the slow exits (the quick exits are hidden in the original, display.none, and not drawn).
+ * Alerts (alertcondition, `alerts` of the result): the 10 conditions of the original (continuation trades, quick /
+ * slow exits, baseline crosses, signal line crosses).
  *
  * Reference: "+ Average Candle Bodies Range" by ClassicScott
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type MaType = 'EMA' | 'HMA' | 'RMA' | 'SMA' | 'VWMA' | 'WMA';
 
@@ -170,7 +173,8 @@ function crosses(a: number[], b: number[]): { over: boolean[]; under: boolean[] 
 export function calculate(
   bars: Bar[],
   inputs: Partial<AverageCandleBodiesRangeInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -229,6 +233,7 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const acbrColors: string[] = new Array(n);
   const signalColors: string[] = new Array(n);
+  const flags: boolean[][] = Array.from({ length: 10 }, () => [] as boolean[]);
   const {
     signalLineStrongInput: strong, blineBgInput, blineBarcolorInput, blineStrongXInput, blineWeakXInput,
     signalBgInput, signalBarcolorInput, signalStrongXInput, signalWeakXInput,
@@ -421,28 +426,44 @@ export function calculate(
 
     const t = bars[i].time;
     // bgcolor calls in Pine order: each later call is drawn on top; na or fully transparent colours draw nothing
-    for (const c of [aboveBaselineStrongSignal, aboveBaseline, aboveSignalLineStrongSignal, aboveSignalLine]) {
-      if (visible(c)) bgColors.push({ time: t, color: c });
-    }
-    // barcolor calls in Pine order: the last call with a colour sets the bar colour
-    let barColor: string | null = null;
-    for (const c of [barColorBaselineCrossStrongSignal, barColorBaselineCross, barColorSignalLineCrossStrongSignal,
+    // (ids bgcolor0..3: the bgcolor() calls in their order)
+    [aboveBaselineStrongSignal, aboveBaseline, aboveSignalLineStrongSignal, aboveSignalLine].forEach((c, k) => {
+      if (visible(c)) bgColors.push({ id: `bgcolor${k}`, time: t, color: c });
+    });
+    // barcolor calls in Pine order, one entry per call with a colour (ids barcolor0..7): the last one sets the bar
+    // colour
+    [barColorBaselineCrossStrongSignal, barColorBaselineCross, barColorSignalLineCrossStrongSignal,
       barColorSignalLineCross, barColorAboveBaselineStrongSignal, barColorAboveBaseline,
-      barColorAboveSignalLineStrongSignal, barColorAboveSignalLine]) {
-      if (c !== null) barColor = c;
-    }
-    if (barColor !== null) barColors.push({ time: t, color: barColor });
+      barColorAboveSignalLineStrongSignal, barColorAboveSignalLine].forEach((c, k) => {
+      if (c !== null) barColors.push({ id: `barcolor${k}`, time: t, color: c });
+    });
 
     // Continuation trades
     const bullContTrade = dir && gt(a, 0) && lt(a1, s) && signalXover;
     const bearContTrade = dir && lt(a, 0) && gt(a1, s) && signalXunder;
-    if (bullContTrade) markers.push({ time: t, position: 'bottom', shape: 'arrowUp', color: '#445b84' });
-    if (bearContTrade) markers.push({ time: t, position: 'top', shape: 'arrowDown', color: '#844444' });
+    if (bullContTrade) markers.push({ id: 'shape0', time: t, position: 'bottom', shape: 'arrowUp', color: '#445b84' });
+    if (bearContTrade) markers.push({ id: 'shape1', time: t, position: 'top', shape: 'arrowDown', color: '#844444' });
     // Exits: the quick exits (signalLine > 0 and signalXunder, signalLine < 0 and signalXover) have display.none
     // in Pine: not drawn. exitShortSlowly = ta.crossover(acbr, lowerBaseline),
     // exitLongSlowly = ta.crossunder(acbr, upperBaseline)
-    if (blineLowerXover) markers.push({ time: t, position: 'bottom', shape: 'xcross', color: '#445b84' });
-    if (blineUpperXunder) markers.push({ time: t, position: 'top', shape: 'xcross', color: '#844444' });
+    if (blineLowerXover) markers.push({ id: 'shape3', time: t, position: 'bottom', shape: 'xcross', color: '#445b84' });
+    if (blineUpperXunder) markers.push({ id: 'shape5', time: t, position: 'top', shape: 'xcross', color: '#844444' });
+
+    // alertconditions, in the original's order
+    const exitLongQuickly = gt(s, 0) && signalXunder;
+    const exitShortQuickly = lt(s, 0) && signalXover;
+    [
+      bullContTrade,
+      bearContTrade,
+      exitLongQuickly,
+      blineUpperXunder, // exitLongSlowly = ta.crossunder(acbr, upperBaseline)
+      exitShortQuickly,
+      blineLowerXover, // exitShortSlowly = ta.crossover(acbr, lowerBaseline)
+      (gt(up, 0) && blineUpperXover) || (gt(low, 0) && blineLowerXover),
+      (lt(up, 0) && blineUpperXunder) || (lt(low, 0) && blineLowerXunder),
+      gt(a, 0) && signalXover,
+      lt(a, 0) && signalXunder,
+    ].forEach((f, k) => flags[k].push(f));
   }
 
   const P = (vals: number[], cols: string[] | string) => bars.map((b, i) => ({
@@ -462,8 +483,23 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Continuation Trade - Bullish', message: 'Bullish continuation trade by ACBR.' },
+  { id: 'alert1', title: 'Continuation Trade - Bearish', message: 'Bearish continuation trade by ACBR.' },
+  { id: 'alert2', title: 'Exit Long Quickly', message: 'Exit long trade, by ACBR.' },
+  { id: 'alert3', title: 'Exit Long Slowly', message: 'Exit long trade, by ACBR.' },
+  { id: 'alert4', title: 'Exit Short Quickly', message: 'Exit short trade, by ACBR.' },
+  { id: 'alert5', title: 'Exit Short Slowly', message: 'Exit short trade, by ACBR.' },
+  { id: 'alert6', title: 'ACBR Crossing Above Upper Baseline', message: 'ACBR has crossed above the upper baseline.' },
+  { id: 'alert7', title: 'ACBR Crossing Below Lower Baseline', message: 'ACBR has crossed below the lower baseline.' },
+  { id: 'alert8', title: 'ACBR Crossing Above Signal Line Trade Entry', message: 'ACBR has crossed above the signal line. Possible trade entry.' },
+  { id: 'alert9', title: 'ACBR Crossing Below Signal Line Trade Entry', message: 'ACBR has crossed below the signal line. Possible trade entry.' },
+];
 
 export const AverageCandleBodiesRange = {
   calculate,
@@ -471,4 +507,5 @@ export const AverageCandleBodiesRange = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

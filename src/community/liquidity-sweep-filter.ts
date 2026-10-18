@@ -18,7 +18,9 @@
  * after the last bar, with a bounding box from the first bar of the trend.
  *
  * Chart values read: the chart foreground colour (bounding box, text of the trend shapes). Without a chart context
- * it is the dark theme colour #DBDBDB. The 6 alert conditions of the script have no output.
+ * it is the dark theme colour #DBDBDB.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend' / 'Bearish Trend' on the trend turns, 'Strong
+ * Bullish Sweep' / 'Strong Bearish Sweep' and 'Bullish Sweep' / 'Bearish Sweep' on the bars of the sweep characters.
  *
  * Reference: "Liquidity Sweep Filter [AlgoAlpha]" by AlgoAlpha
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -31,6 +33,7 @@ import {
 } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, MarkerData, TableData } from '../types';
 import { foregroundColorOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LiquiditySweepFilterInputs {
   /** Length of the trend bands */
@@ -185,7 +188,7 @@ export function calculate(
     boxes: BoxData[];
     labels: LabelData[];
     tables: TableData[];
-  } {
+  } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { len, mult, res, scale } = cfg;
   const thresh = cfg.majorSweepThresh;
@@ -251,6 +254,7 @@ export function calculate(
   let cumVol = 0;
   let profileUpper = NaN;
   let profileLower = NaN;
+  const flags: boolean[][] = [trendUp, trendDown, [], [], [], []];
 
   for (let i = 0; i < n; i++) {
     const bar = bars[i];
@@ -355,6 +359,10 @@ export function calculate(
     char(bearSwept && gt(nBearliq, thresh), bar.high + volatility, '▼', cfg.bearColor, 'tiny');
     char(bullSwept && gt(nBullliq, 0), bar.low - volatility, '△', cfg.bullColor);
     char(bearSwept && gt(nBearliq, 0), bar.high + volatility, '▽', cfg.bearColor);
+    flags[2].push(bullSwept && gt(nBullliq, thresh));
+    flags[3].push(bearSwept && gt(nBearliq, thresh));
+    flags[4].push(bullSwept && gt(nBullliq, 0));
+    flags[5].push(bearSwept && gt(nBearliq, 0));
 
     if (trendUp[i] && !Number.isNaN(lower[i])) {
       markers.push({
@@ -457,7 +465,18 @@ export function calculate(
     boxes,
     labels,
     tables,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const LiquiditySweepFilter = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend', message: 'Bullish Trend' },
+  { id: 'alert1', title: 'Bearish Trend', message: 'Bearish Trend' },
+  { id: 'alert2', title: 'Strong Bullish Sweep', message: 'Strong Bullish Sweep' },
+  { id: 'alert3', title: 'Strong Bearish Sweep', message: 'Strong Bearish Sweep' },
+  { id: 'alert4', title: 'Bullish Sweep', message: 'Bullish Sweep' },
+  { id: 'alert5', title: 'Bearish Sweep', message: 'Bearish Sweep' },
+];
+
+export const LiquiditySweepFilter = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

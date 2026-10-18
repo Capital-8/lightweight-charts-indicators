@@ -5,6 +5,8 @@
  * signal line and their difference as a histogram. The histogram columns are teal / light teal above zero and
  * light red / red below zero, the stronger colour when the histogram rises (above zero) or falls (below zero).
  * Horizontal lines at 150, 50, 0, -50 and -150.
+ * Alerts (alertcondition, `alerts` of the result): 'Rising to falling' (the histogram turns negative) and 'Falling to
+ * rising' (it turns positive).
  *
  * Reference: "MACD-V (Volatility Normalized MACD)" by KivancOzbilgic
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { ta, getSourceSeries, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MACDVInputs {
   fastLength: number;
@@ -57,7 +60,7 @@ const ge = (a: number, b: number): boolean => !isNaN(a) && !isNaN(b) && !(b - a 
 export function calculate(
   bars: Bar[],
   inputs: Partial<MACDVInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -73,6 +76,10 @@ export function calculate(
   const finite = (v: number) => (Number.isFinite(v) ? v : NaN);
   const signal = A(ta.ema(Series.fromArray(bars, macdV.map(finite)), cfg.signalLength));
   const hist = macdV.map((v, i) => v - signal[i]);
+
+  // alertcondition(hist[1] >= 0 and hist < 0, "Rising to falling") / alertcondition(hist[1] <= 0 and hist > 0, ...)
+  const toFalling = hist.map((h, i) => i > 0 && ge(hist[i - 1], 0) && gt(0, h));
+  const toRising = hist.map((h, i) => i > 0 && ge(0, hist[i - 1]) && gt(h, 0));
 
   const plot0: { time: number; value: number }[] = [];
   const plot1: { time: number; value: number }[] = [];
@@ -100,8 +107,15 @@ export function calculate(
       { value: 0, options: { title: 'Zero', color: '#787B8680', linestyle: 'dashed' } },
     ],
     markers: [],
+    alerts: alertStates(alertConditions, bars, [toFalling, toRising]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Rising to falling', message: 'MACD Volatility histogram switched from a rising to falling state' },
+  { id: 'alert1', title: 'Falling to rising', message: 'MACD Volatility histogram switched from a falling to rising state' },
+];
 
 export const MACDV = {
   calculate,
@@ -109,4 +123,5 @@ export const MACDV = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

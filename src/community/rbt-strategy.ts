@@ -6,6 +6,8 @@
  * not a doji (wicks >= 2 x body), the current body not engulfing (body > previous body + previous wick), the bars 2
  * to N + 1 back in the same direction as the previous bar, the current range >= the mean range of the previous
  * bars, and optionally the current wick longer than the previous wick. Triangles below / above the bar.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Signal' and 'Bearish Signal', true on the bars of each
+ * signal.
  *
  * Reference: "LuckyFX RBtrader strategy" by luckykoshti
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RbtStrategyInputs {
   enablePrevCandles: boolean;
@@ -72,7 +75,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<RbtStrategyInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const get = (i: number, f: (b: Bar) => number) => (i >= 0 ? f(bars[i]) : NaN);
@@ -86,6 +89,8 @@ export function calculate(
   const bearColor = 'rgb(226, 10, 10)';
 
   const markers: MarkerData[] = [];
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const { open, high, low, close } = bars[i];
     const prevOpen = O(i - 1);
@@ -130,6 +135,8 @@ export function calculate(
     const bear = isBear && prevIsBull && bodyPercentOk && dojiOk && (!cfg.ignoreEngulf || !isBearishEngulf)
       && lastNSameAsPrev && isCurRangeBigEnough && wickCondition;
 
+    bullFlags.push(bull);
+    bearFlags.push(bear);
     const t = bars[i].time;
     // plotshape(bull_bigger_than_bear, "Bullish Signal", shape.triangleup, location.belowbar, size.small)
     if (bull) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: bullColor, size: 'small' });
@@ -141,7 +148,15 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    // alertcondition(bull_bigger_than_bear, "Bullish Signal") / alertcondition(bear_bigger_than_bull, "Bearish Signal")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
 
-export const RbtStrategy = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Signal', message: 'Bullish > Bearish Setup' },
+  { id: 'alert1', title: 'Bearish Signal', message: 'Bearish > Bullish Setup' },
+];
+
+export const RbtStrategy = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -7,6 +7,9 @@
  * ((high + low) / 2): dark red when the middle is in the upper wick (selling absorption), dark green when it is in
  * the lower wick (buying absorption). Bars whose middle is inside the body with scaledVol > t + 2 are coloured green
  * (bull bar) or red (bear bar).
+ * Alerts (alertcondition, `alerts` of the result): buying, selling and any absorption bubble, on closed bars (the
+ * chart context says when the last bar is still open; fallback: closed). The bubbles of the alerts do not depend on
+ * the band of the bubble: any band, with the middle in the lower / upper wick.
  *
  * Reference: "Maket Strat Absorption Bubbles" by samb817
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +17,8 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, MarkerData, PineSize } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MaketStratAbsorptionBubblesInputs {
   showDots: boolean;
@@ -55,7 +60,8 @@ const ne = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) >
 export function calculate(
   bars: Bar[],
   inputs: Partial<MaketStratAbsorptionBubblesInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const t = cfg.limitFactor;
   const bullBubbleColor = String(color.rgb(0, 120, 0));
@@ -70,6 +76,9 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  // barstate.isconfirmed: every bar but a last bar that is still open
+  const lastConfirmed = lastBarConfirmedOf(chart);
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [], anyFlags: boolean[] = [];
   for (let i = 0; i < bars.length; i++) {
     const b = bars[i];
     const volData = b.volume ?? NaN;
@@ -96,19 +105,25 @@ export function calculate(
     const lowerZone = le(midPrice, lowBody) && ge(midPrice, bottomWick);
     const validUp = upperZone;
     const validDn = lowerZone;
+    // buyingAbsorption = anyBubble and validDn; sellingAbsorption = anyBubble and validUp (alerts: and isconfirmed)
+    const anyBubble = cond.some(Boolean);
+    const confirmed = i < bars.length - 1 || lastConfirmed;
+    buyFlags.push(anyBubble && validDn && confirmed);
+    sellFlags.push(anyBubble && validUp && confirmed);
+    anyFlags.push(anyBubble && (validUp || validDn) && confirmed);
 
     // plotshape(condX and validUp ? midPrice : na, style = shape.circle, location = location.absolute, ...):
     // the five selling series first, then the five buying series
     if (!isNaN(midPrice)) {
       for (let k = 0; k < 5; k++) {
         if (cond[k] && validUp) {
-          markers.push({ time: b.time, position: 'atPriceMiddle', price: midPrice, shape: 'circle',
+          markers.push({ time: b.time, id: `shape${k}`, position: 'atPriceMiddle', price: midPrice, shape: 'circle',
             color: bearBubbleColor, size: sizes[k] });
         }
       }
       for (let k = 0; k < 5; k++) {
         if (cond[k] && validDn) {
-          markers.push({ time: b.time, position: 'atPriceMiddle', price: midPrice, shape: 'circle',
+          markers.push({ time: b.time, id: `shape${5 + k}`, position: 'atPriceMiddle', price: midPrice, shape: 'circle',
             color: bullBubbleColor, size: sizes[k] });
         }
       }
@@ -126,7 +141,17 @@ export function calculate(
     plots: {},
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, anyFlags]),
   };
 }
 
-export const MaketStratAbsorptionBubbles = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Maket Strat Buying Absorption Bubble',
+    message: 'Maket Strat Absorption Bubbles: Buying absorption bubble detected. Buyers may be absorbing selling pressure.' },
+  { id: 'alert1', title: 'Maket Strat Selling Absorption Bubble',
+    message: 'Maket Strat Absorption Bubbles: Selling absorption bubble detected. Sellers may be absorbing buying pressure.' },
+  { id: 'alert2', title: 'Maket Strat Absorption Bubble', message: 'Maket Strat Absorption Bubbles: Absorption bubble detected.' },
+];
+
+export const MaketStratAbsorptionBubbles = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

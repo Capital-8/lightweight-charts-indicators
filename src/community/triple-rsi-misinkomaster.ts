@@ -108,8 +108,8 @@ export function calculate(
     fillColors[i] = colT;
     // bgcolor(trend != trend[1] ? col : na), once in the pane and once with force_overlay (trend[1] is na on bar 0)
     if (i > 0 && trend !== prevTrend) {
-      bgColors.push({ time: t(i), color: col });
-      bgColors.push({ time: t(i), color: col, forceOverlay: true });
+      bgColors.push({ id: 'bgcolor0', time: t(i), color: col });
+      bgColors.push({ id: 'bgcolor1', time: t(i), color: col, forceOverlay: true });
     }
   }
 

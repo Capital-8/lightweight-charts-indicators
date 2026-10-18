@@ -5,6 +5,8 @@
  * with "Use Central Time", in Chicago time (America/Chicago). A bar whose opening time has the hour and minute of an
  * odd alert (1, 3, 5, 7, 9, 11) gets a green triangle below it; a bar at the time of an even alert (2, 4, 6, 8, 10,
  * 12) gets a red triangle above it. The time zone is a fixed script value, not the exchange time zone.
+ * Alerts (alertcondition, `alerts` of the result): 'Odd Time-based Alert (Green)' and 'Even Time-based Alert (Red)'
+ * on the bars of the green / red triangles, and 'Alert 1' to 'Alert 12' on the bars at the time of each enabled alert.
  *
  * Reference: "Time-based Alerts for Trading Windows" by xhmxdir
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { time, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TimeBasedAlertsInputs {
   enableAlert1: boolean;
@@ -119,7 +122,7 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<TimeBasedAlertsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const timezone = cfg.useCentralTime ? 'America/Chicago' : 'America/New_York';
   const green = String(color.green);
@@ -131,6 +134,8 @@ export function calculate(
     && m === cfg[`minute${k}` as keyof TimeBasedAlertsInputs];
 
   const markers: MarkerData[] = [];
+  // flags of the odd / even conditions, then of Alert 1 to Alert 12
+  const flags: boolean[][] = Array.from({ length: 14 }, () => []);
   for (const b of bars) {
     // current_hour = hour(time, timezone), current_minute = minute(time, timezone): bar opening time
     const ms = b.time * 1000;
@@ -138,6 +143,9 @@ export function calculate(
     const m = time.minute(ms, timezone);
     const isAlertOdd = at(1, h, m) || at(3, h, m) || at(5, h, m) || at(7, h, m) || at(9, h, m) || at(11, h, m);
     const isAlertEven = at(2, h, m) || at(4, h, m) || at(6, h, m) || at(8, h, m) || at(10, h, m) || at(12, h, m);
+    flags[0].push(isAlertOdd);
+    flags[1].push(isAlertEven);
+    for (const k of ALERTS) flags[k + 1].push(at(k, h, m));
     if (isAlertOdd) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: green, size: 'small' });
     }
@@ -149,7 +157,17 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const TimeBasedAlertsForTradingWindows = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Odd Time-based Alert (Green)', message: 'Odd time-based alert triggered! (Green)' },
+  { id: 'alert1', title: 'Even Time-based Alert (Red)', message: 'Even time-based alert triggered! (Red)' },
+  ...ALERTS.map((k): AlertConditionDecl => ({ id: `alert${k + 1}`, title: `Alert ${k}`, message: `Alert ${k} triggered!` })),
+];
+
+export const TimeBasedAlertsForTradingWindows = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions,
+};

@@ -5,6 +5,8 @@
  * long when DRSI is above the long threshold and short when it is below the short threshold; otherwise it keeps its
  * last state. The DRSI line is drawn four times (glow) in the state colour, the price candles take the state colour,
  * and triangles mark the changes from short to long and back.
+ * Alerts (alertcondition, `alerts` of the result): 'DRSI: Buy' / 'DRSI: Sell' on the bars of those triangles
+ * (ta.crossover / ta.crossunder of the state with 0).
  *
  * Reference: "Double RSI" by Clokivez
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DoubleRsiInputs {
   /** Colour the price candles with the state colour */
@@ -62,7 +65,8 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<DoubleRsiInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -91,6 +95,8 @@ export function calculate(
 
   const candles: PlotCandleData[] = [];
   const markers: MarkerData[] = [];
+  const buyFlags = new Array<boolean>(n).fill(false);
+  const sellFlags = new Array<boolean>(n).fill(false);
   // ta.crossover(T, 0) / ta.crossunder(T, 0): compared with the last bar where T was not na
   let lastT = NaN;
   for (let i = 0; i < n; i++) {
@@ -104,11 +110,13 @@ export function calculate(
       if (!isNaN(lastT)) {
         // plotshape(L, "Buy", shape.triangleup, location.belowbar, #00ffbf, size = size.tiny, force_overlay = true)
         if (T[i] > 0 && lastT <= 0) {
+          buyFlags[i] = true;
           markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: '#00ffbf', size: 'tiny',
             forceOverlay: true });
         }
         // plotshape(S, "Sell", shape.triangledown, location.abovebar, #ff0040, size = size.tiny, force_overlay = true)
         if (T[i] < 0 && lastT >= 0) {
+          sellFlags[i] = true;
           markers.push({ time: b.time, position: 'aboveBar', shape: 'triangleDown', color: '#ff0040', size: 'tiny',
             forceOverlay: true });
         }
@@ -131,8 +139,16 @@ export function calculate(
     ],
     markers,
     plotCandles: { barColor: candles },
+    // alertcondition(ta.crossover(T, 0), "DRSI: Buy") / alertcondition(ta.crossunder(T, 0), "DRSI: Sell")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'DRSI: Buy', message: 'DRSI Buy Signal' },
+  { id: 'alert1', title: 'DRSI: Sell', message: 'DRSI Sell Signal' },
+];
 
 export const DoubleRsi = {
   calculate,
@@ -140,4 +156,5 @@ export const DoubleRsi = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -556,17 +556,18 @@ export function calculate(
     if (cfg.showSessionDivider) {
       sessions.forEach((s, k) => {
         if (!s.show) return;
-        // Active: shape.square for sessions A and C, shape.labelup for B and D; the shape has no colour (na)
+        // Active: shape.square for sessions A and C, shape.labelup for B and D; the shape has no colour (na).
+        // Outputs shape0 / 2 / 4 / 6 (active) and shape1 / 3 / 5 / 7 (session start / end)
         if (active[k]) {
           markers.push({
             time: t, position: 'bottom', shape: k % 2 === 0 ? 'square' : 'labelUp', color: 'transparent', text: '.',
-            textColor: s.color, size: 'tiny',
+            textColor: s.color, size: 'tiny', id: `shape${2 * k}`,
           });
         }
         if (active[k] !== s.prevActive) {
           markers.push({
             time: t, position: 'bottom', shape: 'labelUp', color: 'transparent', text: '❚', textColor: s.color,
-            size: 'tiny',
+            size: 'tiny', id: `shape${2 * k + 1}`,
           });
         }
       });
@@ -580,9 +581,10 @@ export function calculate(
         time1: t, price1: close + mintick, time2: t, price2: close - mintick, color: GRAY, extend: 'both',
         style: 'dashed',
       });
+      // Outputs shape8 (Sunday) to shape14 (Saturday)
       markers.push({
         time: t, position: 'top', shape: 'labelDown', color: 'transparent', text: WEEKDAYS[day - 1], textColor: GRAY,
-        size: 'tiny',
+        size: 'tiny', id: `shape${8 + day - 1}`,
       });
     }
     prevDay = day;

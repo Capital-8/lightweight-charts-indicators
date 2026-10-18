@@ -8,6 +8,7 @@
  * optional stochastic of that RSI (scaled) as K / D lines or a ribbon fill. Bands at OB / OS levels with fills.
  * CBC flip: the state turns bullish when the close is above the previous high and bearish when the close is below
  * the previous low; a flip colours the background and draws a triangle.
+ * Alerts (alertcondition, `alerts` of the result): 'Bears' on a bearish flip, 'Bulls' on a bullish flip.
  *
  * Reference: "HARSI+CBC" by mehmetbezgincan
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -17,6 +18,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HarsiCbcInputs {
   /** RSI length of the HARSI candles */
@@ -177,7 +179,7 @@ export function calculate(
   markers: MarkerData[];
   plotCandles: Record<string, PlotCandleData[]>;
   bgColors: BgColorData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -240,6 +242,8 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const markers: MarkerData[] = [];
   const stochFill: string[] = new Array(n);
+  const bearFlags: boolean[] = [];
+  const bullFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // plotcandle(O, H, L, C, "HARSI", bodyColour, wickColour, bordercolor = bodyColour): no candle when a value is na
@@ -252,6 +256,8 @@ export function calculate(
     const prev = i > 0 ? cbc[i - 1] : false;
     const bullFlip = cbc[i] && !prev;
     const bearFlip = !cbc[i] && prev;
+    bearFlags.push(bearFlip);
+    bullFlags.push(bullFlip);
     if (cfg.showCbcBg && bullFlip) bgColors.push({ time: t, color: COL_BULL_BG });
     else if (cfg.showCbcBg && bearFlip) bgColors.push({ time: t, color: COL_BEAR_BG });
     if (cfg.showCbcShapes && bearFlip) {
@@ -295,8 +301,16 @@ export function calculate(
     markers,
     plotCandles: { harsi: candles },
     bgColors,
+    // alertcondition(not cbc and cbc[1], 'Bears') / alertcondition(cbc and not cbc[1], 'Bulls')
+    alerts: alertStates(alertConditions, bars, [bearFlags, bullFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bears', message: 'Bears in Control' },
+  { id: 'alert1', title: 'Bulls', message: 'Bulls in Control' },
+];
 
 export const HarsiCbc = {
   calculate,
@@ -307,4 +321,5 @@ export const HarsiCbc = {
   plotCandleConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

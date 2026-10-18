@@ -14,6 +14,10 @@
  * The zones are only computed on the last 10,000 bars and on closed bars: a last bar that is still open (chart
  * context `lastBarConfirmed` false) is not analysed.
  *
+ * Alert (alertcondition, `alerts` of the result): 'New FVG @ {{ticker}}', true on the last bar when a zone was found
+ * on the bar before it (the original's count of found zones is above its value of two bars back when the last bar
+ * starts).
+ *
  * Reference: "Volumized Fair Value Gaps | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © fluxchart
@@ -25,6 +29,7 @@ import {
 } from 'oakscriptjs';
 import type { ChartContext } from '../chart-context';
 import { lastBarConfirmedOf } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface FairValueGapsFluxChartsInputs {
   /** Zone Invalidation */
@@ -144,7 +149,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<FairValueGapsFluxChartsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   resetDrawings({ box: MAX_BOXES, label: MAX_BOXES, line: MAX_BOXES });
@@ -152,7 +157,7 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
   };
-  if (n === 0) return result;
+  if (n === 0) return { ...result, alerts: alertStates(alertConditions, bars, [[]]) };
 
   const ms = bars[0].time >= 1e12;
   const time = bars.map((b) => (ms ? b.time : b.time * 1000));
@@ -176,6 +181,8 @@ export function calculate(
 
   const fvgList: FVG[] = [];
   let barIndex = 0;
+  // totalFVGIndex += 1 on the bars where a zone is added
+  const added = new Array<boolean>(n).fill(false);
   const isValid = (f: FVG): boolean => {
     if (!cfg.showInvalidated && !Number.isNaN(f.endTime)) return false;
     if (f.disabled) return false;
@@ -236,6 +243,7 @@ export function calculate(
           newFVG.lowVolume = volCheck ? v(2) : 0;
           newFVG.highVolume = volCheck ? v(0) + v(1) : 0;
         }
+        added[i] = true;
         fvgList.unshift(newFVG);
         while (fvgList.length > SHOW_LAST_X_FVGS) fvgList.pop();
       }
@@ -383,7 +391,16 @@ export function calculate(
   setDrawingBar(null);
 
   const out = drawingOutputs(bars, ms ? 'ms' : 's');
-  return { ...result, boxes: out.boxes ?? [], lines: out.lines ?? [] };
+  // alertcondition(barstate.islast and barstate.isnew and totalFVGIndex > totalFVGIndex[2]), read before the block
+  // of the last bar runs: totalFVGIndex is then its value of the bar before, which is above the value of two bars
+  // back when a zone was added on the bar before
+  const newFvg = bars.map((_b, i) => i === last && i >= 2 && added[i - 1]);
+  return { ...result, boxes: out.boxes ?? [], lines: out.lines ?? [], alerts: alertStates(alertConditions, bars, [newFvg]) };
 }
 
-export const FairValueGapsFluxCharts = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertcondition */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New FVG @ {{ticker}}', message: '' },
+];
+
+export const FairValueGapsFluxCharts = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

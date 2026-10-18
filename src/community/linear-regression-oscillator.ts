@@ -189,13 +189,14 @@ export function calculate(
     // plotchar(..., location = location.absolute, offset = -1): drawn on the previous bar
     if (i >= 1) {
       const t1 = bars[i - 1].time;
-      const char = (price: number, text: string, css: string, size: 'small' | 'tiny') => {
-        markers.push({ time: t1, position: 'atPriceMiddle', price, shape: 'circle', color: 'transparent', text, textColor: css, size });
+      // id: the plotchar output (char0 .. char3 in declaration order)
+      const char = (id: string, price: number, text: string, css: string, size: 'small' | 'tiny') => {
+        markers.push({ time: t1, position: 'atPriceMiddle', price, shape: 'circle', color: 'transparent', text, textColor: css, size, id });
       };
-      if (!Number.isNaN(reversionDown)) char(reversionDown, '◇', colDn, 'small');
-      if (!Number.isNaN(reversionUp)) char(reversionUp, '◇', colUp, 'small');
-      if (cond1[i]) char(0, '◆', String(color.new(colDn, 0)), 'tiny');
-      if (cond2[i]) char(0, '◆', String(color.new(colUp, 0)), 'tiny');
+      if (!Number.isNaN(reversionDown)) char('char0', reversionDown, '◇', colDn, 'small');
+      if (!Number.isNaN(reversionUp)) char('char1', reversionUp, '◇', colUp, 'small');
+      if (cond1[i]) char('char2', 0, '◆', String(color.new(colDn, 0)), 'tiny');
+      if (cond2[i]) char('char3', 0, '◆', String(color.new(colUp, 0)), 'tiny');
     }
 
     // Trend labels on the price

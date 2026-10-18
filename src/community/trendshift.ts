@@ -184,8 +184,8 @@ export function calculate(
 
     const t = b.time;
     // bgcolor(discount_bg_color, "Discount zone tint"), then bgcolor(premium_bg_color, "Premium zone tint")
-    if (cfg.showZoneTint && inDiscount) bgColors.push({ time: t, color: discountBg });
-    if (cfg.showZoneTint && inPremium) bgColors.push({ time: t, color: premiumBg });
+    if (cfg.showZoneTint && inDiscount) bgColors.push({ id: 'bgcolor0', time: t, color: discountBg });
+    if (cfg.showZoneTint && inPremium) bgColors.push({ id: 'bgcolor1', time: t, color: premiumBg });
     // plotshape(... ? low : na, shape.triangleup, location.belowbar, size.small, text = "Shift↑", textcolor = color.white)
     if (cfg.showStructureMarks && bullFirst) {
       markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: bullColor, text: 'Shift↑', textColor: color.white, size: 'small' });

@@ -28,6 +28,11 @@
  * argument): while the last bar is open, the drawings are those of the bar before. Without the value every bar is
  * a closed bar.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Supply Zone Retest @ {{ticker}}' / 'Demand Zone Retest @ {{ticker}}'
+ * on the closed bars with a retest of a supply / demand zone, 'Supply Zone Break @ {{ticker}}' / 'Demand Zone Break @
+ * {{ticker}}' on the closed bars that break a supply / demand zone (whether or not the "Retests" / "Breaks" labels are
+ * shown).
+ *
  * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
  * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
  * and session hours), and a bar of a higher timeframe is complete on the chart bar whose close reaches the end of
@@ -45,6 +50,7 @@ import type { BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe, periodStarts, securityBars } from '../anchor-period';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SupplyDemandFluxChartsInputs {
   /** Max Distance To Last Bar */
@@ -306,18 +312,23 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SupplyDemandFluxChartsInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'boxes' | 'lines' | 'labels'> & { boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[] } {
+): Omit<IndicatorResult, 'boxes' | 'lines' | 'labels'> & { boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
   const boxes: BoxData[] = [];
   const lines: LineDrawingData[] = [];
+  // alertcondition(not na(renderRetestLabelBuyside) and barstate.isconfirmed, ...), the same for the sell side retest
+  // and the two breaks: the render values are set only on closed bars
+  const flags: boolean[][] = [0, 1, 2, 3].map(() => new Array<boolean>(n).fill(false));
   const result = (labels: LabelData[]) => ({
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     boxes,
     lines,
     labels,
+    alerts: alertStates(alertConditions, bars, flags),
   });
   if (n === 0) return result([]);
 
@@ -525,6 +536,11 @@ export function calculate(
       }
     }
 
+    flags[0][i] = !isNaN(retestBuyside);
+    flags[1][i] = !isNaN(retestSellside);
+    flags[2][i] = !isNaN(breakBuyside);
+    flags[3][i] = !isNaN(breakSellside);
+
     // Retest labels, kept by zone (its guid)
     const addRetest = (guid: number, l: ScriptLabel) => {
       const list = retestLabels.get(guid);
@@ -549,10 +565,19 @@ export function calculate(
   return result(scriptLabels.filter((l) => l.alive).map((l) => l.data));
 }
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Supply Zone Retest @ {{ticker}}', message: 'Supply Zone Retest @ {{ticker}}' },
+  { id: 'alert1', title: 'Demand Zone Retest @ {{ticker}}', message: 'Demand Zone Retest @ {{ticker}}' },
+  { id: 'alert2', title: 'Supply Zone Break @ {{ticker}}', message: 'Supply Zone Break @ {{ticker}}' },
+  { id: 'alert3', title: 'Demand Zone Break @ {{ticker}}', message: 'Demand Zone Break @ {{ticker}}' },
+];
+
 export const SupplyDemandFluxCharts = {
   calculate,
   metadata,
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

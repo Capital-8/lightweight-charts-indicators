@@ -11,6 +11,10 @@
  * over the overbought level (sell), "Exit" when it crosses under the overbought level (sell) or over the oversold
  * level (buy), "Center" (off by default) when it crosses the 50 level.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Trend Enter Buy' / 'Trend Enter Sell', 'Trend Center Buy' /
+ * 'Trend Center Sell' and 'Trend Exit Buy' / 'Trend Exit Sell', true on the bars of the matching arrow (with its
+ * "Show Arrows" inputs on).
+ *
  * Reference: "CCI Stochastic" by Daveatt
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -20,6 +24,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CCIStochasticInputs {
   source: 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4' | 'hlcc4';
@@ -107,7 +112,10 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<CCIStochasticInputs> = {}): IndicatorResult & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<CCIStochasticInputs> = {},
+): IndicatorResult & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const OB = cfg.overbought;
@@ -131,8 +139,10 @@ export function calculate(bars: Bar[], inputs: Partial<CCIStochasticInputs> = {}
   const obColors: string[] = [];
   const osColors: string[] = [];
   const markers: MarkerData[] = [];
-  const arrow = (time: number, up: boolean, price: number, c: string) => {
-    markers.push({ time, position: 'atPriceMiddle', price, shape: up ? 'arrowUp' : 'arrowDown',
+  const flags: boolean[][] = [[], [], [], [], [], []];
+  // id: shape<k> of the k-th plotshape (Enter Buy / Sell, Center Buy / Sell, Exit Buy / Sell)
+  const arrow = (id: string, time: number, up: boolean, price: number, c: string) => {
+    markers.push({ id, time, position: 'atPriceMiddle', price, shape: up ? 'arrowUp' : 'arrowDown',
       color: String(color.new(c, 20)), size: 'normal' });
   };
 
@@ -161,12 +171,22 @@ export function calculate(bars: Bar[], inputs: Partial<CCIStochasticInputs> = {}
     obColors.push(gt(m, OB) ? String(color.new(RED, 90)) : NONE);
     osColors.push(lt(m, OS) ? String(color.new(GREEN, 90)) : NONE);
 
-    if (cfg.showArrows && cfg.showArrowsEnter && trendEnter === 1) arrow(t, true, 0, GREEN);
-    if (cfg.showArrows && cfg.showArrowsEnter && trendEnter === -1) arrow(t, false, 100, RED);
-    if (cfg.showArrows && cfg.showArrowsCenter && trendCenter === 1) arrow(t, true, 35, AQUA);
-    if (cfg.showArrows && cfg.showArrowsCenter && trendCenter === -1) arrow(t, false, 65, FUCHSIA);
-    if (cfg.showArrows && cfg.showArrowsExit && trendExit === 1) arrow(t, true, 0, ORANGE);
-    if (cfg.showArrows && cfg.showArrowsExit && trendExit === -1) arrow(t, false, 100, MAROON);
+    // The plotshape and alertcondition calls test the same expressions, in the same order
+    const signals = [
+      cfg.showArrows && cfg.showArrowsEnter && trendEnter === 1,
+      cfg.showArrows && cfg.showArrowsEnter && trendEnter === -1,
+      cfg.showArrows && cfg.showArrowsCenter && trendCenter === 1,
+      cfg.showArrows && cfg.showArrowsCenter && trendCenter === -1,
+      cfg.showArrows && cfg.showArrowsExit && trendExit === 1,
+      cfg.showArrows && cfg.showArrowsExit && trendExit === -1,
+    ];
+    signals.forEach((on, k) => flags[k].push(on));
+    if (signals[0]) arrow('shape0', t, true, 0, GREEN);
+    if (signals[1]) arrow('shape1', t, false, 100, RED);
+    if (signals[2]) arrow('shape2', t, true, 35, AQUA);
+    if (signals[3]) arrow('shape3', t, false, 65, FUCHSIA);
+    if (signals[4]) arrow('shape4', t, true, 0, ORANGE);
+    if (signals[5]) arrow('shape5', t, false, 100, MAROON);
   }
 
   return {
@@ -184,7 +204,15 @@ export function calculate(bars: Bar[], inputs: Partial<CCIStochasticInputs> = {}
       { plot1: 'hline_min', plot2: 'hline_os', options: { title: 'Oversold Fill' }, colors: osColors },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const CCIStochastic = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig };
+/** The original's alertconditions (the message is the title) */
+export const alertConditions: AlertConditionDecl[] = [
+  'Trend Enter Buy', 'Trend Enter Sell', 'Trend Center Buy', 'Trend Center Sell', 'Trend Exit Buy', 'Trend Exit Sell',
+].map((title, k) => ({ id: `alert${k}`, title, message: title }));
+
+export const CCIStochastic = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig, alertConditions,
+};

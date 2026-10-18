@@ -7,6 +7,9 @@
  * to zero; levels at +/- threshold (dashed in Pine), +/- 1 and +/- 2 (dotted in Pine, +/- 2 hidden).
  * Presets replace the lookback and the smoothing (Fast Response 50 / 3, Smooth Trend 200 / 8).
  *
+ * Alerts (alertcondition, `alerts` of the result): the z-score crossing into (over +threshold, under -threshold) and
+ * out of the extreme zones, crossing over / under zero, and entering either extreme zone.
+ *
  * Reference: "Volume-Weighted Price Z-Score [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © QuantAlgo
@@ -14,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type VWPZPreset = 'Default' | 'Fast Response' | 'Smooth Trend';
 export type VWPZColorPreset = 'Classic' | 'Aqua' | 'Cosmic' | 'Ember' | 'Neon' | 'Custom';
@@ -96,7 +100,10 @@ const PRESETS: Record<Exclude<VWPZColorPreset, 'Custom'>, [string, string]> = {
 /** Pine a > b: a - b > 1e-10 (false with na) */
 const gt = (a: number, b: number) => a - b > 1e-10;
 
-export function calculate(bars: Bar[], inputs: Partial<VolumeWeightedPriceZScoreInputs> = {}): IndicatorResult & { barColors: BarColorData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<VolumeWeightedPriceZScoreInputs> = {},
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -130,6 +137,15 @@ export function calculate(bars: Bar[], inputs: Partial<VolumeWeightedPriceZScore
     ? color.from_gradient(v, 0, thr, NEUTRAL, positiveColor)
     : color.from_gradient(v, -thr, 0, negativeColor, NEUTRAL)));
 
+  // Signals of the alertconditions
+  const crossAboveZero = crossedOver(z, 0);
+  const crossBelowZero = crossedUnder(z, 0);
+  const enterExtremePositive = crossedOver(z, thr);
+  const enterExtremeNegative = crossedUnder(z, -thr);
+  const exitExtremePositive = crossedUnder(z, thr);
+  const exitExtremeNegative = crossedOver(z, -thr);
+  const anyExtreme = enterExtremePositive.map((v, i) => v || enterExtremeNegative[i]);
+
   const t = (i: number) => bars[i].time;
   const line = (value: number, c: string) => bars.map((b) => ({ time: b.time, value, color: c }));
   const topT = cfg.fillTransparency;
@@ -160,8 +176,23 @@ export function calculate(bars: Bar[], inputs: Partial<VolumeWeightedPriceZScore
     ],
     // barcolor(enableBarColoring ? gradientColor : na, title = 'Z-Score Bar Color')
     barColors: cfg.enableBarColoring ? bars.map((_b, i) => ({ time: t(i), color: grad[i] })) : [],
+    alerts: alertStates(alertConditions, bars, [
+      enterExtremePositive, enterExtremeNegative, exitExtremePositive, exitExtremeNegative,
+      crossAboveZero, crossBelowZero, anyExtreme,
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Extreme Overbought', message: 'VWPZ: Extreme OVERBOUGHT condition detected! {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Extreme Oversold', message: 'VWPZ: Extreme OVERSOLD condition detected! {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Exit Extreme Overbought', message: 'VWPZ: Exiting extreme overbought zone {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert3', title: 'Exit Extreme Oversold', message: 'VWPZ: Exiting extreme oversold zone {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert4', title: 'Bullish Mean Reversion', message: 'VWPZ: Crossed above zero - Bullish momentum {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert5', title: 'Bearish Mean Reversion', message: 'VWPZ: Crossed below zero - Bearish momentum {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert6', title: 'Any Extreme Level', message: 'VWPZ: Extreme deviation detected! Check chart {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const VolumeWeightedPriceZScore = {
   calculate,
@@ -169,4 +200,5 @@ export const VolumeWeightedPriceZScore = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

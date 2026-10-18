@@ -4,6 +4,7 @@
  * SMAs 5, 8 and 13 and EMAs 20 and 200 of the close. A buy signal is a cross of SMA 5 and SMA 13 with SMA 5 above
  * SMA 13; a sell signal is a cross of SMA 5 and SMA 13 with SMA 5 below SMA 8 and SMA 13. The regime filter keeps
  * all signals, only the signals when EMA 20 > EMA 200 (bullish) or only when EMA 20 < EMA 200 (bearish).
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Condition' and 'Sell Condition', true on the signal bars.
  *
  * Reference: "Super SMA 5 8 13 + EMA 20/200 Regime Filter (ALIZET)" by afdzjr69
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +13,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SuperSma5813Ema20200RegimeFilterInputs {
   /** Regime filter */
@@ -55,7 +57,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<SuperSma5813Ema20200RegimeFilterInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -68,6 +70,8 @@ export function calculate(
   const ema200 = A(ta.ema(src, 200));
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   // ta.cross(ma5, ma13): compares exactly, with the last bar where both values were not na
   let prev5 = NaN;
   let prev13 = NaN;
@@ -86,6 +90,8 @@ export function calculate(
       : cfg.regimeMode === 'Bearish only (EMA20 < EMA200)' ? bearRegime : true;
     const buyCond = cross && gt(a, b) && regimeFilter;
     const sellCond = cross && lt(a, ma8[i]) && lt(a, b) && regimeFilter;
+    buyFlags.push(buyCond);
+    sellFlags.push(sellCond);
     // plotshape(buy_cond, "BUY SIGNAL", shape.triangleup, location.belowbar, color.lime, size = size.large,
     //   text = "BUY NOW"): default text colour
     if (buyCond) {
@@ -109,8 +115,16 @@ export function calculate(
       plot4: line(ema200, EMA200_COL),
     },
     markers,
+    // alertcondition(buy_cond, "Buy Condition") / alertcondition(sell_cond, "Sell Condition")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Condition', message: 'Buy Alert!' },
+  { id: 'alert1', title: 'Sell Condition', message: 'Sell Alert!' },
+];
 
 export const SuperSma5813Ema20200RegimeFilter = {
   calculate,
@@ -118,4 +132,5 @@ export const SuperSma5813Ema20200RegimeFilter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

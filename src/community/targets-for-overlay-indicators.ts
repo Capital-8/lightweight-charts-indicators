@@ -14,6 +14,9 @@
  *
  * As the original: "New Target When Reached" of the crossunder target deletes the label of the crossover target.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Target 1 New' / 'Target 2 New' on the bars where a target of the
+ * setup is set, 'Target 1 Reached' / 'Target 2 Reached' on the bars where its active target is reached.
+ *
  * Chart values read: the symbol tick (`syminfo.mintick`: "Ticks" distance and the label tooltips).
  *
  * Reference: "Targets For Overlay Indicators [LuxAlgo]" by LuxAlgo
@@ -27,6 +30,7 @@ import {
 } from 'oakscriptjs';
 import type { BarColorData, LabelData, LineDrawingData, TableData } from '../types';
 import { mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type Distance = 'Currencies' | '%' | 'ATR' | 'Ticks';
 const DISTANCES = ['Currencies', '%', 'ATR', 'Ticks'];
@@ -146,7 +150,7 @@ export function calculate(
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'lines' | 'labels' | 'tables' | 'barColors'> & {
   lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[]; barColors: BarColorData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const mintick = mintickOf(chart);
@@ -180,6 +184,9 @@ export function calculate(
       obj: { value: NaN, reached: true, active: false } as Target,
       count: 0,
       countReached: 0,
+      // isNewTarget<k> / isTgReached<k> of every bar
+      isNew: new Array<boolean>(n).fill(false),
+      isReached: new Array<boolean>(n).fill(false),
     };
   };
   const t1 = setup(1);
@@ -208,6 +215,7 @@ export function calculate(
           o.reached = true;
           o.active = false;
           t.countReached += 1;
+          t.isReached[i] = true;
           css = null;
           if (o.lbl) label.set_color(o.lbl, t.css);
         }
@@ -227,6 +235,7 @@ export function calculate(
           created.v = line.new(i, bar.close, i, targetValue, 'bar_index', undefined, t.css, t.style);
           created.h = line.new(i, targetValue, i, targetValue, 'bar_index', undefined, t.css, t.style);
           t.count += 1;
+          t.isNew[i] = true;
         }
       }
       if (cfg.candleColoring && css !== null) barColors.push({ time: bar.time, color: css });
@@ -285,8 +294,17 @@ export function calculate(
     lines: drawn.lines ?? [],
     labels: drawn.labels ?? [],
     tables: drawn.tables ?? [],
+    alerts: alertStates(alertConditions, bars, [t1.isNew, t1.isReached, t2.isNew, t2.isReached]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Target 1 New', message: 'Target 1 New' },
+  { id: 'alert1', title: 'Target 1 Reached', message: 'Target 1 Reached' },
+  { id: 'alert2', title: 'Target 2 New', message: 'Target 2 New' },
+  { id: 'alert3', title: 'Target 2 Reached', message: 'Target 2 Reached' },
+];
 
 export const TargetsForOverlayIndicators = {
   calculate,
@@ -294,4 +312,5 @@ export const TargetsForOverlayIndicators = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

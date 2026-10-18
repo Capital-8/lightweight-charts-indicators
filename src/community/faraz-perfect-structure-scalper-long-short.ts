@@ -11,6 +11,8 @@
  * orange when the close is between a structure level and the breakout / breakdown level (no-add zone). A scalp
  * engine gives Buy / Sell Scalp signals on crossings of a MACD (EMA fast - EMA slow) with its SMA signal, confirmed
  * by the direction of a TEMA.
+ * Alerts (alertcondition, `alerts` of the result): XL Long / XS Short, Base Long / Short and Buy / Sell Scalp, true
+ * on the bars of these signals.
  *
  * Reference: "Faraz Perfect Structure Scalper + Long Short (Indicator Alerts)" by fsaleem03
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +20,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface FarazPerfectStructureScalperLongShortInputs {
   /** Swing pivot length (both sides) */
@@ -132,7 +135,8 @@ const le = (a: number, b: number) => ge(b, a);
 export function calculate(
   bars: Bar[],
   inputs: Partial<FarazPerfectStructureScalperLongShortInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -191,6 +195,7 @@ export function calculate(
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
+  const flags: boolean[][] = [[], [], [], [], [], []];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const c = bars[i].close;
@@ -215,6 +220,7 @@ export function calculate(
 
     const buyScalp = crossUp[i] === 1 && gt(itgTema[i], prev(itgTema, i));
     const sellScalp = crossDown[i] === 1 && lt(itgTema[i], prev(itgTema, i));
+    [perfectLong, perfectShort, baseLong, baseShort, buyScalp, sellScalp].forEach((f, k) => flags[k].push(f));
 
     // No-add zone background
     const longNoAddZone = gt(c, structLow[i]) && lt(c, breakoutLvl[i]);
@@ -268,8 +274,20 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    // alertcondition(perfectLong / perfectShort / baseLong / baseShort / buyScalp / sellScalp)
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Faraz XL Long Signal', message: 'Faraz Perfect Structure: XL LONG signal on {{ticker}} ({{interval}}).' },
+  { id: 'alert1', title: 'Faraz XS Short Signal', message: 'Faraz Perfect Structure: XS SHORT signal on {{ticker}} ({{interval}}).' },
+  { id: 'alert2', title: 'Faraz Base Long', message: 'Faraz Structure: Base LONG signal on {{ticker}} ({{interval}}).' },
+  { id: 'alert3', title: 'Faraz Base Short', message: 'Faraz Structure: Base SHORT signal on {{ticker}} ({{interval}}).' },
+  { id: 'alert4', title: 'Faraz Buy Scalp', message: 'Faraz ITG-style BUY SCALP on {{ticker}} ({{interval}}).' },
+  { id: 'alert5', title: 'Faraz Sell Scalp', message: 'Faraz ITG-style SELL SCALP on {{ticker}} ({{interval}}).' },
+];
 
 export const FarazPerfectStructureScalperLongShort = {
   calculate,
@@ -277,4 +295,5 @@ export const FarazPerfectStructureScalperLongShort = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

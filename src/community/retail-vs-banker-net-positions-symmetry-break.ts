@@ -9,6 +9,8 @@
  * `lenSpike` bars), larger than the retail z-score by a gap, larger than a minimum, while the retail line is quiet
  * or moves the other way; a cooldown separates two breaks. Markers: retail zero crosses, institutional extremes
  * (confirmed pivots of the line, or a new high / low of a window) and the breaks; optional background shading.
+ * Alerts (alertcondition, `alerts` of the result): the six conditions of the original, retail flips up / down / either
+ * direction, institutional extreme high / low, symmetry break.
  *
  * Reference: "Retail vs Banker Net Positions – Symmetry Break" by JasonHyde
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +20,7 @@ import {
   ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar,
 } from 'oakscriptjs';
 import type { BgColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RetailVsBankerNetPositionsSymmetryBreakInputs {
   /** Trend EMA length */
@@ -154,7 +157,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<RetailVsBankerNetPositionsSymmetryBreakInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -224,6 +227,8 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  // alertcondition flags in the original's order
+  const flags: boolean[][] = [0, 1, 2, 3, 4, 5].map(() => new Array<boolean>(n).fill(false));
   let lastIdx = NaN;
   let lastTopIdx = NaN;
   let lastBotIdx = NaN;
@@ -251,11 +256,11 @@ export function calculate(
     if (!isNaN(r)) prevRet = r;
     // plotchar(showRetFlips and retFlipUp ? retNet : na, char = "▲", location.absolute, color.lime, size.tiny)
     if (cfg.showRetFlips && retFlipUp) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: r, shape: 'circle', color: 'transparent', text: '▲',
+      markers.push({ id: 'char0', time: t, position: 'atPriceMiddle', price: r, shape: 'circle', color: 'transparent', text: '▲',
         textColor: color.lime, size: 'tiny' });
     }
     if (cfg.showRetFlips && retFlipDown) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: r, shape: 'circle', color: 'transparent', text: '▼',
+      markers.push({ id: 'char1', time: t, position: 'atPriceMiddle', price: r, shape: 'circle', color: 'transparent', text: '▼',
         textColor: color.red, size: 'tiny' });
     }
 
@@ -274,13 +279,19 @@ export function calculate(
     const botFire = botNow && canBot;
     if (topFire) lastTopIdx = i;
     if (botFire) lastBotIdx = i;
+    flags[0][i] = retFlipUp;
+    flags[1][i] = retFlipDown;
+    flags[2][i] = retFlipUp || retFlipDown;
+    flags[3][i] = topFire;
+    flags[4][i] = botFire;
+    flags[5][i] = symBreak;
     // plotchar(topFire ? instNet : na, "Institutional Extreme High", "●", location.absolute, size.tiny, aqua)
     if (topFire && !isNaN(v)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: v, shape: 'circle', color: 'transparent', text: '●',
+      markers.push({ id: 'char2', time: t, position: 'atPriceMiddle', price: v, shape: 'circle', color: 'transparent', text: '●',
         textColor: color.aqua, size: 'tiny' });
     }
     if (botFire && !isNaN(v)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: v, shape: 'circle', color: 'transparent', text: '●',
+      markers.push({ id: 'char3', time: t, position: 'atPriceMiddle', price: v, shape: 'circle', color: 'transparent', text: '●',
         textColor: color.orange, size: 'tiny' });
     }
     // bgcolor layers in Pine order (the later call is drawn on top)
@@ -290,7 +301,7 @@ export function calculate(
     // plotshape(showMarks and symBreak, style = shape.circle, location = location.top, size = size.tiny,
     //           color = color.fuchsia, text = "Break"): Pine default text colour (blue)
     if (cfg.showMarks && symBreak) {
-      markers.push({ time: t, position: 'top', shape: 'circle', color: color.fuchsia, text: 'Break', textColor: color.blue,
+      markers.push({ id: 'shape4', time: t, position: 'top', shape: 'circle', color: color.fuchsia, text: 'Break', textColor: color.blue,
         size: 'tiny' });
     }
   }
@@ -311,8 +322,23 @@ export function calculate(
     ],
     markers,
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Retail Flip: Red → Green', message: 'Retail (proxy) crossed above zero — color changed from red to green.' },
+  { id: 'alert1', title: 'Retail Flip: Green → Red', message: 'Retail (proxy) crossed below zero — color changed from green to red.' },
+  { id: 'alert2', title: 'Retail Flip: Either Direction', message: 'Retail (proxy) changed color (crossed the zero line).' },
+  { id: 'alert3', title: 'Institutional Extreme HIGH', message: 'Institutional proxy reached an extreme HIGH (pivot/window).' },
+  { id: 'alert4', title: 'Institutional Extreme LOW', message: 'Institutional proxy reached an extreme LOW (pivot/window).' },
+  {
+    id: 'alert5',
+    title: 'Symmetry Break (Institution)',
+    message: 'Institution line made a sudden, outsized move while Retail was quiet or opposite (symmetry broken).',
+  },
+];
 
 export const RetailVsBankerNetPositionsSymmetryBreak = {
   calculate,
@@ -322,4 +348,5 @@ export const RetailVsBankerNetPositionsSymmetryBreak = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

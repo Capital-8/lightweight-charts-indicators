@@ -1,7 +1,9 @@
 /**
  * Slow Heiken Ashi
  *
- * Heikin-Ashi candles smoothed with SMA for a slower, smoother view.
+ * Heikin-Ashi candles smoothed with SMA for a slower, smoother view. A white '▼' at the candle high when the candle
+ * turns from bullish to bearish, a white '▲' at the candle low when it turns from bearish to bullish (the original's
+ * two plotchar outputs, ids char0 / char1). The original has no alerts.
  *
  * Reference: "Slow Heiken Ashi" (community)
  */
@@ -103,19 +105,21 @@ export function calculate(bars: Bar[], inputs: Partial<SlowHeikenAshiInputs> = {
     const c = smoothC[i];
     const po = smoothO[i - 1];
     const pc = smoothC[i - 1];
-    if (o == null || c == null || po == null || pc == null) continue;
+    const h = smoothH[i];
+    const l = smoothL[i];
+    if (o == null || c == null || po == null || pc == null || h == null || l == null) continue;
 
     const prevBullish = pc >= po; // previous candle was bullish (green)
     const currBullish = c >= o;
 
     // Cross(vOpen, vClose) means color flipped
     if (prevBullish && !currBullish) {
-      // Was bullish, now bearish -> bearish signal (▼)
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#FFFFFF', text: 'Sell' });
+      // Was bullish, now bearish -> bearish signal: plotchar(..., char='▼', color=white, location=location.absolute)
+      markers.push({ id: 'char0', time: bars[i].time, position: 'atPriceMiddle', price: h, shape: 'circle', char: '▼', color: '#FFFFFF' });
     }
     if (!prevBullish && currBullish) {
-      // Was bearish, now bullish -> bullish signal (▲)
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#FFFFFF', text: 'Buy' });
+      // Was bearish, now bullish -> bullish signal: plotchar(..., char='▲', color=white, location=location.absolute)
+      markers.push({ id: 'char1', time: bars[i].time, position: 'atPriceMiddle', price: l, shape: 'circle', char: '▲', color: '#FFFFFF' });
     }
   }
 

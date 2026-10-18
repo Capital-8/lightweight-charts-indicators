@@ -178,13 +178,14 @@ export function calculate(
 
     // Filtered pivots: plotshape(..., location.absolute, offset = -rightBars)
     if (strong && hidePivot && (isHigh || isLow)) {
-      const draw = (price: number, base: string) => {
+      // ids of the four plotshape outputs: shape0 / shape1 (pivot high, small / tiny), shape2 / shape3 (pivot low)
+      const draw = (price: number, base: string, smallId: string, tinyId: string) => {
         const time = bars[back].time;
-        markers.push({ time, position: 'atPriceMiddle', price, shape: 'circle', color: String(color.new(base, 60)), size: 'small' });
-        markers.push({ time, position: 'atPriceMiddle', price, shape: 'circle', color: base, size: 'tiny' });
+        markers.push({ id: smallId, time, position: 'atPriceMiddle', price, shape: 'circle', color: String(color.new(base, 60)), size: 'small' });
+        markers.push({ id: tinyId, time, position: 'atPriceMiddle', price, shape: 'circle', color: base, size: 'tiny' });
       };
-      if (isHigh) draw(bars[back].high, upperCol);
-      if (isLow) draw(bars[back].low, lowerCol);
+      if (isHigh) draw(bars[back].high, upperCol, 'shape0', 'shape1');
+      if (isLow) draw(bars[back].low, lowerCol, 'shape2', 'shape3');
     }
   }
   setDrawingBar(null);

@@ -3,12 +3,16 @@
  *
  * Tillson T3 smoothing applied to RSI, then PMax trailing stop.
  * T3 is a triple-smoothed EMA with a volume factor for reduced lag.
+ * Alerts (alertcondition, `alerts` of the result): crosses of T3 and PMax (either way, over, under) and crosses of
+ * hl2 (the default source of the original's price alerts; the port has no source input) and PMax, on the bars where
+ * the lines are drawn (after the warm-up).
  *
  * Reference: "PMax on RSI with T3"
  */
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PMaxRSIT3Inputs {
   rsiLen: number;
@@ -45,7 +49,7 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<PMaxRSIT3Inputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<PMaxRSIT3Inputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { rsiLen, t3Len, t3Factor, atrMult } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -173,6 +177,13 @@ export function calculate(bars: Bar[], inputs: Partial<PMaxRSIT3Inputs> = {}): O
     }
   }
 
+  // cross / crossover / crossunder of (T3, PMax) and of (hl2, PMax), on the drawn bars only (na before the warm-up)
+  const xo = (a: number[], b: number[]) => a.map((v, i) => i > warmup && v > b[i] && a[i - 1] <= b[i - 1]);
+  const xu = (a: number[], b: number[]) => a.map((v, i) => i > warmup && v < b[i] && a[i - 1] >= b[i - 1]);
+  const hl2 = bars.map((bar) => (bar.high + bar.low) / 2);
+  const t3Over = xo(t3, pmaxArr), t3Under = xu(t3, pmaxArr);
+  const srcOver = xo(hl2, pmaxArr), srcUnder = xu(hl2, pmaxArr);
+
   // RSI line plot (Pine: plot(showrsi ? rsi : na, "RSI", color=#8E1599))
   const plot2 = rsiArr.map((v, i) => ({
     time: bars[i].time,
@@ -203,7 +214,21 @@ export function calculate(bars: Bar[], inputs: Partial<PMaxRSIT3Inputs> = {}): O
       { plot1: 'band1', plot2: 'band0', colors: bandFillColors },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, [
+      t3Over.map((v, i) => v || t3Under[i]), t3Over, t3Under,
+      srcOver.map((v, i) => v || srcUnder[i]), srcOver, srcUnder,
+    ]),
   };
 }
 
-export const PMaxRSIT3 = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cross Alert', message: 'PMax - Moving Avg Crossing!' },
+  { id: 'alert1', title: 'Crossover Alarm', message: 'Moving Avg BUY SIGNAL!' },
+  { id: 'alert2', title: 'Crossunder Alarm', message: 'Moving Avg SELL SIGNAL!' },
+  { id: 'alert3', title: 'Price Cross Alert', message: 'PMax - Price Crossing!' },
+  { id: 'alert4', title: 'Price Crossover Alarm', message: 'PRICE OVER PMax - BUY SIGNAL!' },
+  { id: 'alert5', title: 'Price Crossunder Alarm', message: 'PRICE UNDER PMax - SELL SIGNAL!' },
+];
+
+export const PMaxRSIT3 = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

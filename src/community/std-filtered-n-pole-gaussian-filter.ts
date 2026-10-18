@@ -6,6 +6,7 @@
  * source and / or the output: a change smaller than `filter` standard deviations of the last `filterperiod` values
  * keeps the previous value. The line is green while it rises and red while it falls (bar colours too); "L" / "S"
  * triangles mark the turns from down to up and from up to down.
+ * Alerts (alertcondition, `alerts` of the result): 'Long' and 'Short', true on the bars of the L / S turns.
  *
  * Sources: the chart bars, the Heikin Ashi bars of the chart (built from the chart bars) and the "Heiken-Ashi
  * Better" bars of the library loxxexpandedsourcetypes by loxx (its functions are ported in this file: AMA, T3 or
@@ -21,6 +22,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type Smoothing = 'AMA' | 'T3' | 'Kaufman';
 type FilterOption = 'Price' | 'Gaussian Filter' | 'Both' | 'None';
@@ -305,7 +307,7 @@ function sourceOf(bars: Bar[], cfg: StdFilteredNPoleGaussianFilterInputs): numbe
 export function calculate(
   bars: Bar[],
   inputs: Partial<StdFilteredNPoleGaussianFilterInputs> = {},
-): IndicatorResult & { markers: MarkerData[]; barColors: BarColorData[] } {
+): IndicatorResult & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -320,6 +322,8 @@ export function calculate(
   }
 
   const plot0: Array<{ time: number; value: number; color: string }> = [];
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
   let contsw = 0;
@@ -340,6 +344,8 @@ export function calculate(
     contsw = pregoLong ? 1 : pregoShort ? -1 : prevContsw;
     const goLong = pregoLong && prevContsw === -1;
     const goShort = pregoShort && prevContsw === 1;
+    longFlags.push(goLong);
+    shortFlags.push(goShort);
     colorout = state === -1 ? RED : state === 1 ? GREEN : colorout === 'transparent' ? TRANSPARENT_BLACK : colorout;
 
     const time = bars[i].time;
@@ -358,7 +364,15 @@ export function calculate(
     plots: { plot0 },
     markers,
     barColors,
+    // alertcondition(goLong, "Long") / alertcondition(goShort, "Short")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
-export const StdFilteredNPoleGaussianFilter = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long', message: 'STD-Filtered, N-Pole Gaussian Filter [Loxx]: Long\nSymbol: {{ticker}}\nPrice: {{close}}' },
+  { id: 'alert1', title: 'Short', message: 'STD-Filtered, N-Pole Gaussian Filter [Loxx]: Short\nSymbol: {{ticker}}\nPrice: {{close}}' },
+];
+
+export const StdFilteredNPoleGaussianFilter = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

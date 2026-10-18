@@ -13,6 +13,9 @@
  * Optional Alligator lines (SMMA of hl2 with volatility-adjusted lengths 13 / 8 / 5, shifted 8 / 5 / 3 bars back)
  * and EMAs (20 or 50, 100, 200) coloured by the close above / below them.
  *
+ * Alerts (alertcondition, `alerts` of the result): the MACD line crossing over / under its signal and the RSI (RSI
+ * length) crossing over 80 / under 20.
+ *
  * Reference: "AI Infinity" by jonathanalbrecht_trader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Jonny86FXPro
@@ -20,6 +23,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AiInfinityInputs {
   enableBarColor: boolean;
@@ -255,7 +259,7 @@ function gradient(start: string, midC: string, end: string): string[] {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AiInfinityInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -434,8 +438,25 @@ export function calculate(
     plots,
     fills,
     barColors,
+    // bullishMACDCross / bearishMACDCross = ta.crossover / ta.crossunder(macdLine, signalLine);
+    // rsiCrossAbove80 = ta.crossover(rsiValue, 80), rsiCrossBelow20 = ta.crossunder(rsiValue, 20)
+    alerts: (() => {
+      const rsi = A(ta.rsi(closeS, cfg.rsiLength));
+      return alertStates(alertConditions, bars, [
+        crossedOver(macdLine, signalLine), crossedUnder(macdLine, signalLine),
+        crossedOver(rsi, 80), crossedUnder(rsi, 20),
+      ]);
+    })(),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish MACD Cross', message: 'MACD line crossed ABOVE the signal line. Possible Bullish momentum.' },
+  { id: 'alert1', title: 'Bearish MACD Cross', message: 'MACD line crossed BELOW the signal line. Possible Bearish momentum.' },
+  { id: 'alert2', title: 'RSI Cross Above 80', message: 'RSI just crossed ABOVE 80. Potentially overbought zone.' },
+  { id: 'alert3', title: 'RSI Cross Below 20', message: 'RSI just crossed BELOW 20. Potentially oversold zone.' },
+];
 
 export const AiInfinity = {
   calculate,
@@ -443,4 +464,5 @@ export const AiInfinity = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

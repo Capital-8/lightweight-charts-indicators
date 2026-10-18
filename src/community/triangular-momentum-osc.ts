@@ -167,15 +167,15 @@ export function calculate(bars: Bar[], inputs: Partial<TriangularMomentumOscInpu
     // Pine: plotshape(iff(bull,osc,na), shape.circle, location.absolute, #00c42b)
     // Pine: plotshape(iff(bull,osc,na), shape.labelup, location.absolute, #00c42b, text="Buy")
     if (bull) {
-      markers.push({ time: bars[i].time, position: 'inBar', shape: 'circle', color: '#00c42b' });
-      markers.push({ time: bars[i].time, position: 'inBar', shape: 'labelUp', color: '#00c42b', text: 'Buy' });
+      markers.push({ id: 'shape0', time: bars[i].time, position: 'inBar', shape: 'circle', color: '#00c42b' });
+      markers.push({ id: 'shape2', time: bars[i].time, position: 'inBar', shape: 'labelUp', color: '#00c42b', text: 'Buy' });
     }
 
     // Pine: plotshape(iff(bear,osc,na), shape.circle, location.absolute, #ff441f)
     // Pine: plotshape(iff(bear,osc,na), shape.labeldown, location.absolute, #ff441f, text="Sell")
     if (bear) {
-      markers.push({ time: bars[i].time, position: 'inBar', shape: 'circle', color: '#ff441f' });
-      markers.push({ time: bars[i].time, position: 'inBar', shape: 'labelDown', color: '#ff441f', text: 'Sell' });
+      markers.push({ id: 'shape1', time: bars[i].time, position: 'inBar', shape: 'circle', color: '#ff441f' });
+      markers.push({ id: 'shape3', time: bars[i].time, position: 'inBar', shape: 'labelDown', color: '#ff441f', text: 'Sell' });
     }
 
     // Pine: line.new from previous crossover/crossunder to current

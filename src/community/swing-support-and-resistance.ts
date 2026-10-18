@@ -5,6 +5,7 @@
  * levels are drawn as circles, shifted back by `pivotLen` bars (on the bars where the pivots are confirmed minus
  * `pivotLen`). A Buy triangle marks a close crossing above the resistance, a Sell triangle a close crossing below
  * the support.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Alert' and 'Sell Alert', true on the bars of each signal.
  *
  * Reference: "Swing Support and Resistance [Vijay]" by VSB-2024
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,13 @@
 import { ta, Series, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'Buy: Price broke above resistance' },
+  { id: 'alert1', title: 'Sell Alert', message: 'Sell: Price broke below support' },
+];
 
 export interface SwingSupportAndResistanceInputs {
   /** Pivot length (bars on each side) */
@@ -47,7 +55,7 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<SwingSupportAndResistanceInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = cfg.pivotLen;
@@ -105,6 +113,8 @@ export function calculate(
       plot1: shifted(support, cfg.showSupport, color.green),
     },
     markers,
+    // alertcondition(buySignal, 'Buy Alert') / alertcondition(sellSignal, 'Sell Alert')
+    alerts: alertStates(alertConditions, bars, [buySignal.map((v) => !!v), sellSignal.map((v) => !!v)]),
   };
 }
 
@@ -114,4 +124,5 @@ export const SwingSupportAndResistance = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

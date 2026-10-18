@@ -11,6 +11,10 @@
  *
  * The chart background colour comes from the chart context (third argument); without it the dark theme value is used.
  *
+ * Alerts (as the original's alertcondition calls): buying absorption (a bubble in the lower wick), selling absorption
+ * (a bubble in the upper wick) and any absorption, on confirmed bars only (`barstate.isconfirmed`: the last bar only
+ * when the chart context says it is closed, `lastBarConfirmed`; true without a context).
+ *
  * Reference: "Absorption Bubbles" by profitprotrading
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © profitprotrading
@@ -18,7 +22,8 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, MarkerData, PineSize } from '../types';
-import { backgroundColorOf, type ChartContext } from '../chart-context';
+import { backgroundColorOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AbsorptionBubblesInputs {
   showDots: boolean;
@@ -49,6 +54,12 @@ export const metadata = {
   overlay: true,
 };
 
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buying Absorption', message: 'Absorption detected: Buyers absorbed selling pressure' },
+  { id: 'alert1', title: 'Selling Absorption', message: 'Absorption detected: Sellers absorbed buying pressure' },
+  { id: 'alert2', title: 'Absorption (Any)', message: 'Absorption detected: Buying or Selling absorption event' },
+];
+
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
@@ -68,7 +79,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<AbsorptionBubblesInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const t = cfg.limitFactor;
   const whiteChart = isWhite(backgroundColorOf(chart));
@@ -86,6 +97,9 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
+  const lastConfirmed = lastBarConfirmedOf(chart);
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [], anyFlags: boolean[] = [];
   for (let i = 0; i < bars.length; i++) {
     const b = bars[i];
     const midPrice = (b.high + b.low) / 2;
@@ -107,19 +121,26 @@ export function calculate(
     const validUp = ge(midPrice, topBody) && le(midPrice, b.high);
     const validDn = le(midPrice, lowBody) && ge(midPrice, b.low);
 
+    // alertcondition((condA or ... or condE) and validDn / validUp / (validUp or validDn) and barstate.isconfirmed)
+    const confirmed = i < bars.length - 1 || lastConfirmed;
+    const anyCond = cond.some((c) => c);
+    buyFlags.push(anyCond && validDn && confirmed);
+    sellFlags.push(anyCond && validUp && confirmed);
+    anyFlags.push(anyCond && (validUp || validDn) && confirmed);
+
     // plotshape(condX and validUp ? midPrice : na, "", shape.circle, location.absolute, gradUp, size = ...):
     // the five upper-wick series first, then the five lower-wick series
     if (!isNaN(midPrice)) {
       for (let k = 0; k < 5; k++) {
         if (cond[k] && validUp) {
           markers.push({ time: b.time, position: 'atPriceMiddle', price: midPrice, shape: 'circle',
-            color: String(color.from_gradient(scaledVol, 0, 8, upFrom, upTo)), size: sizes[k] });
+            color: String(color.from_gradient(scaledVol, 0, 8, upFrom, upTo)), size: sizes[k], id: `shape${k}` });
         }
       }
       for (let k = 0; k < 5; k++) {
         if (cond[k] && validDn) {
           markers.push({ time: b.time, position: 'atPriceMiddle', price: midPrice, shape: 'circle',
-            color: String(color.from_gradient(scaledVol, 0, 8, dnFrom, dnTo)), size: sizes[k] });
+            color: String(color.from_gradient(scaledVol, 0, 8, dnFrom, dnTo)), size: sizes[k], id: `shape${k + 5}` });
         }
       }
     }
@@ -127,8 +148,8 @@ export function calculate(
     const insideBody = gt(midPrice, lowBody) && lt(midPrice, topBody);
     const heavyVolBody = gt(scaledVol, t + 2);
     // barcolor(insideBody and heavyVolBody and bullBar ? color.rgb(0, 255, 0) : na), then the same for bearBar
-    if (insideBody && heavyVolBody && bullBar) barColors.push({ time: b.time, color: bullBarColor });
-    if (insideBody && heavyVolBody && bearBar) barColors.push({ time: b.time, color: bearBarColor });
+    if (insideBody && heavyVolBody && bullBar) barColors.push({ time: b.time, color: bullBarColor, id: 'barcolor0' });
+    if (insideBody && heavyVolBody && bearBar) barColors.push({ time: b.time, color: bearBarColor, id: 'barcolor1' });
   }
 
   return {
@@ -136,7 +157,8 @@ export function calculate(
     plots: {},
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, anyFlags]),
   };
 }
 
-export const AbsorptionBubbles = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const AbsorptionBubbles = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -8,6 +8,8 @@
  * higher high with a falling VWAP slope (linear regression of the VWAP now and `slopeLength` bars ago), a close
  * crossing over the VWAP on a volume below its 20-bar average, and a close back below +1 sigma after a close above
  * +3 sigma.
+ * Alerts (alertcondition, `alerts` of the result): 'VWAP Slope Divergence', 'Low Volume Retest' and 'Deviation
+ * Failure', true on the bars of each signal (also with the signals hidden).
  *
  * Reference: "Dynamic VWAP: Fair Value & Divergence Suite" by RWCS_LTD
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DynamicVwapFairValueDivergenceSuiteInputs {
   /** Show the divergence signals */
@@ -92,7 +95,7 @@ const eq = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) <
 export function calculate(
   bars: Bar[],
   inputs: Partial<DynamicVwapFairValueDivergenceSuiteInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -154,6 +157,7 @@ export function calculate(
   const crossAboveVWAP = A(ta.crossover(S(close), S(vwapValue)));
 
   const markers: MarkerData[] = [];
+  const flags: boolean[][] = [[], [], []];
   const fillColor = (on: boolean, c: string) => (cfg.showFills && on ? c : 'transparent');
   const fills = {
     f1: new Array<string>(n), f2: new Array<string>(n), f3: new Array<string>(n),
@@ -176,6 +180,9 @@ export function calculate(
     // sigmaFail = close[1] > upper3[1] and close < upper1
     const sigmaFail = i > 0 && gt(close[i - 1], upper3[i - 1]) && lt(close[i], upper1[i]);
     const t = time[i];
+    flags[0].push(slopeDivergence);
+    flags[1].push(lowVolumeRetest);
+    flags[2].push(sigmaFail);
     if (cfg.detect && slopeDivergence) {
       markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: slopeColor, size: 'tiny' });
     }
@@ -239,8 +246,17 @@ export function calculate(
       { plot1: 'plot17', plot2: 'plot18', options: { title: '+4σ to +5σ Fill' }, colors: fills.f6 },
     ],
     markers,
+    // alertcondition(slopeDivergence) / alertcondition(lowVolumeRetest) / alertcondition(sigmaFail)
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'VWAP Slope Divergence', message: 'VWAP slope divergence detected.' },
+  { id: 'alert1', title: 'Low Volume Retest', message: 'Price crossed VWAP on low volume.' },
+  { id: 'alert2', title: 'Deviation Failure', message: 'Deviation failure detected (mean reversion signal).' },
+];
 
 export const DynamicVwapFairValueDivergenceSuite = {
   calculate,
@@ -248,4 +264,5 @@ export const DynamicVwapFairValueDivergenceSuite = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

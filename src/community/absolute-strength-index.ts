@@ -6,6 +6,8 @@
  * normalised between them: ASI = (return - loser) / (winner - loser) * 2 - 1. A moving average of the ASI is the
  * signal line; bands at +8 / -8 with a background fill, gradient fills beyond +5 / -5, and optional divergences
  * (ASI at its lowest / highest of a lookback while the price makes a lower low / higher high).
+ * Alerts (alertcondition, `alerts` of the result): 'Regular Bullish Divergence' / 'Regular Bearish Divergence', true
+ * on the bars of a Bull / Bear divergence label (only with "Divergence" on).
  *
  * Reference: "Absolute Strength Index [ASI] (Zeiierman)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type ASIMAType = 'SMA' | 'EMA' | 'WMA' | 'RMA' | 'HMA';
 
@@ -114,7 +117,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AbsoluteStrengthIndexInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const close = bars.map((b) => b.close);
@@ -170,6 +173,8 @@ export function calculate(
   const bullPlot: { time: number; value: number; color: string }[] = [];
   const bearPlot: { time: number; value: number; color: string }[] = [];
   const markers: MarkerData[] = [];
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     let plFound = false;
@@ -194,6 +199,8 @@ export function calculate(
         prevPriceHigh = bars[i].high;
       }
     }
+    bullFlags.push(bullCond);
+    bearFlags.push(bearCond);
     // plot(plFound ? ASI : na, linewidth = 2, color = bullCond ? bullColor : na, display = display.pane)
     bullPlot.push({ time: t, value: plFound ? asi[i] : NaN, color: bullCond ? cfg.bullColor : 'transparent' });
     bearPlot.push({ time: t, value: phFound ? asi[i] : NaN, color: bearCond ? cfg.bearColor : 'transparent' });
@@ -243,8 +250,16 @@ export function calculate(
           topColor: new Array(n).fill(osTop), bottomColor: new Array(n).fill(osBottom) } },
     ],
     markers,
+    // alertcondition(bullCond, ...) / alertcondition(bearCond, ...)
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Regular Bullish Divergence', message: 'Found a new Regular Bullish Divergence' },
+  { id: 'alert1', title: 'Regular Bearish Divergence', message: 'Found a new Regular Bearish Divergence' },
+];
 
 export const AbsoluteStrengthIndex = {
   calculate,
@@ -254,4 +269,5 @@ export const AbsoluteStrengthIndex = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

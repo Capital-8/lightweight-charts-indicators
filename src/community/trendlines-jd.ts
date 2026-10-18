@@ -16,6 +16,8 @@
  *   the bar and a lime bar; a close that crosses over a line of the lows gives a triangle above the bar and a
  *   fuchsia bar. The comparison uses the close of the bar before on which the same side was tested.
  * - Plots: the pivot highs and pivot lows, on the bar of the pivot.
+ * - Alerts (alertcondition, `alerts` of the result, whatever "show trendline breaks"): 'trendline break' (either
+ *   break), 'trendline break up' (cross over a line of the highs) and 'trendline break down' (over a line of the lows).
  *
  * "limit number of trendlines shown": the original reads the line that was current a number of bars ago, the number
  * of bars since an older pivot. While fewer pivots than that exist, the number is the bar time divided by the bar
@@ -31,6 +33,7 @@ import {
   type Bar, type Line,
 } from 'oakscriptjs';
 import type { BarColorData, LineDrawingData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendlinesJdInputs {
   len: number;
@@ -108,7 +111,8 @@ interface Site { bar: number; value: number; previous: number }
 export function calculate(
   bars: Bar[],
   inputs: Partial<TrendlinesJdInputs> = {},
-): Omit<IndicatorResult, 'lines' | 'markers' | 'barColors'> & { lines: LineDrawingData[]; markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'lines' | 'markers' | 'barColors'>
+  & { lines: LineDrawingData[]; markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = Math.trunc(cfg.len);
@@ -190,6 +194,7 @@ export function calculate(
   const colorLow: Array<string | null> = new Array(n).fill(null);
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const breakFlags: boolean[] = [], upFlags: boolean[] = [], downFlags: boolean[] = [];
 
   try {
     for (let i = 0; i < n; i++) {
@@ -263,6 +268,11 @@ export function calculate(
       colorHigh[i] = highsFall ? colorRising : cfg.dispSelect ? null : colorFalling;
       colorLow[i] = gt(slopeLow * time, 0) ? colorFalling : cfg.dispSelect ? null : colorRising;
 
+      // alertcondition(long_break or short_break) / alertcondition(long_break) / alertcondition(short_break)
+      breakFlags.push(longBreak || shortBreak);
+      upFlags.push(longBreak);
+      downFlags.push(shortBreak);
+
       if (cfg.doAlerts) {
         const t = bars[i].time as number;
         const shown = !Number.isNaN(bars[i].close) && bars[i].close !== 0;
@@ -297,8 +307,16 @@ export function calculate(
     markers,
     barColors,
     lines,
+    alerts: alertStates(alertConditions, bars, [breakFlags, upFlags, downFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'trendline break', message: 'trendline break: {{close}}' },
+  { id: 'alert1', title: 'trendline break up', message: 'trendline break up: {{close}}' },
+  { id: 'alert2', title: 'trendline break down', message: 'trendline break down: {{close}}' },
+];
 
 export const TrendlinesJd = {
   calculate,
@@ -306,4 +324,5 @@ export const TrendlinesJd = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

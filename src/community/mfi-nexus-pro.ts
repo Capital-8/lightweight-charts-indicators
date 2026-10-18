@@ -8,6 +8,8 @@
  * the same side and can be filtered by MFI and RSI zones and by "wait for the opposite signal". Signals are drawn in
  * the pane and on the price chart (each signal, all signals combined by AND, or by OR). Five connector plots give
  * 1 (buy), -1 (sell) or 0.
+ * Alerts (alertcondition, `alerts` of the result): the buy / sell signals of the MA, BB and divergence modes, of all
+ * three combined by OR and by AND, as the original declares them.
  *
  * Reference: "MFI Nexus Pro [trade_lexx]" by trade_lexx
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,21 @@
 import { ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal MA', message: 'Buy Signal MA: MFI crossed above the MA.' },
+  { id: 'alert1', title: 'Sell Signal MA', message: 'Sell Signal MA: MFI crossed below the MA.' },
+  { id: 'alert2', title: 'Buy Signal BB', message: 'Buy Signal BB: MFI crossed above the lower Bollinger Band.' },
+  { id: 'alert3', title: 'Sell Signal BB', message: 'Sell Signal BB: MFI crossed below the upper Bollinger Band.' },
+  { id: 'alert4', title: 'Buy Signal Div', message: 'Buy Signal Div: Bullish divergence detected.' },
+  { id: 'alert5', title: 'Sell Signal Div', message: 'Sell Signal Div: Bearish divergence detected.' },
+  { id: 'alert6', title: 'Buy OR Signal MA, BB, Div', message: 'Buy Signal: MFI crossed above the MA or BB or bullish divergence' },
+  { id: 'alert7', title: 'Sell OR Signal MA, BB, Div', message: 'Sell Signal: MFI crossed below the MA or BB or bearish divergence.' },
+  { id: 'alert8', title: 'Buy AND Signal MA, BB, Div', message: 'Buy Signal: MFI crossed above the MA or BB or bullish divergence' },
+  { id: 'alert9', title: 'Sell AND Signal MA, BB, Div', message: 'Sell Signal: MFI crossed below the MA or BB or bearish divergence.' },
+];
 
 type MaType = 'SMA' | 'EMA' | 'WMA' | 'HMA' | 'KAMA' | 'VWMA' | 'ALMA' | 'TEMA' | 'ZLEMA' | 'DEMA';
 type AndOrMode = 'None' | 'MA and BB and Div' | 'MA or BB or Div';
@@ -174,7 +191,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<MfiNexusProInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -429,52 +446,68 @@ export function calculate(
   const red = String(color.new(color.red, 0));
   for (let i = 0; i < n; i++) {
     const time = t(i);
-    const pane = (on: boolean, buy: boolean, text: string) => {
+    // id: the Style-settings id of the plotshape (shape<k>, k over the plotshapes in declaration order)
+    const pane = (on: boolean, buy: boolean, text: string, id: string) => {
       if (on) {
         markers.push({ time, position: buy ? 'bottom' : 'top', shape: buy ? 'triangleUp' : 'triangleDown',
-          color: buy ? green : red, text, textColor: PINE_TEXT, size: 'auto' });
+          color: buy ? green : red, text, textColor: PINE_TEXT, size: 'auto', id });
       }
     };
-    const chart = (on: boolean, buy: boolean, text: string) => {
+    const chart = (on: boolean, buy: boolean, text: string, id: string) => {
       if (on) {
         markers.push({ time, position: buy ? 'belowBar' : 'aboveBar', shape: buy ? 'triangleUp' : 'triangleDown',
-          color: buy ? green : red, text, textColor: PINE_TEXT, size: 'auto', forceOverlay: true });
+          color: buy ? green : red, text, textColor: PINE_TEXT, size: 'auto', forceOverlay: true, id });
       }
     };
     // Pane signals: location.bottom / location.top; divergence signals at mfiLBR (location.absolute)
-    pane(cfg.maMode && buyMA[i], true, 'MA');
-    pane(cfg.maMode && sellMA[i], false, 'MA');
-    pane(cfg.bbMode && buyBB[i], true, 'BB');
-    pane(cfg.bbMode && sellBB[i], false, 'BB');
+    pane(cfg.maMode && buyMA[i], true, 'MA', 'shape2');
+    pane(cfg.maMode && sellMA[i], false, 'MA', 'shape3');
+    pane(cfg.bbMode && buyBB[i], true, 'BB', 'shape4');
+    pane(cfg.bbMode && sellBB[i], false, 'BB', 'shape5');
     const price = fin(mfiLBR(i));
     if (!isNaN(price)) {
       if (buyDiv[i]) {
         markers.push({ time, position: 'atPriceMiddle', price, shape: 'triangleUp', color: green, text: 'Div',
-          textColor: PINE_TEXT, size: 'auto' });
+          textColor: PINE_TEXT, size: 'auto', id: 'shape6' });
       }
       if (sellDiv[i]) {
         markers.push({ time, position: 'atPriceMiddle', price, shape: 'triangleDown', color: red, text: 'Div',
-          textColor: PINE_TEXT, size: 'auto' });
+          textColor: PINE_TEXT, size: 'auto', id: 'shape7' });
       }
     }
     // Chart signals (force_overlay)
     const none = cfg.andOrMode === 'None';
-    chart(none && cfg.maMode && buyMA[i], true, 'Buy');
-    chart(none && cfg.maMode && sellMA[i], false, 'Sell');
-    chart(none && cfg.bbMode && buyBB[i], true, 'Buy');
-    chart(none && cfg.bbMode && sellBB[i], false, 'Sell');
-    chart(none && cfg.divergenceMode && buyDiv[i], true, 'Buy');
-    chart(none && cfg.divergenceMode && sellDiv[i], false, 'Sell');
+    chart(none && cfg.maMode && buyMA[i], true, 'Buy', 'shape8');
+    chart(none && cfg.maMode && sellMA[i], false, 'Sell', 'shape9');
+    chart(none && cfg.bbMode && buyBB[i], true, 'Buy', 'shape10');
+    chart(none && cfg.bbMode && sellBB[i], false, 'Sell', 'shape11');
+    chart(none && cfg.divergenceMode && buyDiv[i], true, 'Buy', 'shape12');
+    chart(none && cfg.divergenceMode && sellDiv[i], false, 'Sell', 'shape13');
     if (cfg.andOrMode === 'MA and BB and Div') {
       const texts = ['MA+BB', 'MA+Div', 'BB+Div', 'MA+BB+Div'];
-      sadBuy(i).forEach((on, k) => chart(on, true, texts[k]));
-      sadSell(i).forEach((on, k) => chart(on, false, texts[k]));
+      sadBuy(i).forEach((on, k) => chart(on, true, texts[k], `shape${14 + k}`));
+      sadSell(i).forEach((on, k) => chart(on, false, texts[k], `shape${18 + k}`));
     }
     if (cfg.andOrMode === 'MA or BB or Div') {
-      chart(sodBuy(i), true, 'Buy');
-      chart(sodSell(i), false, 'Sell');
+      chart(sodBuy(i), true, 'Buy', 'shape22');
+      chart(sodSell(i), false, 'Sell', 'shape23');
     }
   }
+
+  // The alertconditions, in the original's order
+  const range = Array.from({ length: n }, (_v, i) => i);
+  const alertFlags: boolean[][] = [
+    range.map((i) => cfg.maMode && buyMA[i]),
+    range.map((i) => cfg.maMode && sellMA[i]),
+    range.map((i) => cfg.bbMode && buyBB[i]),
+    range.map((i) => cfg.bbMode && sellBB[i]),
+    range.map((i) => cfg.divergenceMode && buyDiv[i]),
+    range.map((i) => cfg.divergenceMode && sellDiv[i]),
+    range.map((i) => sodBuy(i)),
+    range.map((i) => sodSell(i)),
+    range.map((i) => sadBuy(i).some(Boolean)),
+    range.map((i) => sadSell(i).some(Boolean)),
+  ];
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -492,6 +525,7 @@ export function calculate(
         colors: new Array<string>(n).fill(cfg.bbMode ? String(color.new(color.green, 90)) : 'transparent') },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
 
@@ -503,4 +537,5 @@ export const MfiNexusPro = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

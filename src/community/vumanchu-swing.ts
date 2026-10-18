@@ -4,12 +4,15 @@
  * Range filter-based momentum indicator with buy/sell signals.
  * Uses EMA-based smoothing for range size calculation and a
  * ratcheting filter that tracks price movement.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Alert' and 'Sell Alert', true on the bars of the original's
+ * longCondition / shortCondition (first long / short condition after the opposite one, from the first bar on).
  *
  * Reference: "Range Filter - B&S Signals" (VuManChu Swing Free)
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VuManChuSwingInputs {
   swingPeriod: number;
@@ -41,7 +44,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<VuManChuSwingInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<VuManChuSwingInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const { swingPeriod, swingMultiplier, useBarColor } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -98,6 +101,10 @@ export function calculate(bars: Bar[], inputs: Partial<VuManChuSwingInputs> = {}
   let condIni = 0;
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  // The original's longCondition / shortCondition for the alerts: exact longCond / shortCond (src[1] na on bar 0,
+  // an unchanged source matches neither side), CondIni[1], no warm-up
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
+  let alertCondIni = 0;
 
   for (let i = 0; i < n; i++) {
     const src = closeArr[i] ?? 0;
@@ -113,6 +120,14 @@ export function calculate(bars: Bar[], inputs: Partial<VuManChuSwingInputs> = {}
     const prevCondIni = condIni;
     if (longCond) condIni = 1;
     else if (shortCond) condIni = -1;
+
+    const src1 = i > 0 ? (closeArr[i - 1] ?? NaN) : NaN;
+    const longA = src > filt[i] && src > src1 && upward || src > filt[i] && src < src1 && upward;
+    const shortA = src < filt[i] && src < src1 && downward || src < filt[i] && src > src1 && downward;
+    const prevA = alertCondIni;
+    alertCondIni = longA ? 1 : shortA ? -1 : alertCondIni;
+    buyFlags.push(longA && prevA === -1);
+    sellFlags.push(shortA && prevA === 1);
 
     if (i >= warmup) {
       if (longCond && prevCondIni === -1) {
@@ -163,7 +178,15 @@ export function calculate(bars: Bar[], inputs: Partial<VuManChuSwingInputs> = {}
     ],
     markers,
     barColors,
+    // alertcondition(longCondition, "Buy Alert") / alertcondition(shortCondition, "Sell Alert")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
 
-export const VuManChuSwing = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'BUY' },
+  { id: 'alert1', title: 'Sell Alert', message: 'SELL' },
+];
+
+export const VuManChuSwing = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

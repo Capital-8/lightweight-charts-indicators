@@ -4,12 +4,13 @@
  * Stochastic variant with 3 smoothing levels.
  * K = (close - lowest(low,len)) / (highest(high,len) - lowest(low,len)) * 100.
  * K2 = SMA(K, smooth1). K3 = SMA(K2, smooth2). Signal = SMA(K3, smooth3).
+ * Circles (a plot, as the original) at the signal value on the bars where the signal crosses K3.
  *
  * Reference: "Stoch VX3"
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BgColorData } from '../types';
+import type { BgColorData } from '../types';
 
 export interface StochVX3Inputs {
   len: number;
@@ -35,6 +36,7 @@ export const inputConfig: InputConfig[] = [
 export const plotConfig: PlotConfig[] = [
   { id: 'plot0', title: 'K3', color: '#2962FF', lineWidth: 2 },
   { id: 'plot1', title: 'Signal', color: '#FF6D00', lineWidth: 1 },
+  { id: 'plot2', title: 'Plot', color: '#000000', lineWidth: 4, style: 'circles' },
 ];
 
 export const metadata = {
@@ -85,27 +87,14 @@ export function calculate(bars: Bar[], inputs: Partial<StochVX3Inputs> = {}): Om
     value: (v == null || i < warmup) ? NaN : v,
   }));
 
-  // markers: circle on K/D cross (Pine: plot(cross(d, k) ? d : na, style=circles, linewidth=4))
-  const markers: MarkerData[] = [];
-  for (let i = warmup + 1; i < n; i++) {
-    const k3Now = k3Arr[i] ?? NaN;
-    const sigNow = sigArr[i] ?? NaN;
-    const k3Prev = k3Arr[i - 1] ?? NaN;
-    const sigPrev = sigArr[i - 1] ?? NaN;
-    if (isNaN(k3Now) || isNaN(sigNow) || isNaN(k3Prev) || isNaN(sigPrev)) continue;
-    // cross(d, k) means d crosses k in either direction
-    const prevDAbove = sigPrev > k3Prev;
-    const currDAbove = sigNow > k3Now;
-    if (prevDAbove !== currDAbove) {
-      markers.push({
-        time: bars[i].time,
-        position: sigNow > k3Now ? 'aboveBar' : 'belowBar',
-        shape: 'circle',
-        color: '#000000',
-        text: '',
-      });
-    }
-  }
+  // plot(cross(d, k) ? d : na, color=black, style=circles, linewidth=4): a circle at the signal value on the bars
+  // where the signal crosses K3 (either direction)
+  const plot2 = bars.map((b, i) => {
+    const d = plot1[i].value, k = plot0[i].value;
+    const d1 = i > 0 ? plot1[i - 1].value : NaN, k1 = i > 0 ? plot0[i - 1].value : NaN;
+    const cross = (d > k && d1 <= k1) || (d < k && d1 >= k1);
+    return { time: b.time, value: cross ? d : NaN, color: '#000000' };
+  });
 
   // bgcolor: black when K3 < Signal (OutputSignal>0), teal otherwise
   // Pine: bgcolor(OutputSignal>0?#000000:#128E89, transp=80)
@@ -123,7 +112,7 @@ export function calculate(bars: Bar[], inputs: Partial<StochVX3Inputs> = {}): Om
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1 },
+    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2 },
     hlines: [
       { value: 80, options: { color: '#787B86', linestyle: 'dashed' as const, title: 'Overbought' } },
       { value: 20, options: { color: '#787B86', linestyle: 'dashed' as const, title: 'Oversold' } },
@@ -132,9 +121,8 @@ export function calculate(bars: Bar[], inputs: Partial<StochVX3Inputs> = {}): Om
     fills: [
       { plot1: 'overbought', plot2: 'oversold', options: { color: 'rgba(156, 39, 176, 0.0)' } },
     ],
-    markers,
     bgColors,
-  } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] };
+  } as Omit<IndicatorResult, 'markers'> & { bgColors: BgColorData[] };
 }
 
 export const StochVX3 = { calculate, metadata, defaultInputs, inputConfig, plotConfig };

@@ -16,6 +16,10 @@
  * of 3 bars back and the high of the bar before (bearish), gives a box with the text "FVG". The box grows to the
  * current bar, takes the mitigated colour once the price enters it and is removed once the price has filled it.
  *
+ * Alerts: alertconditions 'BOS' and 'CHOCH' (`alerts` of the result), true from the bar of a BOS / CHoCH break until
+ * the next bar without a break (as the original's `var` flags: a BOS right after a CHoCH keeps the CHOCH flag on), and
+ * alert() calls (`alertCalls`, once per bar) "FVG has been mitigated" when the price first enters a gap.
+ *
  * At most 50 lines and 50 labels are kept: with high "Number of break to show" / "Number of FVG to show" values the
  * oldest ones are removed first.
  *
@@ -27,8 +31,12 @@
  */
 
 import { str, color, callsite, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BoxData, LabelData, LineDrawingData } from '../types';
+import type { AlertCall, BoxData, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type LineOption = '─' | '┈' | '╌';
 
@@ -231,6 +239,8 @@ interface Fvg {
   bg: string;
   border: string;
   label: Lb;
+  /** isFvgMitigated: the price has entered the gap (its alert was made) */
+  mitigated: boolean;
 }
 
 /** indicator() without max_lines_count / max_labels_count: 50 lines and 50 labels */
@@ -239,7 +249,8 @@ const MAX_OBJECTS = 50;
 export function calculate(
   bars: Bar[],
   inputs: Partial<SmcStructuresAndFvgInputs> = {},
-): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & { boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & { boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const fvgHistoryNbr = Math.trunc(cfg.fvgHistoryNbr);
@@ -305,6 +316,7 @@ export function calculate(
     const right = i - 1;
     fvgs.push({
       bullish, left, right, top, bottom,
+      mitigated: false,
       bg: bullish ? cfg.bullishFvgColor : cfg.bearishFvgColor,
       border: String(color.new(bullish ? '#4CAF50' : '#FF5252', 100)),
       label: labels.add({
@@ -353,6 +365,13 @@ export function calculate(
     { show: cfg.isFibo5ToShow, value: cfg.fibo5Value, css: cfg.fibo5Color, style: lineStyle(cfg.fibo5StyleOption), width: cfg.fibo5LineWidth },
   ].map((f) => ({ ...f, line: null as Ln | null, label: null as Lb | null }));
 
+  // var bool isBOSAlert / isCHOCHAlert, one value per bar
+  let isBOSAlert = false;
+  let isCHOCHAlert = false;
+  const bosFlags: boolean[] = [];
+  const chochFlags: boolean[] = [];
+  const alertCalls: AlertCall[] = [];
+
   for (let i = 0; i < n; i++) {
     const b = bars[i];
 
@@ -371,6 +390,11 @@ export function calculate(
       }
       if (f.bullish ? lt(b.low, f.top) : gt(b.high, f.bottom)) {
         f.bg = cfg.mitigatedFvgColor;
+        // if not isFvgMitigated: alert("FVG has been mitigated", alert.freq_once_per_bar)
+        if (!f.mitigated) {
+          alertCalls.push({ time: b.time as number, message: 'FVG has been mitigated', freq: 'once_per_bar' });
+          f.mitigated = true;
+        }
         if (cfg.isMitigatedFvgToReduce) {
           if (f.bullish) f.top = b.low;
           else f.bottom = b.high;
@@ -419,6 +443,8 @@ export function calculate(
       (structureDirection === 1 && gt(breakHigh(i), structureHigh));
 
     if (lowBroken) {
+      if (structureDirection === 1) isBOSAlert = true;
+      else isCHOCHAlert = true;
       addBreak(i, structureLowStartIndex, structureLow, structureDirection === 1, false);
       structureDirection = 1;
       structureHighStartIndex = structureMaxBar;
@@ -426,23 +452,31 @@ export function calculate(
       structureHigh = H(structureHighStartIndex);
       structureLow = b.low;
     } else if (highBroken) {
+      if (structureDirection === 2) isBOSAlert = true;
+      else isCHOCHAlert = true;
       addBreak(i, structureHighStartIndex, structureHigh, structureDirection === 2, true);
       structureDirection = 2;
       structureHighStartIndex = i;
       structureLowStartIndex = structureMinBar;
       structureHigh = b.high;
       structureLow = L(structureLowStartIndex);
-    } else if (gt(b.high, structureHigh) && (structureDirection === 0 || structureDirection === 2)) {
-      if (!body || !oldHigh) {
-        structureHigh = b.high;
-        structureHighStartIndex = i;
-      }
-    } else if (lt(b.low, structureLow) && (structureDirection === 0 || structureDirection === 1)) {
-      if (!body || !oldLow) {
-        structureLow = b.low;
-        structureLowStartIndex = i;
+    } else {
+      isBOSAlert = false;
+      isCHOCHAlert = false;
+      if (gt(b.high, structureHigh) && (structureDirection === 0 || structureDirection === 2)) {
+        if (!body || !oldHigh) {
+          structureHigh = b.high;
+          structureHighStartIndex = i;
+        }
+      } else if (lt(b.low, structureLow) && (structureDirection === 0 || structureDirection === 1)) {
+        if (!body || !oldLow) {
+          structureLow = b.low;
+          structureLowStartIndex = i;
+        }
       }
     }
+    bosFlags.push(isBOSAlert);
+    chochFlags.push(isCHOCHAlert);
 
     // Current structure: deleted and drawn again on every bar
     if (cfg.isCurrentStructToShow) {
@@ -490,8 +524,17 @@ export function calculate(
     labels: labels.list.map((l) => ({
       time: T(Math.trunc(l.x)), price: l.y, text: l.text, textColor: l.textColor, style: 'none' as const,
     })),
+    // alertcondition(isBOSAlert, "BOS") / alertcondition(isCHOCHAlert, "CHOCH")
+    alerts: alertStates(alertConditions, bars, [bosFlags, chochFlags]),
+    alertCalls,
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BOS', message: 'BOS' },
+  { id: 'alert1', title: 'CHOCH', message: 'CHOCH' },
+];
 
 export const SmcStructuresAndFvg = {
   calculate,
@@ -499,4 +542,6 @@ export const SmcStructuresAndFvg = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

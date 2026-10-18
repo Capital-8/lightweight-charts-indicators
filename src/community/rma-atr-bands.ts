@@ -5,6 +5,8 @@
  * RMA - ATR * lower multiplier. A close above the upper band sets the trend up, a close below the lower band sets it
  * down; the line, the bands, their fills and the bars take the trend colour, and LONG / SHORT triangles mark the bars
  * where the trend turns.
+ * Alerts (alertcondition, `alerts` of the result): 'RMA ATR Bands Long' / 'RMA ATR Bands Short', true on the bars where
+ * the trend turns up / down.
  *
  * Reference: "RMA ATR Bands" by SchizoQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RMAATRBandsInputs {
   /** Source of the RMA trend line */
@@ -74,7 +77,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<RMAATRBandsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -92,6 +95,7 @@ export function calculate(
   const fillColors: string[] = [];
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
 
   let trend = 0; // var int trend = 0
   let prevTrend = NaN; // trend[1] (na on the first bar)
@@ -108,6 +112,8 @@ export function calculate(
     const longSignal = trend === 1 && !isNaN(prevTrend) && prevTrend !== 1;
     const shortSignal = trend === -1 && !isNaN(prevTrend) && prevTrend !== -1;
     prevTrend = trend;
+    longFlags.push(longSignal);
+    shortFlags.push(shortSignal);
 
     const bandColor = trend === 1 ? longColor : trend === -1 ? shortColor : color.gray;
     maPlot.push({ time: t, value: ma[i], color: bandColor });
@@ -138,8 +144,16 @@ export function calculate(
     ],
     markers,
     barColors,
+    // alertcondition(longSignal, "RMA ATR Bands Long") / alertcondition(shortSignal, "RMA ATR Bands Short")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RMA ATR Bands Long', message: 'RMA ATR Bands Long Signal on {{ticker}}' },
+  { id: 'alert1', title: 'RMA ATR Bands Short', message: 'RMA ATR Bands Short Signal on {{ticker}}' },
+];
 
 export const RMAATRBands = {
   calculate,
@@ -147,4 +161,5 @@ export const RMAATRBands = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

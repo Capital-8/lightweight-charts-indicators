@@ -5,11 +5,22 @@
  * a normalized percentage difference as an oscillator. Crossovers
  * generate long/short signals. Optional fractal-based divergence detection.
  *
+ * Alerts (alertcondition, `alerts` of the result): "OCC BothCond" (either cross), "OCC LongCond" (close MA crossing
+ * over the open MA) and "OCC ShortCond" (crossing under it), on the bars of the Long / Short circles.
+ *
  * Reference: "Open Close Cross Strategy R5.1" by JustUncleL
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'OCC BothCond', message: 'OCC BothCond' },
+  { id: 'alert1', title: 'OCC LongCond', message: 'OCC LongCond' },
+  { id: 'alert2', title: 'OCC ShortCond', message: 'OCC ShortCond' },
+];
 
 export interface OpenCloseCrossInputs {
   maType: string;
@@ -135,7 +146,10 @@ function variant(srcArr: number[], length: number, maType: string, bars: Bar[]):
   }
 }
 
-export function calculate(bars: Bar[], inputs: Partial<OpenCloseCrossInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<OpenCloseCrossInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -162,17 +176,21 @@ export function calculate(bars: Bar[], inputs: Partial<OpenCloseCrossInputs> = {
   const markers: MarkerData[] = [];
 
   // Cross signals
+  const longCond: boolean[] = new Array(n).fill(false);
+  const shortCond: boolean[] = new Array(n).fill(false);
   for (let i = 1; i < n; i++) {
     if (i < warmup || isNaN(closeMA[i]) || isNaN(openMA[i])) continue;
 
     const xlong = closeMA[i - 1] <= openMA[i - 1] && closeMA[i] > openMA[i];
     const xshort = closeMA[i - 1] >= openMA[i - 1] && closeMA[i] < openMA[i];
+    longCond[i] = xlong;
+    shortCond[i] = xshort;
 
     if (xlong) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'circle', color: '#26A69A', text: 'Long' });
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'circle', color: '#26A69A', text: 'Long', id: 'shape0' });
     }
     if (xshort) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'circle', color: '#EF5350', text: 'Short' });
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'circle', color: '#EF5350', text: 'Short', id: 'shape0' });
     }
   }
 
@@ -199,11 +217,11 @@ export function calculate(bars: Bar[], inputs: Partial<OpenCloseCrossInputs> = {
         const curPrice = bars[i - 2].high;
         // Regular bearish: price higher high but pcd lower high
         if (curPrice > prevTopPrice && curPcd < prevTopPcd) {
-          markers.push({ time: bars[i - 2].time, position: 'aboveBar', shape: 'diamond', color: '#EF5350', text: 'Bear Div' });
+          markers.push({ time: bars[i - 2].time, position: 'aboveBar', shape: 'diamond', color: '#EF5350', text: 'Bear Div', id: 'shape1' });
         }
         // Hidden bearish: price lower high but pcd higher high
         if (curPrice < prevTopPrice && curPcd > prevTopPcd) {
-          markers.push({ time: bars[i - 2].time, position: 'aboveBar', shape: 'diamond', color: '#FF9800', text: 'H.Bear' });
+          markers.push({ time: bars[i - 2].time, position: 'aboveBar', shape: 'diamond', color: '#FF9800', text: 'H.Bear', id: 'shape2' });
         }
       }
 
@@ -212,11 +230,11 @@ export function calculate(bars: Bar[], inputs: Partial<OpenCloseCrossInputs> = {
         const curPrice = bars[i - 2].low;
         // Regular bullish: price lower low but pcd higher low
         if (curPrice < prevBotPrice && curPcd > prevBotPcd) {
-          markers.push({ time: bars[i - 2].time, position: 'belowBar', shape: 'diamond', color: '#26A69A', text: 'Bull Div' });
+          markers.push({ time: bars[i - 2].time, position: 'belowBar', shape: 'diamond', color: '#26A69A', text: 'Bull Div', id: 'shape3' });
         }
         // Hidden bullish: price higher low but pcd lower low
         if (curPrice > prevBotPrice && curPcd < prevBotPcd) {
-          markers.push({ time: bars[i - 2].time, position: 'belowBar', shape: 'diamond', color: '#FF9800', text: 'H.Bull' });
+          markers.push({ time: bars[i - 2].time, position: 'belowBar', shape: 'diamond', color: '#FF9800', text: 'H.Bull', id: 'shape4' });
         }
       }
 
@@ -259,7 +277,8 @@ export function calculate(bars: Bar[], inputs: Partial<OpenCloseCrossInputs> = {
       { value: 0, options: { color: '#787B86', linestyle: 'dashed' as const, title: 'Zero' } },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, [longCond.map((f, i) => f || shortCond[i]), longCond, shortCond]),
   };
 }
 
-export const OpenCloseCross = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const OpenCloseCross = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -5,6 +5,10 @@
  * rsi = 100 when down is 0, 0 when up is 0, else 100 - 100 / (1 + up / down). Five horizontal levels (overbought,
  * overbought noise level, neutral, oversold noise level, oversold) with grey fills between the noise levels and the
  * outer levels. The part of the RSI above the overbought level is filled red, the part below the oversold level green.
+ * Alerts (alertcondition, `alerts` of the result), with the expressions of the original: 'Entry Into Overbought Area'
+ * = ta.crossover(ob, rsi), 'Exit From Overbought Area' = ta.crossunder(ob, rsi), 'Crossing Neutral Level' =
+ * ta.cross(nt, rsi), 'Entry Into Oversold Area' = ta.crossover(os, rsi), 'Exit From Oversold area' =
+ * ta.crossunder(ob, rsi) (the overbought level, as in the original).
  *
  * Reference: "RSI Multicolor editable V2" by Guillaume46
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +16,7 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiMulticolorEditableInputs {
   /** RSI length */
@@ -89,7 +94,10 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<RsiMulticolorEditableInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<RsiMulticolorEditableInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -109,6 +117,16 @@ export function calculate(bars: Bar[], inputs: Partial<RsiMulticolorEditableInpu
 
   const t = (i: number) => bars[i].time;
   const constant = (c: string) => new Array<string>(n).fill(c);
+  // coben = ta.crossover(ob, rv), cobex = ta.crossunder(ob, rv), cosen = ta.crossover(os, rv),
+  // cosex = ta.crossunder(ob, rv), cnt = ta.cross(nt, rv): the levels are the first series
+  const level = (v: number) => new Array<number>(n).fill(v);
+  const ntOver = crossedOver(level(cfg.nt), rsi);
+  const ntUnder = crossedUnder(level(cfg.nt), rsi);
+  const coben = crossedOver(level(cfg.ob), rsi);
+  const cobex = crossedUnder(level(cfg.ob), rsi);
+  const cnt = ntOver.map((v, i) => v || ntUnder[i]);
+  const cosen = crossedOver(level(cfg.os), rsi);
+  const cosex = crossedUnder(level(cfg.ob), rsi);
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -136,8 +154,18 @@ export function calculate(bars: Bar[], inputs: Partial<RsiMulticolorEditableInpu
       { plot1: 'plot3', plot2: 'plot1', options: { title: 'Overbought' }, colors: constant(OB_FILL) },
       { plot1: 'plot2', plot2: 'plot4', options: { title: 'Oversold' }, colors: constant(OS_FILL) },
     ],
+    alerts: alertStates(alertConditions, bars, [coben, cobex, cnt, cosen, cosex]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '* Entry Into Overbought Area', message: 'Entry Into Overbought Area!' },
+  { id: 'alert1', title: '* Exit From Overbought Area', message: 'Exit From Overbought Area!' },
+  { id: 'alert2', title: '* Crossing Neutral Level', message: 'Crossing Neutral Level' },
+  { id: 'alert3', title: '* Entry Into Oversold Area', message: 'Entry Into Oversold Area!' },
+  { id: 'alert4', title: '* Exit From Oversold area', message: 'Exit From Oversold Area!' },
+];
 
 export const RsiMulticolorEditable = {
   calculate,
@@ -147,4 +175,5 @@ export const RsiMulticolorEditable = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

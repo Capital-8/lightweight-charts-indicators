@@ -4,6 +4,7 @@
  * An EMA of the close on the price chart, with BUY / SELL labels. BUY: MACD histogram (MACD line - signal line) above
  * 0, RSI below the oversold level, close above the EMA and volume above its SMA. SELL: MACD histogram below 0, RSI
  * above the overbought level, close below the EMA and volume above its SMA.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' and 'Sell Signal', true on the bars of each signal.
  *
  * Reference: "5-Minute Buy/Sell Signal" by Waqas_Khalid
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +12,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface FiveMinuteBuySellSignalInputs {
   macdFastLength: number;
@@ -64,7 +66,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<FiveMinuteBuySellSignalInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -79,6 +81,8 @@ export function calculate(
   const volMA = A(ta.sma(Series.fromArray(bars, volume), cfg.volumeLength));
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const macdHist = macd[i] - signal[i];
     const c = bars[i].close;
@@ -86,6 +90,8 @@ export function calculate(
     const buy = gt(macdHist, 0) && lt(rsi[i], cfg.rsiOversold) && gt(c, ema50[i]) && gt(volume[i], volMA[i]);
     // sellSignal = macdHist < 0 and rsi > rsiOverbought and close < ema50 and volume > volMA
     const sell = lt(macdHist, 0) && gt(rsi[i], cfg.rsiOverbought) && lt(c, ema50[i]) && gt(volume[i], volMA[i]);
+    buyFlags.push(buy);
+    sellFlags.push(sell);
     // plotshape(..., color.green / color.red, shape.labelup / labeldown, location.belowbar / abovebar, size.small);
     // no textcolor: Pine default blue
     if (buy) {
@@ -102,8 +108,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0: ema50.map((v, i) => ({ time: bars[i].time, value: v, color: color.orange })) },
     markers,
+    // alertcondition(buySignal, 'Buy Signal', ...) / alertcondition(sellSignal, 'Sell Signal', ...)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Buy Signal: MACD bullish, RSI oversold, price above EMA50' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Sell Signal: MACD bearish, RSI overbought, price below EMA50' },
+];
 
 export const FiveMinuteBuySellSignal = {
   calculate,
@@ -111,4 +125,5 @@ export const FiveMinuteBuySellSignal = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

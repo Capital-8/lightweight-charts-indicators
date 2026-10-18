@@ -8,6 +8,9 @@
  * above (below) 0 on that previous bar. With the divergence option, regular bullish (RSI higher low, price lower
  * low) and bearish (RSI lower high, price higher high) divergences between pivots are drawn on the pivot bar with
  * Bull / Bear labels.
+ * Alerts (alertcondition, `alerts` of the result): Strong Buy / Strong Sell (the dot conditions), Buy / Sell (RSI
+ * beyond the oversold / overbought level with momentum and its change both rising / both falling), the RSI
+ * crossing 50 and the two divergences.
  *
  * Reference: "RSI [Hash Capital Research]" by Hash_Capital
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +19,7 @@
 import { ta, Series, getSourceSeries, callsite, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type RsiHashCapitalMaType = 'None' | 'SMA' | 'EMA' | 'SMMA (RMA)' | 'WMA' | 'VWMA';
 
@@ -125,7 +129,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<RsiHashCapitalInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; visibility: Record<string, boolean> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; visibility: Record<string, boolean> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -249,7 +253,7 @@ export function calculate(
           : cfg.buySignalLocation === 'Zone Line' ? cfg.oversoldLevel : buyPrevRsi;
         buyPrevRsi = rsi[i];
         if (!isNaN(price)) {
-          markers.push({ time: at, position: 'atPriceMiddle', price, shape: 'circle', color: LIME, size: 'tiny' });
+          markers.push({ id: 'shape0', time: at, position: 'atPriceMiddle', price, shape: 'circle', color: LIME, size: 'tiny' });
         }
       }
       if (cfg.showSellSignals && extremeOverbought[i]) {
@@ -257,7 +261,7 @@ export function calculate(
           : cfg.sellSignalLocation === 'Zone Line' ? cfg.overboughtLevel : sellPrevRsi;
         sellPrevRsi = rsi[i];
         if (!isNaN(price)) {
-          markers.push({ time: at, position: 'atPriceMiddle', price, shape: 'circle', color: RED, size: 'tiny' });
+          markers.push({ id: 'shape1', time: at, position: 'atPriceMiddle', price, shape: 'circle', color: RED, size: 'tiny' });
         }
       }
     }
@@ -269,11 +273,11 @@ export function calculate(
       plot3.push({ time: at, value: plFound[i] ? v : NaN, color: bullCond[i] ? color.green : NONE_COLOR });
       plot4.push({ time: at, value: phFound[i] ? v : NaN, color: bearCond[i] ? color.red : NONE_COLOR });
       if (bullCond[i] && !isNaN(v)) {
-        markers.push({ time: at, position: 'atPriceBottom', price: v, shape: 'labelUp', color: color.green,
+        markers.push({ id: 'shape2', time: at, position: 'atPriceBottom', price: v, shape: 'labelUp', color: color.green,
           text: ' Bull ', textColor: color.white });
       }
       if (bearCond[i] && !isNaN(v)) {
-        markers.push({ time: at, position: 'atPriceTop', price: v, shape: 'labelDown', color: color.red,
+        markers.push({ id: 'shape3', time: at, position: 'atPriceTop', price: v, shape: 'labelDown', color: color.red,
           text: ' Bear ', textColor: color.white });
       }
     }
@@ -292,14 +296,35 @@ export function calculate(
     { value: 0, options: { title: 'Lower Bound', color: String(color.new(color.white, 90)), linestyle: 'solid' } },
   );
 
+  // velocity = ta.change(momentum, 1); oversoldReversal / overboughtReversal; ta.crossover / crossunder(rsi, 50)
+  const velocity = momentum.map((m, i) => (i > 0 ? m - momentum[i - 1] : NaN));
+  const oversoldReversal = rsi.map((r, i) => lt(r, cfg.oversoldLevel) && gt(momentum[i], 0) && gt(velocity[i], 0));
+  const overboughtReversal = rsi.map((r, i) => gt(r, cfg.overboughtLevel) && lt(momentum[i], 0) && lt(velocity[i], 0));
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay, precision: 2 },
     plots: { plot0, plot1, plot2, plot3, plot4 },
     hlines,
     markers,
     visibility: { enableSignalLine },
+    alerts: alertStates(alertConditions, bars, [
+      extremeOversold, extremeOverbought, oversoldReversal, overboughtReversal,
+      crossedOver(rsi, 50), crossedUnder(rsi, 50), bullCond, bearCond,
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RSI - Strong Buy', message: 'Extreme oversold reversal detected' },
+  { id: 'alert1', title: 'RSI - Strong Sell', message: 'Extreme overbought reversal detected' },
+  { id: 'alert2', title: 'RSI - Buy Signal', message: 'Oversold reversal with momentum' },
+  { id: 'alert3', title: 'RSI - Sell Signal', message: 'Overbought reversal with momentum' },
+  { id: 'alert4', title: 'RSI - Bullish Cross', message: 'RSI crossed above 50' },
+  { id: 'alert5', title: 'RSI - Bearish Cross', message: 'RSI crossed below 50' },
+  { id: 'alert6', title: 'RSI - Bullish Divergence', message: 'Found a new Regular Bullish Divergence' },
+  { id: 'alert7', title: 'RSI - Bearish Divergence', message: 'Found a new Regular Bearish Divergence' },
+];
 
 export const RsiHashCapital = {
   calculate,
@@ -307,4 +332,5 @@ export const RsiHashCapital = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

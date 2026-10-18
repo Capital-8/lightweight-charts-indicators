@@ -8,6 +8,8 @@
  * fill take the slope colour of the midline. Squeeze: the relative width (width / |midline|) ranks in the lowest
  * percentile of its lookback window (background). Optional backgrounds for closes outside the channel and candles
  * coloured by regime (strong / weak trend, squeeze, neutral).
+ * Alerts (alertcondition, `alerts` of the result): midline rising / falling, close crossing over / under the midline,
+ * close below the upper band ('Price Above Kernel Channel Upper', as the original's expression) and below the lower.
  *
  * Reference: "Kernel Channel [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BgColorData, PlotCandleData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type KernelType = 'Epanechnikov' | 'Triangular' | 'Laplacian' | 'Cosine';
 type BandType = 'Kernel ATR' | 'Kernel StdDev';
@@ -87,6 +90,9 @@ export const plotConfig: PlotConfig[] = [
   { id: 'plot2', title: 'Lower Band', color: '#00ff00', lineWidth: 1 },
 ];
 
+/** plotcandle(open, high, low, close, "Bar Coloring", ..., display = useBarColor ? display.all : display.none) */
+export const plotCandleConfig = [{ id: 'barColoring', title: 'Bar Coloring' }];
+
 export const metadata = {
   title: 'Kernel Channel [BackQuant]',
   shortTitle: 'Kernel Channel [BackQuant]',
@@ -115,7 +121,7 @@ function kernelWeight(idx: number, length: number, bw: number, ktype: KernelType
 export function calculate(
   bars: Bar[],
   inputs: Partial<KernelChannelInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -199,9 +205,9 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // bgcolor(showSqueeze and inSqueeze ? sqzCol : na), then the two deviation layers
-    if (cfg.showSqueeze && inSqueeze[i]) bgColors.push({ time: t, color: cfg.sqzCol });
-    if (cfg.highlightDev && gt(close[i], upper[i])) bgColors.push({ time: t, color: devUp });
-    if (cfg.highlightDev && lt(close[i], lower[i])) bgColors.push({ time: t, color: devDown });
+    if (cfg.showSqueeze && inSqueeze[i]) bgColors.push({ time: t, color: cfg.sqzCol, id: 'bgcolor0' });
+    if (cfg.highlightDev && gt(close[i], upper[i])) bgColors.push({ time: t, color: devUp, id: 'bgcolor1' });
+    if (cfg.highlightDev && lt(close[i], lower[i])) bgColors.push({ time: t, color: devDown, id: 'bgcolor2' });
 
     // plotcandle(..., "Bar Coloring", barCol, barCol, bordercolor = barCol, display = useBarColor ? all : none)
     if (cfg.useBarColor) {
@@ -234,9 +240,28 @@ export function calculate(
       colors: bars.map((_b, i) => String(color.new(midColor(i), 80))),
     }],
     bgColors,
-    plotCandles: cfg.useBarColor ? { barColoring: candles } : {},
+    // the plotcandle output is always declared; its candles are drawn only with useBarColor (display.none else)
+    plotCandles: { barColoring: candles },
+    alerts: alertStates(alertConditions, bars, [
+      bars.map((_b, i) => gt(midline[i], i > 0 ? midline[i - 1] : NaN)), // midline > midline[1]
+      bars.map((_b, i) => lt(midline[i], i > 0 ? midline[i - 1] : NaN)), // midline < midline[1]
+      crossedOver(close, midline),
+      crossedUnder(close, midline),
+      bars.map((_b, i) => lt(close[i], upper[i])), // close < upper
+      bars.map((_b, i) => lt(close[i], lower[i])), // close < lower
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Kernel Channel Long', message: 'Kernel Channel Long {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Kernel Channel Short', message: 'Kernel Channel Short {{exchange}}:{{ticker}}' },
+  { id: 'alert2', title: 'Price Crossed Kernel Channel Midline', message: 'Price Crossed Kernel Channel Midline {{exchange}}:{{ticker}}' },
+  { id: 'alert3', title: 'Price Crossed Kernel Channel Midline', message: 'Price Crossed Kernel Channel Midline {{exchange}}:{{ticker}}' },
+  { id: 'alert4', title: 'Price Above Kernel Channel Upper', message: 'Price Above Kernel Channel Upper {{exchange}}:{{ticker}}' },
+  { id: 'alert5', title: 'Price Below Kernel Channel Lower', message: 'Price Below Kernel Channel Lower {{exchange}}:{{ticker}}' },
+];
 
 export const KernelChannel = {
   calculate,
@@ -244,4 +269,6 @@ export const KernelChannel = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  plotCandleConfig,
+  alertConditions,
 };

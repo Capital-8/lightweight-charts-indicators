@@ -7,12 +7,15 @@
  * Net pressure (TPX) is the WMA-smoothed difference.
  * v3.0 adds optional pre-smoothing; v4.0 adds dominant pressure signals;
  * v5.0 adds TPX swing alerts.
+ * Alerts (alertcondition, `alerts` of the result): 'TPX Bulls in Control' (bull pressure >= control level), 'TPX
+ * Bears in Control' (bear pressure >= control level) and 'Net Pressure Swing' (TPX crosses 0).
  *
  * Reference: "RedK Trader Pressure Index (TPX)" by RedKTrader
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RedKTPXInputs {
   length: number;
@@ -58,7 +61,7 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<RedKTPXInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<RedKTPXInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { length, smooth, controlLevel, preSmooth, preSmoothLen, slevelOn, slevel } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -174,6 +177,16 @@ export function calculate(bars: Bar[], inputs: Partial<RedKTPXInputs> = {}): Omi
     }
   }
 
+  // maxbulls = avgbulls >= clevel; maxbears = avgbears >= clevel; TPXswing = ta.cross(TPX, 0)
+  const maxBulls = avgBullsArr.map((v) => v != null && !isNaN(v) && v >= controlLevel);
+  const maxBears = avgBearsArr.map((v) => v != null && !isNaN(v) && v >= controlLevel);
+  // TPX of the original is na until its averages are known: the port's zeros before that are not crossed
+  const tpxFirst = (length - 1) + (preSmooth ? preSmoothLen - 1 : 0) + (smooth - 1);
+  const tpxAlert = tpxArr.map((v, i) => (i < tpxFirst ? NaN : v ?? NaN));
+  const tpxUp = crossedOver(tpxAlert, 0);
+  const tpxDn = crossedUnder(tpxAlert, 0);
+  const tpxSwing = tpxUp.map((f, i) => f || tpxDn[i]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3, 'plot4': plot4 },
@@ -182,7 +195,15 @@ export function calculate(bars: Bar[], inputs: Partial<RedKTPXInputs> = {}): Omi
       { value: controlLevel, options: { color: '#ffee00', linestyle: 'dotted' as const, title: 'Control Level' } },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, [maxBulls, maxBears, tpxSwing]),
   };
 }
 
-export const RedKTPX = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'TPX Bulls in Control', message: 'TPX Bull Pressure >= Control Level' },
+  { id: 'alert1', title: 'TPX Bears in Control', message: 'TPX Bear Pressure >= Control Level' },
+  { id: 'alert2', title: 'Net Pressure Swing', message: 'Net Pressure Swing Detected!' },
+];
+
+export const RedKTPX = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

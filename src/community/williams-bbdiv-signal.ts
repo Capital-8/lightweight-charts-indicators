@@ -8,6 +8,9 @@
  * pause in bars, an optional wait for the opposite signal, a %R zone filter and an optional RSI filter. The signals
  * are drawn in the pane and on the price chart (each signal alone, or in AND mode the combinations of two or three
  * signals on the same bar). A transparent "Connector" plot gives 1 (buy), -1 (sell) or 0.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' and 'Sell Signal', true on the bars of the final buy /
+ * sell signal (the Connector at 1 / -1). The "Regular Bullish / Bearish Label" shapes are hidden in the original
+ * (display.none) and are not drawn.
  *
  * Reference: "Williams Signal [trade_lexx]" by trade_lexx
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +21,7 @@ import {
   type FillConfig, type Bar, type SourceType, callsite,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 
 export type WilliamsBbdivSignalMAType = 'SMA' | 'EMA' | 'WMA' | 'HMA' | 'KAMA' | 'VWMA' | 'ALMA' | 'TEMA' | 'ZLEMA' | 'LSMA';
@@ -275,7 +279,7 @@ function ma(source: number[], length: number, type: string, bars: Bar[]): number
 export function calculate(
   bars: Bar[],
   inputs: Partial<WilliamsBbdivSignalInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const arr = (a: ArrayLike<number>) => Array.from(a, (v) => v ?? NaN);
@@ -447,8 +451,11 @@ export function calculate(
   const plot6 = [];
   const bbFill: string[] = new Array(n).fill(cfg.bbModeInput ? BB_FILL : 'transparent');
   const markers: MarkerData[] = [];
-  const mark = (i: number, m: Omit<MarkerData, 'time' | 'textColor' | 'size'>) => {
-    markers.push({ time: t(i), textColor: PINE_TEXT, ...m });
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
+  // id: the plotshape of the original that draws the marker (shape<k>, in declaration order)
+  const mark = (i: number, id: string, m: Omit<MarkerData, 'time' | 'textColor' | 'size' | 'id'>) => {
+    markers.push({ time: t(i), textColor: PINE_TEXT, id, ...m });
   };
   for (let i = 0; i < n; i++) {
     const time = t(i);
@@ -472,32 +479,32 @@ export function calculate(
     const mSellDiv = cfg.divergenceModeInput && sellDiv[i];
 
     // Pane signals (the "Regular Bullish / Bearish Label" plotshapes have display.none in Pine: not drawn)
-    if (mBuyMA) mark(i, { position: 'bottom', shape: 'triangleUp', color: GREEN, text: 'MA' });
-    if (mSellMA) mark(i, { position: 'top', shape: 'triangleDown', color: RED, text: 'MA' });
-    if (mBuyBB) mark(i, { position: 'bottom', shape: 'triangleUp', color: GREEN, text: 'BB' });
-    if (mSellBB) mark(i, { position: 'top', shape: 'triangleDown', color: RED, text: 'BB' });
+    if (mBuyMA) mark(i, 'shape2', { position: 'bottom', shape: 'triangleUp', color: GREEN, text: 'MA' });
+    if (mSellMA) mark(i, 'shape3', { position: 'top', shape: 'triangleDown', color: RED, text: 'MA' });
+    if (mBuyBB) mark(i, 'shape4', { position: 'bottom', shape: 'triangleUp', color: GREEN, text: 'BB' });
+    if (mSellBB) mark(i, 'shape5', { position: 'top', shape: 'triangleDown', color: RED, text: 'BB' });
     // plotshape(percentRBuySignalDiv ? percentRLBR : na, location.absolute)
     if (buyDiv[i] && !isNaN(percentRLBR[i])) {
-      mark(i, { position: 'atPriceMiddle', price: percentRLBR[i], shape: 'triangleUp', color: GREEN, text: 'Div' });
+      mark(i, 'shape6', { position: 'atPriceMiddle', price: percentRLBR[i], shape: 'triangleUp', color: GREEN, text: 'Div' });
     }
     if (sellDiv[i] && !isNaN(percentRLBR[i])) {
-      mark(i, { position: 'atPriceMiddle', price: percentRLBR[i], shape: 'triangleDown', color: RED, text: 'Div' });
+      mark(i, 'shape7', { position: 'atPriceMiddle', price: percentRLBR[i], shape: 'triangleDown', color: RED, text: 'Div' });
     }
 
     // Price chart signals (force_overlay = true)
-    const chart = (on: boolean, buy: boolean, text: string) => {
+    const chart = (on: boolean, buy: boolean, text: string, id: string) => {
       if (!on) return;
-      mark(i, buy
+      mark(i, id, buy
         ? { position: 'belowBar', shape: 'triangleUp', color: GREEN, text, forceOverlay: true }
         : { position: 'aboveBar', shape: 'triangleDown', color: RED, text, forceOverlay: true });
     };
     if (!cfg.andMode) {
-      chart(mBuyMA, true, 'Buy');
-      chart(mSellMA, false, 'Sell');
-      chart(mBuyBB, true, 'Buy');
-      chart(mSellBB, false, 'Sell');
-      chart(mBuyDiv, true, 'Buy');
-      chart(mSellDiv, false, 'Sell');
+      chart(mBuyMA, true, 'Buy', 'shape8');
+      chart(mSellMA, false, 'Sell', 'shape9');
+      chart(mBuyBB, true, 'Buy', 'shape10');
+      chart(mSellBB, false, 'Sell', 'shape11');
+      chart(mBuyDiv, true, 'Buy', 'shape12');
+      chart(mSellDiv, false, 'Sell', 'shape13');
     }
     const buyMaBb = mBuyMA && mBuyBB;
     const buyMaDiv = mBuyMA && mBuyDiv;
@@ -508,14 +515,14 @@ export function calculate(
     const sellBbDiv = mSellBB && mSellDiv;
     const sellAll = mSellMA && mSellBB && mSellDiv;
     if (cfg.andMode) {
-      chart(buyMaBb, true, 'MA+BB');
-      chart(buyMaDiv, true, 'MA+Div');
-      chart(buyBbDiv, true, 'BB+Div');
-      chart(buyAll, true, 'MA+BB+Div');
-      chart(sellMaBb, false, 'MA+BB');
-      chart(sellMaDiv, false, 'MA+Div');
-      chart(sellBbDiv, false, 'BB+Div');
-      chart(sellAll, false, 'MA+BB+Div');
+      chart(buyMaBb, true, 'MA+BB', 'shape14');
+      chart(buyMaDiv, true, 'MA+Div', 'shape15');
+      chart(buyBbDiv, true, 'BB+Div', 'shape16');
+      chart(buyAll, true, 'MA+BB+Div', 'shape17');
+      chart(sellMaBb, false, 'MA+BB', 'shape18');
+      chart(sellMaDiv, false, 'MA+Div', 'shape19');
+      chart(sellBbDiv, false, 'BB+Div', 'shape20');
+      chart(sellAll, false, 'MA+BB+Div', 'shape21');
     }
 
     const buySignalOR = mBuyMA || mBuyBB || mBuyDiv;
@@ -525,6 +532,8 @@ export function calculate(
     const finalBuy = cfg.andMode ? buySignalAND : buySignalOR;
     const finalSell = cfg.andMode ? sellSignalAND : sellSignalOR;
     plot6.push({ time, value: finalBuy ? 1 : finalSell ? -1 : 0, color: NONE_COLOR });
+    buyFlags[i] = finalBuy;
+    sellFlags[i] = finalSell;
   }
 
   return {
@@ -542,8 +551,15 @@ export function calculate(
       { plot1: 'plot2', plot2: 'plot3', options: { title: 'Bollinger Bands Background Fill' }, colors: bbFill },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** alertcondition(finalBuySignal / finalSellSignal) of the original */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Final Buy Signal Triggered' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Final Sell Signal Triggered' },
+];
 
 export const WilliamsBbdivSignal = {
   calculate,
@@ -553,4 +569,5 @@ export const WilliamsBbdivSignal = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

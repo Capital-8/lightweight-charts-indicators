@@ -17,8 +17,11 @@
  *   order pivot high is below it or a pivot low above it.
  * - Second order pivots are marked with a small label.
  *
- * At most 50 lines, 50 boxes and 50 labels are kept. The alert inputs only change the alert messages of the
- * original, which have no output here.
+ * At most 50 lines, 50 boxes and 50 labels are kept.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): on a bar with an MSB, a zone or breakerblock
+ * test (once per first order pivot), a new range or a range test, one call whose message lists these events (each
+ * selected by its alert input) and ends with the current price.
  *
  * Chart context: `chart.lastBarConfirmed`: a last bar that is still open is not processed.
  *
@@ -28,8 +31,8 @@
  * by MarkMiddleton2020.
  */
 
-import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BoxData, LabelData, LineDrawingData } from '../types';
+import { str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import type { AlertCall, BoxData, LabelData, LineDrawingData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface HigherOrderOrderblocksBreakerblocksRangeInputs {
@@ -147,7 +150,9 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<HigherOrderOrderblocksBreakerblocksRangeInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & { boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines'> & {
+  boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[]; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const lastConfirmed = lastBarConfirmedOf(chart);
@@ -234,6 +239,17 @@ export function calculate(
   const max2 = (a: number, b: number) => (isNaN(a) || isNaN(b) ? NaN : Math.max(a, b));
   const min2 = (a: number, b: number) => (isNaN(a) || isNaN(b) ? NaN : Math.min(a, b));
   const mean = (a: number, b: number) => (cfg.logSv ? Math.exp((Math.log(a) + Math.log(b)) / 2) : (a + b) / 2);
+  // Alert messages: string alert = na, extended by each event (na + text = text); the pivot of the last test alert of
+  // each kind (var int h_a_time = 0 ...)
+  const alertCalls: AlertCall[] = [];
+  const fmt = (v: number) => str.tostring(v);
+  let hATime = 0;
+  let lATime = 0;
+  let mhATime = 0;
+  let mlATime = 0;
+  let rhATime = 0;
+  let rlATime = 0;
+  const leftOf = (b: Bx) => (b.deleted ? NaN : b.left);
 
   for (let i = 0; i < n; i++) {
     if (i === n - 1 && !lastConfirmed) break;
@@ -241,6 +257,8 @@ export function calculate(
     const pvl = i >= 2 && gt(bars[i].low, bars[i - 1].low) && lt(bars[i - 1].low, bars[i - 2].low);
     let newPh2 = false;
     let newPl2 = false;
+    let alert = '';
+    const close = bars[i].close;
 
     if (pvh) {
       add(pvh1Price, bars[i - 1].high);
@@ -265,6 +283,9 @@ export function calculate(
         const top = pvh2Price[0];
         const bottom = max2(lowAt(pvh2Time[0]), lowAt(pvh2Time[0] - 1));
         shortBoxes.push(newBox(pvh2Time[0], top, i, bottom, cfg.boxSv ? cfg.uS : null));
+        if (cfg.msbASv) {
+          alert += 'Bearish MSB @ ' + fmt(ltcmrhhPrice) + '\n' + 'New Supply Zone : ' + fmt(top) + ' - ' + fmt(bottom) + '\n';
+        }
         ltcmrhhPrice = NaN;
       }
     }
@@ -291,6 +312,9 @@ export function calculate(
         const top = min2(highAt(pvl2Time[0]), highAt(pvl2Time[0] - 1));
         const bottom = pvl2Price[0];
         longBoxes.push(newBox(pvl2Time[0], top, i, bottom, cfg.boxSv ? cfg.uD : null));
+        if (cfg.msbASv) {
+          alert += 'Bullish MSB @ ' + fmt(htcmrllPrice) + '\n' + 'New Demand Zone : ' + fmt(bottom) + ' - ' + fmt(top) + '\n';
+        }
         htcmrllPrice = NaN;
       }
     }
@@ -300,7 +324,13 @@ export function calculate(
     // Supply zones
     for (let k = shortBoxes.length - 1; k >= 0; k--) {
       const b = shortBoxes[k];
-      if (gt(lastHigh, bottomOf(b)) && cfg.boxSv) setBg(b, cfg.tS);
+      if (gt(lastHigh, bottomOf(b))) {
+        if (cfg.boxSv) setBg(b, cfg.tS);
+        if (cfg.obASv && lt(close, bottomOf(b)) && pvh1Time[0] !== hATime) {
+          hATime = pvh1Time[0];
+          alert += 'Supply Zone Test @ ' + fmt(lastHigh) + ' (age = ' + fmt(i - leftOf(b)) + ' bars) \n';
+        }
+      }
       if (gt(lastLow, topOf(b))) {
         if (cfg.mSv) {
           setBg(b, cfg.uB);
@@ -315,7 +345,13 @@ export function calculate(
     // Demand zones
     for (let k = longBoxes.length - 1; k >= 0; k--) {
       const b = longBoxes[k];
-      if (lt(lastLow, topOf(b)) && cfg.boxSv) setBg(b, cfg.tD);
+      if (lt(lastLow, topOf(b))) {
+        if (cfg.boxSv) setBg(b, cfg.tD);
+        if (cfg.obASv && gt(close, topOf(b)) && pvl1Time[0] !== lATime) {
+          lATime = pvl1Time[0];
+          alert += 'Demand Zone Test @ ' + fmt(lastLow) + ' (age = ' + fmt(i - leftOf(b)) + ' bars) \n';
+        }
+      }
       if (lt(lastHigh, bottomOf(b))) {
         if (cfg.mSv) {
           setBg(b, cfg.uB);
@@ -330,7 +366,13 @@ export function calculate(
     // Breakerblocks
     for (let k = mShortBoxes.length - 1; k >= 0; k--) {
       const b = mShortBoxes[k];
-      if (gt(lastHigh, bottomOf(b))) setBg(b, cfg.tB);
+      if (gt(lastHigh, bottomOf(b))) {
+        setBg(b, cfg.tB);
+        if (cfg.bbASv && lt(close, bottomOf(b)) && pvh1Time[0] !== mhATime) {
+          mhATime = pvh1Time[0];
+          alert += 'Breakerblock Test Up @ ' + fmt(lastHigh) + ' (age = ' + fmt(i - leftOf(b)) + ' bars) \n';
+        }
+      }
       if (gt(lastLow, topOf(b))) {
         drop(boxes, b);
         mShortBoxes.splice(k, 1);
@@ -338,7 +380,13 @@ export function calculate(
     }
     for (let k = mLongBoxes.length - 1; k >= 0; k--) {
       const b = mLongBoxes[k];
-      if (lt(lastLow, topOf(b))) setBg(b, cfg.tB);
+      if (lt(lastLow, topOf(b))) {
+        setBg(b, cfg.tB);
+        if (cfg.bbASv && gt(close, topOf(b)) && pvl1Time[0] !== mlATime) {
+          mlATime = pvl1Time[0];
+          alert += 'Breakerblock Test Down @ ' + fmt(lastLow) + ' (age = ' + fmt(i - leftOf(b)) + ' bars) \n';
+        }
+      }
       if (lt(lastHigh, bottomOf(b))) {
         drop(boxes, b);
         mLongBoxes.splice(k, 1);
@@ -365,11 +413,20 @@ export function calculate(
         range25Lines.push(newLine(start, upperQuarter, i, GRAY, 1, true, 'right'));
         range75Lines.push(newLine(start, lowerQuarter, i, GRAY, 1, true, 'right'));
       }
+      if (cfg.rASv) alert += 'New Range : ' + fmt(lastRangeH) + ' - ' + fmt(lastRangeL) + '. Mean = ' + fmt(mid) + '\n';
     }
     // Ranges that price has left
     for (let k = rangeHLines.length - 1; k >= 0; k--) {
       const top = yOf(rangeHLines[k]);
       const bottom = yOf(rangeLLines[k]);
+      if (gt(pvh1Price[0], top) && cfg.rtASv && lt(close, top) && pvh1Time[0] !== rhATime) {
+        rhATime = pvh1Time[0];
+        alert += 'Range High Test @ ' + fmt(pvh1Price[0]) + ' \n';
+      }
+      if (lt(pvl1Price[0], bottom) && cfg.rtASv && gt(close, bottom) && pvl1Time[0] !== rlATime) {
+        rlATime = pvl1Time[0];
+        alert += 'Range Low Test @ ' + fmt(pvl1Price[0]) + ' \n';
+      }
       if (cfg.rangeEqSv) rangeM = hold(rangeM, rangeMLines[k]);
       if (cfg.rangeQSv) {
         range25 = hold(range25, range25Lines[k]);
@@ -404,6 +461,11 @@ export function calculate(
         limit(labels);
       }
     }
+
+    // alert := not na(alert) ? alert + 'Current price = ' + str.tostring(close) + '\n' : na; alert(alert, once per bar close)
+    if (alert !== '') {
+      alertCalls.push({ time: bars[i].time as number, message: alert + 'Current price = ' + fmt(close) + '\n', freq: 'once_per_bar_close' });
+    }
   }
 
   const T = (index: number) => bars[index].time;
@@ -424,8 +486,11 @@ export function calculate(
     labels: labels.filter((l) => drawn(l.x, l.y)).map((l) => ({
       time: T(l.x), price: l.y, text: '', color: l.color, textColor: '#363A45', style: l.style, size: 'tiny' as const,
     })),
+    alertCalls,
   };
 }
+
+export const hasAlertFunction = true;
 
 export const HigherOrderOrderblocksBreakerblocksRange = {
   calculate,
@@ -433,4 +498,5 @@ export const HigherOrderOrderblocksBreakerblocksRange = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

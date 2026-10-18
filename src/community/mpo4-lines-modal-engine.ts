@@ -8,6 +8,9 @@
  * levels change colour with the order of the fast lines. Circles mark fast line A crossing back from the oversold /
  * overbought levels; pivot divergences between price and fast line A give Bull / Bear labels.
  *
+ * Alerts (alertcondition, `alerts` of the result): the buy / sell return signals (when shown), the slow line colour
+ * change (Direction mode / Position vs Zero mode) and the bullish / bearish divergences on fast line A.
+ *
  * Reference: "MPO4 Lines – Modal Engine" by Uncle_the_shooter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Uncle_the_shooter
@@ -15,6 +18,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 
 export type Mpo4SlowColorMode = 'Direction' | 'Position vs Zero';
@@ -186,7 +190,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<Mpo4LinesModalEngineInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -371,10 +375,22 @@ export function calculate(
   const sellColor = String(color.new(cfg.overboughtLineColor, 60));
   const bullLabel = String(color.new(cfg.bullDivColor, 40));
   const bearLabel = String(color.new(cfg.bearDivColor, 40));
+  const buyAlert = new Array<boolean>(n).fill(false);
+  const sellAlert = new Array<boolean>(n).fill(false);
+  const dirChange = new Array<boolean>(n).fill(false);
+  const posChange = new Array<boolean>(n).fill(false);
+  const l1 = (i: number) => (i >= 0 ? line1[i] : NaN);
   for (let i = 0; i < n; i++) {
     // ta.crossover(line2, oversold) / ta.crossunder(line2, overbought): exact comparisons (na compares false)
     const longSignal = i > 0 && line2[i] > cfg.oversold && line2[i - 1] <= cfg.oversold;
     const shortSignal = i > 0 && line2[i] < cfg.overbought && line2[i - 1] >= cfg.overbought;
+    // supBuySignal / supSellSignal
+    buyAlert[i] = cfg.showObosSignals && longSignal;
+    sellAlert[i] = cfg.showObosSignals && shortSignal;
+    // colorChangeDirection = slowColorMode == 'Direction' and (line1 > line1[1]) != (line1[1] > line1[2])
+    dirChange[i] = cfg.slowColorMode === 'Direction' && gt(l1(i), l1(i - 1)) !== gt(l1(i - 1), l1(i - 2));
+    // colorChangePosition = slowColorMode == 'Position vs Zero' and (line1 >= 0) != (line1[1] >= 0)
+    posChange[i] = cfg.slowColorMode === 'Position vs Zero' && ge(l1(i), 0) !== ge(l1(i - 1), 0);
     // plotshape(supBuySignal ? line2 : na, location.bottom, color.new(oversoldLineColor, 60), shape.circle, size.tiny)
     if (cfg.showObosSignals && longSignal) {
       markers.push({ time: t(i), position: 'bottom', shape: 'circle', color: buyColor, size: 'tiny' });
@@ -408,8 +424,19 @@ export function calculate(
     ],
     fills,
     markers,
+    alerts: alertStates(alertConditions, bars, [buyAlert, sellAlert, dirChange, posChange, bullCond, bearCond]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy: Fast A Return from Oversold', message: 'Fast Line A crossed above oversold level.' },
+  { id: 'alert1', title: 'Sell: Fast A Return from Overbought', message: 'Fast Line A crossed below overbought level.' },
+  { id: 'alert2', title: 'Slow Line Color Change (Direction Mode)', message: 'Slow Line changed direction.' },
+  { id: 'alert3', title: 'Slow Line Color Change (Position vs Zero Mode)', message: 'Slow Line crossed zero level.' },
+  { id: 'alert4', title: 'Bullish Divergence (Fast A)', message: 'Bullish divergence detected on Fast Line A.' },
+  { id: 'alert5', title: 'Bearish Divergence (Fast A)', message: 'Bearish divergence detected on Fast Line A.' },
+];
 
 export const Mpo4LinesModalEngine = {
   calculate,
@@ -417,4 +444,5 @@ export const Mpo4LinesModalEngine = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

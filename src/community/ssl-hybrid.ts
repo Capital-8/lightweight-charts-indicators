@@ -8,6 +8,10 @@
  * candles larger than one ATR near the baseline; optional ATR bands. The transparency of the colours grows with the
  * percentile rank of the ATR (risk gradient). A table on the last bar gives the risk level, the distance of the
  * close from the baseline in ATR, the volatility percentile and the ATR.
+ * The exit arrows are the original's plotarrow (`arrows` of the result, id arrow0); the diamonds have the id shape0.
+ * Alerts (alertcondition, `alerts` of the result): exits (close crossing the exit line), SSL2 continuations, close
+ * crossing the channel bands and the baseline, high risk entry (ATR percentile above 75 and the close 2 ATR or more
+ * from the baseline), false breakout warning (the diamond condition) and extreme volatility (percentile above 90).
  *
  * Reference: "SSL Hybrid" by Mihkel00
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -17,7 +21,9 @@ import {
   ta, Series, color, str, math, getSourceSeries,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
+import type { ArrowData } from 'oakscriptjs';
 import type { MarkerData, BarColorData, TableData, TableCellData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type DisplayMode = 'Baseline Only' | 'Baseline + SSL' | 'SSL Only' | 'Entry/Exit Only' | 'Full Display';
 type MaType =
@@ -182,6 +188,7 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 const le = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !(a - b > EPS);
+const ge = (a: number, b: number) => !Number.isNaN(a) && !Number.isNaN(b) && !(b - a > EPS);
 const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 /** Pine nz(x, y): na and the infinities are replaced */
 const nz = (x: number, y = 0) => (Number.isFinite(x) ? x : y);
@@ -192,7 +199,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SslHybridInputs> = {},
 ): Omit<IndicatorResult, 'markers' | 'barColors' | 'tables'> & {
-  markers: MarkerData[]; barColors: BarColorData[]; tables: TableData[];
+  markers: MarkerData[]; arrows: ArrowData[]; barColors: BarColorData[]; tables: TableData[]; alerts: AlertConditionState[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -425,7 +432,14 @@ export function calculate(
   const plots: Record<string, Point[]> = { plot0: [], plot1: [], plot2: [], plot3: [], plot4: [], plot5: [], plot6: [] };
   const fillColors: string[] = [];
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   const barColors: BarColorData[] = [];
+  // Alert flags computed in the bar loop
+  const upperKs: number[] = [];
+  const lowerKs: number[] = [];
+  const buyAtrs: boolean[] = [];
+  const sellAtrs: boolean[] = [];
+  const violations: boolean[] = [];
   const white = String(color.white);
   const transparentNeutral = String(color.new('#666666', 80));
   let bullishColor = NEUTRAL;
@@ -472,12 +486,18 @@ export function calculate(
 
     // plotarrow(show_exit ? codiff : na, colorup = bullish_color, colordown = bearish_color, maxheight = 20)
     if (showExit) {
-      if (crossLong[i] === 1) markers.push({ time, position: 'belowBar', shape: 'arrowUp', color: bullishColor });
-      else if (crossShort[i] === 1) markers.push({ time, position: 'aboveBar', shape: 'arrowDown', color: bearishColor });
+      if (crossLong[i] === 1) arrows.push({ time, id: 'arrow0', value: 1, color: bullishColor });
+      else if (crossShort[i] === 1) arrows.push({ time, id: 'arrow0', value: -1, color: bearishColor });
     }
+    // plotshape(show_signals and candlesize_violation, ..., title = "Signal Diamonds")
     if (cfg.showSignals && candleSizeViolation) {
-      markers.push({ time, position: 'top', shape: 'diamond', color: white, size: 'tiny' });
+      markers.push({ time, position: 'top', shape: 'diamond', color: white, size: 'tiny', id: 'shape0' });
     }
+    upperKs.push(upperK);
+    lowerKs.push(lowerK);
+    buyAtrs.push(buyAtr);
+    sellAtrs.push(sellAtr);
+    violations.push(candleSizeViolation);
     if (cfg.colorBars) barColors.push({ time, color: baselineColor });
   }
 
@@ -512,10 +532,51 @@ export function calculate(
     // fill(upper_channel, lower_channel, title = "Baseline Channel")
     fills: [{ plot1: 'plot1', plot2: 'plot2', colors: fillColors }],
     markers,
+    arrows,
     barColors,
     tables,
+    alerts: alertStates(alertConditions, bars, alertFlags()),
   };
+
+  /** One flag per bar for each alertcondition of the original */
+  function alertFlags(): boolean[][] {
+    // exit_long = ta.crossunder(close, sslExit); exit_short = ta.crossover(close, sslExit)
+    const exitLong = crossedUnder(close, sslExit);
+    const exitShort = crossedOver(close, sslExit);
+    // ssl2_buy_signal = buy_atr and not buy_atr[1] (the same for sell)
+    const ssl2Buy = buyAtrs.map((v, i) => v && !(i > 0 && buyAtrs[i - 1]));
+    const ssl2Sell = sellAtrs.map((v, i) => v && !(i > 0 && sellAtrs[i - 1]));
+    // baseline_bullish = ta.crossover(close, upperk); baseline_bearish = ta.crossunder(close, lowerk)
+    const baselineBullish = crossedOver(close, upperKs);
+    const baselineBearish = crossedUnder(close, lowerKs);
+    // price_above_baseline = close > BBMC and close[1] <= BBMC (the same for below)
+    const above = close.map((c, i) => i > 0 && gt(c, bbmc[i]) && le(close[i - 1], bbmc[i]));
+    const below = close.map((c, i) => i > 0 && lt(c, bbmc[i]) && ge(close[i - 1], bbmc[i]));
+    // high_risk_entry = risk_level == "High" and entry_distance == "Far" (a na distance is "Far")
+    const highRisk = close.map((c, i) => {
+      const distance = Math.abs(c - bbmc[i]) / atr[i];
+      return gt(atrPercentile[i], 75) && !lt(distance, 1) && !lt(distance, 2);
+    });
+    // extreme_volatility = atr_percentile > 90
+    const extreme = atrPercentile.map((p) => gt(p, 90));
+    return [exitLong, exitShort, ssl2Buy, ssl2Sell, baselineBullish, baselineBearish, above, below, highRisk, violations, extreme];
+  }
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'EXIT LONG Signal', message: 'EXIT LONG Signal – see chart for price and risk details' },
+  { id: 'alert1', title: 'EXIT SHORT Signal', message: 'EXIT SHORT Signal – see chart for price and risk details' },
+  { id: 'alert2', title: 'SSL2 BUY Continuation', message: 'SSL2 BUY Continuation – see chart for ATR details' },
+  { id: 'alert3', title: 'SSL2 SELL Continuation', message: 'SSL2 SELL Continuation – see chart for ATR details' },
+  { id: 'alert4', title: 'Price Above Upper Channel', message: 'Price Above Upper Channel – price has broken above upper band' },
+  { id: 'alert5', title: 'Price Below Lower Channel', message: 'Price Below Lower Channel – price has broken below lower band' },
+  { id: 'alert6', title: 'Price Crossed Above Baseline', message: 'Price Crossed Above Baseline' },
+  { id: 'alert7', title: 'Price Crossed Below Baseline', message: 'Price Crossed Below Baseline' },
+  { id: 'alert8', title: 'HIGH RISK Entry Conditions', message: 'HIGH RISK Entry – check chart for context' },
+  { id: 'alert9', title: 'FALSE BREAKOUT WARNING', message: 'FALSE BREAKOUT WARNING – possible trap candle' },
+  { id: 'alert10', title: 'EXTREME VOLATILITY', message: 'EXTREME VOLATILITY – check ATR levels on chart' },
+];
 
 export const SslHybrid = {
   calculate,
@@ -523,4 +584,5 @@ export const SslHybrid = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

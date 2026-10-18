@@ -17,7 +17,9 @@
  * Chart values read (optional third argument of calculate): the symbol tick (the least distance of the stop from the
  * entry, and the prices in the label tooltips; without it 0.01) and the state of the last bar (no signal on a last
  * bar that is still open; without it the last bar is taken as closed).
- * The 12 alert conditions of the script have no output.
+ * Alerts (alertcondition, `alerts` of the result): the 12 conditions of the original (RSI / signal crosses, oversold
+ * reclaim, overbought reject, centerline crosses, the confirmed entry signals and the TP / SL hits of the trade
+ * projections), each gated by its 'Enable ... Alerts' input.
  *
  * Reference: "RSI Entry Engine [trade_w_samet]" by tradewsamet
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,6 +31,7 @@ import {
 } from 'oakscriptjs';
 import type { BgColorData, BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TablePosition } from '../types';
 import { lastBarConfirmedOf, mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiEntryEngineInputs {
   rsiSource: SourceType;
@@ -299,7 +302,7 @@ export function calculate(
     boxes: BoxData[];
     labels: LabelData[];
     tables: TableData[];
-  } {
+  } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { overbought, oversold, extremeHigh, extremeLow, slMode, rrTarget } = cfg;
   const n = bars.length;
@@ -342,6 +345,10 @@ export function calculate(
   };
 
   const trades: Trade[] = [];
+  const upFlags: boolean[] = new Array(n).fill(false);
+  const downFlags: boolean[] = new Array(n).fill(false);
+  // longTpHitBar, longSlHitBar, shortTpHitBar, shortSlHitBar
+  const hitFlags: boolean[][] = [0, 1, 2, 3].map(() => new Array(n).fill(false));
 
   for (let i = 0; i < n; i++) {
     const bar = bars[i];
@@ -355,6 +362,8 @@ export function calculate(
     const confirmed = i < n - 1 || lastConfirmed;
     const upSignal = crossUp[i] && confirmed;
     const downSignal = crossDown[i] && confirmed;
+    upFlags[i] = upSignal;
+    downFlags[i] = downSignal;
 
     if (upSignal) {
       newLabel(i, rsi, TXT_UP, 'label_up', CLR_GREEN,
@@ -435,6 +444,7 @@ export function calculate(
       }
       if (tpHit || slHit) {
         trade.active = false;
+        hitFlags[(trade.dir === 1 ? 0 : 2) + (tpHit ? 0 : 1)][i] = true;
         const direction = trade.dir === 1 ? 'Long' : 'Short';
         if (tpHit) {
           newLabel(i, trade.tp, TXT_TP_HIT, 'label_down', CLR_GREEN,
@@ -515,6 +525,20 @@ export function calculate(
   }
 
   const hl = hlineList(overbought, oversold, extremeHigh, extremeLow);
+
+  // alertcondition(enable... and cond): exact crosses of the smoothed RSI
+  const gate = (on: boolean, flags: boolean[]) => flags.map((f) => on && f);
+  const alertFlags = [
+    gate(cfg.enableCrossAlerts, crossedOver(rsiSmooth, signal)),
+    gate(cfg.enableCrossAlerts, crossedUnder(rsiSmooth, signal)),
+    gate(cfg.enableZoneAlerts, crossedOver(rsiSmooth, oversold)),
+    gate(cfg.enableZoneAlerts, crossedUnder(rsiSmooth, overbought)),
+    gate(cfg.enableCenterAlerts, crossedOver(rsiSmooth, 50)),
+    gate(cfg.enableCenterAlerts, crossedUnder(rsiSmooth, 50)),
+    gate(cfg.enableSignalAlerts, upFlags),
+    gate(cfg.enableSignalAlerts, downFlags),
+    ...hitFlags.map((f) => gate(cfg.enableTradeAlerts, f)),
+  ];
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -531,7 +555,24 @@ export function calculate(
     boxes,
     labels,
     tables,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
 
-export const RsiEntryEngine = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RSI Bullish Cross', message: 'RSI crossed above Signal' },
+  { id: 'alert1', title: 'RSI Bearish Cross', message: 'RSI crossed below Signal' },
+  { id: 'alert2', title: 'RSI Oversold Reclaim', message: 'RSI reclaimed above Oversold' },
+  { id: 'alert3', title: 'RSI Overbought Reject', message: 'RSI crossed below Overbought' },
+  { id: 'alert4', title: 'RSI Centerline Bullish', message: 'RSI crossed above 50' },
+  { id: 'alert5', title: 'RSI Centerline Bearish', message: 'RSI crossed below 50' },
+  { id: 'alert6', title: 'Long Entry Signal', message: 'Long entry signal confirmed' },
+  { id: 'alert7', title: 'Short Entry Signal', message: 'Short entry signal confirmed' },
+  { id: 'alert8', title: 'Long TP Hit', message: 'Long projected take-profit reached' },
+  { id: 'alert9', title: 'Long SL Hit', message: 'Long projected stop-loss reached' },
+  { id: 'alert10', title: 'Short TP Hit', message: 'Short projected take-profit reached' },
+  { id: 'alert11', title: 'Short SL Hit', message: 'Short projected stop-loss reached' },
+];
+
+export const RsiEntryEngine = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hlineConfig, fillConfig, alertConditions };

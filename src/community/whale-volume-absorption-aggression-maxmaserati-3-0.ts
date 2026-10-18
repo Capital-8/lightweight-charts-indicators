@@ -114,10 +114,10 @@ export function calculate(
     plot1.push({ time: b.time, value: s, color: AVG_COL });
 
     // Four bgcolor calls in this order (at most one is not na on a bar)
-    if (isSeller && isWhale) bgColors.push({ time: b.time, color: bgSellWhale });
-    if (isSeller && isUltra) bgColors.push({ time: b.time, color: bgSellUltra });
-    if (isBuyer && isWhale) bgColors.push({ time: b.time, color: bgBuyWhale });
-    if (isBuyer && isUltra) bgColors.push({ time: b.time, color: bgBuyUltra });
+    if (isSeller && isWhale) bgColors.push({ id: 'bgcolor0', time: b.time, color: bgSellWhale });
+    if (isSeller && isUltra) bgColors.push({ id: 'bgcolor1', time: b.time, color: bgSellUltra });
+    if (isBuyer && isWhale) bgColors.push({ id: 'bgcolor2', time: b.time, color: bgBuyWhale });
+    if (isBuyer && isUltra) bgColors.push({ id: 'bgcolor3', time: b.time, color: bgBuyUltra });
   }
 
   return {

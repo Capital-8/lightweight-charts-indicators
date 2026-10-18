@@ -7,7 +7,8 @@
  * to a higher timeframe (1 hour, 4 hours or 1 day): its Count is then multiplied by the ratio of that timeframe to
  * the chart timeframe, and its lines can be shortened to a number of bars.
  * It also plots the linear regression curve (the end point of the regression of each bar) with optional bands at
- * 1, 2 and 3 standard deviations or average true ranges, optional arrows for the regression slope, optional marks
+ * 1, 2 and 3 standard deviations or average true ranges, optional arrows for the regression slope (the original's
+ * plotarrow, `arrows` of the result), optional marks
  * on bars of high volatility (range above a multiple of the average true range) and of exhaustion (volume above a
  * multiple of its average), and it colours the bars by their volume against the volume average. These outputs are
  * shown on the last 3 x Count bars only (the Count of the first channel).
@@ -31,6 +32,7 @@
  */
 
 import { ta, str, timeframe, Series, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import type { ArrowData } from 'oakscriptjs';
 import type { AlertCall, BarColorData, LabelData, LineDrawingData, MarkerData, TableData } from '../types';
 import { mintickOf, tickerOf, type ChartContext } from '../chart-context';
 import { alertStates, crossedOver, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
@@ -342,7 +344,7 @@ export function calculate(
   chart?: ChartContext,
 ): IndicatorResult & {
     markers: MarkerData[]; barColors: BarColorData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[];
-    alerts: AlertConditionState[]; alertCalls: AlertCall[];
+    arrows: ArrowData[]; alerts: AlertConditionState[]; alertCalls: AlertCall[];
   } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -526,6 +528,7 @@ export function calculate(
   const plots: Record<string, Array<{ time: number; value: number; color?: string }>> = {};
   for (const p of plotConfig) plots[p.id] = [];
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   const barColors: BarColorData[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -537,11 +540,10 @@ export function calculate(
       plots[`plot${k + 1}`].push({ time: b.time, value: isFinite(value) ? value : NaN, color: bandColors[k] });
     }
     if (!show) continue;
-    // plotarrow(): up arrow below the bar for a positive slope, down arrow above the bar for a negative one
+    // plotarrow(slope, 'Linear Regression Slope', colorup, colordown): up arrow for a positive value, down arrow for a
+    // negative one, none for 0 / na
     if (cfg.showSlope && isFinite(slope[i]) && slope[i] !== 0) {
-      markers.push(slope[i] > 0
-        ? { time: b.time, position: 'belowBar', shape: 'arrowUp', color: cfg.lrColorSlopeU }
-        : { time: b.time, position: 'aboveBar', shape: 'arrowDown', color: cfg.lrColorSlopeD });
+      arrows.push({ time: b.time, id: 'arrow0', value: slope[i], color: slope[i] > 0 ? cfg.lrColorSlopeU : cfg.lrColorSlopeD });
     }
     const hasVolume = volume[i] !== 0;
     if (cfg.vSpikeLb && hasVolume && gt(volume[i], cfg.vSpikeThresh * vSma[i])) {
@@ -561,6 +563,7 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
     markers,
+    arrows,
     barColors,
     lines,
     labels,

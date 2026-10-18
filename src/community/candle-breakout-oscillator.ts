@@ -161,10 +161,11 @@ export function calculate(
     const bearishCross = gt(be, bu) && !isNaN(pbu) && !isNaN(pbe) && !gt(pbe, pbu);
     // plotshape(bullsNormalized, 'Bullish Cross', circle, absolute, bullishCross ? color.new(bullColor, 0) : na, tiny)
     if (bullishCross && !isNaN(bu)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: bu, shape: 'circle', color: String(color.new(bullColor, 0)), size: 'tiny' });
+      markers.push({ id: 'shape0', time: t, position: 'atPriceMiddle', price: bu, shape: 'circle', color: String(color.new(bullColor, 0)), size: 'tiny' });
     }
     if (bearishCross && !isNaN(be)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: be, shape: 'circle', color: String(color.new(bearColor, 0)), size: 'tiny' });
+      // plotshape(bearsNormalized, 'Bearish Cross', circle, absolute, bearishCross ? color.new(bearColor, 0) : na, tiny)
+      markers.push({ id: 'shape1', time: t, position: 'atPriceMiddle', price: be, shape: 'circle', color: String(color.new(bearColor, 0)), size: 'tiny' });
     }
     fillColors[0].push(gt(bu, top) ? bullColor : transparent);
     fillColors[1].push(gt(bottom, bu) ? bullColor : transparent);

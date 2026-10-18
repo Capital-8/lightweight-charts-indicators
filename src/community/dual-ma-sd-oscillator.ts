@@ -5,6 +5,8 @@
  * minus the standard deviation of the spread. The trend state turns bullish when the spread closes above the upper
  * band and bearish when it closes below the lower band; it colours the columns and the price bars, and BULL / BEAR
  * triangles on the price pane mark the first bar of a new state.
+ * Alerts (alertcondition, `alerts` of the result): 'Bull Signal' / 'Bear Signal', true on the first bar of a new
+ * state (also with the signals hidden).
  *
  * Reference: "Dual MA SD Oscillator" by SchizoQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DualMaSdOscillatorInputs {
   /** Price source of the fast and slow EMAs */
@@ -79,7 +82,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<DualMaSdOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -105,6 +108,7 @@ export function calculate(
   const plot2: Array<{ time: number; value: number; color: string }> = [];
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
   let sq = 0; // var int SQ = 0
   let prevSq = NaN; // SQ[1] (na on the first bar)
   for (let i = 0; i < n; i++) {
@@ -115,6 +119,8 @@ export function calculate(
     const longSignal = sq === 1 && !isNaN(prevSq) && prevSq !== 1;
     const shortSignal = sq === -1 && !isNaN(prevSq) && prevSq !== -1;
     const col = sq === 1 ? longCol : shortCol;
+    longFlags.push(longSignal);
+    shortFlags.push(shortSignal);
 
     plot0.push({ time: t, value: upperBand[i], color: upperCol });
     plot1.push({ time: t, value: lowerBand[i], color: lowerCol });
@@ -143,8 +149,16 @@ export function calculate(
       colors: new Array<string>(n).fill(String(color.new(color.gray, 93))) }],
     markers,
     barColors,
+    // alertcondition(longSignal, "Bull Signal") / alertcondition(shortSignal, "Bear Signal")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bull Signal', message: 'Dual MA SD Oscillator Bull Signal on {{ticker}}' },
+  { id: 'alert1', title: 'Bear Signal', message: 'Dual MA SD Oscillator Bear Signal on {{ticker}}' },
+];
 
 export const DualMaSdOscillator = {
   calculate,
@@ -152,4 +166,5 @@ export const DualMaSdOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

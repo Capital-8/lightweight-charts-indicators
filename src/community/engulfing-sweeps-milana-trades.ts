@@ -7,13 +7,21 @@
  * as arrows below / above the bar or as a highlighted candle colour (bar colour with the highlight opacity as
  * transparency; the bullish colour wins when both patterns are true).
  *
+ * Alerts: 'Bullish Engulfing Alert' and 'Bearish Engulfing Alert' (alertcondition, `alerts` of the result), true on
+ * the pattern bars, and the alert() calls of the original on the same bars ("Bullish Engulfing pattern detected!" /
+ * "Bearish Engulfing pattern detected!", once per bar close, `alertCalls` of the result).
+ *
  * Reference: "Engulfing Sweeps - Milana Trades" by MilanaArsenovna
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © MilanaArsenovna
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BarColorData, MarkerData } from '../types';
+import type { AlertCall, BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface EngulfingSweepsMilanaTradesInputs {
   /** 'Arrow' = arrow above or below the bar, 'Highlight Candle' = bar colour */
@@ -65,7 +73,8 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<EngulfingSweepsMilanaTradesInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const avgVolume = ta.sma(new Series(bars, (b) => b.volume ?? NaN), cfg.volumePeriod).toArray().map((v) => v ?? NaN);
@@ -76,6 +85,9 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
+  const alertCalls: AlertCall[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     // prevHigh = ta.highest(high[1], 1), prevLow = ta.lowest(low[1], 1): the previous high / low
@@ -87,6 +99,11 @@ export function calculate(
     const bearishEngulfing = gt(b.high, prevHigh) && lt(b.close, prevOpen);
     const bullishConfirmed = cfg.useVolumeFilter ? bullishEngulfing && isHugeVolume : bullishEngulfing;
     const bearishConfirmed = cfg.useVolumeFilter ? bearishEngulfing && isHugeVolume : bearishEngulfing;
+    bullFlags.push(bullishConfirmed);
+    bearFlags.push(bearishConfirmed);
+    // if bullishConfirmed / bearishConfirmed: alert("... pattern detected!", alert.freq_once_per_bar_close)
+    if (bullishConfirmed) alertCalls.push({ time: b.time, message: 'Bullish Engulfing pattern detected!', freq: 'once_per_bar_close' });
+    if (bearishConfirmed) alertCalls.push({ time: b.time, message: 'Bearish Engulfing pattern detected!', freq: 'once_per_bar_close' });
 
     // plotshape(showArrow and bullishConfirmed, "Bullish Arrow", location.belowbar, bullColor, shape.arrowup, size.tiny)
     if (showArrow && bullishConfirmed) {
@@ -107,7 +124,18 @@ export function calculate(
     plots: {},
     markers,
     barColors,
+    // alertcondition(bullishConfirmed, ...) / alertcondition(bearishConfirmed, ...)
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
+    alertCalls,
   };
 }
 
-export const EngulfingSweepsMilanaTrades = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Engulfing Alert', message: 'Bullish Engulfing pattern detected!' },
+  { id: 'alert1', title: 'Bearish Engulfing Alert', message: 'Bearish Engulfing pattern detected!' },
+];
+
+export const EngulfingSweepsMilanaTrades = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction,
+};

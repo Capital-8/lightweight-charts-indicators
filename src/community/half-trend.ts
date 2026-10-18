@@ -5,11 +5,15 @@
  * Tracks highest lows / lowest highs over the amplitude period, flips direction
  * when SMA of high/low crosses these extremes and price confirms.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'HalfTrend Buy' on the bars the trend turns up, 'HalfTrend Sell' on
+ * the bars it turns down (from the first bar with an ATR).
+ *
  * Reference: "HalfTrend" by everget
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HalfTrendInputs {
   amplitude: number;
@@ -44,7 +48,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<HalfTrendInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<HalfTrendInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { amplitude, channelDeviation, showArrows, showLabels } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -134,6 +141,12 @@ export function calculate(bars: Bar[], inputs: Partial<HalfTrendInputs> = {}): O
     }
   }
 
+  // buySignal = not na(arrowUp) and trend == 0 and trend[1] == 1; sellSignal = not na(arrowDown) and trend == 1 and
+  // trend[1] == 0 (arrowUp / arrowDown are set on the flip bars, na while the ATR is na)
+  const hasAtr = (i: number) => atr2Arr[i] != null && !isNaN(atr2Arr[i] as number);
+  const buyFlags = trendArr.map((t, i) => i > 0 && hasAtr(i) && t === 0 && trendArr[i - 1] === 1);
+  const sellFlags = trendArr.map((t, i) => i > 0 && hasAtr(i) && t === 1 && trendArr[i - 1] === 0);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': htPlot, 'plot1': toPlot(atrHighArr), 'plot2': toPlot(atrLowArr) },
@@ -142,7 +155,15 @@ export function calculate(bars: Bar[], inputs: Partial<HalfTrendInputs> = {}): O
       { plot1: 'plot0', plot2: 'plot2', options: { color: 'rgba(41,98,255,0.15)' } },
     ],
     markers,
+    // alertcondition(buySignal, 'HalfTrend Buy') / alertcondition(sellSignal, 'HalfTrend Sell')
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
 
-export const HalfTrend = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'HalfTrend Buy', message: 'HalfTrend Buy, {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'HalfTrend Sell', message: 'HalfTrend Sell, {{exchange}}:{{ticker}}' },
+];
+
+export const HalfTrend = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

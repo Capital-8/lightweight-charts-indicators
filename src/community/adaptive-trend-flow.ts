@@ -4,12 +4,14 @@
  * Dual EMA basis (fast + slow on hlc3) plus stdev volatility bands.
  * Trend state tracks: bullish when close > upper, bearish when close < lower.
  * Plots basis line and trailing level (lower in uptrend, upper in downtrend).
+ * Alerts (alertcondition, `alerts` of the result): 'Adaptive Trend Flow Long' / 'Short' on the trend changes.
  *
  * Reference: "Adaptive Trend Flow [QuantAlgo]" by QuantAlgo
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, BgColorData, LabelData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AdaptiveTrendFlowInputs {
   length: number;
@@ -40,7 +42,11 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<AdaptiveTrendFlowInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<AdaptiveTrendFlowInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; bgColors: BgColorData[]; labels: LabelData[] }
+  & { alerts: AlertConditionState[] } {
   const { length, smoothLen, sensitivity } = { ...defaultInputs, ...inputs };
   const len = bars.length;
 
@@ -118,6 +124,37 @@ export function calculate(bars: Bar[], inputs: Partial<AdaptiveTrendFlowInputs> 
   }
 
   const warmup = length * 2 + smoothLen;
+
+  // Alerts: the original's get_trend_state on every bar (var trend = 0, var prev_level = na): while prev_level is na
+  // it starts again from close > basis (basis na: -1), so the trend can change before the bands exist
+  const origTrend: number[] = new Array(len);
+  {
+    let prevLevel = NaN;
+    let trend = 0;
+    for (let i = 0; i < len; i++) {
+      const close = bars[i].close;
+      const basis = (fastEmaArr[i] + slowEmaArr[i]) / 2;
+      const upper = basis + smoothVolArr[i] * sensitivity;
+      const lower = basis - smoothVolArr[i] * sensitivity;
+      if (isNaN(prevLevel)) {
+        trend = close > basis ? 1 : -1;
+        prevLevel = trend === 1 ? lower : upper;
+      }
+      if (trend === 1) {
+        if (close < lower) {
+          trend = -1;
+          prevLevel = upper;
+        } else prevLevel = lower;
+      } else if (close > upper) {
+        trend = 1;
+        prevLevel = lower;
+      } else prevLevel = upper;
+      origTrend[i] = trend;
+    }
+  }
+  // long_signal = trend == 1 and trend[1] == -1; short_signal = trend == -1 and trend[1] == 1
+  const longSignal = origTrend.map((t, i) => t === 1 && i > 0 && origTrend[i - 1] === -1);
+  const shortSignal = origTrend.map((t, i) => t === -1 && i > 0 && origTrend[i - 1] === 1);
 
   // plot0: basis colored by trend
   const plot0 = basisArr.map((v, i) => {
@@ -217,7 +254,14 @@ export function calculate(bars: Bar[], inputs: Partial<AdaptiveTrendFlowInputs> 
     barColors,
     bgColors,
     labels,
-  } as Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[]; bgColors: BgColorData[]; labels: LabelData[] };
+    alerts: alertStates(alertConditions, bars, [longSignal, shortSignal]),
+  };
 }
 
-export const AdaptiveTrendFlow = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Adaptive Trend Flow Long', message: 'Adaptive Trend Flow Long {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Adaptive Trend Flow Short', message: 'Adaptive Trend Flow Short {{exchange}}:{{ticker}}' },
+];
+
+export const AdaptiveTrendFlow = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -8,6 +8,7 @@
  * range RMA). The line is the average of the two set averages. The background is red when the line is above
  * OB - |line - RSI of TSI| * (0.972741476 - 0.95) (not below 0) and green when it is below
  * OS + |line - RSI of TSI| * (0.972741476 - 0.95) (not above 100).
+ * Alerts (alertcondition, `alerts` of the result): 'RSI Oversold' / 'RSI Overbought', true on the bars of each zone.
  *
  * Reference: "Perfect RSI" by HabibiBudo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +16,7 @@
 
 import { ta, Series, fixnan, getSourceSeries, type InputConfig, type PlotConfig, type Bar, type IndicatorResult, type SourceType } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PerfectRsiInputs {
   /** RSI length (Regular) - 1 */
@@ -170,7 +172,7 @@ const CORRELATION_THRESHOLD = 0.95;
 export function calculate(
   bars: Bar[],
   inputs: Partial<PerfectRsiInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -237,6 +239,7 @@ export function calculate(
 
   const plot0: { time: number; value: number; color: string }[] = [];
   const bgColors: BgColorData[] = [];
+  const osFlags: boolean[] = [], obFlags: boolean[] = [];
   const lineColor = 'rgb(246, 249, 252)';
   for (let i = 0; i < n; i++) {
     const RSI1 = (rsiPlusDynamic[i] + rsi2Advanced[i] + rsimom[i] + rsiPpo[i] + RSITSI[i] + rsiValue[i]) / 6;
@@ -245,9 +248,13 @@ export function calculate(
     const rsiDiff = Math.abs(RSI - RSITSI[i]);
     const overboughtLevel = max(cfg.ob - rsiDiff * (CC - CORRELATION_THRESHOLD), 0);
     const oversoldLevel = min(cfg.os + rsiDiff * (CC - CORRELATION_THRESHOLD), 100);
+    const overboughtZone = gt(RSI, overboughtLevel);
+    const oversoldZone = lt(RSI, oversoldLevel);
+    obFlags.push(overboughtZone);
+    osFlags.push(oversoldZone);
     // bgcolor(overboughtZone ? #ff000080 : oversoldZone ? #00ff0880 : na)
-    if (gt(RSI, overboughtLevel)) bgColors.push({ time: bars[i].time, color: '#ff000080' });
-    else if (lt(RSI, oversoldLevel)) bgColors.push({ time: bars[i].time, color: '#00ff0880' });
+    if (overboughtZone) bgColors.push({ time: bars[i].time, color: '#ff000080' });
+    else if (oversoldZone) bgColors.push({ time: bars[i].time, color: '#00ff0880' });
     plot0.push({ time: bars[i].time, value: Number.isFinite(RSI) ? RSI : NaN, color: lineColor });
   }
 
@@ -259,8 +266,16 @@ export function calculate(
       { value: cfg.os, options: { title: 'Oversold', color: '#6a00ff', linestyle: 'dashed' } },
     ],
     bgColors,
+    // alertcondition(oversoldZone, 'RSI Oversold') / alertcondition(overboughtZone, 'RSI Overbought')
+    alerts: alertStates(alertConditions, bars, [osFlags, obFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RSI Oversold', message: 'RSI is oversold!' },
+  { id: 'alert1', title: 'RSI Overbought', message: 'RSI is overbought!' },
+];
 
 export const PerfectRsi = {
   calculate,
@@ -268,4 +283,5 @@ export const PerfectRsi = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

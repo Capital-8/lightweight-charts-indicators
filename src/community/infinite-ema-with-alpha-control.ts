@@ -6,7 +6,9 @@
  * updates). Each line is coloured bullish / bearish / neutral by the close above / below / equal to it; a cloud
  * between them takes the slow bullish colour when the fast EMA is above the slow EMA, else the slow bearish colour.
  * Optional background shading, and triangles one bar back on the crossovers of the fast EMA over / under the slow
- * EMA.
+ * EMA (one Style output per signal size, as the original).
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish EMA Crossover' / 'Bearish EMA Crossover', true on the bar
+ * where the fast EMA crosses over / under the slow EMA (with the fast EMA enabled).
  *
  * Reference: "Infinite EMA with Alpha Control" by Sesilya
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, MarkerData, PineSize } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface InfiniteEmaWithAlphaControlInputs {
   /** Slow EMA length (N) */
@@ -120,7 +123,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<InfiniteEmaWithAlphaControlInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const interval = barInterval(bars);
@@ -188,16 +191,25 @@ export function calculate(
   }
 
   // ta.crossover / ta.crossunder(fastEMA, slowEMA) compare exactly; plotshape(..., offset = -1): drawn one bar back
+  // bullish_cross = enableFastEMA and ta.crossover(fastEMA, slowEMA); bearish_cross: ta.crossunder
+  const bullishCross: boolean[] = [];
+  const bearishCross: boolean[] = [];
+  for (let i = 0; i < n; i++) {
+    bullishCross.push(cfg.enableFastEMA && i > 0 && fast[i] > slow[i] && fast[i - 1] <= slow[i - 1]);
+    bearishCross.push(cfg.enableFastEMA && i > 0 && fast[i] < slow[i] && fast[i - 1] >= slow[i - 1]);
+  }
   const markers: MarkerData[] = [];
   if (cfg.enableFastEMA && cfg.showCrossoverSignals) {
     const size = cfg.signalSize as PineSize;
+    // One plotshape per size: "Bullish Cross Tiny" ... "Large" (shape0-3), "Bearish Cross Tiny" ... (shape4-7)
+    const sizeIndex = Math.max(0, (['tiny', 'small', 'normal', 'large'] as const).indexOf(cfg.signalSize));
     for (let i = 1; i < n; i++) {
       const time = barTime(bars, i - 1, interval);
-      if (fast[i] > slow[i] && fast[i - 1] <= slow[i - 1]) {
-        markers.push({ time, position: 'belowBar', shape: 'triangleUp', color: cfg.bullishSignalColor, size });
+      if (bullishCross[i]) {
+        markers.push({ time, position: 'belowBar', shape: 'triangleUp', color: cfg.bullishSignalColor, size, id: `shape${sizeIndex}` });
       }
-      if (fast[i] < slow[i] && fast[i - 1] >= slow[i - 1]) {
-        markers.push({ time, position: 'aboveBar', shape: 'triangleDown', color: cfg.bearishSignalColor, size });
+      if (bearishCross[i]) {
+        markers.push({ time, position: 'aboveBar', shape: 'triangleDown', color: cfg.bearishSignalColor, size, id: `shape${4 + sizeIndex}` });
       }
     }
   }
@@ -208,8 +220,15 @@ export function calculate(
     fills,
     bgColors,
     markers,
+    alerts: alertStates(alertConditions, bars, [bullishCross, bearishCross]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish EMA Crossover', message: 'Fast EMA crossed above Slow EMA - Bullish signal!' },
+  { id: 'alert1', title: 'Bearish EMA Crossover', message: 'Fast EMA crossed below Slow EMA - Bearish signal!' },
+];
 
 export const InfiniteEmaWithAlphaControl = {
   calculate,
@@ -217,4 +236,5 @@ export const InfiniteEmaWithAlphaControl = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -26,6 +26,9 @@
  * (periods, month and year), the chart foreground and background colours. The chart is taken as a standard chart
  * (regular candles).
  *
+ * Alerts: the original declares an alert() call (in its alarm() function, "Price ... Timeframe ..." message), but
+ * every call of alarm() is commented out in it, so it never fires: `alertCalls` of the result is always empty.
+ *
  * Reference: "HTF Candles by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © dgtrd
@@ -35,7 +38,7 @@ import {
   ta, str, color, array, time, timeframe, Series, getSourceSeries, box, heikinAshi, resetDrawings,
   setDrawingBar, varDrawing, type Box, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
-import type { BarColorData, BoxData, LabelData, LineDrawingData, PolylineData, TableCellData, TableData } from '../types';
+import type { AlertCall, BarColorData, BoxData, LabelData, LineDrawingData, PolylineData, TableCellData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { periodStarts, chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import { backgroundColorOf, foregroundColorOf, mintickOf, timezoneOf, type ChartContext } from '../chart-context';
@@ -368,13 +371,16 @@ function timeframeBars(bars: Bar[], tf: string, sameAsChart: boolean, context?: 
   return higherTimeframeBars(bars, tf, context);
 }
 
+/** The original has an alert() call (never reached: see the header) */
+export const hasAlertFunction = true;
+
 export function calculate(
   allBars: Bar[],
   inputs: Partial<HtfCandlesMiniChartsByDgtInputs> = {},
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'labels' | 'lines' | 'polylines' | 'tables' | 'barColors'> & {
     boxes: BoxData[]; labels: LabelData[]; lines: LineDrawingData[]; polylines: PolylineData[]; tables: TableData[];
-    barColors: BarColorData[];
+    barColors: BarColorData[]; alertCalls: AlertCall[];
   } {
   const cfg = { ...defaultInputs, ...inputs };
   const mintick = mintickOf(chart);
@@ -997,6 +1003,8 @@ export function calculate(
     labels,
     polylines,
     tables,
+    // alarm(cond, message, htfUser, oncePerBarClose) => alert(...): no alarm() call is left in the original
+    alertCalls: [],
   };
 }
 
@@ -1006,4 +1014,5 @@ export const HtfCandlesMiniChartsByDgt = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

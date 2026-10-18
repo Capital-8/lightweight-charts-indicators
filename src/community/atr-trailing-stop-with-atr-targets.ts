@@ -6,6 +6,8 @@
  * lowest low since the flip plus ATR * mult; a close above it flips the trend up (stop = close - ATR * mult). At each
  * flip three targets are frozen at the flip close +- 1, 2 and 3 ATR (ATR of the flip bar). Buy / Sell labels on the
  * flips and a light gray background on every bar.
+ * Alerts (alertcondition, `alerts` of the result): 'ATR Flip Buy' / 'ATR Flip Sell' on the flips up / down (whether
+ * the labels are shown or not).
  *
  * Reference: "ATR Trailing Stop with ATR Targets [v6]" by TRDRZone
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AtrTrailingStopWithAtrTargetsInputs {
   /** ATR period */
@@ -60,7 +63,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AtrTrailingStopWithAtrTargetsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { atrMult } = cfg;
@@ -86,6 +89,7 @@ export function calculate(
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
   const bg = String(color.new(color.gray, 95));
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const { high, low, close, time } = bars[i];
@@ -130,6 +134,8 @@ export function calculate(
       }
     }
 
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
     plot0.push({ time, value: trailStop, color: trend === 1 ? color.green : color.red });
     // showTargets = not na(flipBar) and bar_index >= flipBar
     const showTargets = !isNaN(flipBar) && i >= flipBar;
@@ -154,8 +160,16 @@ export function calculate(
     plots: { plot0, plot1, plot2, plot3 },
     markers,
     bgColors,
+    // alertcondition(buySignal, ...) / alertcondition(sellSignal, ...)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'ATR Flip Buy', message: 'ATR trailing stop flipped bullish — BUY' },
+  { id: 'alert1', title: 'ATR Flip Sell', message: 'ATR trailing stop flipped bearish — SELL' },
+];
 
 export const AtrTrailingStopWithAtrTargets = {
   calculate,
@@ -163,4 +177,5 @@ export const AtrTrailingStopWithAtrTargets = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

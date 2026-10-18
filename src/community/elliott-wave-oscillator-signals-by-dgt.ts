@@ -18,10 +18,17 @@
  *   on the last "Plotting Length" bars.
  * A small logo table is drawn at the bottom right.
  *
+ * Alerts as the original's: the alert conditions long / short early warning (the oscillator crossing its signal
+ * line) and trading opportunity (the same cross one bar before), and the close crossing above the upper Keltner
+ * bands 3 / 2 or below the lower bands 2 / 3 (computed whether the channels are displayed or not); the alert() calls
+ * of the backtest framework (long / short entry, stop loss, long / short early warning; once per bar), in
+ * `alertCalls`.
+ *
  * Chart context (optional third argument), read by the backtest framework only:
  * - `chart.now`: the current time, start of the backtest period. Without it the clock of the computer.
  * - `chart.mintick`: the symbol tick (smallest price in the profit ratio). Without it 0.01.
  * - `chart.timeframe`: the chart timeframe in the statistics text. Without it, from the gaps between the bars.
+ * - `chart.tickerid`: the ticker id in the messages of the alert() calls. Without it an empty string.
  *
  * Reference: "Elliott Wave Oscillator Signals by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,10 +36,11 @@
  */
 
 import { ta, str, color, Series, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
-import type { LabelData, LineDrawingData, MarkerData, TableData } from '../types';
+import type { AlertCall, LabelData, LineDrawingData, MarkerData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
-import { mintickOf, nowOf, type ChartContext } from '../chart-context';
+import { mintickOf, nowOf, tickeridOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ElliottWaveOscillatorSignalsByDgtInputs {
   /** Elliott Wave Oscillator Signals */
@@ -277,6 +285,20 @@ export const metadata = {
   overlay: true,
 };
 
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long : Early Warning', message: 'EWOˢ - Probable Long Trade (Not Confirmed)\n{{exchange}}:{{ticker}}\nPrice = {{close}}\nTime = {{time}}' },
+  { id: 'alert1', title: 'Long : Trading Opportunity', message: 'EWOˢ - Probable Long Trade Opportunity\n{{exchange}}:{{ticker}}\nPrice = {{close}}\nTime = {{time}}' },
+  { id: 'alert2', title: 'Short : Early Warning', message: 'EWOˢ - Probable Short Trade (Not Confirmed)\n{{exchange}}:{{ticker}}\nPrice = {{close}}\nTime = {{time}}' },
+  { id: 'alert3', title: 'Short : Trading Opportunity', message: 'EWOˢ - Probable Short Trade Opportunity\n{{exchange}}:{{ticker}}\nPrice = {{close}}\nTime = {{time}}' },
+  { id: 'alert4', title: 'Crossover Upper High KC', message: 'Crossover Upper High KC Band\n{{exchange}}:{{ticker}}->\nPrice = {{close}},\nTime = {{time}}' },
+  { id: 'alert5', title: 'Crossover Upper Mid KC', message: 'Crossover Upper Mid KC Band\n{{exchange}}:{{ticker}}->\nPrice = {{close}},\nTime = {{time}}' },
+  { id: 'alert6', title: 'Crossunder Lower Mid KC', message: 'Crossunder Lower Mid KC Band\n{{exchange}}:{{ticker}}->\nPrice = {{close}},\nTime = {{time}}' },
+  { id: 'alert7', title: 'Crossunder Lower Low KC', message: 'Crossunder Lower Low KC Band\n{{exchange}}:{{ticker}}->\nPrice = {{close}},\nTime = {{time}}' },
+];
+
+/** The script calls alert() (backtest framework entries, stop loss and early warnings) */
+export const hasAlertFunction = true;
+
 /** indicator(max_labels_count = 500, max_lines_count = 500) */
 const MAX_OBJECTS = 500;
 /** Milliseconds of a year in the script */
@@ -295,7 +317,10 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ElliottWaveOscillatorSignalsByDgtInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[] } {
+): IndicatorResult & {
+  markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[];
+  alerts: AlertConditionState[]; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -325,10 +350,10 @@ export function calculate(
   if (cfg.ew) {
     for (let i = Math.max(0, n - p); i < n; i++) {
       const time = bars[i].time;
-      if (crossUp[i] && lt(ewo[i], -t)) markers.push({ time, position: 'belowBar', shape: 'labelUp', color: String(color.new(DARK_GREEN, 0)), size: 'small' });
-      if (crossUp[i] && ge(ewo[i], -t)) markers.push({ time, position: 'belowBar', shape: 'labelUp', color: String(color.new(GREEN, 0)), size: 'tiny' });
-      if (crossDown[i] && gt(ewo[i], t)) markers.push({ time, position: 'aboveBar', shape: 'labelDown', color: String(color.new(DARK_RED, 0)), size: 'small' });
-      if (crossDown[i] && le(ewo[i], t)) markers.push({ time, position: 'aboveBar', shape: 'labelDown', color: String(color.new(RED, 0)), size: 'tiny' });
+      if (crossUp[i] && lt(ewo[i], -t)) markers.push({ time, position: 'belowBar', shape: 'labelUp', color: String(color.new(DARK_GREEN, 0)), size: 'small', id: 'shape0' });
+      if (crossUp[i] && ge(ewo[i], -t)) markers.push({ time, position: 'belowBar', shape: 'labelUp', color: String(color.new(GREEN, 0)), size: 'tiny', id: 'shape1' });
+      if (crossDown[i] && gt(ewo[i], t)) markers.push({ time, position: 'aboveBar', shape: 'labelDown', color: String(color.new(DARK_RED, 0)), size: 'small', id: 'shape2' });
+      if (crossDown[i] && le(ewo[i], t)) markers.push({ time, position: 'aboveBar', shape: 'labelDown', color: String(color.new(RED, 0)), size: 'tiny', id: 'shape3' });
     }
   }
 
@@ -366,6 +391,8 @@ export function calculate(
 
   // Backtest framework
   const labels: Lb[] = [];
+  const alertCalls: AlertCall[] = [];
+  const tickerid = tickeridOf(chart);
   const plot0: Array<{ time: number; value: number; color: string }> = [];
   {
     const { isBackTest, tradeMode, dasCapital, lenBckTst, isTest } = cfg;
@@ -407,6 +434,10 @@ export function calculate(
     for (let i = 0; i < n; i++) {
       const b = bars[i];
       const timeMs = b.time * 1000;
+      // alert(message, alert.freq_once_per_bar) with the close in str.tostring's default format
+      const call = (what: string) => alertCalls.push({
+        time: b.time, message: `${what} — ${tickerid} | Price: ${str.tostring(b.close)}`, freq: 'once_per_bar',
+      });
       const fOpen = (dd: number, lbl: boolean) => {
         entry = b.open;
         dir = dd;
@@ -486,9 +517,16 @@ export function calculate(
             if (exitL || exitS) fClose(slHit, cfg.lblInOutSL);
           }
           if (dir === 0) {
-            if (longCond && canLong) fOpen(1, cfg.lblInOutSL);
-            if (shortCond && canShort) fOpen(-1, cfg.lblInOutSL);
+            if (longCond && canLong) {
+              fOpen(1, cfg.lblInOutSL);
+              call('Long entry');
+            }
+            if (shortCond && canShort) {
+              fOpen(-1, cfg.lblInOutSL);
+              call('Short entry');
+            }
           }
+          if (slHit) call('Stop loss');
         }
 
         // Early warnings: the label lives one bar
@@ -502,6 +540,7 @@ export function calculate(
               color: TEAL, style: 'none', textColor: WHITE, size: 'large', forceOverlay: true,
             });
             deleteLabel(before);
+            call('Long early warning');
           }
           if (canShort && dir !== -1 && at(crossDown, 1) && !crossUp[i]) {
             wLabel = newLabel({
@@ -510,6 +549,7 @@ export function calculate(
               color: RED, style: 'none', textColor: WHITE, size: 'large', forceOverlay: true,
             });
             deleteLabel(before);
+            call('Short early warning');
           }
           // bool(ta.change(time))
           if (i > 0 && timeMs !== bars[i - 1].time * 1000) deleteLabel(before);
@@ -567,29 +607,25 @@ export function calculate(
   const src = getSourceSeries(bars, cfg.kcSource);
   const kcLength = Math.trunc(cfg.kcLength);
   const nan = () => new Array<number>(n).fill(NaN);
+  // Computed whether the channels are displayed or not: the alert conditions read the bands
   let middle = nan();
-  let range = nan();
-  if (cfg.k) {
-    switch (cfg.kcMaType) {
-      case 'DEMA': {
-        const ema1 = ta.ema(src, kcLength);
-        const e1 = arr(ema1);
-        const e2 = arr(ta.ema(ema1, kcLength));
-        middle = e1.map((v, i) => 2 * v - e2[i]);
-        break;
-      }
-      case 'EMA': middle = arr(ta.ema(src, kcLength)); break;
-      case 'HMA': middle = arr(ta.hma(src, kcLength)); break;
-      case 'SMA': middle = arr(ta.sma(src, kcLength)); break;
-      case 'WMA': middle = arr(ta.wma(src, kcLength)); break;
-      default: break;
+  switch (cfg.kcMaType) {
+    case 'DEMA': {
+      const ema1 = ta.ema(src, kcLength);
+      const e1 = arr(ema1);
+      const e2 = arr(ta.ema(ema1, kcLength));
+      middle = e1.map((v, i) => 2 * v - e2[i]);
+      break;
     }
-    if (cfg.isBand1 || cfg.isBand2 || cfg.isBand3) {
-      range = cfg.bandsStyle === 'True Range' ? arr(ta.rma(ta.tr(bars, true), kcLength))
-        : cfg.bandsStyle === 'Average True Range' ? arr(ta.atr(bars, Math.trunc(cfg.atrlength)))
-          : cfg.bandsStyle === 'Range' ? arr(ta.rma(new Series(bars, (b) => b.high - b.low), kcLength)) : new Array<number>(n).fill(0);
-    }
+    case 'EMA': middle = arr(ta.ema(src, kcLength)); break;
+    case 'HMA': middle = arr(ta.hma(src, kcLength)); break;
+    case 'SMA': middle = arr(ta.sma(src, kcLength)); break;
+    case 'WMA': middle = arr(ta.wma(src, kcLength)); break;
+    default: break;
   }
+  const range = cfg.bandsStyle === 'True Range' ? arr(ta.rma(ta.tr(bars, true), kcLength))
+    : cfg.bandsStyle === 'Average True Range' ? arr(ta.atr(bars, Math.trunc(cfg.atrlength)))
+      : cfg.bandsStyle === 'Range' ? arr(ta.rma(new Series(bars, (b) => b.high - b.low), kcLength)) : new Array<number>(n).fill(0);
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
   const band = (on: boolean, mult: number, sign: number, css: string) => bars.map((b, i) => ({
     time: b.time,
@@ -615,6 +651,18 @@ export function calculate(
     { plot1: 'plot3', plot2: 'plot2', options: { title: 'KC Cloud High' }, colors: cloud(String(color.new(RED, 89))) },
   ];
 
+  // Alert conditions, in the original's order
+  const closeArr = bars.map((b) => b.close);
+  const bandArr = (mult: number, sign: number) => middle.map((v, i) => v + sign * mult * range[i]);
+  const prevFlag = (a: boolean[]) => a.map((_v, i) => i > 0 && a[i - 1]);
+  const alerts = alertStates(alertConditions, bars, [
+    crossUp, prevFlag(crossUp), crossDown, prevFlag(crossDown),
+    crossedOver(closeArr, bandArr(cfg.kcMult3, 1)),
+    crossedOver(closeArr, bandArr(cfg.kcMult2, 1)),
+    crossedUnder(closeArr, bandArr(cfg.kcMult2, -1)),
+    crossedUnder(closeArr, bandArr(cfg.kcMult3, -1)),
+  ]);
+
   // Logo
   const tables: TableData[] = n === 0 ? [] : [{
     position: 'bottom_right', columns: 1, rows: 1,
@@ -629,6 +677,8 @@ export function calculate(
     lines,
     labels: labels.map(({ deleted: _deleted, ...l }) => l),
     tables,
+    alerts,
+    alertCalls,
   };
 }
 
@@ -638,4 +688,6 @@ export const ElliottWaveOscillatorSignalsByDgt = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

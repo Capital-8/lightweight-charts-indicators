@@ -2,12 +2,16 @@
  * RedK Slow/Smooth Average (RSS_WMA)
  *
  * Double-smoothed WMA: WMA(WMA(source, length), smoothLength).
+ * Alerts (alertcondition, `alerts` of the result): 'RSS_WMA Swing Up' (the line rises, did not rise on the bar
+ * before), 'RSS_WMA Swing Down' (the line does not rise, rose on the bar before) and 'RSS_WMA Swing' (either), on the
+ * drawn line.
  *
  * Reference: "RedK RSS_WMA" by RedKTrader
  */
 
 import { ta, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RedKRSSWMAInputs {
   length: number;
@@ -37,7 +41,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<RedKRSSWMAInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<RedKRSSWMAInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { length, smoothLength, src } = { ...defaultInputs, ...inputs };
   const srcSeries = getSourceSeries(bars, src);
 
@@ -74,11 +78,25 @@ export function calculate(bars: Bar[], inputs: Partial<RedKRSSWMAInputs> = {}): 
     }
   }
 
+  // uptrend = LL > LL[1] (na compares false); SwingUp = uptrend and not uptrend[1]; SwingDn = uptrend[1] and not uptrend
+  const ll = plot.map((p) => p.value);
+  const uptrend = ll.map((v, i) => i > 0 && v > ll[i - 1]);
+  const swingUp = uptrend.map((u, i) => u && !(i > 0 && uptrend[i - 1]));
+  const swingDn = uptrend.map((u, i) => i > 0 && uptrend[i - 1] && !u);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot },
     markers,
+    alerts: alertStates(alertConditions, bars, [swingUp, swingDn, swingUp.map((f, i) => f || swingDn[i])]),
   };
 }
 
-export const RedKRSSWMA = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RSS_WMA Swing Up', message: 'RSS_WMA Swing Up Detected!' },
+  { id: 'alert1', title: 'RSS_WMA Swing Down', message: 'RSS_WMA Swing Down Detected!' },
+  { id: 'alert2', title: 'RSS_WMA Swing', message: 'RSS_WMA Up/Down Swing Detected!' },
+];
+
+export const RedKRSSWMA = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

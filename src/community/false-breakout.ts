@@ -6,12 +6,15 @@
  * A false breakout up occurs when price makes consecutive new highs
  * then crosses below the breakout level. Vice versa for down.
  * Draws horizontal lines from breakout bar to current bar at breakout price level.
+ * Alerts (alertcondition, `alerts` of the result): 'False Breakout Up' and 'False Breakout Down', true on the bars of
+ * these signals.
  *
  * Reference: "False Breakout (Expo)" by Zeiierman
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LineDrawingData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface FalseBreakoutInputs {
   period: number;
@@ -48,7 +51,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<FalseBreakoutInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; lines: LineDrawingData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<FalseBreakoutInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const { period, minPeriod, maxPeriod, maType, smoothLength, aggressive } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -109,6 +115,8 @@ export function calculate(bars: Bar[], inputs: Partial<FalseBreakoutInputs> = {}
   const markers: MarkerData[] = [];
   const lines: LineDrawingData[] = [];
   const warmup = period + 2;
+  const upFlags = new Array<boolean>(n).fill(false);
+  const downFlags = new Array<boolean>(n).fill(false);
 
   for (let i = 0; i < n; i++) {
     // Track new highs (count goes negative)
@@ -152,6 +160,8 @@ export function calculate(bars: Bar[], inputs: Partial<FalseBreakoutInputs> = {}
     const falsebreakoutup = count < -1 && breakdown && maxvalid && minbars;
     // False breakout down: multiple new lows (count > 1), then price breaks up
     const falsebreakoutdown = count > 1 && breakup && maxvalid && minbars;
+    upFlags[i] = falsebreakoutup;
+    downFlags[i] = falsebreakoutdown;
 
     if (falsebreakoutup) {
       count = 0;
@@ -201,7 +211,15 @@ export function calculate(bars: Bar[], inputs: Partial<FalseBreakoutInputs> = {}
     plots: {},
     markers,
     lines,
+    // alertcondition(falsebreakoutup) / alertcondition(falsebreakoutdown)
+    alerts: alertStates(alertConditions, bars, [upFlags, downFlags]),
   };
 }
 
-export const FalseBreakout = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'False Breakout Up', message: 'False Breakout Up' },
+  { id: 'alert1', title: 'False Breakout Down', message: 'False Breakout Down' },
+];
+
+export const FalseBreakout = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

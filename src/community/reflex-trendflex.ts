@@ -7,6 +7,8 @@
  * Both are normalized by an exponentially weighted RMS (0.04 / 0.96). An optional dynamic threshold (+/-) on one
  * oscillator: multiplier * 0.6745 * stdev (MAD mode), multiplier * stdev, or the percentile (nearest rank) of the
  * absolute oscillator over the threshold period.
+ * Alerts (alertcondition, `alerts` of the result): the threshold oscillator crosses over +threshold / under
+ * -threshold (with the threshold shown), Reflex and Trendflex cross over / under zero.
  *
  * Reference: "Reflex & Trendflex" by e2e4
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
  */
 
 import { ta, Series, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type ReflexTrendflexThresholdMode = 'MAD' | 'Standard Deviation' | 'Percentile Rank';
 
@@ -155,7 +158,7 @@ function trendflex(src: number[], period: number): number[] {
   return normalize(sm.map((s, i) => (period * s - sums[i]) / period));
 }
 
-export function calculate(bars: Bar[], inputs: Partial<ReflexTrendflexInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<ReflexTrendflexInputs> = {}): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -187,6 +190,11 @@ export function calculate(bars: Bar[], inputs: Partial<ReflexTrendflexInputs> = 
   const plot2 = bars.map((_b, i) => ({ time: t(i), value: thresholdValue[i], color: cfg.colorThresholdTop }));
   const plot3 = bars.map((_b, i) => ({ time: t(i), value: -thresholdValue[i], color: cfg.colorThresholdBottom }));
 
+  // crossedAboveThreshold = showThreshold and ta.crossover(thresholdOsc, thresholdValue)
+  // crossedBelowThreshold = showThreshold and ta.crossunder(thresholdOsc, -thresholdValue)
+  const aboveThr = cfg.showThreshold ? crossedOver(thresholdOsc, thresholdValue) : none.map(() => false);
+  const belowThr = cfg.showThreshold ? crossedUnder(thresholdOsc, thresholdValue.map((v) => -v)) : none.map(() => false);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2, plot3 },
@@ -194,8 +202,23 @@ export function calculate(bars: Bar[], inputs: Partial<ReflexTrendflexInputs> = 
     hlines: cfg.showZeroLine
       ? [{ value: 0, options: { title: 'Zero', color: cfg.colorZeroLine, linestyle: 'dashed', linewidth: 1 } }]
       : [],
+    alerts: alertStates(alertConditions, bars, [
+      aboveThr, belowThr,
+      crossedOver(reflexValue, 0), crossedUnder(reflexValue, 0),
+      crossedOver(trendflexValue, 0), crossedUnder(trendflexValue, 0),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Reflex & Trendflex: Above +Threshold', message: 'xFlex: oscillator crossed above +threshold' },
+  { id: 'alert1', title: 'Reflex & Trendflex: Below -Threshold', message: 'xFlex: oscillator crossed below -threshold' },
+  { id: 'alert2', title: 'Reflex & Trendflex: Reflex Above Zero', message: 'xFlex: Reflex crossed above zero' },
+  { id: 'alert3', title: 'Reflex & Trendflex: Reflex Below Zero', message: 'xFlex: Reflex crossed below zero' },
+  { id: 'alert4', title: 'Reflex & Trendflex: Trendflex Above Zero', message: 'xFlex: Trendflex crossed above zero' },
+  { id: 'alert5', title: 'Reflex & Trendflex: Trendflex Below Zero', message: 'xFlex: Trendflex crossed below zero' },
+];
 
 export const ReflexTrendflex = {
   calculate,
@@ -203,4 +226,5 @@ export const ReflexTrendflex = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

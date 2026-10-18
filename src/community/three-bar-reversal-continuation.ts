@@ -115,11 +115,12 @@ export function calculate(
     strength[i] = condRange + condVol + condRngVol;
 
     // plotchar(strength == k and showStrength, char = ".", location = location.bottom, size = size.tiny)
-    const dot = (c: string) =>
-      markers.push({ time: t, position: 'bottom', shape: 'circle', color: 'transparent', text: '.', textColor: c, size: 'tiny' });
-    if (strength[i] === 1 && showStrength) dot(white);
-    if (strength[i] === 2 && showStrength) dot(yellow);
-    if (strength[i] === 3 && showStrength) dot(lime);
+    // `id`: the plotchar output (char0 to char4 in declaration order)
+    const dot = (c: string, id: string) =>
+      markers.push({ time: t, position: 'bottom', shape: 'circle', color: 'transparent', text: '.', textColor: c, size: 'tiny', id });
+    if (strength[i] === 1 && showStrength) dot(white, 'char0');
+    if (strength[i] === 2 && showStrength) dot(yellow, 'char1');
+    if (strength[i] === 3 && showStrength) dot(lime, 'char2');
 
     // strength[k] / barRange[1] / volume[1] before the first bar are na (comparisons false); bool history is false
     const s1 = i >= 1 ? strength[i - 1] : NaN;
@@ -152,12 +153,12 @@ export function calculate(
     // plotchar(bullCond, char = symbolUp, location = location.belowbar, color = plotColor, size = size.tiny)
     if (bullCond) {
       markers.push({ time: t, position: 'belowBar', shape: 'circle', color: 'transparent', text: symbolUp,
-        textColor: plotColor, size: 'tiny' });
+        textColor: plotColor, size: 'tiny', id: 'char3' });
     }
     // plotchar(bearCond, char = symbolDown, location = location.abovebar, color = plotColor, size = size.tiny)
     if (bearCond) {
       markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: 'transparent', text: symbolDown,
-        textColor: plotColor, size: 'tiny' });
+        textColor: plotColor, size: 'tiny', id: 'char4' });
     }
 
     // reqConfirm = volume > avgVolume and barRange > avgRange; alert() on bullCond, else on bearCond

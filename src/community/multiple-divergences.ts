@@ -270,19 +270,23 @@ export function calculate(bars: Bar[], inputs: Partial<MultipleDivergencesInputs
   }
 
   // ---- Generate markers ----
+  // The original has one plotshape per kind and count: "1" to "8" and "8+" (more than 8) for the regular bullish
+  // (shape0-shape8), regular bearish (shape9-shape17), hidden bullish (shape18-shape26) and hidden bearish
+  // (shape27-shape35) divergences
+  const shapeId = (first: number, count: number) => `shape${first + Math.min(count, 9) - 1}`;
   const markers: MarkerData[] = [];
   for (let i = warmup; i < n; i++) {
     if (plotBull && regBullCount[i] >= minDivCount) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008080', text: String(regBullCount[i]) });
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008080', text: String(regBullCount[i]), id: shapeId(0, regBullCount[i]) });
     }
     if (plotBear && regBearCount[i] >= minDivCount) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: String(regBearCount[i]) });
+      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FF0000', text: String(regBearCount[i]), id: shapeId(9, regBearCount[i]) });
     }
     if (plotHiddenBull && hidBullCount[i] >= minDivCount) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008000', text: String(hidBullCount[i]) });
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#008000', text: String(hidBullCount[i]), id: shapeId(18, hidBullCount[i]) });
     }
     if (plotHiddenBear && hidBearCount[i] >= minDivCount) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FFA500', text: String(hidBearCount[i]) });
+      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: '#FFA500', text: String(hidBearCount[i]), id: shapeId(27, hidBearCount[i]) });
     }
   }
 

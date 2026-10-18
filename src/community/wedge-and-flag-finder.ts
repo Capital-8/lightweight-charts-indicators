@@ -15,6 +15,9 @@
  * the theme list, its two trend lines, a label, and with "Draw Zigzag" the zigzag legs with the pivot numbers.
  * At most 500 lines and 500 labels are kept.
  *
+ * Alerts (alert() calls, `alertCalls` of the result): "New Flag pattern found" / "New Wedge pattern found" on each
+ * pattern drawn, once per bar close ("Alert only after the confirmation of the bar", default) or once per bar.
+ *
  * The zigzag is the function `czigzag` of the library "zigzag" (version 14) by HeWhoMustNotBeNamed (Trendoscope);
  * `unshift` comes from the library "arrays" (version 1) and `get_trend_series` from "utils" (version 1) of the same
  * author. The functions used are written in this file.
@@ -25,8 +28,11 @@
  */
 
 import { ta, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { LabelData, LineDrawingData } from '../types';
+import type { AlertCall, LabelData, LineDrawingData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface WedgeAndFlagFinderInputs {
   /** Pivots of a wedge: 5 or 6 */
@@ -206,8 +212,9 @@ function trendSeries(pivots: number[], firstIndex: number, lastIndex: number): n
 export function calculate(
   bars: Bar[],
   inputs: Partial<WedgeAndFlagFinderInputs> = {},
-): Omit<IndicatorResult, 'labels' | 'lines'> & { labels: LabelData[]; lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'labels' | 'lines'> & { labels: LabelData[]; lines: LineDrawingData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
+  const alertCalls: AlertCall[] = [];
   const n = bars.length;
   const wedgeSize = cfg.wedgeSize;
   const themeColors = cfg.theme === 'Dark' ? [...DARK_THEME] : [...LIGHT_THEME];
@@ -367,7 +374,14 @@ export function calculate(
         newLabel({ x: fBar, y: f, text: 'Wedge', style: gt(lastPivot, llastPivot) ? 'label_down' : 'label_up', yloc: 'price', color: zgColor, textColor: BLACK });
       }
       deleteDrawing = !((isFlag && cfg.allowFlag) || (!isFlag && cfg.allowWedge));
-      if (!deleteDrawing) addNewWedge(a, b, c, d, e, f, aBar, bBar, cBar, dBar, eBar, fBar, zgColor);
+      if (!deleteDrawing) {
+        addNewWedge(a, b, c, d, e, f, aBar, bBar, cBar, dBar, eBar, fBar, zgColor);
+        // alert('New ' + (isFlag ? 'Flag' : 'Wedge') + ' pattern found', alertOnBarCompletion ? once_per_bar_close : once_per_bar)
+        alertCalls.push({
+          time: bars[i].time as number, message: `New ${isFlag ? 'Flag' : 'Wedge'} pattern found`,
+          freq: cfg.alertOnBarCompletion ? 'once_per_bar_close' : 'once_per_bar',
+        });
+      }
       themeColors.unshift(zgColor);
     }
     if (deleteDrawing) {
@@ -468,6 +482,7 @@ export function calculate(
       time: T(l.x), price: l.y, text: l.text, color: l.color, textColor: l.textColor, style: l.style,
       ...(l.yloc !== 'price' ? { yloc: l.yloc } : {}),
     })),
+    alertCalls,
   };
 }
 
@@ -477,4 +492,5 @@ export const WedgeAndFlagFinder = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

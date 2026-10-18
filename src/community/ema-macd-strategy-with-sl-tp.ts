@@ -6,6 +6,7 @@
  * top and the histogram crossed over zero within the last `lookbackPeriod` bars, and one of the two crosses is on
  * this bar. SELL is the mirror. On a signal the stop-loss is the opposite channel line and the take-profit is the
  * close plus (or minus) the risk times the reward ratio; both lines are removed when price crosses the stop-loss.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Alert' and 'Sell Alert', true on the BUY / SELL bars.
  *
  * Reference: "EMA & MACD Strategy with SL/TP" by mamachi-
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EmaMacdStrategyWithSlTpInputs {
   /** EMA channel length */
@@ -80,7 +82,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<EmaMacdStrategyWithSlTpInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -114,6 +116,8 @@ export function calculate(
   const slLine: number[] = new Array(n);
   const tpLine: number[] = new Array(n);
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
   let sl = NaN; // var float slLine = na
   let tp = NaN; // var float tpLine = na
   for (let i = 0; i < n; i++) {
@@ -124,6 +128,9 @@ export function calculate(
       && le(barsSinceHistHigh[i], lb) && (priceCrossOverHigh[i] === 1 || histCrossOverZero[i] === 1);
     const shortCondition = isBelow200 && lt(macdHist[i], 0) && le(barsSincePriceLow[i], lb)
       && le(barsSinceHistLow[i], lb) && (priceCrossUnderLow[i] === 1 || histCrossUnderZero[i] === 1);
+
+    longFlags.push(longCondition);
+    shortFlags.push(shortCondition);
 
     const prevClose = i > 0 ? bars[i - 1].close : NaN;
     if (longCondition) {
@@ -164,8 +171,16 @@ export function calculate(
     // fill(p_high, p_low, color = color.new(color.blue, 90), title = 'Channel Fill')
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: FILL_COL, title: 'Channel Fill' } }],
     markers,
+    // alertcondition(longCondition, 'Buy Alert') / alertcondition(shortCondition, 'Sell Alert')
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'EMAチャネル: 買いサイン (SL: {{plot_4}}, TP: {{plot_5}})' },
+  { id: 'alert1', title: 'Sell Alert', message: 'EMAチャネル: 売りサイン (SL: {{plot_4}}, TP: {{plot_5}})' },
+];
 
 export const EmaMacdStrategyWithSlTp = {
   calculate,
@@ -173,4 +188,5 @@ export const EmaMacdStrategyWithSlTp = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

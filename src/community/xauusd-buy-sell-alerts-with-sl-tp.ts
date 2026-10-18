@@ -2,24 +2,31 @@
  * XAUUSD Buy/Sell Alerts with SL & TP
  *
  * Fast and slow EMAs of the close. Buy: the fast EMA crosses over the slow EMA while RSI < 60. Sell: the fast EMA
- * crosses under the slow EMA while RSI > 40. The Pine script also sends alert() messages with the entry, the stop
- * loss (close -/+ stopLossPips * 0.01) and the take profit (close +/- takeProfitPips * 0.01); alerts have no chart
- * output, so the two pip inputs only take part in the alert text.
+ * crosses under the slow EMA while RSI > 40.
+ *
+ * Alerts: alertcondition 'Buy Alert' / 'Sell Alert' (`alerts` of the result) on the buy / sell bars, and alert() calls
+ * (`alertCalls`, once per bar close) on the same bars with the entry (close), the stop loss (close -/+ stopLossPips *
+ * 0.01) and the take profit (close +/- takeProfitPips * 0.01), as str.tostring(x, format.price) gives them. The two
+ * pip inputs only take part in the alert text.
  *
  * Reference: "XAUUSD Buy/Sell Alerts with SL & TP" by alexandrossolomou1
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
-import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import { ta, Series, color, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import type { AlertCall, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface XauusdBuySellAlertsWithSlTpInputs {
   emaFastLen: number;
   emaSlowLen: number;
   rsiLen: number;
-  /** Stop loss in pips of 0.01 (alert text only) */
+  /** Stop loss in pips of 0.01 (alert() text only) */
   stopLossPips: number;
-  /** Take profit in pips of 0.01 (alert text only) */
+  /** Take profit in pips of 0.01 (alert() text only) */
   takeProfitPips: number;
 }
 
@@ -58,7 +65,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<XauusdBuySellAlertsWithSlTpInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -68,17 +75,36 @@ export function calculate(
   const rsi = A(ta.rsi(close, cfg.rsiLen));
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
+  const alertCalls: AlertCall[] = [];
+  const pip = 0.01;
+  const fmt = (x: number) => str.tostring(x, 'price');
   for (let i = 1; i < n; i++) {
     // ta.crossover / ta.crossunder: exact comparisons (no tolerance), a tie on the previous bar counts
     const crossUp = emaFast[i] > emaSlow[i] && emaFast[i - 1] <= emaSlow[i - 1];
     const crossDown = emaFast[i] < emaSlow[i] && emaFast[i - 1] >= emaSlow[i - 1];
     // plotshape(buySignal, "Buy Signal", location.belowbar, color.green, shape.labelup, text = "BUY")
-    if (crossUp && lt(rsi[i], 60)) {
+    const buySignal = crossUp && lt(rsi[i], 60);
+    const sellSignal = crossDown && gt(rsi[i], 40);
+    buyFlags[i] = buySignal;
+    sellFlags[i] = sellSignal;
+    if (buySignal) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: color.green, text: 'BUY', textColor: color.blue });
     }
     // plotshape(sellSignal, "Sell Signal", location.abovebar, color.red, shape.labeldown, text = "SELL")
-    if (crossDown && gt(rsi[i], 40)) {
+    if (sellSignal) {
       markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: color.red, text: 'SELL', textColor: color.blue });
+    }
+    // alert("XAUUSD BUY\nEntry: " + str.tostring(close, format.price) + "\nSL: " + ... , alert.freq_once_per_bar_close)
+    const c = bars[i].close;
+    if (buySignal) {
+      alertCalls.push({ time: bars[i].time, freq: 'once_per_bar_close',
+        message: `XAUUSD BUY\nEntry: ${fmt(c)}\nSL: ${fmt(c - cfg.stopLossPips * pip)}\nTP: ${fmt(c + cfg.takeProfitPips * pip)}` });
+    }
+    if (sellSignal) {
+      alertCalls.push({ time: bars[i].time, freq: 'once_per_bar_close',
+        message: `XAUUSD SELL\nEntry: ${fmt(c)}\nSL: ${fmt(c + cfg.stopLossPips * pip)}\nTP: ${fmt(c - cfg.takeProfitPips * pip)}` });
     }
   }
 
@@ -89,8 +115,16 @@ export function calculate(
       plot1: bars.map((b, i) => ({ time: b.time, value: emaSlow[i] })),
     },
     markers,
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
+    alertCalls,
   };
 }
+
+/** alertcondition(buySignal / sellSignal) of the original */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'XAUUSD BUY Signal' },
+  { id: 'alert1', title: 'Sell Alert', message: 'XAUUSD SELL Signal' },
+];
 
 export const XauusdBuySellAlertsWithSlTp = {
   calculate,
@@ -98,4 +132,6 @@ export const XauusdBuySellAlertsWithSlTp = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

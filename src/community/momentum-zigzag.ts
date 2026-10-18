@@ -5,11 +5,17 @@
  * from MACD, Moving Average, or QQE. ZigZag tracks peaks/bottoms;
  * momentum determines direction changes. Force detection via RSI(5).
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): on each LONG / SHORT signal,
+ * 'long slprice=<stop> tp=<TakeProfitLevel>' / 'short slprice=<stop> tp=<TakeProfitLevel>' as the original builds them.
+ *
  * Reference: "Momentum-based ZigZag (incl. QQE) NON-REPAINTING" by Peter_O
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import { ta, Series, str, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import type { AlertCall, MarkerData } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface MomentumZigZagInputs {
   momentumSelect: string;
@@ -25,6 +31,8 @@ export interface MomentumZigZagInputs {
   qqeFactor: number;
   rsiSmoothing: number;
   qqeThreshold: number;
+  /** Take profit level written in the alert messages (no effect on the other outputs) */
+  takeProfitLevel: number;
 }
 
 export const defaultInputs: MomentumZigZagInputs = {
@@ -41,6 +49,7 @@ export const defaultInputs: MomentumZigZagInputs = {
   qqeFactor: 4.238,
   rsiSmoothing: 5,
   qqeThreshold: 10,
+  takeProfitLevel: 200,
 };
 
 export const inputConfig: InputConfig[] = [
@@ -57,6 +66,7 @@ export const inputConfig: InputConfig[] = [
   { id: 'qqeFactor', type: 'float', title: 'QQE Factor', defval: 4.238, min: 0.001, step: 0.001 },
   { id: 'rsiSmoothing', type: 'int', title: 'QQE RSI Smoothing', defval: 5, min: 1 },
   { id: 'qqeThreshold', type: 'int', title: 'QQE Threshold', defval: 10, min: 0 },
+  { id: 'takeProfitLevel', type: 'int', title: 'TakeProfitLevel', defval: 200 },
 ];
 
 export const plotConfig: PlotConfig[] = [
@@ -69,7 +79,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<MomentumZigZagInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<MomentumZigZagInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -380,13 +390,19 @@ export function calculate(bars: Bar[], inputs: Partial<MomentumZigZagInputs> = {
 
   // --- Markers for LONG/SHORT ---
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
+  // var stoploss_long = low / var stoploss_short = high (first bar)
+  let stoplossLong = n ? lowArr[0] : NaN;
+  let stoplossShort = n ? highArr[0] : NaN;
 
   // Determine force flags at each momentum signal bar
   for (let i = 1; i < n; i++) {
+    let goLong = false, goShort = false;
     if (momentumDown[i]) {
       const bsUp = barsSince(momentumUp, i - 1);
       const bsOb = barsSinceRsiAbove(rsi5Arr, ob, i - 1);
       const wasForceUp = bsUp >= bsOb;
+      goShort = !wasForceUp;
       // GoShort = momentumDOWN and not force_up
       if (!wasForceUp && !isNaN(zigzag[i])) {
         markers.push({
@@ -402,6 +418,7 @@ export function calculate(bars: Bar[], inputs: Partial<MomentumZigZagInputs> = {
       const bsDown = barsSince(momentumDown, i - 1);
       const bsOs = barsSinceRsiBelow(rsi5Arr, os, i - 1);
       const wasForceDown = bsDown >= bsOs;
+      goLong = !wasForceDown;
       // GoLong = momentumUP and not force_down
       if (!wasForceDown && !isNaN(zigzag[i])) {
         markers.push({
@@ -413,13 +430,22 @@ export function calculate(bars: Bar[], inputs: Partial<MomentumZigZagInputs> = {
         });
       }
     }
+    // pl / ph = ta.valuewhen(momentumUP / momentumDOWN, ZigZag, 0): this bar's ZigZag on a signal bar
+    // if GoLong: stoploss_long := low < pl ? low : pl / if GoShort: stoploss_short := high > ph ? high : ph
+    if (goLong) stoplossLong = lowArr[i] < zigzag[i] ? lowArr[i] : zigzag[i];
+    if (goShort) stoplossShort = highArr[i] > zigzag[i] ? highArr[i] : zigzag[i];
+    // alert('long slprice=' + str.tostring(stoploss_long) + ' tp=' + str.tostring(TakeProfitLevel), freq_once_per_bar_close)
+    const tp = str.tostring(cfg.takeProfitLevel);
+    if (goLong) alertCalls.push({ time: bars[i].time as number, message: 'long slprice=' + str.tostring(stoplossLong) + ' tp=' + tp, freq: 'once_per_bar_close' });
+    if (goShort) alertCalls.push({ time: bars[i].time as number, message: 'short slprice=' + str.tostring(stoplossShort) + ' tp=' + tp, freq: 'once_per_bar_close' });
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0 },
     markers,
+    alertCalls,
   };
 }
 
-export const MomentumZigZag = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const MomentumZigZag = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

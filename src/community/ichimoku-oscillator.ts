@@ -4,12 +4,24 @@
  * Oscillator derived from Ichimoku components: tenkan - kijun as histogram.
  * Tenkan = (highest high + lowest low) / 2 over conversionPeriods.
  * Kijun = (highest high + lowest low) / 2 over basePeriods.
+ * Shapes: an X on the cloud layer when a full trend (+/-4) ends, triangles at 0 on a new full uptrend / downtrend, and
+ * a small X on the cloud layer when a profitable full trend gives a partial take-profit signal (Kijun / Tenkan cross,
+ * or EMA / cloud cross when "Take Partial Profit by EMA" is on). The original's bounce-off triangles are not drawn
+ * (the port has no "Bounce Off Support/Resistance" input; it is off by default in the original).
+ * Alerts (alert() calls, `alertCalls` of the result), as the original: "Close Position" when a full trend ends, main
+ * Buy / Sell on a new full trend, "Take Partial Profit" on a partial take-profit signal; the first "close" of the
+ * message is replaced by the close price.
  *
  * Reference: "Ichimoku Oscillator"
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BgColorData } from '../types';
+import { ta, str, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import type { AlertCall, MarkerData, BgColorData } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
+
+type AlertFreq = 'once_per_bar' | 'once_per_bar_close';
 
 export interface IchimokuOscillatorInputs {
   conversionPeriods: number;
@@ -17,6 +29,26 @@ export interface IchimokuOscillatorInputs {
   laggingSpan: number;
   displacement: number;
   emaLen: number;
+  /** Take Partial Profit by EMA */
+  emaTakePartialProfit: boolean;
+  /** Main Buy/Sell Alert */
+  mainAlert: boolean;
+  /** Buy alert message ("close" is replaced by the close price) */
+  alertLongMsg: string;
+  /** Sell alert message */
+  alertShortMsg: string;
+  /** Frequency of the Buy / Sell alerts */
+  mainFrequency: AlertFreq;
+  /** Close Position Alert */
+  closeAlert: boolean;
+  /** Take Partial Profit Alert */
+  closePartAlert: boolean;
+  /** Close Position message */
+  closeMainMsg: string;
+  /** Take Partial Profit message */
+  closePartMsg: string;
+  /** Frequency of the Close Position / Take Partial Profit alerts */
+  closeFrequency: AlertFreq;
 }
 
 export const defaultInputs: IchimokuOscillatorInputs = {
@@ -25,6 +57,16 @@ export const defaultInputs: IchimokuOscillatorInputs = {
   laggingSpan: 52,
   displacement: 13,
   emaLen: 9,
+  emaTakePartialProfit: true,
+  mainAlert: true,
+  alertLongMsg: 'Buy / Main, Close = close',
+  alertShortMsg: 'Sell / Main, Close = close',
+  mainFrequency: 'once_per_bar_close',
+  closeAlert: true,
+  closePartAlert: true,
+  closeMainMsg: 'Close Position, Close = close',
+  closePartMsg: 'Take Partial Profit, Close = close',
+  closeFrequency: 'once_per_bar',
 };
 
 export const inputConfig: InputConfig[] = [
@@ -33,6 +75,28 @@ export const inputConfig: InputConfig[] = [
   { id: 'laggingSpan', type: 'int', title: 'Lagging Span', defval: 52, min: 1 },
   { id: 'displacement', type: 'int', title: 'Displacement', defval: 13, min: 1 },
   { id: 'emaLen', type: 'int', title: 'EMA Length', defval: 9, min: 1 },
+  { id: 'emaTakePartialProfit', type: 'bool', title: 'Take Partial Profit by EMA', defval: true },
+  { id: 'mainAlert', type: 'bool', title: 'Main Buy/Sell Alert', defval: true, group: 'Alerts' },
+  { id: 'alertLongMsg', type: 'string', title: ' Long message', defval: 'Buy / Main, Close = close', group: 'Alerts' },
+  { id: 'alertShortMsg', type: 'string', title: ' Short message', defval: 'Sell / Main, Close = close', group: 'Alerts' },
+  {
+    id: 'mainFrequency', type: 'string', title: ' Frequency', defval: 'once_per_bar_close',
+    options: ['once_per_bar_close', 'once_per_bar'], group: 'Alerts',
+  },
+  { id: 'closeAlert', type: 'bool', title: 'Close Position Alert', defval: true, group: 'Alerts' },
+  { id: 'closePartAlert', type: 'bool', title: 'Take Partial Profit Alert', defval: true, group: 'Alerts' },
+  {
+    id: 'closeMainMsg', type: 'string', title: ' Close Position Message', defval: 'Close Position, Close = close',
+    group: 'Alerts',
+  },
+  {
+    id: 'closePartMsg', type: 'string', title: ' Take Partial Profit Message',
+    defval: 'Take Partial Profit, Close = close', group: 'Alerts',
+  },
+  {
+    id: 'closeFrequency', type: 'string', title: ' Frequency', defval: 'once_per_bar',
+    options: ['once_per_bar_close', 'once_per_bar'], group: 'Alerts',
+  },
 ];
 
 export const plotConfig: PlotConfig[] = [
@@ -49,8 +113,12 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<IchimokuOscillatorInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
-  const { conversionPeriods, basePeriods, laggingSpan, displacement, emaLen } = { ...defaultInputs, ...inputs };
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<IchimokuOscillatorInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; alertCalls: AlertCall[] } {
+  const cfg = { ...defaultInputs, ...inputs };
+  const { conversionPeriods, basePeriods, laggingSpan, displacement, emaLen } = cfg;
   const n = bars.length;
 
   const high = new Series(bars, (b) => b.high);
@@ -217,17 +285,75 @@ export function calculate(bars: Bar[], inputs: Partial<IchimokuOscillatorInputs>
     value: (i < warmup + emaLen || v == null) ? NaN : v,
   }));
 
-  // Pine markers: uptrend = trend==4 signal, downtrend = trend==-4 signal
+  // Pine markers (ids: the original's plotshape outputs shape0..shape5) and alert() calls
+  const LONG_COL = '#FFFFFF';
+  const SHORT_COL = '#FFEB3B';
+  const EMA_COL = '#d1c4e9';
+  // getClose(message) => str.replace(message, "close", str.tostring(close)): the first occurrence
+  const getClose = (message: string, i: number) => message.replace('close', str.tostring(closeArr[i] ?? NaN));
+  const crossAt = (a: ArrayLike<number | null>, b: ArrayLike<number | null>, i: number) => {
+    const v = a[i] ?? NaN, w = b[i] ?? NaN, pv = a[i - 1] ?? NaN, pw = b[i - 1] ?? NaN;
+    return v > w && pv <= pw;
+  };
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
   for (let i = warmup + 1; i < n; i++) {
     if (isNaN(cloud[i])) continue;
-    const uptrend = trendArr[i] === 4 && trendArr[i] !== trendArr[i - 1];
-    const downtrend = trendArr[i] === -4 && trendArr[i] !== trendArr[i - 1];
-    if (uptrend) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#FFFFFF', text: '' });
+    const t = bars[i].time;
+    const c = closeArr[i] ?? NaN;
+    const trend = trendArr[i];
+    const changed = trend !== trendArr[i - 1];
+    // closetrade = ta.change(trend) != 0 and math.abs(trend[1]) == 4
+    // plotshape(cloud, color = closetrade ? (trend[1] > 0 ? long : short) : na, xcross, absolute, size.small)
+    const closetrade = changed && Math.abs(trendArr[i - 1]) === 4;
+    if (closetrade) {
+      markers.push({
+        time: t, position: 'atPriceMiddle', price: cloud[i], shape: 'xcross',
+        color: trendArr[i - 1] > 0 ? LONG_COL : SHORT_COL, size: 'small', id: 'shape0',
+      });
+      if (cfg.closeAlert) alertCalls.push({ time: t, message: getClose(cfg.closeMainMsg, i), freq: cfg.closeFrequency });
     }
+    // uptrend = trend == 4 and ta.change(trend) != 0: plotshape(0, triangleup, absolute, size.small)
+    const uptrend = trend === 4 && changed;
+    if (uptrend) {
+      markers.push({
+        time: t, position: 'atPriceMiddle', price: 0, shape: 'triangleUp', color: LONG_COL, size: 'small', text: '',
+        id: 'shape1',
+      });
+      if (cfg.mainAlert) alertCalls.push({ time: t, message: getClose(cfg.alertLongMsg, i), freq: cfg.mainFrequency });
+    }
+    // downtrend = trend == -4 and ta.change(trend) != 0: plotshape(0, triangledown, absolute, size.small)
+    const downtrend = trend === -4 && changed;
     if (downtrend) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#FFEB3B', text: '' });
+      markers.push({
+        time: t, position: 'atPriceMiddle', price: 0, shape: 'triangleDown', color: SHORT_COL, size: 'small', text: '',
+        id: 'shape3',
+      });
+      if (cfg.mainAlert) alertCalls.push({ time: t, message: getClose(cfg.alertShortMsg, i), freq: cfg.mainFrequency });
+    }
+    // Partial take profit: plotshape(cloud, color = posexitcol, absolute, xcross, size.tiny); alert on partclose
+    const convcrossbase = crossAt(tenkanArr, kijunArr, i);
+    const basecrosscons = crossAt(kijunArr, tenkanArr, i);
+    const emacrosscloud = crossAt(emaLine, cloud, i);
+    const cloudcrossema = crossAt(cloud, emaLine, i);
+    const ematk = cfg.emaTakePartialProfit;
+    const profitable = (trend === 4 && c > entryLevel[i]) || (trend === -4 && c < entryLevel[i]);
+    const posexitcol = !profitable ? null
+      : trend === 4 && basecrosscons ? LONG_COL
+        : trend === 4 && emacrosscloud && ematk ? EMA_COL
+          : trend === -4 && convcrossbase ? SHORT_COL
+            : trend === -4 && cloudcrossema && ematk ? EMA_COL
+              : null;
+    if (posexitcol) {
+      markers.push({
+        time: t, position: 'atPriceMiddle', price: cloud[i], shape: 'xcross', color: posexitcol, size: 'tiny',
+        id: 'shape5',
+      });
+    }
+    const partclose = (trend === 4 && basecrosscons) || (trend === 4 && emacrosscloud && ematk)
+      || (trend === -4 && convcrossbase) || (trend === -4 && cloudcrossema && ematk);
+    if (partclose && cfg.closePartAlert) {
+      alertCalls.push({ time: t, message: getClose(cfg.closePartMsg, i), freq: cfg.closeFrequency });
     }
   }
 
@@ -262,7 +388,8 @@ export function calculate(bars: Bar[], inputs: Partial<IchimokuOscillatorInputs>
     ],
     markers,
     bgColors,
+    alertCalls,
   };
 }
 
-export const IchimokuOscillator = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const IchimokuOscillator = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

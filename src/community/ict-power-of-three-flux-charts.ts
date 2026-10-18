@@ -18,6 +18,12 @@
  * with the "Alternative" layout; an open trade ends 15 bars after the last bar); the backtesting table (entries,
  * wins, losses, win rate, average and total profit in %).
  *
+ * Alerts: the four alertconditions (`alerts` of the result: 'Buy Signal' / 'Sell Signal' on a long / short entry,
+ * 'Take-Profit Signal' / 'Stop-Loss Signal' on an exit) and the alert() calls of the same names (`alertCalls`, once
+ * per bar, each when its "Alerts" input is on). As in the original they start on the last closed historical bar
+ * (`barstate.islastconfirmedhistory`: the last bar, or the bar before it when `chart.lastBarConfirmed` is false), so
+ * they are true on that bar at most (the original does not read an open last bar).
+ *
  * Chart context (optional third argument):
  * - `chart.lastBarConfirmed`: the original works on closed bars only. When the last bar is still open, it is not
  *   read, and the lines, labels and boxes are those of the bar before it. Without it every bar is a closed bar.
@@ -29,7 +35,8 @@
  */
 
 import { ta, str, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BoxData, LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TablePosition } from '../types';
+import type { AlertCall, BoxData, LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TablePosition } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 import { lastBarConfirmedOf, mintickOf, type ChartContext } from '../chart-context';
 
@@ -177,7 +184,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<IctPowerOfThreeFluxChartsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[] } {
+): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[] }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -186,6 +194,9 @@ export function calculate(
   const boxes: BoxData[] = [];
   const labels: LabelData[] = [];
   const tables: TableData[] = [];
+  // buyAlertTick, sellAlertTick, tpAlertTick, slAlertTick and not initRun, per bar
+  const ticks: boolean[][] = [[], [], [], []];
+  const alertCalls: AlertCall[] = [];
   const result = () => ({
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
@@ -194,6 +205,8 @@ export function calculate(
     boxes,
     labels,
     tables,
+    alerts: alertStates(alertConditions, bars, ticks),
+    alertCalls,
   });
   if (n === 0) return result();
 
@@ -226,6 +239,10 @@ export function calculate(
     const confirmed = i < last || lastConfirmed;
     const lowBreakout = closeBreak ? b.close : b.low;
     const highBreakout = closeBreak ? b.close : b.high;
+    let buyAlertTick = false;
+    let sellAlertTick = false;
+    let tpAlertTick = false;
+    let slAlertTick = false;
 
     if (i > last - MAX_DISTANCE_TO_LAST_BAR && confirmed) {
       // A new setup when no trade is open
@@ -288,6 +305,7 @@ export function calculate(
         po3.entryPrice = b.close;
         if (po3.manipulationDirection === 'Bearish') {
           po3.entryType = 'Long';
+          buyAlertTick = true;
           if (fixed) {
             po3.slTarget = po3.entryPrice * (1 - slPercent / 100.0);
             po3.tpTarget = po3.entryPrice * (1 + tpPercent / 100.0);
@@ -297,6 +315,7 @@ export function calculate(
           }
         } else {
           po3.entryType = 'Short';
+          sellAlertTick = true;
           if (fixed) {
             po3.slTarget = po3.entryPrice * (1 + slPercent / 100.0);
             po3.tpTarget = po3.entryPrice * (1 - tpPercent / 100.0);
@@ -312,6 +331,8 @@ export function calculate(
         const long = po3.entryType === 'Long';
         const short = po3.entryType === 'Short';
         const exit = (price: number, state: State) => {
+          if (state === 'Take Profit') tpAlertTick = true;
+          else slAlertTick = true;
           po3.exitPrice = price;
           po3.exitTime = time;
           po3.state = state;
@@ -328,6 +349,22 @@ export function calculate(
           if (short && ge(b.high, po3.slTarget)) exit(po3.slTarget, 'Stop Loss');
         }
       }
+    }
+
+    // initRun := false on barstate.islastconfirmedhistory (the last bar, or the bar before an open last bar)
+    if (i >= (lastConfirmed ? last : last - 1)) {
+      ticks[0][i] = buyAlertTick;
+      ticks[1][i] = sellAlertTick;
+      ticks[2][i] = tpAlertTick;
+      ticks[3][i] = slAlertTick;
+      // if not initRun: alert("Buy Signal") ... when the input of the alert is on
+      const call = (on: boolean, message: string) => {
+        if (on) alertCalls.push({ time, message, freq: 'once_per_bar' });
+      };
+      call(buyAlertTick && cfg.buyAlertEnabled, 'Buy Signal');
+      call(sellAlertTick && cfg.sellAlertEnabled, 'Sell Signal');
+      call(tpAlertTick && cfg.tpAlertEnabled, 'Take-Profit Signal');
+      call(slAlertTick && cfg.slAlertEnabled, 'Stop-Loss Signal');
     }
 
     // Exit markers
@@ -450,10 +487,23 @@ export function calculate(
   return result();
 }
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: '' },
+  { id: 'alert1', title: 'Sell Signal', message: '' },
+  { id: 'alert2', title: 'Take-Profit Signal', message: '' },
+  { id: 'alert3', title: 'Stop-Loss Signal', message: '' },
+];
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
+
 export const IctPowerOfThreeFluxCharts = {
   calculate,
   metadata,
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

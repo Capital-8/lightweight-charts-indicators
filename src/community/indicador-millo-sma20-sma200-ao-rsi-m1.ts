@@ -7,6 +7,7 @@
  * BUY. A SELL label is the mirror (close below the slow SMA, cross under the fast SMA, AO cross under 0, RSI below the
  * threshold). With "confirm on bar close", a signal needs a confirmed (closed) bar. The port reads the state of the
  * last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy' and 'Sell', true on the bars of the BUY / SELL signals.
  *
  * Reference: "Crypto M1 - SMA20 SMA200 RSI50 AO confirm (cooldown)" by hernangarcia_78
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +16,7 @@
 import { ta, Series, callsite, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface IndicadorMilloSma20Sma200AoRsiM1Inputs {
   /** Enable the BUY (long) signals */
@@ -88,7 +90,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<IndicadorMilloSma20Sma200AoRsiM1Inputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -120,6 +122,8 @@ export function calculate(
   const plot0 = [];
   const plot1 = [];
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const c = bars[i].close;
     const aoVal = sma5[i] - sma34[i];
@@ -149,6 +153,8 @@ export function calculate(
     const sellSignal = rawSell && (!cfg.confirmClose || barIsConfirmed(i));
     if (buySignal) lastBuyBar = i;
     if (sellSignal) lastSellBar = i;
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
 
     const time = bars[i].time;
     plot0.push({ time, value: sma20[i], color: SMA_FAST_COL });
@@ -162,14 +168,21 @@ export function calculate(
       markers.push({ time, position: 'aboveBar', shape: 'labelDown', color: SELL_COL, text: 'SELL', textColor: color.white, size: 'tiny' });
     }
   }
-  // alertcondition(buySignal, "Buy", ...) and alertcondition(sellSignal, "Sell", ...): no output
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
     markers,
+    // alertcondition(buySignal, "Buy", ...) / alertcondition(sellSignal, "Sell", ...)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy', message: 'BUY - Precio cruza SMA20, RSI>50 y AO 0 up dentro de la ventana (cooldown activo)' },
+  { id: 'alert1', title: 'Sell', message: 'SELL - Precio cruza SMA20, RSI<50 y AO 0 down dentro de la ventana (cooldown activo)' },
+];
 
 export const IndicadorMilloSma20Sma200AoRsiM1 = {
   calculate,
@@ -177,4 +190,5 @@ export const IndicadorMilloSma20Sma200AoRsiM1 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

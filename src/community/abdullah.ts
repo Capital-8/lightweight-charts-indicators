@@ -171,19 +171,20 @@ export function calculate(
     const sellSignal = i > 0 && ceDir === -1 && dir[i - 1] === 1;
     // plotshape(buySignal ? longStop : na, 'Long Stop Start', location.absolute, shape.circle, size.tiny, green)
     if (buySignal && !isNaN(ls)) {
-      markers.push({ time: t(i), position: 'atPriceMiddle', price: ls, shape: 'circle', color: color.green, size: 'tiny' });
+      markers.push({ time: t(i), position: 'atPriceMiddle', price: ls, shape: 'circle', color: color.green, size: 'tiny', id: 'shape0' });
     }
     // plotshape(buySignal and ce_showLabels ? longStop : na, 'Buy Label', text = 'Buy', shape.labelup, size.tiny)
     if (buySignal && cfg.ceShowLabels && !isNaN(ls)) {
       markers.push({ time: t(i), position: 'atPriceBottom', price: ls, shape: 'labelUp', color: color.green,
-        text: 'Buy', textColor: color.white, size: 'tiny' });
+        text: 'Buy', textColor: color.white, size: 'tiny', id: 'shape1' });
     }
     if (sellSignal && !isNaN(ss)) {
-      markers.push({ time: t(i), position: 'atPriceMiddle', price: ss, shape: 'circle', color: color.red, size: 'tiny' });
+      // plotshape(sellSignal ? shortStop : na, 'Short Stop Start', ...) / 'Sell Label'
+      markers.push({ time: t(i), position: 'atPriceMiddle', price: ss, shape: 'circle', color: color.red, size: 'tiny', id: 'shape2' });
     }
     if (sellSignal && cfg.ceShowLabels && !isNaN(ss)) {
       markers.push({ time: t(i), position: 'atPriceTop', price: ss, shape: 'labelDown', color: color.red,
-        text: 'Sell', textColor: color.white, size: 'tiny' });
+        text: 'Sell', textColor: color.white, size: 'tiny', id: 'shape3' });
     }
   }
 

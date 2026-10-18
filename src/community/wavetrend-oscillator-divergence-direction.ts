@@ -8,6 +8,8 @@
  * (only in the overbought / oversold zone, or all of them) and bar colours; the histogram is wt1 - wt2.
  * Optional divergences between wt1 fractals (5 bars) and the price, drawn 2 bars back with "R" / "O" labels, and an
  * optional extra moving average of wt1 (11 types) coloured by its direction.
+ * Alerts (alertcondition, `alerts` of the result): the sell / buy crosses (overbought / oversold only, or all), both
+ * sides together, and the change of the wt1 direction, declared twice as the original (Spanish then English titles).
  *
  * Reference: "Oscilador WaveTrend" (WaveTrend Oscillator + Divergence + Direction Detection + Alerts) by Dreadblitz
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 import { ta, taCore, callsite, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type WaveTrendMaType = 'SMA' | 'EMA' | 'WMA' | 'VWMA' | 'SMMA' | 'DEMA' | 'TEMA' | 'HullMA' | 'ZEMA' | 'TMA' | 'SSMA';
 
@@ -157,7 +160,8 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<WaveTrendOscillatorDivergenceDirectionInputs> = {},
-): Omit<IndicatorResult, 'markers' | 'barColors'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers' | 'barColors'> & { markers: MarkerData[]; barColors: BarColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => (v === null || v === undefined ? NaN : Number(v)));
@@ -314,18 +318,18 @@ export function calculate(
     divBear.push({ time, value: top ? num(fractalTop[i]) : NaN, color: col1 });
     divBull.push({ time, value: bot ? num(fractalBot[i]) : NaN, color: col2 });
     // plotshape(... ? wt1[1] +- ploff : na, location.absolute, offset = -2)
-    const label = (on: boolean, price: number, text: string, bear: boolean) => {
+    const label = (on: boolean, price: number, text: string, bear: boolean, id: string) => {
       if (!on || !Number.isFinite(price)) return;
       markers.push({
         time, position: bear ? 'atPriceTop' : 'atPriceBottom', price, shape: bear ? 'labelDown' : 'labelUp',
-        color: bear ? ROJO : VERDE_FUERTE, text, textColor: BLANCO, size: 'tiny',
+        color: bear ? ROJO : VERDE_FUERTE, text, textColor: BLANCO, size: 'tiny', id,
       });
     };
     const w1 = at(wt1, i - 1);
-    label(regularBearish && cfg.etiquetas, w1 + ploff, '🐻 R', true);
-    label(hiddenBearish && cfg.etiquetas, w1 + ploff, '🐻 O', true);
-    label(regularBullish && cfg.etiquetas, w1 - ploff, '🐂 R', false);
-    label(hiddenBullish && cfg.etiquetas, w1 - ploff, '🐂 O', false);
+    label(regularBearish && cfg.etiquetas, w1 + ploff, '🐻 R', true, 'shape0');
+    label(hiddenBearish && cfg.etiquetas, w1 + ploff, '🐻 O', true, 'shape1');
+    label(regularBullish && cfg.etiquetas, w1 - ploff, '🐂 R', false, 'shape2');
+    label(hiddenBullish && cfg.etiquetas, w1 - ploff, '🐂 O', false, 'shape3');
   }
   plots.divBear = divBear;
   plots.divBull = divBull;
@@ -346,8 +350,27 @@ export function calculate(
     fills,
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, alertFlags(venta, venta1, compra, compra1, direction)),
   };
 }
+
+/** The original's alertcondition() expressions per bar, in its declaration order */
+function alertFlags(venta: boolean[], venta1: boolean[], compra: boolean[], compra1: boolean[], direction: number[]): boolean[][] {
+  const any = venta.map((v, i) => v || compra[i]);
+  const any1 = venta1.map((v, i) => v || compra1[i]);
+  // cambio_direccion = change(direction, 1) as a condition: na (bar 0) and 0 are false
+  const change = direction.map((d, i) => i > 0 && d !== direction[i - 1]);
+  const set = [venta, venta1, compra, compra1, any, any1, change];
+  return [...set, ...set];
+}
+
+/** The original's alertconditions (no message: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  'Ventas en Sobre Compra', 'Todas las Ventas', 'Compras en Sobre Venta', 'Todas las Compras',
+  'Compras/Ventas en Sobre Compra/Venta', 'Todas las Ventas/Compras', 'Cambio Direccion WT',
+  'Overbought Sales', 'All Sales', 'Oversold Buys', 'All Buys', 'Buys/Sales Overbought/Oversold', 'All Sales/Buys',
+  'WT Direction Change',
+].map((title, k) => ({ id: `alert${k}`, title, message: 'Alert Fired!' }));
 
 /** variant(type, src, len) of the original: the extra moving average of wt1 */
 function variant(type: WaveTrendMaType, src: number[], len: number, bars: Bar[]): number[] {
@@ -424,4 +447,5 @@ export const WaveTrendOscillatorDivergenceDirection = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

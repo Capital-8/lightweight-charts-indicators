@@ -573,10 +573,16 @@ export function calculate(
         const p2 = bars[i - 2];
         const fvg = gt(p1.close, p1.open) ? lt(p2.high, bar.low) : gt(p2.low, bar.high);
         if (gt(body[i - 1], std[i - 1] * cfg.displacementFactor) && fvg) {
-          barColors.push({ time: p1.time, color: lt(p1.open, p1.close) ? cfg.displacementBull : cfg.displacementBear });
+          // barcolor(... and displacement_fvg ? candle : na, offset = -1)
+          barColors.push({
+            time: p1.time, color: lt(p1.open, p1.close) ? cfg.displacementBull : cfg.displacementBear, id: 'barcolor0',
+          });
         }
       } else if (gt(body[i], std[i])) {
-        barColors.push({ time: bar.time, color: lt(bar.open, bar.close) ? cfg.displacementBull : cfg.displacementBear });
+        // barcolor(... and not displacement_fvg ? candle : na)
+        barColors.push({
+          time: bar.time, color: lt(bar.open, bar.close) ? cfg.displacementBull : cfg.displacementBear, id: 'barcolor1',
+        });
       }
     }
   }

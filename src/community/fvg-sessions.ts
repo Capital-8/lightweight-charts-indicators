@@ -13,6 +13,9 @@
  *
  * Drawings are kept up to 500 lines and 500 boxes (the oldest are removed).
  *
+ * Alerts (alertcondition, `alerts` of the result): new bullish / bearish gap of the day, its mitigation, the close
+ * inside the gap of the day, and the close crossing the middle of the gap of the day.
+ *
  * Limits of the port:
  * - New days come from the UTC calendar and the bars (see anchor-period): equal on UTC symbols and on symbols whose
  *   trading day is inside one UTC day.
@@ -36,6 +39,7 @@ import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Ba
 import { periodStarts } from '../anchor-period';
 import type { BoxData, LineDrawingData } from '../types';
 import { foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface FvgSessionsInputs {
   /** FVG Level (bullish) */
@@ -85,6 +89,8 @@ const MAX_COUNT = 500;
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
+const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
 interface Ln {
   x1: number; y1: number; x2: number; y2: number;
@@ -109,7 +115,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<FvgSessionsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // syminfo.mintick
@@ -125,6 +131,12 @@ export function calculate(
 
   let sfvg: Fvg = { top: NaN, btm: NaN, mitigated: false, isnew: true, isbull: false, lvl: null, area: null };
   let sesr: { max: Ln; min: Ln } | null = null;
+  // Alert flags (bull_isnew, bear_isnew, bull_mitigated, bear_mitigated, within bull / bear) and the state of the
+  // gap of the day at the end of each bar (math.avg(sfvg.top, sfvg.btm), isbull, isnew)
+  const flags: boolean[][] = Array.from({ length: 6 }, () => []);
+  const gapAvg: number[] = [];
+  const gapBull: boolean[] = [];
+  const gapNew: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const { high, low, close } = bars[i];
@@ -172,12 +184,18 @@ export function calculate(
     }
 
     // First gap of the day
+    let bullIsNew = false;
+    let bearIsNew = false;
+    let bullMitigated = false;
+    let bearMitigated = false;
     if (bullFvg && sfvg.isnew) {
       sfvg = { top: low, btm: H(i - 2), mitigated: false, isnew: false, isbull: true, lvl: null, area: null };
       setFvg(sfvg, 2, cfg.bullAreaCss, cfg.bullCss);
+      bullIsNew = true;
     } else if (bearFvg && sfvg.isnew) {
       sfvg = { top: L(i - 2), btm: high, mitigated: false, isnew: false, isbull: false, lvl: null, area: null };
       setFvg(sfvg, 2, cfg.bearAreaCss, cfg.bearCss);
+      bearIsNew = true;
     }
 
     // Mitigation
@@ -185,11 +203,24 @@ export function calculate(
       if (sfvg.isbull && lt(close, sfvg.btm)) {
         setFvg(sfvg, 1, cfg.bullMitigatedCss, cfg.bullCss);
         sfvg.mitigated = true;
+        bullMitigated = true;
       } else if (!sfvg.isbull && gt(close, sfvg.top)) {
         setFvg(sfvg, 1, cfg.bearMitigatedCss, cfg.bearCss);
         sfvg.mitigated = true;
+        bearMitigated = true;
       }
     }
+    // close >= sfvg.btm and close <= sfvg.top and (not) sfvg.isbull and not sfvg.isnew
+    const within = ge(close, sfvg.btm) && le(close, sfvg.top) && !sfvg.isnew;
+    flags[0].push(bullIsNew);
+    flags[1].push(bearIsNew);
+    flags[2].push(bullMitigated);
+    flags[3].push(bearMitigated);
+    flags[4].push(within && sfvg.isbull);
+    flags[5].push(within && !sfvg.isbull);
+    gapAvg.push((sfvg.top + sfvg.btm) / 2);
+    gapBull.push(sfvg.isbull);
+    gapNew.push(sfvg.isnew);
 
     // The gap of the day follows the current bar
     if (!sfvg.isnew) {
@@ -208,12 +239,35 @@ export function calculate(
     borderColor: 'transparent', bgColor: b.bg,
   }));
 
+  // ta.cross(close, math.avg(sfvg.top, sfvg.btm)) and (not) sfvg.isbull and not sfvg.isnew
+  const closes = bars.map((b) => b.close);
+  const over = crossedOver(closes, gapAvg);
+  const under = crossedUnder(closes, gapAvg);
+  const avgCross = bars.map((_b, i) => (over[i] || under[i]) && !gapNew[i]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     lines: outLines,
     boxes: outBoxes,
+    alerts: alertStates(alertConditions, bars, [
+      ...flags,
+      avgCross.map((c, i) => c && gapBull[i]),
+      avgCross.map((c, i) => c && !gapBull[i]),
+    ]),
   };
 }
 
-export const FvgSessions = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish FVG', message: 'New session bullish fvg' },
+  { id: 'alert1', title: 'Bearish FVG', message: 'New session bearish fvg' },
+  { id: 'alert2', title: 'Mitigated Bullish FVG', message: 'Session bullish fvg has been mitigated' },
+  { id: 'alert3', title: 'Mitigated Bearish FVG', message: 'Session bearish fvg has been mitigated' },
+  { id: 'alert4', title: 'Price Within Bullish FVG', message: 'Price is within bullish fvg' },
+  { id: 'alert5', title: 'Price Within Bearish FVG', message: 'Price is within bearish fvg' },
+  { id: 'alert6', title: 'Bullish FVG AVG Cross', message: 'Price crossed bullish fvg average' },
+  { id: 'alert7', title: 'Bearish FVG AVG Cross', message: 'Price crossed bearish fvg average' },
+];
+
+export const FvgSessions = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

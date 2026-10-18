@@ -6,6 +6,7 @@
  * the bearish colour (0) to the bullish colour (100). Levels at 90 / 80 / 50 / 20 / 10 with fills of the bearish
  * (80-90) and bullish (10-20) zones; circles at the bottom when the oscillator crosses over 20 and at the top when it
  * crosses under 80.
+ * Alerts (alertcondition, `alerts` of the result): 'Radiant Buy' and 'Radiant Sell', true on the bars of the circles.
  *
  * Reference: "Radiant Mean Reversion Channels [Pineify]" by Pineify
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,13 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Radiant Buy', message: 'Price is reversing from oversold conditions' },
+  { id: 'alert1', title: 'Radiant Sell', message: 'Price is reversing from overbought conditions' },
+];
 
 export interface RadiantMeanReversionChannelsInputs {
   /** HMA / ATR length */
@@ -77,7 +85,7 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<RadiantMeanReversionChannelsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -133,6 +141,8 @@ export function calculate(
         colors: new Array<string>(n).fill(String(color.new(cfg.colBull, 85))) },
     ],
     markers,
+    // alertcondition(long_signal, "Radiant Buy") / alertcondition(short_signal, "Radiant Sell")
+    alerts: alertStates(alertConditions, bars, [longSignal.map((v) => !!v), shortSignal.map((v) => !!v)]),
   };
 }
 
@@ -142,4 +152,5 @@ export const RadiantMeanReversionChannels = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

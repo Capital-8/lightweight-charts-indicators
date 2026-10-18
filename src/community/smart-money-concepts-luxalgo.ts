@@ -15,6 +15,9 @@
  * - Fair value gaps (optional, other timeframe possible): 3-bar gaps, two boxes each, removed when filled.
  * - Previous day / week / month high and low (optional), premium / discount / equilibrium zones (optional),
  *   candles coloured by the internal trend (optional), swing point labels HH / LH / HL / LL (optional).
+ * - Alerts (alertcondition, `alerts` of the result), on the bars of each event: internal / swing bullish and bearish
+ *   BOS and CHoCH, internal / swing order block breakouts, equal highs / lows, bullish / bearish fair value gaps (an
+ *   event is only found while the inputs of its part are on, as in the original).
  *
  * The drawings are those alive after the last bar. The day / week / month levels are drawn on the last closed bar,
  * the order blocks on the last closed bar and on the last bar. The port reads the state of the last bar from the
@@ -50,6 +53,7 @@ import {
 import type { BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, PlotCandleData } from '../types';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type Show = 'All' | 'BOS' | 'CHoCH';
 type LabelSize = 'tiny' | 'small' | 'normal';
@@ -341,7 +345,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SmartMoneyConceptsLuxalgoInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -445,6 +450,15 @@ export function calculate(
   // drawZone(): var label and var box of the three calls
   const zones: Array<{ label: Label; box: Box }> = [];
   const candles: PlotCandleData[] = [];
+  // currentAlerts (alerts.new() on each bar): one flag per bar for each alertcondition, in the declaration order
+  const flags: boolean[][] = alertConditions.map(() => new Array<boolean>(n).fill(false));
+  const AL = {
+    internalBullishBOS: 0, internalBullishCHoCH: 1, internalBearishBOS: 2, internalBearishCHoCH: 3,
+    swingBullishBOS: 4, swingBullishCHoCH: 5, swingBearishBOS: 6, swingBearishCHoCH: 7,
+    internalBullishOrderBlock: 8, internalBearishOrderBlock: 9, swingBullishOrderBlock: 10, swingBearishOrderBlock: 11,
+    equalHighs: 12, equalLows: 13, bullishFairValueGap: 14, bearishFairValueGap: 15,
+  };
+  const fire = (k: number, i: number) => { flags[k][i] = true; };
 
   /** drawStructure(): line and text of a break */
   const drawStructure = (
@@ -512,7 +526,7 @@ export function calculate(
       const level = at(L, i - size);
       if (equalHighLow && lt(Math.abs(p.currentLevel - level), cfg.equalHighsLowsThreshold * atrMeasure[i])) {
         drawEqualHighLow(p, level, size, false, i);
-        // alert: Equal Lows
+        fire(AL.equalLows, i);
       }
       p.lastLevel = p.currentLevel;
       p.currentLevel = level;
@@ -533,7 +547,7 @@ export function calculate(
       const level = at(H, i - size);
       if (equalHighLow && lt(Math.abs(p.currentLevel - level), cfg.equalHighsLowsThreshold * atrMeasure[i])) {
         drawEqualHighLow(p, level, size, true, i);
-        // alert: Equal Highs
+        fire(AL.equalHighs, i);
       }
       p.lastLevel = p.currentLevel;
       p.currentLevel = level;
@@ -593,7 +607,9 @@ export function calculate(
     const crossedOver = st.over(C[i], p.currentLevel);
     if (crossedOver && !p.crossed && extraCondition) {
       const tag = trend.bias === BEARISH ? CHOCH : BOS;
-      // alert: (Internal) Bullish BOS / CHoCH, by the tag
+      // currentAlerts.(internal|swing)Bullish(CHoCH|BOS) := tag == CHOCH / tag == BOS
+      if (internal) fire(tag === CHOCH ? AL.internalBullishCHoCH : AL.internalBullishBOS, i);
+      else fire(tag === CHOCH ? AL.swingBullishCHoCH : AL.swingBullishBOS, i);
       p.crossed = true;
       trend.bias = BULLISH;
       const display = internal ? shown(cfg.showInternals, cfg.showInternalBull, tag) : shown(cfg.showStructure, cfg.showSwingBull, tag);
@@ -607,7 +623,9 @@ export function calculate(
     const crossedUnder = st.under(C[i], p.currentLevel);
     if (crossedUnder && !p.crossed && extraCondition) {
       const tag = trend.bias === BULLISH ? CHOCH : BOS;
-      // alert: (Internal) Bearish BOS / CHoCH, by the tag
+      // currentAlerts.(internal|swing)Bearish(CHoCH|BOS) := tag == CHOCH / tag == BOS
+      if (internal) fire(tag === CHOCH ? AL.internalBearishCHoCH : AL.internalBearishBOS, i);
+      else fire(tag === CHOCH ? AL.swingBearishCHoCH : AL.swingBearishBOS, i);
       p.crossed = true;
       trend.bias = BEARISH;
       const display = internal ? shown(cfg.showInternals, cfg.showInternalBear, tag) : shown(cfg.showStructure, cfg.showSwingBear, tag);
@@ -626,10 +644,10 @@ export function calculate(
       let crossed = false;
       if (gt(bearishSource, block.barHigh) && block.bias === BEARISH) {
         crossed = true;
-        // alert: Bearish Internal / Swing OB Breakout
+        fire(internal ? AL.internalBearishOrderBlock : AL.swingBearishOrderBlock, i);
       } else if (lt(bullishSource, block.barLow) && block.bias === BULLISH) {
         crossed = true;
-        // alert: Bullish Internal / Swing OB Breakout
+        fire(internal ? AL.internalBullishOrderBlock : AL.swingBullishOrderBlock, i);
       }
       if (crossed) orderBlocks.splice(index, 1);
     }
@@ -716,10 +734,13 @@ export function calculate(
     lows.push(L[i]);
     times.push(T[i]);
 
-    // plotcandle(showTrendInput ? open : na, high, low, close, color = candleColor, ...): no candle without the open
+    // plotcandle(showTrendInput ? open : na, high, low, close, color = candleColor, ...): the output is always
+    // declared; no candle without the open
     if (cfg.showTrend) {
       const candleColor = internalTrend.bias === BULLISH ? swingBullishColor : swingBearishColor;
       candles.push({ time: bars[i].time, open: O[i], high: H[i], low: L[i], close: C[i], color: candleColor, wickColor: candleColor, borderColor: candleColor });
+    } else {
+      candles.push({ time: bars[i].time, open: NaN, high: NaN, low: NaN, close: NaN });
     }
 
     if (cfg.showHighLowSwings || cfg.showPremiumDiscountZones) {
@@ -828,14 +849,14 @@ export function calculate(
         left: lastTime, top: topPrice, right: currentTime + cfg.fairValueGapsExtend * barDuration, bottom: bottomPrice, border: boxColor, bg: boxColor,
       });
       if (bullishFairValueGap) {
-        // alert: Bullish FVG
+        fire(AL.bullishFairValueGap, i);
         const middle = math.avg(currentLow, last2High) as number;
         const topBox = fairValueGapBox(currentLow, middle, fairValueGapBullishColor);
         const bottomBox = fairValueGapBox(middle, last2High, fairValueGapBullishColor);
         fairValueGaps.unshift({ top: currentLow, bottom: last2High, bias: BULLISH, topBox, bottomBox });
       }
       if (bearishFairValueGap) {
-        // alert: Bearish FVG
+        fire(AL.bearishFairValueGap, i);
         const middle = math.avg(currentHigh, last2Low) as number;
         const topBox = fairValueGapBox(currentHigh, middle, fairValueGapBearishColor);
         const bottomBox = fairValueGapBox(middle, last2Low, fairValueGapBearishColor);
@@ -902,12 +923,33 @@ export function calculate(
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
-    plotCandles: cfg.showTrend ? { trendCandles: candles } : {},
+    plotCandles: { trendCandles: candles },
     lines: outLines,
     labels: outLabels,
     boxes: outBoxes,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Internal Bullish BOS', message: 'Internal Bullish BOS formed' },
+  { id: 'alert1', title: 'Internal Bullish CHoCH', message: 'Internal Bullish CHoCH formed' },
+  { id: 'alert2', title: 'Internal Bearish BOS', message: 'Internal Bearish BOS formed' },
+  { id: 'alert3', title: 'Internal Bearish CHoCH', message: 'Internal Bearish CHoCH formed' },
+  { id: 'alert4', title: 'Bullish BOS', message: 'Internal Bullish BOS formed' },
+  { id: 'alert5', title: 'Bullish CHoCH', message: 'Internal Bullish CHoCH formed' },
+  { id: 'alert6', title: 'Bearish BOS', message: 'Bearish BOS formed' },
+  { id: 'alert7', title: 'Bearish CHoCH', message: 'Bearish CHoCH formed' },
+  { id: 'alert8', title: 'Bullish Internal OB Breakout', message: 'Price broke bullish internal OB' },
+  { id: 'alert9', title: 'Bearish Internal OB Breakout', message: 'Price broke bearish internal OB' },
+  { id: 'alert10', title: 'Bullish Swing OB Breakout', message: 'Price broke bullish swing OB' },
+  { id: 'alert11', title: 'Bearish Swing OB Breakout', message: 'Price broke bearish swing OB' },
+  { id: 'alert12', title: 'Equal Highs', message: 'Equal highs detected' },
+  { id: 'alert13', title: 'Equal Lows', message: 'Equal lows detected' },
+  { id: 'alert14', title: 'Bullish FVG', message: 'Bullish FVG formed' },
+  { id: 'alert15', title: 'Bearish FVG', message: 'Bearish FVG formed' },
+];
 
 export const SmartMoneyConceptsLuxalgo = {
   calculate,
@@ -915,4 +957,5 @@ export const SmartMoneyConceptsLuxalgo = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

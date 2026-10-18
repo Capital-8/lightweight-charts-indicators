@@ -5,12 +5,15 @@
  * the RSI: basis = SMA(RSI, bands length), bands = basis +/- multiplier * stdev(RSI, bands length). The RSI line is
  * green above the basis and red below; a fill shades the zone between the bands. White circles mark the bars where
  * the RSI crosses over the upper band or under the lower band.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Volatility Breakout' / 'Bearish Volatility Breakout', true
+ * on the bars of those crosses.
  *
  * Reference: "Institutional Volume RSI [Adaptive]" by abgthecoder
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface InstitutionalVolumeRSIInputs {
   /** RSI length (also the VWMA length) */
@@ -62,7 +65,10 @@ export const metadata = {
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<InstitutionalVolumeRSIInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<InstitutionalVolumeRSIInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -98,8 +104,16 @@ export function calculate(bars: Bar[], inputs: Partial<InstitutionalVolumeRSIInp
     plots: { plot0, plot1, plot2, plot3, plot4, plot5 },
     // fill(p_upper, p_lower, color = color.new(color.blue, 95), title = "Volatility Zone")
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Volatility Zone', color: FILL_COL } }],
+    // alertcondition(cross_up, ...) / alertcondition(cross_dn, ...)
+    alerts: alertStates(alertConditions, bars, [bars.map((_b, i) => crossUp(i)), bars.map((_b, i) => crossDn(i))]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Volatility Breakout', message: 'IV-RSI broke above Upper Band' },
+  { id: 'alert1', title: 'Bearish Volatility Breakout', message: 'IV-RSI broke below Lower Band' },
+];
 
 export const InstitutionalVolumeRSI = {
   calculate,
@@ -107,4 +121,5 @@ export const InstitutionalVolumeRSI = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

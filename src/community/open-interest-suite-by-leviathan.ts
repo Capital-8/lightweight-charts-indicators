@@ -341,11 +341,11 @@ export function calculate(
     }
     deltaPlot.push({ time: t, value: pd ? fin(deltaOI[i]) : NaN, color: pdcol });
     // bgcolor(col_bg and show_loi and large_oi_up ? color.new(pdcol, 85) : na), the same for decreases
-    if (cfg.colBg && cfg.showLoi && largeUp[i]) bgColors.push({ time: t, color: String(color.new(pdcol, 85)) });
-    if (cfg.colBg && cfg.showLod && largeDw[i]) bgColors.push({ time: t, color: String(color.new(pdcol, 85)) });
+    if (cfg.colBg && cfg.showLoi && largeUp[i]) bgColors.push({ id: 'bgcolor0', time: t, color: String(color.new(pdcol, 85)) });
+    if (cfg.colBg && cfg.showLod && largeDw[i]) bgColors.push({ id: 'bgcolor1', time: t, color: String(color.new(pdcol, 85)) });
     // barcolor(col_cha and show_loi and large_oi_up ? color.new(pdcol, 0) : na), the same for decreases
-    if (cfg.colCha && cfg.showLoi && largeUp[i]) barColors.push({ time: t, color: String(color.new(pdcol, 0)) });
-    if (cfg.colCha && cfg.showLod && largeDw[i]) barColors.push({ time: t, color: String(color.new(pdcol, 0)) });
+    if (cfg.colCha && cfg.showLoi && largeUp[i]) barColors.push({ id: 'barcolor0', time: t, color: String(color.new(pdcol, 0)) });
+    if (cfg.colCha && cfg.showLod && largeDw[i]) barColors.push({ id: 'barcolor1', time: t, color: String(color.new(pdcol, 0)) });
   }
 
   const toMs = chart?.timeUnit === 'ms' ? 1 : 1000;

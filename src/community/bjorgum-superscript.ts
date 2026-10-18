@@ -31,17 +31,49 @@
  * - The type "VWAP" restarts on each trading day of the exchange. On daily and higher bars the value is the source of
  *   the bar (na without volume). On intraday bars the port reads the exchange time zone and the session of the symbol
  *   from the optional third argument (see src/chart-context.ts); without them it throws an Error.
- * - The alert inputs and the 20 alert conditions have no output.
+ * - Alerts: the 20 alertcondition() calls of the original (`alerts` of the result), and its alert() calls
+ *   (`alertCalls`, frequency 'Alerts Mode') of the conditions switched on in "Variable Alerts":
+ *   "<text><timeframe> chart. Price is <close>", the timeframe as the original's language version gives it ("D" /
+ *   "W" / "M" for one day / week / month; chart context `timeframe`, else from the bar spacing).
  *
  * Reference: "Bjorgum SuperScript" by Bjorgum
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, getSourceSeries, color, str, array, heikinAshi, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
-import type { BarColorData, MarkerData, PineSize, PlotBarData, PlotCandleData, TableCellData, TableData, TablePosition } from '../types';
+import type { AlertCall, BarColorData, MarkerData, PineSize, PlotBarData, PlotCandleData, TableCellData, TableData, TablePosition } from '../types';
 import { executeScript, ta as scriptTa } from 'oakscriptjs/script';
 import { barInterval } from '../bar-time';
 import type { ChartContext } from '../chart-context';
+import { chartTimeframe } from '../anchor-period';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'TRM Buy', message: 'TRM Buy on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert1', title: 'TRM Sell', message: 'TRM Sell on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert2', title: 'Bj Reversal', message: 'Reversal candle is forming on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert3', title: 'T3 Crossing T3', message: 'A new trend may be forming on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert4', title: 'Reversal Up', message: 'Reversal up on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert5', title: 'Reversal Down', message: 'Reversal down on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert6', title: 'MA Alert', message: 'Price is crossing MAs on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert7', title: 'MA Cross Up', message: 'MA crossed up on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert8', title: 'MA Cross Down', message: 'MA crossed down on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert9', title: 'RSI Signal', message: 'RSI crossed 50 on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert10', title: 'RSI Cross Up', message: 'RSI crossed up 50 on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert11', title: 'RSI Cross Down', message: 'RSI crossed down 50 on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert12', title: 'RSI Overbought', message: 'RSI crossed overbought on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert13', title: 'RSI Oversold', message: 'RSI crossed oversold on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert14', title: 'RSI momo down', message: 'RSI crossed down 70 on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert15', title: 'RSI momo up', message: 'RSI crossed up 30 on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert16', title: 'TSI Curl Up', message: 'TSI curled up on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert17', title: 'TSI Curl Down', message: 'TSI curled down on {{interval}} chart. Price is {{close}}' },
+  { id: 'alert18', title: 'Sar Up', message: 'SAR triggered up {{interval}} chart. Price is {{close}}' },
+  { id: 'alert19', title: 'Sar Down', message: 'SAR triggered down {{interval}} chart. Price is {{close}}' },
+];
 
 type MaType = 'SMA' | 'EMA' | 'HEMA' | 'T3' | 'DEMA' | 'TEMA' | 'HMA' | 'WMA' | 'VWMA' | 'SWMA' | 'VWAP';
 
@@ -74,8 +106,9 @@ export interface BjorgumSuperScriptInputs {
   haover: boolean;
   /** Actual Close Value */
   rPrice: boolean;
-  /** Alerts Mode (no output) */
+  /** Alerts Mode: frequency of the alert() calls (`alertCalls`) */
   alertMode: 'once_per_bar' | 'once_per_bar_close';
+  /** "Variable Alerts": the alert() calls made (`alertCalls`) */
   alertTrmBuy: boolean;
   alertTrmSell: boolean;
   alertRevUp: boolean;
@@ -462,7 +495,8 @@ export function calculate(
     plotCandles: Record<string, PlotCandleData[]>;
     plotBars: Record<string, PlotBarData[]>;
     tables: TableData[];
-  } {
+    alertCalls: AlertCall[];
+  } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -599,6 +633,9 @@ export function calculate(
   const haBarColor: Array<string | null> = new Array(n);
   const cells: TableCellData[] = [];
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
+  /** data / dtat (TSI curls) of each bar, for the alerts */
+  const dataFlags: boolean[] = new Array(n);
+  const dtatFlags: boolean[] = new Array(n);
 
   for (let i = 0; i < n; i++) {
     const time = bars[i].time;
@@ -609,6 +646,8 @@ export function calculate(
     const sell = gt(tsl[i], tsi[i]) && gt(50, rsi[i]);
     const data = gt(tsl[i], tsi[i]) && gt(tsi[i], prev(tsi));
     const dtat = gt(tsi[i], tsl[i]) && gt(prev(tsi), tsi[i]);
+    dataFlags[i] = data;
+    dtatFlags[i] = dtat;
 
     const colOne = gt(anT3[i], prev(anT3));
     const upCol = gt(nT3[i], prev(nT3));
@@ -749,6 +788,67 @@ export function calculate(
     borderColor: String(color.new(color.gray, 60)), borderWidth: 1,
   }] : [];
 
+  // Alert conditions (ta.crossover / ta.crossunder / ta.cross; the comparisons as in the outputs above)
+  const or = (...f: boolean[][]) => f[0].map((_v, i) => f.some((x) => x[i]));
+  const and = (...f: boolean[][]) => f[0].map((_v, i) => f.every((x) => x[i]));
+  const cmp = (f: (i: number) => boolean) => bars.map((_b, i) => f(i));
+  const cross = (a: number[], b: number[] | number) => or(crossedOver(a, b), crossedUnder(a, b));
+  const tsiOver = crossedOver(tsi, tsl);
+  const tsiUnder = crossedUnder(tsi, tsl);
+  const rsiup = crossedOver(rsi, 50);
+  const rsidwn = crossedUnder(rsi, 50);
+  // buy4 = buy1 or buy2 or buy3, sell4 = sell1 or sell2 or sell3
+  const buy4 = or(and(tsiOver, cmp((i) => gt(rsi[i], 50))), and(rsiup, cmp((i) => gt(tsi[i], tsl[i]))), and(tsiOver, rsiup));
+  const sell4 = or(and(tsiUnder, cmp((i) => gt(50, rsi[i]))), and(rsidwn, cmp((i) => gt(tsl[i], tsi[i]))), and(tsiUnder, rsidwn));
+  const revup = crossedOver(close, nT3);
+  const revdwn = crossedUnder(close, nT3);
+  const up1 = crossedOver(close, slow1);
+  const up2 = crossedOver(close, slow2);
+  const dn1 = crossedUnder(close, slow1);
+  const dn2 = crossedUnder(close, slow2);
+  // Hcrossup = crossup1 or crossup2 or crossup3, Hcrossdwn = crossdown1 or crossdown2 or crossdown3
+  const hCrossUp = or(and(up1, cmp((i) => gt(close[i], slow2[i]))), and(up2, cmp((i) => gt(close[i], slow1[i]))), and(up2, up1));
+  const hCrossDn = or(and(dn1, cmp((i) => gt(slow2[i], close[i]))), and(dn2, cmp((i) => gt(slow1[i], close[i]))), and(dn2, dn1));
+  const rsiob = crossedOver(rsi, 70);
+  const rsios = crossedUnder(rsi, 30);
+  const rsicd = crossedUnder(rsi, 70);
+  const rsicu = crossedOver(rsi, 30);
+  const sarup = crossedOver(close, sar);
+  const sardwn = crossedUnder(close, sar);
+  const alertFlags = [
+    buy4, sell4, cross(close, nT3), cross(nT3, anT3), revup, revdwn, and(cross(close, slow1), cross(close, slow2)),
+    hCrossUp, hCrossDn, cross(rsi, 50), rsiup, rsidwn, rsiob, rsios, rsicd, rsicu, dataFlags, dtatFlags, sarup, sardwn,
+  ];
+
+  // _alert(cond, txt): if cond, alert(txt + timeframe.period + ' chart. Price is ' + str.tostring(close), i_alert_mode)
+  const period = chartTimeframe(bars, chart).replace(/^1([DWM])$/, '$1');
+  const calls: Array<[boolean[], boolean, string]> = [
+    [buy4, cfg.alertTrmBuy, 'TRM Buy on '],
+    [sell4, cfg.alertTrmSell, 'TRM Sell on '],
+    [revup, cfg.alertRevUp, 'Reversal up on '],
+    [revdwn, cfg.alertRevDown, 'Reversal down on '],
+    [hCrossUp, cfg.alertMaCrossUp, 'MA crossed up on '],
+    [hCrossDn, cfg.alertMaCrossDown, 'MA crossed down on '],
+    [rsiup, cfg.alertRsiUp50, 'RSI crossed up 50 on '],
+    [rsidwn, cfg.alertRsiDown50, 'RSI crossed down 50 on '],
+    [rsiob, cfg.alertRsiUp70, 'RSI crossed up 70 on '],
+    [rsios, cfg.alertRsiDown30, 'RSI crossed down 30 on '],
+    [rsicd, cfg.alertRsiDown70, 'RSI crossed down 70 on '],
+    [rsicu, cfg.alertRsiUp30, 'RSI crossed up 30 on '],
+    [dataFlags, cfg.alertTsiCurlUp, 'TSI curled up on '],
+    [dtatFlags, cfg.alertTsiCurlDown, 'TSI curled down on '],
+    [sarup, cfg.alertSarUp, 'SAR triggered up '],
+    [sardwn, cfg.alertSarDown, 'SAR triggered down '],
+  ];
+  const alertCalls: AlertCall[] = [];
+  for (let i = 0; i < n; i++) {
+    for (const [cond, on, txt] of calls) {
+      if (on && cond[i]) {
+        alertCalls.push({ time: bars[i].time, message: txt + period + ' chart. Price is ' + str.tostring(close[i]), freq: cfg.alertMode });
+      }
+    }
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -773,7 +873,9 @@ export function calculate(
     plotCandles: { hollowCandles: candles },
     plotBars: { heikinAshi: haBars },
     tables,
+    alertCalls,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
 
-export const BjorgumSuperScript = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BjorgumSuperScript = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction };

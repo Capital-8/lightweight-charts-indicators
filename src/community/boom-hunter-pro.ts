@@ -7,11 +7,40 @@
  * LSMA WaveTrend using linreg for additional confluence.
  * Entry signals from crossover conditions on quotient + trigger.
  *
+ * Markers as the original's plotshape outputs (ids shape0..shape9): exit warnings (orange circle, red "Overbought"),
+ * the four "Long" labels (gray, yellow, blue, lime), the "Short" label, the "Continuation" triangle (break of the
+ * resistance pivot of the main oscillator after a support break) and the two "Bounce" triangles of the LSMA wave
+ * trend (wt2 = SMA 6 of avg(TCI, MF, RSI 3) of hlc3, at wt2 + 9 / wt2 - 9). The lengths of the LSMA wave trend and of
+ * the support / resistance pivots are the original's default inputs.
+ *
+ * Alerts (alertcondition, `alerts` of the result): the original's 16 conditions.
+ *
  * Reference: "Boom Hunter Pro" by veryfid
  */
 
-import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { ta, Series, color, math, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions (all with the default message) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Crossover', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Crossunder', message: 'Alert Fired!' },
+  { id: 'alert2', title: 'Long', message: 'Alert Fired!' },
+  { id: 'alert3', title: 'Entry Zone', message: 'Alert Fired!' },
+  { id: 'alert4', title: 'Break Resistance', message: 'Alert Fired!' },
+  { id: 'alert5', title: 'Break Support', message: 'Alert Fired!' },
+  { id: 'alert6', title: 'Crossover - Market Low', message: 'Alert Fired!' },
+  { id: 'alert7', title: 'Crossunder - Market High', message: 'Alert Fired!' },
+  { id: 'alert8', title: 'Crossover With Pressure', message: 'Alert Fired!' },
+  { id: 'alert9', title: 'Crossunder With Pressure', message: 'Alert Fired!' },
+  { id: 'alert10', title: 'Continuation', message: 'Alert Fired!' },
+  { id: 'alert11', title: 'Orange - Overbought', message: 'Alert Fired!' },
+  { id: 'alert12', title: 'Red - Overbought', message: 'Alert Fired!' },
+  { id: 'alert13', title: 'Bounce down', message: 'Alert Fired!' },
+  { id: 'alert14', title: 'Bounce up', message: 'Alert Fired!' },
+  { id: 'alert15', title: 'Short', message: 'Alert Fired!' },
+];
 
 export interface BoomHunterProInputs {
   lpPeriod: number;
@@ -25,6 +54,8 @@ export interface BoomHunterProInputs {
   square: boolean;
   showLongs: boolean;
   showShorts: boolean;
+  /** Show Entry and Exit Points? (the exit warning circles) */
+  showEntry: boolean;
 }
 
 export const defaultInputs: BoomHunterProInputs = {
@@ -39,6 +70,7 @@ export const defaultInputs: BoomHunterProInputs = {
   square: true,
   showLongs: true,
   showShorts: true,
+  showEntry: true,
 };
 
 export const inputConfig: InputConfig[] = [
@@ -53,6 +85,7 @@ export const inputConfig: InputConfig[] = [
   { id: 'square', type: 'bool', title: 'Square Line', defval: true },
   { id: 'showLongs', type: 'bool', title: 'Show Long Entries', defval: true },
   { id: 'showShorts', type: 'bool', title: 'Show Short Entries', defval: true },
+  { id: 'showEntry', type: 'bool', title: 'Show Entry and Exit Points?', defval: true },
 ];
 
 export const plotConfig: PlotConfig[] = [
@@ -61,6 +94,7 @@ export const plotConfig: PlotConfig[] = [
   { id: 'plot2', title: 'Q3 (Red Wave)', color: '#FF000080', lineWidth: 1 },
   { id: 'plot3', title: 'Q5 (Yellow)', color: '#FFFF00', lineWidth: 1 },
   { id: 'plot4', title: 'Q6 (Blue Boom)', color: '#0000FF', lineWidth: 1 },
+  { id: 'plot5', title: 'Q4 (Red Wave)', color: '#FF000080', lineWidth: 1 },
 ];
 
 export const metadata = {
@@ -127,8 +161,11 @@ function ehlers_eot(
   return { q1, q2 };
 }
 
-export function calculate(bars: Bar[], inputs: Partial<BoomHunterProInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
-  const { lpPeriod, k1, trigLen, lpPeriod2, k12, k22, lpPeriod3, k13, square, showLongs, showShorts } = { ...defaultInputs, ...inputs };
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<BoomHunterProInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
+  const { lpPeriod, k1, trigLen, lpPeriod2, k12, k22, lpPeriod3, k13, square, showLongs, showShorts, showEntry } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
   const closeArr = bars.map(b => b.close);
@@ -156,6 +193,7 @@ export function calculate(bars: Bar[], inputs: Partial<BoomHunterProInputs> = {}
   // Scale to chart: q * esize + ey
   const q1Arr = eot1.q1.map(v => v * esize + ey);
   const q3Arr = eot2.q1.map(v => v * esize + ey);
+  const q4Arr = eot2.q2.map(v => v * esize + ey);
   const q5Arr = eot3.q1.map(v => v * esize + ey);
   const q6Arr = eot3.q2.map(v => v * esize + ey);
 
@@ -227,123 +265,162 @@ export function calculate(bars: Bar[], inputs: Partial<BoomHunterProInputs> = {}
     value: (i < warmup || isNaN(v)) ? NaN : v,
   }));
 
-  // Entry markers
+  // Plot 5: q4 (EOT2, Quotient 2 of the red wave), filled with q3
+  const plot5 = q4Arr.map((v, i) => ({
+    time: bars[i].time,
+    value: (i < warmup || isNaN(v)) ? NaN : v,
+  }));
+
+  // Conditions of the original (ta.crossover / ta.crossunder / ta.cross, ta.barssince: na before the first true bar)
+  const Q1 = eot1.q1;
+  const Q2 = eot1.q2;
+  const Q3 = eot2.q1;
+  const Q4 = eot2.q2;
+  const Q5 = eot3.q1;
+  const Q6 = eot3.q2;
+  const q1 = q1Arr;
+  const trigger = triggerArr.map((v) => v ?? NaN);
+  const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
+  const S = (a: number[]) => Series.fromArray(bars, a);
+  const or = (a: boolean[], b: boolean[]) => a.map((v, i) => v || b[i]);
+  const cross = (a: number[], b: number[] | number) => or(crossedOver(a, b), crossedUnder(a, b));
+  const barssince = (f: boolean[]) => {
+    let last = -1;
+    return f.map((v, i) => {
+      if (v) last = i;
+      return last < 0 ? NaN : i - last;
+    });
+  };
+  const fixnan = (a: number[]) => {
+    let last = NaN;
+    return a.map((v) => (isNaN(v) ? last : (last = v)));
+  };
+  const prev1 = (a: number[]) => a.map((_v, i) => (i > 0 ? a[i - 1] : NaN));
+
+  // LSMA wave trend: wt1 = tradition(hlc3) = avg(tci, mf, rsi(src, n3)), wt2 = sma(wt1, 6) (n1 = 9, n2 = 6, n3 = 3)
+  const n1 = 9;
+  const n2 = 6;
+  const n3 = 3;
+  const src = bars.map((b) => (b.high + b.low + b.close) / 3);
+  const volume = bars.map((b) => b.volume ?? NaN);
+  const emaSrc = A(ta.ema(S(src), n1));
+  const absDev = A(ta.ema(S(src.map((v, i) => Math.abs(v - emaSrc[i]))), n1));
+  const tci = A(ta.ema(S(src.map((v, i) => (v - emaSrc[i]) / (0.025 * absDev[i]))), n2)).map((v) => v + 50);
+  const change = src.map((v, i) => (i > 0 ? v - src[i - 1] : NaN));
+  const upSum = math.sum(src.map((v, i) => volume[i] * (change[i] <= 0 ? 0 : v)), n3) as number[];
+  const dnSum = math.sum(src.map((v, i) => volume[i] * (change[i] >= 0 ? 0 : v)), n3) as number[];
+  const mf = upSum.map((u, i) => 100.0 - 100.0 / (1.0 + u / dnSum[i]));
+  const rsi3 = A(ta.rsi(S(src), n3));
+  const wt1 = tci.map((v, i) => (v + mf[i] + rsi3[i]) / 3);
+  const wt2 = A(ta.sma(S(wt1), 6));
+
+  // Support / resistance pivots of q1: fixnan(ta.pivothigh(q1, 1, 1)[1]), fixnan(ta.pivotlow(q1, 5, 5)[1])
+  const highUsePivot = fixnan(prev1(A(ta.pivothigh(S(q1), 1, 1))));
+  const lowUsePivot = fixnan(prev1(A(ta.pivotlow(S(q1), 5, 5))));
+
+  const crossover = crossedOver(q1, trigger);
+  const crossunder = crossedUnder(q1, trigger);
+  const entry = crossedUnder(Q2, -0.9);
+  const breakRes = crossedOver(q1, highUsePivot);
+  const breakSup = crossedUnder(q1, lowUsePivot);
+  // var dbreak / ubreak: support breaks since the last entry, resistance breaks after them
+  const continuation: boolean[] = new Array(n).fill(false);
+  let dbreak = 0;
+  let ubreak = 0;
+  for (let i = 0; i < n; i++) {
+    if (breakSup[i]) dbreak += 1;
+    if (entry[i]) {
+      dbreak = 0;
+      ubreak = 0;
+    }
+    if (breakRes[i] && dbreak >= 1) ubreak += 1;
+    continuation[i] = breakRes[i] && dbreak >= 1 && ubreak <= 1;
+  }
+
+  const over = cross(Q5, Q6).map((v, i) => v && Q5[i] > 0.5);
+  const over3 = cross(Q3, Q4).map((v, i) => v && Q3[i] > 0);
+  const sinceWarn2 = barssince(crossedOver(Q1, -0.9));
+  const sinceWarn3 = barssince(crossedUnder(Q1, 0.9));
+  const sinceUp20 = barssince(crossedOver(q1, 20));
+  const sinceUp80 = barssince(crossedOver(q1, 80));
+  const sinceDn0 = barssince(crossunder.map((v, i) => q1[i] <= 0 && v));
+  const sinceDn20 = barssince(crossunder.map((v, i) => q1[i] <= 20 && v));
+  const enter3 = crossover.map((v, i) => Q3[i] <= -0.9 && v && sinceWarn2[i] <= 7 && q1[i] <= 20 && sinceUp20[i] <= 21);
+  const enter5 = crossover.map((v, i) => sinceDn0[i] <= 5 && v);
+  const enter6 = crossover.map((v, i) => sinceDn20[i] <= 11 && v);
+  const enter7 = crossover.map((v, i) => Q3[i] <= -0.9 && v);
+  const senter3 = crossunder.map((v, i) => Q3[i] >= -0.9 && v && sinceWarn3[i] <= 7 && q1[i] >= 99 && sinceUp80[i] <= 21);
+  const sinceWtUp80 = barssince(crossedOver(wt2, 80));
+  const sinceWtDn20 = barssince(crossedUnder(wt2, 20));
+  const wtDn80 = crossedUnder(wt2, 80);
+  const wtUp20 = crossedOver(wt2, 20);
+  const bounceDown = wtDn80.map((v, i) => sinceWtUp80[i] <= 1 && v);
+  const bounceUp = wtUp20.map((v, i) => sinceWtDn20[i] <= 1 && v);
+
+  // plotshape outputs of the original, in declaration order (id shape<k>)
   const markers: MarkerData[] = [];
-  for (let i = 2; i < n; i++) {
-    if (i < warmup) continue;
-    const q1v = q1Arr[i];
-    const prevQ1 = q1Arr[i - 1];
-    const trig = triggerArr[i] ?? 0;
-    const prevTrig = triggerArr[i - 1] ?? 0;
-    const crossoverQ1Trig = prevQ1 <= prevTrig && q1v > trig;
-    const crossunderQ1Trig = prevQ1 >= prevTrig && q1v < trig;
-
-    // Long signals
-    if (showLongs) {
-      // enter7: Quotient3 <= -0.9 and crossover(q1, trigger) -- Yellow long
-      if (eot2.q1[i] <= -0.9 && crossoverQ1Trig) {
-        markers.push({
-          time: bars[i].time,
-          position: 'aboveBar',
-          shape: 'labelDown',
-          color: '#FFFF00CC',
-          text: 'Long',
-        });
-      }
-      // enter5: barssince(q1<=0 and crossunder) <= 5 and crossover -- Blue long
-      else if (crossoverQ1Trig) {
-        let bsSince = n;
-        for (let j = i - 1; j >= Math.max(0, i - 6); j--) {
-          const pq = q1Arr[j];
-          const ppq = j > 0 ? q1Arr[j - 1] : 0;
-          const pt = triggerArr[j] ?? 0;
-          const ppt = j > 0 ? (triggerArr[j - 1] ?? 0) : 0;
-          if (pq <= 0 && ppq >= ppt && pq < pt) {
-            bsSince = i - j;
-            break;
-          }
-        }
-        if (bsSince <= 5) {
-          markers.push({
-            time: bars[i].time,
-            position: 'aboveBar',
-            shape: 'labelDown',
-            color: '#0000FFCC',
-            text: 'Long',
-          });
-        }
-        // enter6: barssince(q1<=20 and crossunder) <= 11 and crossover and q1<=60 -- Gray long
-        else if (q1v <= 60) {
-          let bsSince2 = n;
-          for (let j = i - 1; j >= Math.max(0, i - 12); j--) {
-            const pq = q1Arr[j];
-            const ppq = j > 0 ? q1Arr[j - 1] : 0;
-            const pt = triggerArr[j] ?? 0;
-            const ppt = j > 0 ? (triggerArr[j - 1] ?? 0) : 0;
-            if (pq <= 20 && ppq >= ppt && pq < pt) {
-              bsSince2 = i - j;
-              break;
-            }
-          }
-          if (bsSince2 <= 11) {
-            markers.push({
-              time: bars[i].time,
-              position: 'aboveBar',
-              shape: 'labelDown',
-              color: '#C0C0C0CC',
-              text: 'Long',
-            });
-          }
-        }
-      }
+  // version 5 colour constants: color.red #FF5252, color.yellow #FFEB3B
+  const RED = '#FF5252';
+  const YELLOW = '#FFEB3B';
+  const longText = String(color.new(color.white, 20));
+  const label = (time: number, c: string, text: string, id: string): MarkerData => (
+    { time, position: 'top', shape: 'labelDown', color: String(color.new(c, 20)), text, textColor: longText, size: 'tiny', id });
+  for (let i = 0; i < n; i++) {
+    const time = bars[i].time;
+    // plotshape(showentry ? over : na, 'Exit Warning', location.bottom, shape.circle, size.tiny, orange)
+    if (showEntry && over[i]) markers.push({ time, position: 'bottom', shape: 'circle', color: color.orange, size: 'tiny', id: 'shape0' });
+    // plotshape(showentry ? over3 : na, 'Exit Warning', location.bottom, shape.circle, size.tiny, red, 'Overbought')
+    if (showEntry && over3[i]) {
+      markers.push({ time, position: 'bottom', shape: 'circle', color: RED, text: 'Overbought', size: 'tiny', id: 'shape1' });
     }
-
-    // Short signals
-    if (showShorts) {
-      // senter3: Quotient3 >= -0.9 and crossunder(q1, trigger) and barssince(warn3)<=7 and q1>=99
-      if (eot2.q1[i] >= -0.9 && crossunderQ1Trig && q1v >= 99) {
-        let bsWarn3 = n;
-        for (let j = i; j >= Math.max(0, i - 8); j--) {
-          if (j > 0 && eot1.q1[j - 1] >= 0.9 && eot1.q1[j] < 0.9) {
-            bsWarn3 = i - j;
-            break;
-          }
-        }
-        if (bsWarn3 <= 7) {
-          markers.push({
-            time: bars[i].time,
-            position: 'aboveBar',
-            shape: 'labelDown',
-            color: '#FF0000CC',
-            text: 'Short',
-          });
-        }
-      }
+    // 'Long gray' (enter6 and q1 <= 60), 'Long yellow' (enter7), 'Long blue' (enter5), 'Long Lime' (enter3)
+    if (showLongs && enter6[i] && q1[i] <= 60) markers.push(label(time, color.silver, 'Long', 'shape2'));
+    if (showLongs && enter7[i]) markers.push(label(time, YELLOW, 'Long', 'shape3'));
+    if (showLongs && enter5[i]) markers.push(label(time, color.blue, 'Long', 'shape4'));
+    if (showLongs && enter3[i]) markers.push(label(time, color.lime, 'Long', 'shape5'));
+    // plotshape(showshorts ? senter3 : na, 'Break', text = 'Short', labeldown, location.top, red)
+    if (showShorts && senter3[i]) markers.push(label(time, RED, 'Short', 'shape6'));
+    // plotshape(crossover(q1, highUsePivot) and dbreak >= 1 and ubreak <= 1, 'Break', triangleup, location.bottom)
+    if (continuation[i]) {
+      markers.push({ time, position: 'bottom', shape: 'triangleUp', color: '#00ffaa', text: 'Continuation', size: 'tiny', id: 'shape7' });
     }
-
-    // Overbought warnings: cross(Q5, Q6) with Q5>0.5
-    const prevQ5 = eot3.q1[i - 1];
-    const curQ5 = eot3.q1[i];
-    const prevQ6 = eot3.q2[i - 1];
-    const curQ6 = eot3.q2[i];
-    const crossQ5Q6 = (prevQ5 <= prevQ6 && curQ5 > curQ6) || (prevQ5 >= prevQ6 && curQ5 < curQ6);
-    if (crossQ5Q6 && curQ5 > 0.5) {
-      markers.push({
-        time: bars[i].time,
-        position: 'belowBar',
-        shape: 'circle',
-        color: '#FFA500',
-        text: 'OB',
-      });
+    // plotshape(bounce down ? wt2 + 9 : na, location.absolute, triangledown, yellow), bounce up at wt2 - 9
+    if (bounceDown[i]) {
+      markers.push({ time, position: 'atPriceMiddle', price: wt2[i] + 9, shape: 'triangleDown', color: YELLOW, size: 'tiny', id: 'shape8' });
+    }
+    if (bounceUp[i]) {
+      markers.push({ time, position: 'atPriceMiddle', price: wt2[i] - 9, shape: 'triangleUp', color: YELLOW, size: 'tiny', id: 'shape9' });
     }
   }
 
+  const alertFlags = [
+    crossover,
+    crossunder,
+    enter6.map((v, i) => v || enter7[i] || enter5[i] || enter3[i]),
+    crossedUnder(Q5, -0.9),
+    breakRes,
+    breakSup,
+    crossover.map((v, i) => Q1[i] <= -0.9 && v),
+    crossunder.map((v, i) => Q1[i] >= 0.9 && v),
+    crossover.map((v, i) => wt2[i] <= 20 && v),
+    crossunder.map((v, i) => wt2[i] >= 80 && v),
+    continuation,
+    over,
+    over3,
+    bounceDown,
+    bounceUp,
+    senter3,
+  ];
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3, 'plot4': plot4 },
+    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3, 'plot4': plot4, 'plot5': plot5 },
     hlines: [],
+    // fill(Plot33, Plot44, color = color.new(color.red, 90))
+    fills: [{ plot1: 'plot2', plot2: 'plot5', options: { color: String(color.new('#FF5252', 90)), title: 'Plots Background' } }],
     markers,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
 
-export const BoomHunterPro = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BoomHunterPro = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

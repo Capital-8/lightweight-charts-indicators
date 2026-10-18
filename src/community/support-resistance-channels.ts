@@ -7,12 +7,17 @@
  * The strongest channels of the last bar are drawn as boxes (Pine: extend.both).
  * Color: resistance (price below), support (price above), in channel.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Resistance Broken' / 'Support Broken' on the bars whose close,
+ * outside every channel, crosses above the top / below the bottom of a channel (the triangles of "Show Broken
+ * Support/Resistance").
+ *
  * Reference: "Support Resistance Channels" by LonesomeTheBlue
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BoxData } from '../types';
 import { barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SupportResistanceChannelsInputs {
   prd: number;
@@ -87,7 +92,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<SupportResistanceChannelsInputs> = {}): Omit<IndicatorResult, 'markers'> & { boxes: BoxData[]; markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<SupportResistanceChannelsInputs> = {}): Omit<IndicatorResult, 'markers'> & { boxes: BoxData[]; markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const {
     prd, ppsrc, channelW, minStrength, maxNumSR, loopback,
     resCol, supCol, inchCol, showPP, showSRBroken,
@@ -131,6 +136,8 @@ export function calculate(bars: Bar[], inputs: Partial<SupportResistanceChannels
 
   const boxes: BoxData[] = [];
   const markers: MarkerData[] = [];
+  const resistanceFlags: boolean[] = [];
+  const supportFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const ph = phArr[i];
@@ -277,6 +284,8 @@ export function calculate(bars: Bar[], inputs: Partial<SupportResistanceChannels
         }
       }
     }
+    resistanceFlags.push(resistanceBroken);
+    supportFlags.push(supportBroken);
     // Pine: plotshape(showsrbroken and resistancebroken, style = shape.triangleup, location = location.belowbar,
     //   color = color.new(color.lime, 0), size = size.tiny) (triangledown, abovebar, color.red for supportbroken)
     if (showSRBroken && resistanceBroken) {
@@ -315,7 +324,15 @@ export function calculate(bars: Bar[], inputs: Partial<SupportResistanceChannels
     plots: { 'plot0': maPlot(showMA1, ma1Len, ma1Type), 'plot1': maPlot(showMA2, ma2Len, ma2Type) },
     boxes,
     markers,
+    // alertcondition(resistancebroken, 'Resistance Broken') / alertcondition(supportbroken, 'Support Broken')
+    alerts: alertStates(alertConditions, bars, [resistanceFlags, supportFlags]),
   };
 }
 
-export const SupportResistanceChannels = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Resistance Broken', message: 'Resistance Broken' },
+  { id: 'alert1', title: 'Support Broken', message: 'Support Broken' },
+];
+
+export const SupportResistanceChannels = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

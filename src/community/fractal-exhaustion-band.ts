@@ -8,6 +8,8 @@
  * extreme high (uptrend) or low (downtrend) since the flip, the mid line is the average of the edge and the trend
  * line. Lines, fills, flip circles, and optional candle and background colours follow the trend; the lines and fills
  * are not drawn on the flip bar. The presets replace the FDI period and the band width multiplier, as in Pine.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend', 'Bearish Trend' and 'Any Signal Change' on the
+ * trend flips.
  *
  * Reference: "Fractal Exhaustion Band [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, getSourceSeries, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type FractalExhaustionPreset = 'Default' | 'Fast Response' | 'Smooth Trend';
 export type FractalExhaustionColorPreset = 'Classic' | 'Aqua' | 'Cosmic' | 'Cyber' | 'Neon' | 'Custom';
@@ -103,7 +106,7 @@ const min = (a: number, b: number) => (isNaN(a) || isNaN(b) ? NaN : Math.min(a, 
 export function calculate(
   bars: Bar[],
   inputs: Partial<FractalExhaustionBandInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   let { power, sensitivity } = cfg;
   if (cfg.presetInput === 'Fast Response') {
@@ -176,6 +179,8 @@ export function calculate(
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
   const c = (col: string, transp: number) => String(color.new(col, transp));
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
@@ -196,13 +201,15 @@ export function calculate(
     const bullFlip = dir === 1 && prevDir === -1;
     const bearFlip = dir === -1 && prevDir === 1;
     if (bullFlip && !isNaN(trendLine[i])) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: trendLine[i], shape: 'circle', color: bullColor, size: 'tiny' });
-      markers.push({ time: t, position: 'atPriceMiddle', price: trendLine[i], shape: 'circle', color: c(bullColor, 50), size: 'small' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: trendLine[i], shape: 'circle', color: bullColor, size: 'tiny', id: 'shape0' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: trendLine[i], shape: 'circle', color: c(bullColor, 50), size: 'small', id: 'shape1' });
     }
     if (bearFlip && !isNaN(trendLine[i])) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: trendLine[i], shape: 'circle', color: bearColor, size: 'tiny' });
-      markers.push({ time: t, position: 'atPriceMiddle', price: trendLine[i], shape: 'circle', color: c(bearColor, 50), size: 'small' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: trendLine[i], shape: 'circle', color: bearColor, size: 'tiny', id: 'shape2' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: trendLine[i], shape: 'circle', color: c(bearColor, 50), size: 'small', id: 'shape3' });
     }
+    bullFlags.push(bullFlip);
+    bearFlags.push(bearFlip);
     if (cfg.paintBarsInput) barColors.push({ time: t, color: c(currentColor, cfg.barTranspInput) });
     if (cfg.paintBgInput) bgColors.push({ time: t, color: c(currentColor, cfg.bgTranspInput) });
   }
@@ -217,7 +224,16 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    // alertcondition(bullFlip) / alertcondition(bearFlip) / alertcondition(bullFlip or bearFlip)
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags, bullFlags.map((b, i) => b || bearFlags[i])]),
   };
 }
 
-export const FractalExhaustionBand = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend', message: 'Fractal Exhaustion Band [QuantAlgo]: Bullish trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Trend', message: 'Fractal Exhaustion Band [QuantAlgo]: Bearish trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Any Signal Change', message: 'Fractal Exhaustion Band [QuantAlgo]: Trend direction flipped on {{exchange}}:{{ticker}} - {{interval}}' },
+];
+
+export const FractalExhaustionBand = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

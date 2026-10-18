@@ -13,6 +13,9 @@
  * - Two tables: a text ("quote"), and the state of a stochastic and an RSI (overbought, oversold or neither) on
  *   three timeframes.
  *
+ * Alerts (alertcondition, `alerts` of the result): source breaking the upper / lower trendline (on closed bars), and
+ * the close crossing over / under one of the resistances R1 to R3 or one of the supports S1 to S3.
+ *
  * All prices shown are cut to a number of decimals taken from the symbol tick: the length of the tick as a text
  * minus 2 (0.01 gives 2 decimals; a tick of 1 gives -1, a multiple of 10). At most 500 lines and 500 labels are
  * kept.
@@ -41,6 +44,7 @@ import {
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import { mintickOf, lastBarConfirmedOf, type ChartContext } from '../chart-context';
 import type { LabelData, LineDrawingData, TableData, TableCellData, TablePosition } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type LineStyleName = 'Solid' | 'Dashed' | 'Dotted';
 type TablePlace = 'Top' | 'Middle' | 'Bot';
@@ -418,7 +422,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SmarterSnrInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'labels' | 'lines' | 'tables'> & { labels: LabelData[]; lines: LineDrawingData[]; tables: TableData[] } {
+): Omit<IndicatorResult, 'labels' | 'lines' | 'tables'> & { labels: LabelData[]; lines: LineDrawingData[]; tables: TableData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const v = levels(bars, cfg, chart);
@@ -633,8 +638,38 @@ export function calculate(
     lines: outLines,
     labels: outLabels,
     tables,
+    alerts: alertStates(alertConditions, bars, alertFlags(bars, v, lastConfirmed)),
   };
 }
+
+/** One flag per bar for each alertcondition of the original */
+function alertFlags(bars: Bar[], v: ReturnType<typeof levels>, lastConfirmed: boolean): boolean[][] {
+  const n = bars.length;
+  const close = bars.map((b) => b.close);
+  // barstate.isconfirmed: every bar but an open last bar
+  const confirmed = (i: number) => i < n - 1 || lastConfirmed;
+  const any = (lists: boolean[][]) => close.map((_c, i) => lists.some((f) => f[i]));
+  // sCO = ta.crossover(close, s1) or ta.crossover(close, s2) or ta.crossover(close, s3), the same for sCU, rCO, rCU
+  const sCO = any(v.supports.map((s) => crossedOver(close, s.price)));
+  const sCU = any(v.supports.map((s) => crossedUnder(close, s.price)));
+  const rCO = any(v.resistances.map((r) => crossedOver(close, r.price)));
+  const rCU = any(v.resistances.map((r) => crossedUnder(close, r.price)));
+  return [
+    v.breakUpper.map((b, i) => b && confirmed(i)),
+    v.breakLower.map((b, i) => b && confirmed(i)),
+    rCO, rCU, sCO, sCU,
+  ];
+}
+
+/** The original's alertconditions (no message: the default "Alert Fired!") */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Upper Trendline Breaked', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Lower Trendline Breaked', message: 'Alert Fired!' },
+  { id: 'alert2', title: 'Close Price Crossover  The Resistance', message: 'Alert Fired!' },
+  { id: 'alert3', title: 'Close Price Crossunder The Resistance', message: 'Alert Fired!' },
+  { id: 'alert4', title: 'Close Price Crossover  The Support', message: 'Alert Fired!' },
+  { id: 'alert5', title: 'Close Price Crossunder The Support', message: 'Alert Fired!' },
+];
 
 export const SmarterSnr = {
   calculate,
@@ -642,4 +677,5 @@ export const SmarterSnr = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

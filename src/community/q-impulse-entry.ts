@@ -6,6 +6,7 @@
  * band turns it off. A buy signal is the bar where the trend turns on, with an Elder impulse "green" bar (close above
  * the EMA(13) and a positive MACD(12, 26, 9) histogram) and ADX(14, 14) above 20, at least 30 bars after the last
  * signal and not after another buy; a sell signal is the mirror. The close of the last signal is drawn as dots.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY ALERT' and 'SELL ALERT', true on the buy / sell signal bars.
  *
  * Last bar: the impulse trend changes on a closed bar only. The port reads the state of the last bar from the
  * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
@@ -17,6 +18,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface QImpulseEntryInputs {
@@ -61,7 +63,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<QImpulseEntryInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -97,6 +99,7 @@ export function calculate(
   let entryColor: string | undefined;
   const plot0: { time: number; value: number; color?: string }[] = [];
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     // if isCrossUp and barstate.isconfirmed ... else if isCrossDown and barstate.isconfirmed ...
@@ -115,6 +118,8 @@ export function calculate(
     barsSinceSignal += 1;
     const buySignal = rawBuySignal && barsSinceSignal >= minBarsBetweenSignals && lastSignal !== 1 && isImpulseGreen && adxValid;
     const sellSignal = rawSellSignal && barsSinceSignal >= minBarsBetweenSignals && lastSignal !== -1 && isImpulseRed && adxValid;
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
     if (buySignal) {
       lastSignal = 1;
       barsSinceSignal = 0;
@@ -150,8 +155,16 @@ export function calculate(
       plot3: P(impulseLow, SELL_COLOR),
     },
     markers,
+    // alertcondition(buySignal, "BUY ALERT") / alertcondition(sellSignal, "SELL ALERT")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY ALERT', message: 'BUY: Impulse trend ON' },
+  { id: 'alert1', title: 'SELL ALERT', message: 'SELL: Impulse trend OFF' },
+];
 
 export const QImpulseEntry = {
   calculate,
@@ -159,4 +172,5 @@ export const QImpulseEntry = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

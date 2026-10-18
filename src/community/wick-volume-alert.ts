@@ -9,20 +9,26 @@
  * Last bar: a wick label needs a closed bar. The port reads the state of the last bar from the optional third
  * argument (see src/chart-context.ts); without it every bar is taken as closed.
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): the alert message input on every closed bar
+ * with a long upper or lower wick, high volume and the price within the limits.
+ *
  * Reference: "Wick Volume Alert" by Shazam77
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Shazam77
  */
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { AlertCall, MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface WickVolumeAlertInputs {
   wickToBodyRatio: number;
   useVolumeFilter: boolean;
   volumeMultiplier: number;
-  /** Text of the alert() call (no output in the port) */
+  /** Message of the alert() calls (`alertCalls`) */
   alertMessage: string;
   useUpperPriceLimit: boolean;
   upperPriceLimit: number;
@@ -71,7 +77,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<WickVolumeAlertInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -80,6 +86,7 @@ export function calculate(
   const lowerColor = String(color.new(color.green, 0));
 
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
   bars.forEach((b, i) => {
     const bodySize = Math.abs(b.close - b.open);
     const upperWick = b.high - Math.max(b.open, b.close);
@@ -104,14 +111,18 @@ export function calculate(
     if (longLowerWick && highVolume && isConfirmed && priceWithinLimits) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'labelUp', color: lowerColor, size: 'small' });
     }
+    // alert(alert_message, alert.freq_once_per_bar_close)
+    if (isConfirmed && highVolume && priceWithinLimits && (longUpperWick || longLowerWick)) {
+      alertCalls.push({ time: b.time, message: cfg.alertMessage, freq: 'once_per_bar_close' });
+    }
   });
 
-  // alert(alert_message, alert.freq_once_per_bar_close): no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alertCalls,
   };
 }
 
-export const WickVolumeAlert = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const WickVolumeAlert = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

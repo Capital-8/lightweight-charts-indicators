@@ -4,6 +4,8 @@
  * Bollinger Bands (basis = SMA / EMA / RMA / WMA / VWMA of the source, bands at +- stdev * multiplier) with a
  * transparent fill, and three moving averages (EMA or SMA) of a second source. MA1 and MA2 are yellow when the close
  * is at or above them, red otherwise; MA3 is black and hidden by default. Each group has its own plot offset.
+ * Alert (alertcondition, `alerts` of the result): 'Spike Alert', true on the bars whose |close - open| / open * 100
+ * is at least the candle move %.
  *
  * Reference: "3-in-1 Custom Moving Average Indicator" by Mr-Fish
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type BbMaType = 'SMA' | 'EMA' | 'SMMA (RMA)' | 'WMA' | 'VWMA';
 type MaType = 'SMA' | 'EMA';
@@ -40,7 +43,7 @@ export interface ThreeInOneCustomMovingAverageIndicatorInputs {
   plot3: boolean;
   type3: MaType;
   len3: number;
-  /** Candle move % of the spike alert (alertcondition only, no output) */
+  /** Candle move % of the spike alert (the 'Spike Alert' condition only) */
   alertPct: number;
 }
 
@@ -109,7 +112,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<ThreeInOneCustomMovingAverageIndicatorInputs> = {},
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -143,6 +146,9 @@ export function calculate(
   const col1 = ma1.map((m, i) => (ge(bars[i].close, m) ? color.yellow : color.red));
   const col2 = ma2.map((m, i) => (ge(bars[i].close, m) ? color.yellow : color.red));
 
+  // movePct = math.abs(close - open) / open * 100; spike = movePct >= alertPct
+  const spike = bars.map((b) => ge(Math.abs(b.close - b.open) / b.open * 100, cfg.alertPct));
+
   const interval = barInterval(bars);
   // plot(..., offset = k): the value (and colour) of bar i is drawn on bar i + k
   const shifted = (show: boolean, values: number[], colorAt: (i: number) => string, k: number): Point[] => {
@@ -165,8 +171,14 @@ export function calculate(
     },
     // fill(bbUpper, bbLower, color = color.new(#858585, 100)): fully transparent
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: String(color.new('#858585', 100)) } }],
+    alerts: alertStates(alertConditions, bars, [spike]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Spike Alert', message: 'Price moved {{close}} from open by threshold %' },
+];
 
 export const ThreeInOneCustomMovingAverageIndicator = {
   calculate,
@@ -174,4 +186,5 @@ export const ThreeInOneCustomMovingAverageIndicator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

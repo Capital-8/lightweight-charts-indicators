@@ -7,6 +7,8 @@
  * `vfiLength` bars of the volume (capped at `vcoef` times its average) signed by the typical price change when this
  * change exceeds `coef` times the 30-bar stdev of the log returns times the close, divided by the average volume of
  * the previous bar, optionally smoothed by a 3-bar SMA; an EMA signal line and circles at their crosses.
+ * Alerts (alertcondition, `alerts` of the result): 'VFI Crossover' / 'VFI Crossunder' (VFI crosses its EMA),
+ * 'Strong Buying Pressure' / 'Strong Selling Pressure' (pressure above the threshold) and 'Neutral Zone'.
  *
  * Reference: "Enhanced VFI Buyer/Seller Pressure" by ask2maniish
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, array, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EnhancedVfiBuyerSellerPressureInputs {
   /** Pressure threshold of a strong buyer / seller bar */
@@ -77,7 +80,7 @@ const fin = (x: number) => (Number.isFinite(x) ? x : NaN);
 export function calculate(
   bars: Bar[],
   inputs: Partial<EnhancedVfiBuyerSellerPressureInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -95,6 +98,7 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const buyerPlot: { time: number; value: number; color: string }[] = [];
   const sellerPlot: { time: number; value: number; color: string }[] = [];
+  const strongBuyFlags: boolean[] = [], strongSellFlags: boolean[] = [], neutralFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const buyerPressure = (b.close - b.open) / (b.high - b.low);
@@ -102,6 +106,10 @@ export function calculate(
     const strongBuy = ge(buyerPressure, th);
     const strongSell = ge(sellerPressure, th);
     const neutral = !strongBuy && !strongSell;
+    // alertcondition(buyer_pressure > pressure_threshold) / (seller_pressure > pressure_threshold) / (neutral_signal)
+    strongBuyFlags.push(gt(buyerPressure, th));
+    strongSellFlags.push(gt(sellerPressure, th));
+    neutralFlags.push(neutral);
     bgColors.push({ time: b.time, color: strongBuy ? bgBuy : strongSell ? bgSell : bgNeutral });
     const maxPressure = max(max(buyerPressure, sellerPressure), th);
     const histogramScale = gt(maxPressure, 0) ? 100 / maxPressure : 1;
@@ -149,11 +157,11 @@ export function calculate(
     if (!Number.isFinite(v)) continue;
     // plotshape(crossover_vfi ? vfi : na, "VFI Crossover", shape.circle, location.absolute, color.aqua, size.auto)
     if (crossoverVfi[i] === 1) {
-      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: v, shape: 'circle', color: color.aqua, size: 'auto' });
+      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: v, shape: 'circle', color: color.aqua, size: 'auto', id: 'shape0' });
     }
     // plotshape(crossunder_vfi ? vfi : na, "VFI Crossunder", shape.circle, location.absolute, color.yellow, size.auto)
     if (crossunderVfi[i] === 1) {
-      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: v, shape: 'circle', color: color.yellow, size: 'auto' });
+      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: v, shape: 'circle', color: color.yellow, size: 'auto', id: 'shape1' });
     }
   }
 
@@ -168,8 +176,20 @@ export function calculate(
     hlines: [{ value: 0, options: { title: 'Zero Line', color: color.gray, linestyle: 'dotted', linewidth: 1 } }],
     markers,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [
+      crossoverVfi.map((v) => v === 1), crossunderVfi.map((v) => v === 1), strongBuyFlags, strongSellFlags, neutralFlags,
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'VFI Crossover', message: 'VFI has crossed above the EMA.' },
+  { id: 'alert1', title: 'VFI Crossunder', message: 'VFI has crossed below the EMA.' },
+  { id: 'alert2', title: 'Strong Buying Pressure', message: 'Buyer pressure exceeds the threshold.' },
+  { id: 'alert3', title: 'Strong Selling Pressure', message: 'Seller pressure exceeds the threshold.' },
+  { id: 'alert4', title: 'Neutral Zone', message: 'Buyer and seller pressures are in the neutral range.' },
+];
 
 export const EnhancedVfiBuyerSellerPressure = {
   calculate,
@@ -177,4 +197,5 @@ export const EnhancedVfiBuyerSellerPressure = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

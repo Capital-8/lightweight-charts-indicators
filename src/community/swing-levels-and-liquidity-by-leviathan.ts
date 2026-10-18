@@ -312,13 +312,13 @@ export function calculate(
     if (cfg.showhighs && cfg.showBubbles && h && voltreshcond) {
       markers.push({
         time: bars[swingIndex].time, position: 'atPriceMiddle', price: bars[swingIndex].high, shape: 'circle',
-        color: cfg.sellcolB, size: 'tiny',
+        color: cfg.sellcolB, size: 'tiny', id: 'shape0',
       });
     }
     if (cfg.showlows && cfg.showBubbles && l && voltreshcond) {
       markers.push({
         time: bars[swingIndex].time, position: 'atPriceMiddle', price: bars[swingIndex].low, shape: 'circle',
-        color: cfg.buycolB, size: 'tiny',
+        color: cfg.buycolB, size: 'tiny', id: 'shape1',
       });
     }
   }

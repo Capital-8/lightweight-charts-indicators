@@ -6,15 +6,19 @@
  * the bars are aqua above the channel, red below it and gray inside. Three SSL channels (moving averages of the high
  * and of the low) give a trend side each: the continuation SSL is drawn as circles, green / purple when the close is
  * beyond the baseline and the continuation line with the ATR criterion, white otherwise; crosses of the close and of
- * the exit SSL give yellow exit arrows. A cross marks candles whose body is larger than the ATR while the ATR bands
+ * the exit SSL give yellow exit arrows (`arrows` of the result, the original's plotarrow). A cross marks candles whose body is larger than the ATR while the ATR bands
  * contain the baseline. Optional ATR bands (close +- ATR * multiplier).
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Long or Sell Short' (the close crosses over the exit SSL) and
+ * 'Sell Long or Buy Short' (the exit SSL crosses over the close).
  *
  * Reference: "ReadyFor401ks Just Tell Me When!" by ReadyFor401k
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import type { ArrowData } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type MaType = 'EMA' | 'DEMA' | 'TEMA' | 'HMA' | 'JMA' | 'SMA' | 'VAMA' | 'WMA';
 const MA_TYPES: MaType[] = ['EMA', 'DEMA', 'TEMA', 'HMA', 'JMA', 'SMA', 'VAMA', 'WMA'];
@@ -121,7 +125,8 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<Readyfor401ksJustTellMeWhenInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; arrows: ArrowData[]; barColors: BarColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -233,6 +238,9 @@ export function calculate(
   const sslExit = ssl(exitHigh, exitLow);
 
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
   const barColors: BarColorData[] = [];
   const plot0: { time: number; value: number; color: string }[] = [];
   const plot1: typeof plot0 = [];
@@ -254,10 +262,10 @@ export function calculate(
     const atrViolation = gt(Math.abs(c - b.open), atrSlen[i]);
     const inRange = gt(upperBand[i], BBMC[i]) && lt(lowerBand[i], BBMC[i]);
     if (atrViolation && inRange) {
-      markers.push({ time: t, position: 'top', shape: 'cross', color: String(color.new(color.white, 0)), size: 'small' });
+      markers.push({ time: t, position: 'top', shape: 'cross', color: String(color.new(color.white, 0)), size: 'small', id: 'shape0' });
     }
 
-    // plotarrow(codiff): up arrow below the bar for 1, down arrow above the bar for -1 (both yellow)
+    // plotarrow(codiff, "Exit Arrows"): up arrow for 1, down arrow for -1 (both yellow)
     const x = sslExit[i];
     let crossLong = false;
     let crossShort = false;
@@ -269,8 +277,10 @@ export function calculate(
       prevC = c;
       prevX = x;
     }
-    if (crossLong) markers.push({ time: t, position: 'belowBar', shape: 'arrowUp', color: YELLOW });
-    else if (crossShort) markers.push({ time: t, position: 'aboveBar', shape: 'arrowDown', color: YELLOW });
+    if (crossLong) arrows.push({ time: t, id: 'arrow0', value: 1, color: YELLOW });
+    else if (crossShort) arrows.push({ time: t, id: 'arrow0', value: -1, color: YELLOW });
+    longFlags.push(crossLong);
+    shortFlags.push(crossShort);
 
     const colorBar = gt(c, upperk[i]) ? AQUA : lt(c, lowerk[i]) ? RED : color.gray;
     plot0.push({ time: t, value: cfg.showBaseline ? num(BBMC[i]) : NaN, color: colorBar });
@@ -298,9 +308,18 @@ export function calculate(
     // fill(up_channel, low_channel, color = color_bar)
     fills: [{ plot1: 'plot1', plot2: 'plot2', colors: fillColors }],
     markers,
+    arrows,
     barColors,
+    // alertcondition(ta.crossover(close, sslExit), ...) / alertcondition(ta.crossover(sslExit, close), ...)
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Long or Sell Short', message: 'In Long or Out Short.' },
+  { id: 'alert1', title: 'Sell Long or Buy Short', message: 'Out Long or In Short.' },
+];
 
 export const Readyfor401ksJustTellMeWhen = {
   calculate,
@@ -308,4 +327,5 @@ export const Readyfor401ksJustTellMeWhen = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

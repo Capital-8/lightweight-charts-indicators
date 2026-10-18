@@ -6,6 +6,8 @@
  * (15 types) of the gated close (VWMA: of the raw close) form a ribbon with two intermediate lines
  * (0.67 / 0.33 blends) and three fills of decreasing opacity from the slow to the fast line. The ribbon is bullish
  * when the fast MA is above the slow MA; bars can take the trend colour.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend Signal' / 'Bearish Trend Signal' on the bar the trend
+ * state (1 when the fast MA is above the slow MA, else -1) turns to 1 / -1, 'Trend Change' on either.
  *
  * Reference: "Volume-Gated Trend Ribbon [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 const MA_TYPES = ['SMA', 'EMA', 'WMA', 'RMA', 'HMA', 'VWMA', 'DEMA', 'TEMA', 'ALMA', 'LSMA', 'SMMA', 'KAMA', 'ZLEMA', 'T3', 'VIDYA'];
 const COLOR_PAIRS: Record<string, [string, string]> = {
@@ -99,7 +102,7 @@ const ne0 = (x: number) => Math.abs(x) > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeGatedTrendRibbonInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   let { volMult, volPeriod, fastLen, slowLen } = cfg;
   if (cfg.presetConfig === 'Fast Response') {
@@ -236,8 +239,18 @@ export function calculate(
   const plots: Point[][] = Array.from({ length: 6 }, () => []);
   const fillCols: string[][] = [[], [], []];
   const barColors: BarColorData[] = [];
+  // trendState := bullish ? 1 : -1; longSignal = trendState == 1 and trendState[1] != 1 (na on the first bar: false)
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [], changeFlags: boolean[] = [];
+  let prevState = NaN;
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
+    const state = gt(fastMA[i], slowMA[i]) ? 1 : -1;
+    const longSignal = state === 1 && i > 0 && prevState !== 1;
+    const shortSignal = state === -1 && i > 0 && prevState !== -1;
+    longFlags.push(longSignal);
+    shortFlags.push(shortSignal);
+    changeFlags.push(longSignal || shortSignal);
+    prevState = state;
     const f = fastMA[i];
     const s = slowMA[i];
     // bullish = fastMA > slowMA; trendCol = bullish ? bullColor : bearColor
@@ -267,8 +280,16 @@ export function calculate(
     ],
     markers: [],
     barColors,
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags, changeFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend Signal', message: 'Volume-Gated Ribbon: Trend changed to BULLISH {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Trend Signal', message: 'Volume-Gated Ribbon: Trend changed to BEARISH {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Trend Change', message: 'Volume-Gated Ribbon: Trend direction changed - Check chart {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const VolumeGatedTrendRibbon = {
   calculate,
@@ -276,4 +297,5 @@ export const VolumeGatedTrendRibbon = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

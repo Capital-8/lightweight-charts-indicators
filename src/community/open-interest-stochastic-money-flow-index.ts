@@ -7,6 +7,7 @@
  * history) of weight * close on up closes and on down closes, MFI = 100 - 100 / (1 + up / down). A stochastic of
  * the MFI over 14 bars (loops of the highest / lowest values) is smoothed twice by an EMA of 4 bars: K, then D.
  * Crosses of K and D are marked on the zero line and in the background; optional bar colours (K above D: green).
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' while K is above D, 'Sell Signal' otherwise.
  *
  * The report symbol is COT:<code>_F_OI, with the CFTC code of the symbol root (futures), else of its base
  * currency, else of its quote currency, from the "LibraryCOT" library (version 3, the functions used are ported
@@ -20,6 +21,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import {
   symbolBarsOf, tickerOf, currencyOf, basecurrencyOf, rootOf, lastBarConfirmedOf, type ChartContext, type SymbolRequest,
 } from '../chart-context';
@@ -210,7 +212,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<OpenInterestStochasticMoneyFlowIndexInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } {
+): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const close = bars.map((b) => b.close);
@@ -285,7 +287,11 @@ export function calculate(
   const teal = String(color.teal);
   const maroon = String(color.maroon);
   const lightsOn = cfg.lights === 'ON';
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
+    // possig = k3 > d ? 1 : -1 (reverse = false): alertcondition(possig == 1) / alertcondition(possig == -1)
+    buyFlags.push(gt(k3[i], d[i]));
+    sellFlags.push(!gt(k3[i], d[i]));
     // col_bg = pos_moment ? color.teal : neg_moment ? color.maroon : na
     if (posMoment[i]) bgColors.push({ time: bars[i].time, color: teal });
     else if (negMoment[i]) bgColors.push({ time: bars[i].time, color: maroon });
@@ -312,8 +318,15 @@ export function calculate(
     ],
     bgColors,
     barColors,
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Buy Signal ' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Sell Signal ' },
+];
 
 export const OpenInterestStochasticMoneyFlowIndex = {
   calculate,
@@ -324,4 +337,5 @@ export const OpenInterestStochasticMoneyFlowIndex = {
   hlineConfig,
   fillConfig,
   requiredSymbols,
+  alertConditions,
 };

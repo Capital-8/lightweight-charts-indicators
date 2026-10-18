@@ -21,7 +21,9 @@
  *   the port throws an Error. Above 5 minutes the original only shows a note in a table, as the port does.
  * - Drawing limits as in the original: 500 lines and 100 labels. A filled area whose lines were deleted by the
  *   limit is not drawn and is left out.
- * - The alerts of the original (a message before each window) have no output.
+ * - Alerts (alert() calls, `alertCalls` of the result, once per bar): on the bar `mcAlertM` minutes before each
+ *   enabled window, "<window> macro will be in play in <minutes> minutes for instrument <ticker>" (ticker from the
+ *   chart context), whether or not the vertical line is drawn.
  *
  * Reference: "ICT Macros [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,10 +31,10 @@
  */
 
 import { ta, str, color, timeframe, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { LineDrawingData, LabelData, LinefillData, TableData } from '../types';
+import type { LineDrawingData, LabelData, LinefillData, TableData, AlertCall } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
-import { foregroundColorOf, backgroundColorOf, mintickOf, type ChartContext } from '../chart-context';
+import { foregroundColorOf, backgroundColorOf, mintickOf, tickerOf, type ChartContext } from '../chart-context';
 
 /** The eight windows: input prefix, start hour and minute in the time zone of the window, label text, group */
 const MACROS = [
@@ -109,6 +111,9 @@ export const inputConfig: InputConfig[] = [
 
 export const plotConfig: PlotConfig[] = [];
 
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
+
 export const metadata = {
   title: 'ICT Macros [LuxAlgo]',
   shortTitle: 'ICT Macros [LuxAlgo]',
@@ -161,12 +166,15 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<IctMacrosInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[] } {
+): IndicatorResult & {
+  lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[]; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const CHART_FG = foregroundColorOf(chart); // chart.fg_color
   const CHART_BG = backgroundColorOf(chart); // chart.bg_color
   const mintick = mintickOf(chart);
+  const alertCalls: AlertCall[] = [];
   const result = (
     lines: LineDrawingData[], labels: LabelData[], linefills: LinefillData[], tables: TableData[],
   ) => ({
@@ -176,6 +184,7 @@ export function calculate(
     labels,
     linefills,
     tables,
+    alertCalls,
   });
 
   // tf_m = timeframe.multiplier
@@ -260,9 +269,17 @@ export function calculate(
       };
 
       const soon = clock(cfg.mcAlertM);
-      if (soon.h === m.hour && soon.min === m.minute && cfg.mcAlert) {
-        const at = time + cfg.mcAlertM * 60000;
-        mc.lnf = lines.add({ x1: at, y1: bar.high, x2: at, y2: bar.low, color: CHART_FG, style: 'solid', width: 1, byTime: true, dead: false });
+      if (soon.h === m.hour && soon.min === m.minute) {
+        // alert(_mt + ' macro will be in play in ' + str.tostring(_alertM) + ' minutes for instrument ' + syminfo.ticker)
+        alertCalls.push({
+          time: bar.time as number,
+          message: `${m.text} macro will be in play in ${cfg.mcAlertM} minutes for instrument ${tickerOf(chart)}`,
+          freq: 'once_per_bar',
+        });
+        if (cfg.mcAlert) {
+          const at = time + cfg.mcAlertM * 60000;
+          mc.lnf = lines.add({ x1: at, y1: bar.high, x2: at, y2: bar.low, color: CHART_FG, style: 'solid', width: 1, byTime: true, dead: false });
+        }
       }
 
       const { h, min: minute } = clock(0);
@@ -403,4 +420,5 @@ export const IctMacros = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

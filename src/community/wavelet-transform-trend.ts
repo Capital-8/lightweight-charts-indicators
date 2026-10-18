@@ -8,6 +8,8 @@
  * when the close leaves the band. Line mode draws the trailing band edge with a glow and seven radial fill layers
  * toward the bar midpoint; Wave mode draws fills between lagged copies of the wavelet path. Optional bar and
  * background colours. The presets replace the period, levels and ATR inputs, the colour presets the two colours.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Wavelet Trend' / 'Bearish Wavelet Trend' on the bars where
+ * the trend turns up / down, 'Any Wavelet Trend Flip' on both.
  *
  * Reference: "Wavelet Transform Trend [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 
 import { ta, getSourceSeries, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type WaveletTransformTrendPreset = 'Default' | 'Fast Response' | 'Smooth Trend';
 export type WaveletTransformTrendColorPreset = 'Classic' | 'Aqua' | 'Cosmic' | 'Cyber' | 'Neon' | 'Custom';
@@ -147,7 +150,8 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<WaveletTransformTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -256,11 +260,18 @@ export function calculate(
   const waveFill: string[][] = Array.from({ length: 5 }, () => new Array(n));
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [], anyFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const d = trendDir[i];
     const prevD = i > 0 ? trendDir[i - 1] : 0; // nz(trend_dir[1])
-    const anyShift = (d === 1 && prevD === -1) || (d === -1 && prevD === 1);
+    // bullish_trend_shift / bearish_trend_shift / any_trend_shift
+    const bullShift = d === 1 && prevD === -1;
+    const bearShift = d === -1 && prevD === 1;
+    const anyShift = bullShift || bearShift;
+    bullFlags.push(bullShift);
+    bearFlags.push(bearShift);
+    anyFlags.push(anyShift);
     const trendColor = d === -1 ? bearishColor : bullishColor;
     const showWave = !showLine && !isNaN(waveletConfirmed[i]);
     const hasTrend = d !== 0 && !isNaN(trendLevel[i]);
@@ -308,8 +319,16 @@ export function calculate(
     markers: [],
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags, anyFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Wavelet Trend', message: 'Wavelet Transform Trend: BULLISH on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Wavelet Trend', message: 'Wavelet Transform Trend: BEARISH on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Any Wavelet Trend Flip', message: 'Wavelet Transform Trend: Trend flipped on {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const WaveletTransformTrend = {
   calculate,
@@ -317,4 +336,5 @@ export const WaveletTransformTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

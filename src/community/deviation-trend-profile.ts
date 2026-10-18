@@ -147,8 +147,9 @@ export function calculate(
     // trend != trend[1] (false on the first bar: trend[1] is na)
     if (i > 0 && trend !== trendPrev && !Number.isNaN(avg[i])) {
       const c = trend ? colUp : colDn;
-      markers.push({ time, position: 'atPriceMiddle', price: avg[i], shape: 'circle', color: c, size: 'tiny' });
-      markers.push({ time, position: 'atPriceMiddle', price: avg[i], shape: 'circle', color: trend ? up50 : dn50, size: 'small' });
+      // plotshape "Up" (tiny, small): shape0 / shape1; plotshape "Down" (tiny, small): shape2 / shape3
+      markers.push({ id: trend ? 'shape0' : 'shape2', time, position: 'atPriceMiddle', price: avg[i], shape: 'circle', color: c, size: 'tiny' });
+      markers.push({ id: trend ? 'shape1' : 'shape3', time, position: 'atPriceMiddle', price: avg[i], shape: 'circle', color: trend ? up50 : dn50, size: 'small' });
     }
   }
 

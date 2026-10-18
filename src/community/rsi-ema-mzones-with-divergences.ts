@@ -6,6 +6,8 @@
  * fills, and regular / hidden divergences between RSI pivots and price (the classic pivot divergence logic: a pivot
  * of the RSI compared with the previous pivot, 5 to 60 bars after it). Pivot lines and labels are drawn on the
  * pivot bar (offset -lbR).
+ * Alerts (alertcondition, `alerts` of the result): the four divergences, true on the bar that confirms the pivot
+ * (lbR bars after it), whether or not their "Plot ..." option is on.
  *
  * Reference: "RSI+EMA+MZONES with Divergences" by lordoflolz
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +20,7 @@ import {
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiEmaMzonesWithDivergencesInputs {
   /** RSI period */
@@ -123,7 +126,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<RsiEmaMzonesWithDivergencesInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -159,6 +162,8 @@ export function calculate(
   const phRsi: number[] = [];
   const phHigh: number[] = [];
   const prev = (a: number[]) => (a.length >= 2 ? a[a.length - 2] : NaN);
+  // bullCondAlert, hiddenBullCondAlert, bearCondAlert, hiddenBearCondAlert (without the "Plot ..." options)
+  const alertFlags: boolean[][] = [[], [], [], []];
 
   for (let i = 0; i < n; i++) {
     if (i > 0 && plFound[i - 1]) plBars = 0;
@@ -184,10 +189,18 @@ export function calculate(
     const vwPhRsi = prev(phRsi);
     const vwPhHigh = prev(phHigh);
 
-    const bullCond = cfg.plotBull && lt(lowR, vwPlLow) && gt(r, vwPlRsi) && inRangePl && plFound[i];
-    const hiddenBullCond = cfg.plotHiddenBull && gt(lowR, vwPlLow) && lt(r, vwPlRsi) && inRangePl && plFound[i];
-    const bearCond = cfg.plotBear && gt(highR, vwPhHigh) && lt(r, vwPhRsi) && inRangePh && phFound[i];
-    const hiddenBearCond = cfg.plotHiddenBear && lt(highR, vwPhHigh) && gt(r, vwPhRsi) && inRangePh && phFound[i];
+    const bullCondAlert = lt(lowR, vwPlLow) && gt(r, vwPlRsi) && inRangePl && plFound[i];
+    const hiddenBullCondAlert = gt(lowR, vwPlLow) && lt(r, vwPlRsi) && inRangePl && plFound[i];
+    const bearCondAlert = gt(highR, vwPhHigh) && lt(r, vwPhRsi) && inRangePh && phFound[i];
+    const hiddenBearCondAlert = lt(highR, vwPhHigh) && gt(r, vwPhRsi) && inRangePh && phFound[i];
+    alertFlags[0].push(bullCondAlert);
+    alertFlags[1].push(hiddenBullCondAlert);
+    alertFlags[2].push(bearCondAlert);
+    alertFlags[3].push(hiddenBearCondAlert);
+    const bullCond = cfg.plotBull && bullCondAlert;
+    const hiddenBullCond = cfg.plotHiddenBull && hiddenBullCondAlert;
+    const bearCond = cfg.plotBear && bearCondAlert;
+    const hiddenBearCond = cfg.plotHiddenBear && hiddenBearCondAlert;
 
     // plot(..., offset = -lbR): the value of bar i is drawn on bar i - lbR
     if (i - lbR < 0) continue;
@@ -201,10 +214,10 @@ export function calculate(
 
     // plotshape(cond and showLabels ? rsi[lbR] : na, offset = -lbR, location.absolute, textcolor = color.white)
     if (cfg.showLabels && !isNaN(r)) {
-      if (bullCond) markers.push({ time: t, position: 'atPriceBottom', price: r, shape: 'labelUp', color: BULL, text: 'Bull', textColor: TEXT });
-      if (hiddenBullCond) markers.push({ time: t, position: 'atPriceBottom', price: r, shape: 'labelUp', color: HIDDEN_BULL, text: 'H Bull', textColor: TEXT });
-      if (bearCond) markers.push({ time: t, position: 'atPriceTop', price: r, shape: 'labelDown', color: BEAR, text: 'Bear', textColor: TEXT });
-      if (hiddenBearCond) markers.push({ time: t, position: 'atPriceTop', price: r, shape: 'labelDown', color: HIDDEN_BEAR, text: 'H Bear', textColor: TEXT });
+      if (bullCond) markers.push({ id: 'shape0', time: t, position: 'atPriceBottom', price: r, shape: 'labelUp', color: BULL, text: 'Bull', textColor: TEXT });
+      if (hiddenBullCond) markers.push({ id: 'shape1', time: t, position: 'atPriceBottom', price: r, shape: 'labelUp', color: HIDDEN_BULL, text: 'H Bull', textColor: TEXT });
+      if (bearCond) markers.push({ id: 'shape2', time: t, position: 'atPriceTop', price: r, shape: 'labelDown', color: BEAR, text: 'Bear', textColor: TEXT });
+      if (hiddenBearCond) markers.push({ id: 'shape3', time: t, position: 'atPriceTop', price: r, shape: 'labelDown', color: HIDDEN_BEAR, text: 'H Bear', textColor: TEXT });
     }
   }
 
@@ -225,8 +238,17 @@ export function calculate(
     hlines: hlineConfig.map((h) => ({ value: h.price, options: { title: h.title, color: h.color, linestyle: h.linestyle } })),
     fills: fillConfig.map((f) => ({ plot1: f.plot1, plot2: f.plot2, options: { title: f.title, color: f.color } })),
     markers,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Regular Bullish Divergence', message: 'Found a new Regular Bullish Divergence!' },
+  { id: 'alert1', title: 'Hidden Bullish Divergence', message: 'Found a new Hidden Bullish Divergence!' },
+  { id: 'alert2', title: 'Regular Bearish Divergence', message: 'Found a new Regular Bearish Divergence!' },
+  { id: 'alert3', title: 'Hidden Bearish Divergence', message: 'Found a new Hidden Bearish Divergence!' },
+];
 
 export const RsiEmaMzonesWithDivergences = {
   calculate,
@@ -236,4 +258,5 @@ export const RsiEmaMzonesWithDivergences = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

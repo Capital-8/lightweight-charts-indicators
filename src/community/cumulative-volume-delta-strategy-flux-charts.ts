@@ -17,8 +17,13 @@
  * minus it after a sell signal; buy / sell colour); "TP" / "SL" markers on the exit bars; for the 101 most recent
  * setups with an entry, the zone of the entry (box), a "Buy" / "Sell" label and the dashed target lines with "TP" /
  * "SL" labels (or two boxes with the "Alternative" layout; an open trade ends 15 bars after the current bar); the
- * backtesting table. Zone boxes of older setups stay on the chart (up to 500 boxes), as in the original. The four
- * alert conditions and the alert() calls give no output.
+ * backtesting table. Zone boxes of older setups stay on the chart (up to 500 boxes), as in the original.
+ *
+ * Alerts: the four alertconditions (`alerts` of the result: 'Buy Signal' / 'Sell Signal' on a long / short entry,
+ * 'Take-Profit Signal' / 'Stop-Loss Signal' on an exit) and the alert() calls of the same names (`alertCalls`, once
+ * per bar, each when its "Alerts" input is on). As in the original they start on the last closed historical bar
+ * (`barstate.islastconfirmedhistory`: the last bar, or the bar before it when `chart.lastBarConfirmed` is false), so
+ * they are true on that bar at most (the strategy does not read an open last bar).
  *
  * Limit, lower-timeframe volume: the original reads the volume delta of each bar from the bars of a lower timeframe
  * (1 minute on intraday charts, 5 minutes on daily charts, 60 minutes above; `ta.requestVolumeDelta` of the ta
@@ -47,10 +52,11 @@ import {
   ta, str, color, timeframe, periodClose, Series, box, resetDrawings, setDrawingBar,
   type Box, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { BoxData, LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TablePosition } from '../types';
+import type { AlertCall, BoxData, LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TablePosition } from '../types';
 import { chartTimeframe, hasCalendar, periodChanges, timeAfterLastBar, barsAfterLastBar } from '../anchor-period';
 import { lastBarConfirmedOf, mintickOf, type ChartContext } from '../chart-context';
 import { upDownVolumeOfChartBars } from '../lower-tf-volume';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CumulativeVolumeDeltaStrategyFluxChartsInputs {
   anchorInput: string;
@@ -256,7 +262,10 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<CumulativeVolumeDeltaStrategyFluxChartsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[] } {
+): IndicatorResult & {
+  markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[];
+  alerts: AlertConditionState[]; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -266,6 +275,9 @@ export function calculate(
   const tables: TableData[] = [];
   const boxesOut: BoxData[] = [];
   const cvdsPlot: Array<{ time: number; value: number; color: string }> = [];
+  // buyAlertTick / sellAlertTick / tpAlertTick / slAlertTick of each bar
+  const ticks: boolean[][] = [[], [], [], []];
+  const alertCalls: AlertCall[] = [];
   const result = () => ({
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0: cvdsPlot },
@@ -274,6 +286,9 @@ export function calculate(
     boxes: boxesOut,
     labels,
     tables,
+    // alertcondition(xAlertTick and not initRun, ...)
+    alerts: alertStates(alertConditions, bars, ticks),
+    alertCalls,
   });
   if (n === 0) return result();
 
@@ -462,6 +477,10 @@ export function calculate(
     const confirmed = i < last || lastConfirmed;
     const active = confirmed && i > last - MAX_DISTANCE_TO_LAST_BAR;
     const bk = (k: number) => (i - k >= 0 ? bars[i - k] : null);
+    let buyAlertTick = false;
+    let sellAlertTick = false;
+    let tpAlertTick = false;
+    let slAlertTick = false;
 
     // Fair value gaps
     if (active) {
@@ -681,6 +700,7 @@ export function calculate(
         cv.entryPrice = b.close;
         if (cv.overlapDirection === 'Bull') {
           cv.entryType = 'Long';
+          buyAlertTick = true;
           if (fixed) {
             cv.slTarget = cv.entryPrice * (1 - slPercent / 100.0);
             cv.tpTarget = cv.entryPrice * (1 + tpPercent / 100.0);
@@ -690,6 +710,7 @@ export function calculate(
           }
         } else {
           cv.entryType = 'Short';
+          sellAlertTick = true;
           if (fixed) {
             cv.slTarget = cv.entryPrice * (1 + slPercent / 100.0);
             cv.tpTarget = cv.entryPrice * (1 - tpPercent / 100.0);
@@ -704,6 +725,8 @@ export function calculate(
         const long = cv.entryType === 'Long';
         const short = cv.entryType === 'Short';
         const exit = (price: number, state: State) => {
+          if (state === 'Take Profit') tpAlertTick = true;
+          else slAlertTick = true;
           cv.exitPrice = price;
           cv.exitTime = time;
           cv.state = state;
@@ -722,6 +745,22 @@ export function calculate(
           if (short && ge(b.high, cv.slTarget)) exit(cv.slTarget, 'Stop Loss');
         }
       }
+    }
+
+    // initRun := false on barstate.islastconfirmedhistory (the last bar, or the bar before an open last bar)
+    if (i >= (lastConfirmed ? last : last - 1)) {
+      ticks[0][i] = buyAlertTick;
+      ticks[1][i] = sellAlertTick;
+      ticks[2][i] = tpAlertTick;
+      ticks[3][i] = slAlertTick;
+      // if not initRun: alert("Buy Signal") ... when the input of the alert is on
+      const call = (on: boolean, message: string) => {
+        if (on) alertCalls.push({ time, message, freq: 'once_per_bar' });
+      };
+      call(buyAlertTick && cfg.buyAlertEnabled, 'Buy Signal');
+      call(sellAlertTick && cfg.sellAlertEnabled, 'Sell Signal');
+      call(tpAlertTick && cfg.tpAlertEnabled, 'Take-Profit Signal');
+      call(slAlertTick && cfg.slAlertEnabled, 'Stop-Loss Signal');
     }
 
     // Exit markers
@@ -850,10 +889,23 @@ export function calculate(
   return result();
 }
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: '' },
+  { id: 'alert1', title: 'Sell Signal', message: '' },
+  { id: 'alert2', title: 'Take-Profit Signal', message: '' },
+  { id: 'alert3', title: 'Stop-Loss Signal', message: '' },
+];
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
+
 export const CumulativeVolumeDeltaStrategyFluxCharts = {
   calculate,
   metadata,
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

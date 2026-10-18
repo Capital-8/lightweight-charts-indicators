@@ -5,6 +5,8 @@
  * Three types of signal crosses: QQE cross (RSI vs trailing stop),
  * zero cross (RSI vs 50), and channel cross (RSI enters OB/OS threshold).
  * Optional triple-MA filter for confirming BUY/SELL signals.
+ * Zero crosses (XZ) are marked when no XC / XQ / BUY / SELL mark is on the bar, and a circle at the bottom marks each
+ * BUY / SELL bar once the next bar exists (the original's "Cross Alert Completed").
  *
  * Reference: "QQE Cross" by JustUncleL
  */
@@ -204,8 +206,15 @@ export function calculate(bars: Bar[], inputs: Partial<QqeCrossInputs> = {}): Om
   // Track channel entry for XC
   let xcBuyCount = 0;
   let xcSellCount = 0;
+  // BUY (1) / SELL (-1) on the bar before: plotshape(buy[1] == 1 or sell[1] == 1, "Cross Alert Completed",
+  // location.bottom, color = sell[1] == 1 ? red : green, shape.circle, offset = -1)
+  let prevSignal = 0;
 
   for (let i = 1; i < n; i++) {
+    if (prevSignal !== 0) {
+      markers.push({ time: bars[i - 1].time, position: 'bottom', shape: 'circle', color: prevSignal < 0 ? '#FF0000' : '#008000', id: 'shape8' });
+    }
+    prevSignal = 0;
     if (i < warmup || isNaN(rsIndexArr[i]) || isNaN(fastAtrRsiTL[i])) continue;
 
     const rsi = rsIndexArr[i];
@@ -269,23 +278,34 @@ export function calculate(bars: Bar[], inputs: Partial<QqeCrossInputs> = {}): Om
     const isSell = xcSellFirst && sellFilter;
 
     if (isBuy) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#00FF00', text: 'BUY' });
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#00FF00', text: 'BUY', id: 'shape6' });
     } else if (isSell) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#FF0000', text: 'SELL' });
+      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#FF0000', text: 'SELL', id: 'shape7' });
     }
+    prevSignal = isBuy ? 1 : isSell ? -1 : 0;
 
     // XQ cross markers (not overlapping with BUY/SELL)
     if (xqUp && !isBuy) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#2196F3', text: 'XQ' });
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#2196F3', text: 'XQ', id: 'shape2' });
     } else if (xqDn && !isSell) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#000000', text: 'XQ' });
+      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#000000', text: 'XQ', id: 'shape3' });
     }
 
     // XC markers (channel entry that is not already a BUY/SELL)
     if (xcBuyFirst && !isBuy) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#808000', text: 'XC' });
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#808000', text: 'XC', id: 'shape0' });
     } else if (xcSellFirst && !isSell) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: 'XC' });
+      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#FF0000', text: 'XC', id: 'shape1' });
+    }
+
+    // XZ: RSI signal crossing 50, on a bar without a channel (XC), BUY / SELL or XQ mark of the same side:
+    // plotshape(sQQEz and QQEzlong and QQEclong != 1 and buy[shunt] != 1 and not QQExlong, "QQE Zero Cross Over",
+    //   shape.triangleup, location.belowbar, text = "XZ", color = aqua) and the mirror with fuchsia
+    if (rsi > 50 && rsiPrev <= 50 && !xcBuyFirst && !isBuy && !xqUp) {
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: '#00FFFF', text: 'XZ', id: 'shape4' });
+    }
+    if (rsi < 50 && rsiPrev >= 50 && !xcSellFirst && !isSell && !xqDn) {
+      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: '#FF00FF', text: 'XZ', id: 'shape5' });
     }
   }
 

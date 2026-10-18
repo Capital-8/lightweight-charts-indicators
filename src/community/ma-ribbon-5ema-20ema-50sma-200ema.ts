@@ -3,11 +3,14 @@
  *
  * Four moving averages of the source on the price chart: EMA 5, EMA 20, SMA 50 and EMA 200. Each line can be
  * hidden; colours and widths are inputs.
+ * Alerts (alertcondition, `alerts` of the result): the source crossing above / below the EMA 200 and the EMA 5
+ * crossing above / below the EMA 20 (whether the lines are shown or not).
  *
  * Reference: "5 EMA | 20 EMA | 50 SMA | 200 EMA" by vamsinelluri7
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType, type Series } from 'oakscriptjs';
 
 export interface MaRibbon5ema20ema50sma200emaInputs {
@@ -73,7 +76,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<MaRibbon5ema20ema50sma200emaInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<MaRibbon5ema20ema50sma200emaInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const src = getSourceSeries(bars, cfg.src);
@@ -87,7 +93,7 @@ export function calculate(bars: Bar[], inputs: Partial<MaRibbon5ema20ema50sma200
   const line = (show: boolean, vals: number[], col: string) =>
     bars.map((b, i) => ({ time: b.time, value: show ? vals[i] : NaN, color: col }));
 
-  // 4 alertconditions (price / 200 EMA and 5 EMA / 20 EMA crossings): no output
+  const srcArr = A(src);
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -96,8 +102,22 @@ export function calculate(bars: Bar[], inputs: Partial<MaRibbon5ema20ema50sma200
       plot2: line(cfg.show50sma, sma50, cfg.col50sma),
       plot3: line(cfg.show200ema, ema200, cfg.col200ema),
     },
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(srcArr, ema200), // ta.crossover(src, ema200)
+      crossedUnder(srcArr, ema200), // ta.crossunder(src, ema200)
+      crossedOver(ema5, ema20), // ta.crossover(ema5, ema20)
+      crossedUnder(ema5, ema20), // ta.crossunder(ema5, ema20)
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Price Crossed Above 200 EMA', message: 'Price crossed ABOVE 200 EMA' },
+  { id: 'alert1', title: 'Price Crossed Below 200 EMA', message: 'Price crossed BELOW 200 EMA' },
+  { id: 'alert2', title: '5 EMA Crossed Above 20 EMA', message: '5 EMA crossed ABOVE 20 EMA — Bullish' },
+  { id: 'alert3', title: '5 EMA Crossed Below 20 EMA', message: '5 EMA crossed BELOW 20 EMA — Bearish' },
+];
 
 export const MaRibbon5ema20ema50sma200ema = {
   calculate,
@@ -105,4 +125,5 @@ export const MaRibbon5ema20ema50sma200ema = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

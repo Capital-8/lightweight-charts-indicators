@@ -5,11 +5,14 @@
  * Support line (MA) with upper band and lower band
  * derived from the OTT trailing stop percentage offsets.
  * Supports 8 MA types: SMA, EMA, WMA, TMA, VAR, WWMA, ZLEMA, TSF.
+ * Alerts (alertcondition, `alerts` of the result): the 6 conditions of the original (support line / OTT[2] and
+ * price / OTT[2] crosses), on the series of the port.
  *
  * Reference: "Optimized Trend Tracker Bands" by KivancOzbilgic
  */
 
 import { getSourceSeries, ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface OTTBandsInputs {
   period: number;
@@ -97,7 +100,7 @@ function wwmaFunc(srcArr: number[], length: number): number[] {
   return out;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<OTTBandsInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<OTTBandsInputs> = {}): IndicatorResult & { alerts: AlertConditionState[] } {
   const { period, percent, upperCoeff, lowerCoeff, showFiboLines, showSupport, highlight, mav, src } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -229,8 +232,18 @@ export function calculate(bars: Bar[], inputs: Partial<OTTBandsInputs> = {}): In
     return { time: bars[i].time, value: ott[i - 2] * (1 - X5 * 0.382) };
   });
 
+  // Alerts: crosses of MAvg and of the source with OTT[2] (na on the first two bars)
+  const ott2 = ott.map((_v, i) => (i >= 2 ? ott[i - 2] : NaN));
+  const either = (a: boolean[], b: boolean[]) => a.map((v, i) => v || b[i]);
+  const supUp = crossedOver(mavg, ott2), supDown = crossedUnder(mavg, ott2);
+  const priceUp = crossedOver(srcArr, ott2), priceDown = crossedUnder(srcArr, ott2);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
+    // alertcondition(cross / crossover / crossunder(MAvg, OTT[2]), cross / crossover / crossunder(src, OTT[2]))
+    alerts: alertStates(alertConditions, bars, [
+      either(supUp, supDown), supUp, supDown, either(priceUp, priceDown), priceUp, priceDown,
+    ]),
     plots: {
       'ottMain': ottMain, 'support': support,
       'ottUpper': ottUpper, 'ottUpperHalf': ottUpperHalf, 'ottUpperFibo': ottUpperFibo,
@@ -257,4 +270,14 @@ export function calculate(bars: Bar[], inputs: Partial<OTTBandsInputs> = {}): In
   };
 }
 
-export const OTTBands = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cross Alert', message: 'OTT - Support Line Crossing!' },
+  { id: 'alert1', title: 'Crossover Alarm', message: 'Support Line BUY SIGNAL!' },
+  { id: 'alert2', title: 'Crossunder Alarm', message: 'Support Line SELL SIGNAL!' },
+  { id: 'alert3', title: 'Price Cross Alert', message: 'OTT - Price Crossing!' },
+  { id: 'alert4', title: 'Price Crossover Alarm', message: 'PRICE OVER OTT - BUY SIGNAL!' },
+  { id: 'alert5', title: 'Price Crossunder Alarm', message: 'PRICE UNDER OTT - SELL SIGNAL!' },
+];
+
+export const OTTBands = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

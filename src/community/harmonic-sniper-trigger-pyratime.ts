@@ -6,6 +6,8 @@
  * fisher = 0.5 * ln((1 + value) / (1 - value)) + 0.5 * fisher[1]. The trigger line is the fisher of the previous
  * bar. A fill between the two lines is green when the fisher is above the trigger, red otherwise; B / S labels mark
  * the crosses. Reference lines at +-1.5 and 0.
+ * Alerts (alertcondition, `alerts` of the result): 'Fisher Buy Signal' / 'Fisher Sell Signal' on the bars of the B / S
+ * crosses.
  *
  * Reference: "Harmonic Sniper Trigger [Fisher]" by PyraTime
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HarmonicSniperTriggerPyratimeInputs {
   /** Length of the highest / lowest window */
@@ -53,7 +56,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<HarmonicSniperTriggerPyratimeInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -122,8 +125,16 @@ export function calculate(
     ],
     fills: [{ plot1: 'plot2', plot2: 'plot3', options: { title: 'Trend Fill' }, colors: fillColors }],
     markers,
+    // alertcondition(cross_up, "Fisher Buy Signal") / alertcondition(cross_dn, "Fisher Sell Signal")
+    alerts: alertStates(alertConditions, bars, [crossUp.map((v) => !!v), crossDn.map((v) => !!v)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Fisher Buy Signal', message: 'Fisher Cross UP (Green) - Check for GPM Time Line!' },
+  { id: 'alert1', title: 'Fisher Sell Signal', message: 'Fisher Cross DOWN (Red) - Check for GPM Time Line!' },
+];
 
 export const HarmonicSniperTriggerPyratime = {
   calculate,
@@ -131,4 +142,5 @@ export const HarmonicSniperTriggerPyratime = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

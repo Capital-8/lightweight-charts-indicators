@@ -15,6 +15,9 @@
  *
  * At most 500 lines are kept (the oldest are removed).
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Breakout Up' and 'Breakout Down', true on the bars where the
+ * pattern completes up / down.
+ *
  * Reference: "2B Reversal Pattern (Expo)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Zeiierman
@@ -22,6 +25,7 @@
 
 import { ta, callsite, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LineDrawingData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TwoBReversalPatternInputs {
   /** Pivot period */
@@ -86,7 +90,7 @@ interface Ln {
 export function calculate(
   bars: Bar[],
   inputs: Partial<TwoBReversalPatternInputs> = {},
-): IndicatorResult & { lines: LineDrawingData[]; markers: MarkerData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const prd = Math.trunc(cfg.prd);
@@ -133,6 +137,8 @@ export function calculate(
   const crossBo = callsite.cross();
 
   const markers: MarkerData[] = [];
+  const upFlags: boolean[] = [];
+  const dnFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const { high, low, close, time } = bars[i];
@@ -194,6 +200,8 @@ export function calculate(
       }
     }
     activePrev = active;
+    upFlags.push(breakoutUp);
+    dnFlags.push(breakoutDn);
 
     // plotshape(breakoutup ? low : na, location.belowbar): the series is read as a bool (na and 0 draw nothing)
     if (breakoutUp && low !== 0) {
@@ -213,7 +221,15 @@ export function calculate(
       ...(l.dashed ? { style: 'dashed' as const } : {}),
       ...(l.width !== 1 ? { width: l.width } : {}),
     })),
+    // alertcondition(breakoutup, 'Breakout Up', ...) / alertcondition(breakoutdn, 'Breakout Down', ...)
+    alerts: alertStates(alertConditions, bars, [upFlags, dnFlags]),
   };
 }
 
-export const TwoBReversalPattern = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Breakout Up', message: 'Breakout Up' },
+  { id: 'alert1', title: 'Breakout Down', message: 'Breakout Down' },
+];
+
+export const TwoBReversalPattern = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

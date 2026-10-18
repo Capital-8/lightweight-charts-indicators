@@ -8,6 +8,7 @@
  * overflows of both lines) colours the background and the candles. Strong signals: Money Flow crosses the -0.7 /
  * 0.7 levels while Hyper Wave is beyond -0.5 / 0.5; weak signals: Hyper Wave crosses 0 while Money Flow is inside
  * the levels. Threshold bands at 0.7..1 and -0.7..-1 and a zero band at -0.1..0.1.
+ * Alerts (alertcondition, `alerts` of the result): 'Strong Buy Signal' / 'Strong Sell Signal' on the strong signals.
  *
  * Last bar: the three zero lines and the fill between them are drawn on closed bars only. The port reads the state of
  * the last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
@@ -19,6 +20,7 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, MarkerData, PlotCandleData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface OscillatorMatrixInputs {
   mfLength: number;
@@ -124,7 +126,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<OscillatorMatrixInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -175,6 +178,7 @@ export function calculate(
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
   const candles: PlotCandleData[] = [];
+  const strongBuyFlags: boolean[] = [], strongSellFlags: boolean[] = [];
   // ta.crossover(a, b): a > b and a[1] <= b[1]; ta.crossunder(a, b): a < b and a[1] >= b[1] (exact, no 1e-10 tolerance)
   const crossover = (a: number[], b: number, i: number) => i > 0 && a[i] > b && a[i - 1] <= b;
   const crossunder = (a: number[], b: number, i: number) => i > 0 && a[i] < b && a[i - 1] >= b;
@@ -192,6 +196,8 @@ export function calculate(
 
     const strongBuy = crossover(moneyFlow, -0.7, i) && lt(hw, -0.5);
     const strongSell = crossunder(moneyFlow, 0.7, i) && gt(hw, 0.5);
+    strongBuyFlags.push(strongBuy);
+    strongSellFlags.push(strongSell);
     const weakBuy = crossover(hyperWave, 0, i) && gt(mf, -0.7);
     const weakSell = crossunder(hyperWave, 0, i) && lt(mf, 0.7);
 
@@ -245,10 +251,19 @@ export function calculate(
     markers,
     bgColors,
     plotCandles: { candleColoring: candles },
+    // alertcondition(strong_buy_signal) / alertcondition(strong_sell_signal)
+    alerts: alertStates(alertConditions, bars, [strongBuyFlags, strongSellFlags]),
   };
 }
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Strong Buy Signal', message: 'Oscillator Matrix: Strong Buy Signal Detected' },
+  { id: 'alert1', title: 'Strong Sell Signal', message: 'Oscillator Matrix: Strong Sell Signal Detected' },
+];
+
 export const OscillatorMatrix = {
+  alertConditions,
   calculate,
   metadata,
   defaultInputs,

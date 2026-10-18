@@ -6,6 +6,8 @@
  * (filter + range) and a lower band (filter - range) are trailed, and the Twin Range Filter line takes the upper or
  * the lower band, depending on the side of the close. BUY / SELL labels mark the crosses of the close and the line,
  * and the area between ohlc4 and the line is green when the close is above the line, red below.
+ * Alerts (alertcondition, `alerts` of the result): 'Long' and 'Short', true on the crosses of the close over / under
+ * the line (whatever "Show Buy/Sell Signals ?").
  *
  * Reference: "Twin Range Filter" by KivancOzbilgic
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TwinRangeFilterVisualizedInputs {
   source: SourceType;
@@ -75,7 +78,7 @@ const nz = (v: number) => (isNaN(v) ? 0 : v);
 export function calculate(
   bars: Bar[],
   inputs: Partial<TwinRangeFilterVisualizedInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -149,7 +152,15 @@ export function calculate(
       { plot1: 'plot1', plot2: 'plot0', options: { title: 'UpTrend Highligter' }, colors: upColors },
       { plot1: 'plot1', plot2: 'plot0', options: { title: 'DownTrend Highligter' }, colors: downColors },
     ],
+    // alertcondition(long, 'Long') / alertcondition(short, 'Short')
+    alerts: alertStates(alertConditions, bars, [long.map((v) => !!v), short.map((v) => !!v)]),
   };
 }
 
-export const TwinRangeFilterVisualized = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long', message: 'Long' },
+  { id: 'alert1', title: 'Short', message: 'Short' },
+];
+
+export const TwinRangeFilterVisualized = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

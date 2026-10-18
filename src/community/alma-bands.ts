@@ -4,11 +4,14 @@
  * Two Arnaud Legoux moving averages of the source with their own length, offset and sigma. The fill between them is
  * cyan when ALMA 1 is above ALMA 2, else red.
  *
+ * Alerts (alertcondition, `alerts` of the result): ALMA 1 crossing over / under ALMA 2 (whatever the show inputs).
+ *
  * Reference: "🌊 ALMA Bands" by B3AR_Trades
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType, type Series } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AlmaBandsInputs {
   /** Window of ALMA 1 */
@@ -76,7 +79,10 @@ export const metadata = {
 /** Pine a > b: a - b > 1e-10 (false with na) */
 const gt = (a: number, b: number) => a - b > 1e-10;
 
-export function calculate(bars: Bar[], inputs: Partial<AlmaBandsInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<AlmaBandsInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const src = getSourceSeries(bars, cfg.almaSource);
@@ -96,8 +102,16 @@ export function calculate(bars: Bar[], inputs: Partial<AlmaBandsInputs> = {}): I
       plot1: bars.map((b, i) => ({ time: b.time, value: cfg.showAlma2 ? alma2[i] : NaN, color: ALMA_COLOR })),
     },
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'ALMA Fill' }, colors: fillColors }],
+    // bullish_crossover = ta.crossover(alma1, alma2), bearish_crossover = ta.crossunder(alma1, alma2)
+    alerts: alertStates(alertConditions, bars, [crossedOver(alma1, alma2), crossedUnder(alma1, alma2)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Crossover', message: 'BULLISH: ALMA 1 crossed above ALMA 2' },
+  { id: 'alert1', title: 'Bearish Crossover', message: 'BEARISH: ALMA 1 crossed below ALMA 2' },
+];
 
 export const AlmaBands = {
   calculate,
@@ -105,4 +119,5 @@ export const AlmaBands = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

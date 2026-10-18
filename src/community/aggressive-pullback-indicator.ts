@@ -5,7 +5,7 @@
  * (open below / above the open of 2 bars ago) and pass the swing and EMA-touch rules of the script.
  * On a signal bar the stop price (5-bar swing low / high plus an ATR(14) buffer) and the target price (stop distance
  * times the risk:reward) are plotted on the signal bar and on the next bar.
- * The Pine alertcondition (long or short signal) has no chart output.
+ * Alerts (alertcondition, `alerts` of the result): 'API Alert!', true on the bars of a long or a short signal.
  *
  * Reference: "Aggressive Pullback Indicator" by ZenAndTheArtOfTrading
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +13,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AggressivePullbackIndicatorInputs {
   /** EMA Length */
@@ -52,7 +53,7 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AggressivePullbackIndicatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { emaLength, stopSizeInput, riskToReward } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -146,7 +147,14 @@ export function calculate(
       plot4: twoBars(validShort, tradeTargetPrice),
     },
     markers,
+    // alertcondition(validLong or validShort, "API Alert!")
+    alerts: alertStates(alertConditions, bars, [validLong.map((v, i) => v || validShort[i])]),
   };
 }
 
-export const AggressivePullbackIndicator = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'API Alert!', message: 'Pullback signal for {{ticker}}' },
+];
+
+export const AggressivePullbackIndicator = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

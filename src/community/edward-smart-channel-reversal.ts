@@ -5,6 +5,7 @@
  * and an EMA trend line. BUY: the low touches the lower channel, the bar is green, the close is back above the lower
  * channel, the RSI is below 40 and the close is above the EMA. SELL: the high touches the upper channel, the bar is
  * red, the close is back below the upper channel, the RSI is above 60 and the close is below the EMA.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Alert' / 'Sell Alert', true on the BUY / SELL bars.
  *
  * Reference: "Edward Smart Channel Reversal" by Jos-ProTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EdwardSmartChannelReversalInputs {
   /** Channel length (highest high / lowest low) */
@@ -61,7 +63,7 @@ const PINE_TEXT = '#2962FF';
 export function calculate(
   bars: Bar[],
   inputs: Partial<EdwardSmartChannelReversalInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -77,6 +79,7 @@ export function calculate(
     plot0: [], plot1: [], plot2: [], plot3: [],
   };
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -91,6 +94,8 @@ export function calculate(
     const bearReversal = ge(b.high, upper[i]) && lt(b.close, b.open) && lt(b.close, upper[i]) && gt(rsi[i], 60);
     const buySignal = bullReversal && gt(b.close, ema[i]);
     const sellSignal = bearReversal && lt(b.close, ema[i]);
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
     // plotshape(buySignal, 'BUY', shape.labelup, location.belowbar, color.lime, text = 'BUY')
     if (buySignal) {
       markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: color.lime, text: 'BUY', textColor: PINE_TEXT, size: 'auto' });
@@ -109,8 +114,16 @@ export function calculate(
     plots,
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Plots Background' }, colors: new Array<string>(n).fill(fillColor) }],
     markers,
+    // alertcondition(buySignal, "Buy Alert") / alertcondition(sellSignal, "Sell Alert")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'Edward Smart Channel Reversal BUY' },
+  { id: 'alert1', title: 'Sell Alert', message: 'Edward Smart Channel Reversal SELL' },
+];
 
 export const EdwardSmartChannelReversal = {
   calculate,
@@ -118,4 +131,5 @@ export const EdwardSmartChannelReversal = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

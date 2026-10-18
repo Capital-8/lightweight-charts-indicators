@@ -221,10 +221,10 @@ export function calculate(
     const jo = jerkOBV[i];
     const jc = jerkCDV[i];
     if (cfg.showOBVJerkBG && gt(Math.abs(jo), thrOBV[i])) {
-      bgColors.push({ time: t, color: String(color.new(gt(jo, 0) ? color.green : color.red, 100 - opa(jo, thrOBV[i]))) });
+      bgColors.push({ time: t, color: String(color.new(gt(jo, 0) ? color.green : color.red, 100 - opa(jo, thrOBV[i]))), id: 'bgcolor0' });
     }
     if (cfg.showCDVJerkBG && gt(Math.abs(jc), thrCDV[i])) {
-      bgColors.push({ time: t, color: String(color.new(gt(jc, 0) ? color.green : color.red, 100 - opa(jc, thrCDV[i]))) });
+      bgColors.push({ time: t, color: String(color.new(gt(jc, 0) ? color.green : color.red, 100 - opa(jc, thrCDV[i]))), id: 'bgcolor1' });
     }
     const relVol = vol[i] / median[i];
     const tapeOK = gt(relVol, 1.3) && gt(atrRank[i], 0.25);
@@ -237,8 +237,8 @@ export function calculate(
     const jerkShortOK = cfg.stackBG && tapeOK && sameDir && newShort && shortPriceOK && coolOK(lastShort, i);
     if (jerkLongOK) lastLong = i;
     if (jerkShortOK) lastShort = i;
-    if (jerkLongOK) bgColors.push({ time: t, color: longColor });
-    if (jerkShortOK) bgColors.push({ time: t, color: shortColor });
+    if (jerkLongOK) bgColors.push({ time: t, color: longColor, id: 'bgcolor2' });
+    if (jerkShortOK) bgColors.push({ time: t, color: shortColor, id: 'bgcolor3' });
   }
 
   const line = (on: boolean, v: number[], c: string) => bars.map((b, i) => ({ time: b.time, value: on ? fin(v[i]) : NaN, color: c }));

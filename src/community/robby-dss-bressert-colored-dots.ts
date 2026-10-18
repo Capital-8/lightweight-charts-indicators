@@ -65,9 +65,10 @@ export function calculate(bars: Bar[], inputs: Partial<RobbyDssBressertColoredDo
   const dss = A(ta.ema(S(stochOfSmoothed), cfg.emaPeriod));
 
   // var color dotColor = color.red; lime when dssValue > dssValue[1], red when dssValue < dssValue[1], else kept
-  const lime = String(color.new(color.lime, 0));
-  const red = String(color.new(color.red, 0));
-  let dotColor: string = color.red;
+  // (color.new(c, 0) is the colour c itself: one string per colour of the palette)
+  const lime: string = color.lime;
+  const red: string = color.red;
+  let dotColor: string = red;
   const plot0 = bars.map((b, i) => {
     const prev = i > 0 ? dss[i - 1] : NaN;
     if (gt(dss[i], prev)) dotColor = lime;

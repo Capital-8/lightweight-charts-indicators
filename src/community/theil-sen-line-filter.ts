@@ -6,6 +6,8 @@
  * multiplier, a percent of the price or fixed points). The filtered line starts at the source and moves by
  * response * slope per bar. The trend is up when the line rises and down when it falls (kept when flat); the line
  * and the candles take the long / short colour of the trend (white before the first move).
+ * Alerts (alertcondition, `alerts` of the result): 'Theil-Sen Up Slope' / 'Theil-Sen Down Slope' when the change of
+ * the line (tsf - tsf[1]) crosses over / under 0.
  *
  * Reference: "Theil-Sen Line Filter [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TheilSenLineFilterInputs {
   /** Series to filter with the Theil-Sen median-slope line */
@@ -86,7 +89,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TheilSenLineFilterInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = getSourceSeries(bars, cfg.pricesource).toArray().map((v) => v ?? NaN);
@@ -136,13 +139,23 @@ export function calculate(
     plot0.push({ time: bars[i].time as number, value: cfg.showLine ? tsf[i] : NaN, color: String(color.new(barColour, 40)) });
   }
 
+  // upTurn = ta.crossover(tsf - tsf[1], 0), dnTurn = ta.crossunder(tsf - tsf[1], 0)
+  const change = tsf.map((v, i) => (i > 0 ? v - tsf[i - 1] : NaN));
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     markers: [],
     barColors,
+    alerts: alertStates(alertConditions, bars, [crossedOver(change, 0), crossedUnder(change, 0)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Theil-Sen Up Slope', message: 'Theil-Sen slope turned up {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Theil-Sen Down Slope', message: 'Theil-Sen slope turned down {{exchange}}:{{ticker}}' },
+];
 
 export const TheilSenLineFilter = {
   calculate,
@@ -150,4 +163,5 @@ export const TheilSenLineFilter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

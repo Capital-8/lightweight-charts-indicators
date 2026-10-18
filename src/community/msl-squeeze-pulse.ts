@@ -8,6 +8,9 @@
  * middle of the highest high / lowest low channel, in ATR units, drawn as candles from 0: filled while the pulse
  * extends, hollow while it fades.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Coil On' / 'Coil Released' (the coiled state starts / ends) and
+ * 'Pulse Flip Up' / 'Pulse Flip Down' (the pulse turns positive / negative).
+ *
  * Reference: "MSL Squeeze Pulse" by MarketStructureLab
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: MSL Squeeze Pulse — developed by MarketStructureLab.
@@ -15,6 +18,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BgColorData, MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MslSqueezePulseInputs {
   priceSrc: SourceType;
@@ -99,7 +103,7 @@ export function calculate(
   inputs: Partial<MslSqueezePulseInputs> = {},
 ): Omit<IndicatorResult, 'markers'> & {
   markers: MarkerData[]; bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]>;
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -128,6 +132,10 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const markers: MarkerData[] = [];
   const statePoints: { time: number; value: number; color: string }[] = [];
+  const coilOn = new Array<boolean>(n).fill(false);
+  const coilOff = new Array<boolean>(n).fill(false);
+  const flipUp = new Array<boolean>(n).fill(false);
+  const flipDown = new Array<boolean>(n).fill(false);
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const pv = pulseVal[i];
@@ -148,6 +156,11 @@ export function calculate(
 
     // coilReleased = (not coiled) and coiled[1]
     const coilReleased = !coiled[i] && i > 0 && coiled[i - 1];
+    // coilOn = coiled and not coiled[1]; pulseFlipUp = pulseVal > 0 and nz(pulseVal[1]) <= 0 (and Down likewise)
+    coilOn[i] = coiled[i] && !(i > 0 && coiled[i - 1]);
+    coilOff[i] = coilReleased;
+    flipUp[i] = gt(pv, 0) && le(prev, 0);
+    flipDown[i] = lt(pv, 0) && ge(prev, 0);
     if (cfg.showRelease && coilReleased) {
       markers.push({ time: t, position: 'atPriceMiddle', price: 0.0, shape: 'diamond', color: releaseColor, size: 'small' });
     }
@@ -164,8 +177,17 @@ export function calculate(
     bgColors,
     markers,
     plotCandles: { pulse: candles },
+    alerts: alertStates(alertConditions, bars, [coilOn, coilOff, flipUp, flipDown]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Coil On', message: '{{ticker}} compression ratio entered its coiled percentile on {{interval}}' },
+  { id: 'alert1', title: 'Coil Released', message: '{{ticker}} compression ratio left its coiled percentile on {{interval}}' },
+  { id: 'alert2', title: 'Pulse Flip Up', message: '{{ticker}} pulse flipped positive on {{interval}}' },
+  { id: 'alert3', title: 'Pulse Flip Down', message: '{{ticker}} pulse flipped negative on {{interval}}' },
+];
 
 export const MslSqueezePulse = {
   calculate,
@@ -173,4 +195,5 @@ export const MslSqueezePulse = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

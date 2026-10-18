@@ -6,6 +6,8 @@
  * lower price low than the previous pivot low, 5 to 60 bars after it, is bullish; the mirror case with pivot highs is
  * bearish. Pivots are drawn 5 bars back with Bull / Bear labels in the pane and on the price bars. Bars are coloured
  * by the most recent divergence, fading out over 1000 bars. Levels at -1, 1 and 0.
+ * Alerts (alertcondition, `alerts` of the result): 'Regular Bullish Divergence' / 'Regular Bearish Divergence' on the
+ * bar where the divergence is found (5 bars after its pivot).
  *
  * Reference: "Uptrick: Trend Analysis" by Uptrick
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 
 export interface UptrickTrendAnalysisInputs {
@@ -86,7 +89,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<UptrickTrendAnalysisInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -226,8 +229,22 @@ export function calculate(
     ],
     markers,
     barColors,
+    // alertcondition(bullCond) / alertcondition(bearCond)
+    alerts: alertStates(alertConditions, bars, [bullCond, bearCond]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0', title: 'Regular Bullish Divergence',
+    message: 'Found a new Regular Bullish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.',
+  },
+  {
+    id: 'alert1', title: 'Regular Bearish Divergence',
+    message: 'Found a new Regular Bearish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.',
+  },
+];
 
 export const UptrickTrendAnalysis = {
   calculate,
@@ -235,4 +252,5 @@ export const UptrickTrendAnalysis = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

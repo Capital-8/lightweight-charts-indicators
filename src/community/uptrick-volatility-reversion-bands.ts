@@ -99,10 +99,10 @@ export function calculate(
     const longSignal = i > 0 && close[i] < lower[i] && close[i - 1] >= lower[i - 1];
     const shortSignal = i > 0 && close[i] > upper[i] && close[i - 1] <= upper[i - 1];
     if (longSignal) {
-      markers.push({ time: t(i), position: 'belowBar', shape: 'labelUp', color: longCol, text: '▲+', textColor: color.white, size: 'small' });
+      markers.push({ time: t(i), position: 'belowBar', shape: 'labelUp', color: longCol, text: '▲+', textColor: color.white, size: 'small', id: 'shape0' });
     }
     if (shortSignal) {
-      markers.push({ time: t(i), position: 'aboveBar', shape: 'labelDown', color: shortCol, text: '▼+', textColor: color.white, size: 'small' });
+      markers.push({ time: t(i), position: 'aboveBar', shape: 'labelDown', color: shortCol, text: '▼+', textColor: color.white, size: 'small', id: 'shape1' });
     }
 
     const denom = max(upper[i] - lower[i], 0.0000001);
@@ -112,10 +112,10 @@ export function calculate(
 
     // weak signals: ratioClamped >= 0.9 / <= 0.1
     if (cfg.weakSignals && ge(ratioClamped, 0.9)) {
-      markers.push({ time: t(i), position: 'aboveBar', shape: 'labelDown', color: weakSellCol, text: '▼', textColor: color.white, size: 'tiny' });
+      markers.push({ time: t(i), position: 'aboveBar', shape: 'labelDown', color: weakSellCol, text: '▼', textColor: color.white, size: 'tiny', id: 'shape2' });
     }
     if (cfg.weakSignals && le(ratioClamped, 0.1)) {
-      markers.push({ time: t(i), position: 'belowBar', shape: 'labelUp', color: weakBuyCol, text: '▲', textColor: color.white, size: 'tiny' });
+      markers.push({ time: t(i), position: 'belowBar', shape: 'labelUp', color: weakBuyCol, text: '▲', textColor: color.white, size: 'tiny', id: 'shape3' });
     }
   }
 

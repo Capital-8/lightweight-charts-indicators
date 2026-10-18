@@ -23,8 +23,15 @@
  * consolidated volume) differ from the bars built from the chart bars, so the zones of these timeframes can differ.
  *
  * Chart values read: the ticker id of the symbol, for the table shown when the symbol has no volume ("... for this
- * symbol (EXCHANGE:NAME)"). Without a chart context the name and its brackets are left out of the text. The 32
- * alert() calls have no output.
+ * symbol (EXCHANGE:NAME)"). Without a chart context the name and its brackets are left out of the text.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar), per time frame as its "Alerts" input selects:
+ * the close crossing into a zone (over the resistance body edge / under the support body edge), testing a broken
+ * level (under the fractal high / over the fractal low), breaking a level (over the fractal high / under the fractal
+ * low) and a new zone found, with the message "<ticker> - ..." of the original (syminfo.ticker from the chart
+ * context, empty without it). As in the original, the options "Price Breaks Up Resistance" and "Price Breaks Down
+ * Support" select no alert (the script tests other names). Alerts of a time frame below the chart timeframe need its
+ * values, which the bars do not carry: the port throws an Error.
  *
  * Periods and the chart context (optional third argument of calculate): with the exchange time zone and the session
  * of the symbol (`timezone`, `session`) the periods are those of the exchange calendar (its trading days, holidays
@@ -44,7 +51,9 @@ import {
 } from 'oakscriptjs';
 import type { LineDrawingData, LabelData, LinefillData, TableData } from '../types';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
-import { tickeridOf, type ChartContext } from '../chart-context';
+import { tickeridOf, tickerOf, type ChartContext } from '../chart-context';
+import { crossedOver, crossedUnder } from '../alert-states';
+import type { AlertCall } from '../types';
 
 type Menu = 'S/R' | 'S/R Zones' | 'Disable';
 type StyleName = 'Solid' | 'Dotted' | 'Dashed';
@@ -382,16 +391,20 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeBasedSupportResistanceZonesInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[] } {
+): IndicatorResult & {
+  lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[]; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
-  const result = (lines: LineDrawingData[], labels: LabelData[], linefills: LinefillData[], tables: TableData[]) => ({
+  const result = (lines: LineDrawingData[], labels: LabelData[], linefills: LinefillData[], tables: TableData[],
+    alertCalls: AlertCall[] = []) => ({
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     lines,
     labels,
     linefills,
     tables,
+    alertCalls,
   });
   const chartTf = chartTimeframe(bars, chart);
   if (n === 0 || chartTf === '') return result([], [], [], []);
@@ -545,6 +558,14 @@ export function calculate(
   };
   const back = (i: number, k: number) => (Number.isNaN(k) ? i : i - k >= 0 ? i - k : NaN);
 
+  /** TF1_text and the TFx_input of the other time frames at bar i */
+  const namesAt = (i: number) => {
+    const m1 = tfs[0].minutes[i];
+    const tf1String = tfs[0].input === 'Chart' ? period : TF_STRING[tfs[0].input];
+    const tf1Text = ge(m1, 60) && lt(m1, 1440) ? `${m1 / 60}h` : lt(m1, 60) ? `${tf1String}m` : tf1String;
+    return [tf1Text, tfs[1].input, tfs[2].input, tfs[3].input];
+  };
+
   const lower = (message: string): never => {
     throw new Error(`${message} is below the chart timeframe "${chartTf}": the chart bars do not carry its data.`);
   };
@@ -555,10 +576,7 @@ export function calculate(
     const chartOnLower = (tf: TimeFrame) => !Number.isNaN(tf.minutes[i]) && !gt(currentMinutes, tf.minutes[i]);
     const chartEqual = (tf: TimeFrame) => eq(currentMinutes, tf.minutes[i]) && tf.menuOn;
     // TF1_text
-    const m1 = tfs[0].minutes[i];
-    const tf1String = tfs[0].input === 'Chart' ? period : TF_STRING[tfs[0].input];
-    const tf1Text = ge(m1, 60) && lt(m1, 1440) ? `${m1 / 60}h` : lt(m1, 60) ? `${tf1String}m` : tf1String;
-    const names = [tf1Text, tfs[1].input, tfs[2].input, tfs[3].input];
+    const names = namesAt(i);
     // TF1 is hidden when another time frame is the chart timeframe
     const tf1Free = !chartEqual(tfs[1]) && !chartEqual(tfs[2]) && !chartEqual(tfs[3]);
 
@@ -647,6 +665,54 @@ export function calculate(
     setDrawingBar(null);
   }
 
+  // ---- alert() calls, per bar in the original's order (time frame 1 to 4; per time frame: enters resistance zone,
+  // tests resistance as support, enters support zone, tests support as resistance, breaks resistance, breaks
+  // support, new resistance zone, new support zone)
+  const alertCalls: AlertCall[] = [];
+  const ticker = tickerOf(chart);
+  const closes = bars.map((b) => b.close);
+  const tfAlerts = tfs.map((tf, k) => {
+    const sel = raw[`tf${k + 1}Alerts`] as string;
+    const all = sel === 'All Alerts On';
+    const enterRes = sel === 'Price Enters Resistance Zone' || sel === 'Price Enters Either S/R Zone' || all;
+    const enterSup = sel === 'Price Enters Support Zone' || sel === 'Price Enters Either S/R Zone' || all;
+    // the original tests 'Price Breaks Resistance' / 'Price Breaks Support', names its options do not have
+    const breakRes = sel === 'Price Breaks Either S/R' || all;
+    const breakSup = sel === 'Price Breaks Either S/R' || all;
+    const newZone = sel === 'New S/R Zone Found' || all;
+    const any = enterRes || enterSup || breakRes || breakSup || newZone;
+    if (any && !tf.known) lower(`Time Frame ${k + 1} ("${tf.input}", needed by its alerts)`);
+    return {
+      enterRes, enterSup, breakRes, breakSup, newZone,
+      crosses: any ? [
+        crossedOver(closes, tf.resZoneAt), crossedUnder(closes, tf.fractalUp), crossedUnder(closes, tf.supZoneAt),
+        crossedOver(closes, tf.fractalDown), crossedOver(closes, tf.fractalUp), crossedUnder(closes, tf.fractalDown),
+      ] : [],
+    };
+  });
+  for (let i = 0; i < n; i++) {
+    const names = namesAt(i);
+    const t = bars[i].time;
+    const push = (text: string) => alertCalls.push({ time: t, message: `${ticker} - ${text}`, freq: 'once_per_bar' });
+    tfs.forEach((tf, k) => {
+      const a = tfAlerts[k];
+      if (a.crosses.length === 0) return;
+      const [entersRes, testResAsSup, entersSup, testSupAsRes, breaksRes, breaksSup] = a.crosses.map((c) => c[i]);
+      const name = names[k];
+      if (a.enterRes && entersRes) push(`Price enters ${name} Resistance Zone`);
+      if (a.enterRes && testResAsSup) push(`Price is testing ${name} resistance as support`);
+      if (a.enterSup && entersSup) push(`Price enters ${name} Support Zone`);
+      if (a.enterSup && testSupAsRes) push(`Price is testing ${name} support as resistance`);
+      if (a.breakRes && breaksRes) push(`Price is breaking out ${name} Resistance`);
+      if (a.breakSup && breaksSup) push(`Price is breaking down ${name} Support`);
+      if (a.newZone) {
+        // NewResFound = menu on and FractalUp != FractalUp[1] (na: false)
+        if (tf.menuOn && neq(tf.fractalUp[i], i > 0 ? tf.fractalUp[i - 1] : NaN) === true) push(`New ${name} Resistance Zone Found`);
+        if (tf.menuOn && neq(tf.fractalDown[i], i > 0 ? tf.fractalDown[i - 1] : NaN) === true) push(`New ${name} Support Zone Found`);
+      }
+    });
+  }
+
   // ---- Outputs: the objects alive after the last bar; an object with an na coordinate is not drawn (a deleted line
   // has na coordinates)
   const interval = barInterval(bars);
@@ -687,7 +753,10 @@ export function calculate(
     });
   }
 
-  return result(lines, labels, linefills, tables);
+  return result(lines, labels, linefills, tables, alertCalls);
 }
 
-export const VolumeBasedSupportResistanceZones = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original makes alert() calls (`alertCalls` of the result) */
+export const hasAlertFunction = true;
+
+export const VolumeBasedSupportResistanceZones = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

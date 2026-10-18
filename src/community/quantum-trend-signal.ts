@@ -5,6 +5,7 @@
  * is above 55 and the ATR is above its 20-bar SMA times the ATR filter; a SELL triangle when the fast EMA crosses
  * under the slow EMA while the RSI is below 45 with the same volatility filter. The background is green while the
  * fast EMA is above the slow EMA and red while it is below.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Alert' and 'Sell Alert', true on the bars of the triangles.
  *
  * Reference: "Quantum Trend Signal" by ReubenMiles
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,13 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'Quantum Trend BUY' },
+  { id: 'alert1', title: 'Sell Alert', message: 'Quantum Trend SELL' },
+];
 
 export interface QuantumTrendSignalInputs {
   fastEMA: number;
@@ -58,7 +66,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<QuantumTrendSignalInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -79,6 +87,8 @@ export function calculate(
   // The comparisons are exact (no 1e-10 tolerance).
   let prevF = NaN;
   let prevS = NaN;
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const f = emaFast[i];
     const s = emaSlow[i];
@@ -89,13 +99,17 @@ export function calculate(
       prevS = s;
     }
     const volatilityOK = gt(atr[i], atrAvg[i] * cfg.atrFilter);
+    const buy = crossUp && gt(rsi[i], 55) && volatilityOK;
+    const sell = crossDown && lt(rsi[i], 45) && volatilityOK;
+    buyFlags.push(buy);
+    sellFlags.push(sell);
     // plotshape(buy, "BUY", location.belowbar, color.lime, shape.triangleup, size = size.small, text = "BUY")
-    if (crossUp && gt(rsi[i], 55) && volatilityOK) {
+    if (buy) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: color.lime, size: 'small',
         text: 'BUY', textColor: color.blue });
     }
     // plotshape(sell, "SELL", location.abovebar, color.red, shape.triangledown, size = size.small, text = "SELL")
-    if (crossDown && lt(rsi[i], 45) && volatilityOK) {
+    if (sell) {
       markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: color.red, size: 'small',
         text: 'SELL', textColor: color.blue });
     }
@@ -112,6 +126,8 @@ export function calculate(
     },
     markers,
     bgColors,
+    // alertcondition(buy, "Buy Alert") / alertcondition(sell, "Sell Alert")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
 
@@ -121,4 +137,5 @@ export const QuantumTrendSignal = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

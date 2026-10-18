@@ -23,8 +23,10 @@
  *   and bearish (as Pine, all four series are titled "Regular Bullish"), drawn on the pivot bar.
  *
  * Plot styles chosen by inputs in the original ("AO": area when "Show ao away 0 point" is off; "Histogram": line
- * when the MACD and "Show MACD area away 0 point" are on) keep the default style here. The alert() call of the
- * original (status text) has no output.
+ * when the MACD and "Show MACD area away 0 point" are on) keep the default style here.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): on every bar, "Estatus segun estrategia"
+ * and the status text (made whether the status label is shown or not, as in the original).
  *
  * Reference: "Multpile strategies [LUPOWN]" by Lupown
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -35,7 +37,7 @@ import {
   ta, Series, color, label, fixnan, resetDrawings, setDrawingBar, drawingOutputs,
   type FillData, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { BgColorData, MarkerData } from '../types';
+import type { AlertCall, BgColorData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 
 type Source = 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4' | 'volume';
@@ -412,7 +414,7 @@ const STATUS_TITLE = '\t Estatus segun estrategia\n\t';
 export function calculate(
   bars: Bar[],
   inputs: Partial<MultpileStrategiesInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[]; markers: MarkerData[]; fills: FillData[] } {
+): IndicatorResult & { bgColors: BgColorData[]; markers: MarkerData[]; fills: FillData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => (v === null || v === undefined ? NaN : v));
@@ -678,6 +680,7 @@ export function calculate(
 
   resetDrawings();
   let prevLabel: ReturnType<typeof label.new> | undefined;
+  const alertCalls: AlertCall[] = [];
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === n - 1);
     const t = bars[i].time;
@@ -754,8 +757,8 @@ export function calculate(
     put(27, i, cfg.showAa ? sc(adxValue[i] - keyLevel + cfg.far, i) * cfg.scaleADX
       : cfg.showADX ? sc(adxValue[i] - keyLevel, i) * cfg.scaleADX : NaN, adxUp ? '#ffffff' : '#a09a9a');
 
-    // status label: one per bar, the one of the bar before deleted
-    if (cfg.showStatus) {
+    // status text (scr_label) on every bar; status label (one per bar, the one of the bar before deleted) when shown
+    {
       const a1 = ge(adxValue[i], 23);
       const a2 = lt(adxValue[i], 23);
       const a3 = ge(adxValue[i], at(adxValue, i, 1));
@@ -786,10 +789,14 @@ export function calculate(
                                     : a2 && a3 && s2 && s3 ? 'Monitor muestra rango-subida,\n el movimiento quiere agarrar fuerza'
                                       : '-';
       const text = `Info ADX: ${iAdx}\nInfo monitor: ${iMom}\nInfo general:\n${igral}`;
-      const lab = label.new(i + Math.trunc(cfg.dist), 0, STATUS_TITLE + text, 'bar_index', 'price', cfg.dashColor,
-        'label_left', cfg.dashTextColor);
-      if (prevLabel) label.delete(prevLabel);
-      prevLabel = lab;
+      if (cfg.showStatus) {
+        const lab = label.new(i + Math.trunc(cfg.dist), 0, STATUS_TITLE + text, 'bar_index', 'price', cfg.dashColor,
+          'label_left', cfg.dashTextColor);
+        if (prevLabel) label.delete(prevLabel);
+        prevLabel = lab;
+      }
+      // if scr_label != '': alert('Estatus segun estrategia\n' + scr_label, freq = alert.freq_once_per_bar_close)
+      alertCalls.push({ time: t, message: 'Estatus segun estrategia\n' + text, freq: 'once_per_bar_close' });
     }
   }
   setDrawingBar(null);
@@ -814,10 +821,14 @@ export function calculate(
     bgColors,
     markers,
     ...drawingOutputs(bars),
+    alertCalls,
   };
 }
 
 const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export const MultpileStrategies = {
   calculate,
@@ -825,4 +836,5 @@ export const MultpileStrategies = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

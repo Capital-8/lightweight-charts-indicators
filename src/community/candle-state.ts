@@ -39,9 +39,11 @@ export function calculate(
   _inputs: Partial<CandleStateInputs> = {},
 ): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
   const markers: MarkerData[] = [];
-  // plotshape(..., location = location.abovebar), default size (size.auto)
-  const up = (time: number) => markers.push({ time, position: 'aboveBar', shape: 'triangleUp', color: color.green, size: 'auto' });
-  const down = (time: number) => markers.push({ time, position: 'aboveBar', shape: 'triangleDown', color: color.red, size: 'auto' });
+  // plotshape(..., location = location.abovebar), default size (size.auto); id: shape<k> of the k-th plotshape
+  const up = (time: number, id: string) =>
+    markers.push({ id, time, position: 'aboveBar', shape: 'triangleUp', color: color.green, size: 'auto' });
+  const down = (time: number, id: string) =>
+    markers.push({ id, time, position: 'aboveBar', shape: 'triangleDown', color: color.red, size: 'auto' });
   bars.forEach((b, i) => {
     // high[1] / low[1] are na on the first bar: the comparisons are false
     const barResult1 = i > 0 && gt(b.high, bars[i - 1].high);
@@ -50,15 +52,15 @@ export function calculate(
     const isRedCandle = lt(b.close, b.open);
     const isType3 = barResult1 && barResult2;
     // Pine plotshape order: Bar State Up, Bar State Down, Type 3 Red Base / Top, Type 3 Green Base / Top
-    if (barResult1 && !isType3) up(b.time);
-    if (barResult2 && !isType3) down(b.time);
+    if (barResult1 && !isType3) up(b.time, 'shape0');
+    if (barResult2 && !isType3) down(b.time, 'shape1');
     if (isType3 && isRedCandle) {
-      up(b.time);
-      down(b.time);
+      up(b.time, 'shape2');
+      down(b.time, 'shape3');
     }
     if (isType3 && isGreenCandle) {
-      down(b.time);
-      up(b.time);
+      down(b.time, 'shape4');
+      up(b.time, 'shape5');
     }
   });
   return {

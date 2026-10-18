@@ -6,6 +6,8 @@
  * probability of the loop score and the long-term probability of the SMA of the loop score over `length` bars.
  * The signal is the EMA(2) of the mean of both probabilities (in %): +1 above 50, -1 otherwise. It is drawn as
  * circles with a fill to zero, the price bars take its colour, and L / S markers show the crosses of zero.
+ * Alerts (alertcondition, `alerts` of the result): 'Dual Bayesian Bullish Cross' / 'Dual Bayesian Bearish Cross', true
+ * on the crosses of zero of the signal.
  *
  * Reference: "Dual Bayesian For Loop [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DualBayesianForLoopInputs {
   /** Price source */
@@ -81,7 +84,7 @@ function bayesian(v: number): number {
 export function calculate(
   bars: Bar[],
   inputs: Partial<DualBayesianForLoopInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -113,14 +116,17 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // ta.crossover(binary_signal, 0) / ta.crossunder(binary_signal, 0)
-    if (i > 0 && binary[i] > 0 && binary[i - 1] <= 0) {
+    bullFlags.push(i > 0 && binary[i] > 0 && binary[i - 1] <= 0);
+    bearFlags.push(i > 0 && binary[i] < 0 && binary[i - 1] >= 0);
+    if (bullFlags[i]) {
       markers.push({ time: t, position: 'belowBar', shape: 'circle', color: cfg.bullCol, text: '𝑳',
         textColor: cfg.bullCol, size: 'tiny', forceOverlay: true });
     }
-    if (i > 0 && binary[i] < 0 && binary[i - 1] >= 0) {
+    if (bearFlags[i]) {
       markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: cfg.bearCol, text: '𝑺',
         textColor: cfg.bearCol, size: 'tiny', forceOverlay: true });
     }
@@ -152,8 +158,16 @@ export function calculate(
     }],
     markers,
     barColors,
+    // alertcondition(ta.crossover(binary_signal, 0)) / alertcondition(ta.crossunder(binary_signal, 0))
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Dual Bayesian Bullish Cross', message: 'Dual Bayesian Bullish Cross {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Dual Bayesian Bearish Cross', message: 'Dual Bayesian Bearish Cross {{exchange}}:{{ticker}}' },
+];
 
 export const DualBayesianForLoop = {
   calculate,
@@ -161,4 +175,5 @@ export const DualBayesianForLoop = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

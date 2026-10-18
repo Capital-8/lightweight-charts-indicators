@@ -8,7 +8,8 @@
  * candle and closes inside the previous candle range.
  * A triangle marks each pattern, and on the pattern bar the CRT High / CRT Low plots give the highest high and the
  * lowest low of the two candles (na on the other bars).
- * The Pine alertconditions (bullish / bearish CRT) have no chart output.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish CRT Alert' and 'Bearish CRT Alert', true on the pattern
+ * bars.
  *
  * Reference: "Candle Range Trading (CRT) with Alerts" by marcostan93
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +17,7 @@
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CandleRangeTradingInputs {
   /** Show the CRT High / CRT Low plots */
@@ -41,13 +43,17 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<CandleRangeTradingInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<CandleRangeTradingInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { showBox } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
   const markers: MarkerData[] = [];
   const plot0: { time: number; value: number }[] = new Array(n);
   const plot1: { time: number; value: number }[] = new Array(n);
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -59,6 +65,8 @@ export function calculate(bars: Bar[], inputs: Partial<CandleRangeTradingInputs>
 
     const bearishCRT = close1 > open1 && b.close < b.open && b.high > high1 && b.close <= high1 && b.close >= low1;
     const bullishCRT = close1 < open1 && b.close > b.open && b.low < low1 && b.close <= high1 && b.close >= low1;
+    bullFlags.push(bullishCRT);
+    bearFlags.push(bearishCRT);
 
     // plotshape(bullishCRT, 'Bullish CRT', shape.triangleup, location.belowbar, color.green, size = size.small)
     if (bullishCRT) {
@@ -79,8 +87,16 @@ export function calculate(bars: Bar[], inputs: Partial<CandleRangeTradingInputs>
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
     markers,
+    // alertcondition(bullishCRT, 'Bullish CRT Alert') / alertcondition(bearishCRT, 'Bearish CRT Alert')
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish CRT Alert', message: 'Bullish CRT Pattern Detected' },
+  { id: 'alert1', title: 'Bearish CRT Alert', message: 'Bearish CRT Pattern Detected' },
+];
 
 export const CandleRangeTrading = {
   calculate,
@@ -88,4 +104,5 @@ export const CandleRangeTrading = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

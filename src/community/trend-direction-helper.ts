@@ -273,16 +273,16 @@ export function calculate(
           const [v2, v1, v0] = [at(topHighs, topHighs.length - 3), at(topHighs, topHighs.length - 2), high[i - 2]];
           const higherHigh = gt(v0, v1) && gt(v0, v2);
           const lowerHigh = gt(v1, v0) && gt(v2, v0);
-          if (cfg.showHHLL && higherHigh) markers.push({ time, position: 'aboveBar', shape: 'square', color: MAROON, text: '[HH]', textColor: PLOT_BLUE });
-          if (cfg.showHHLL && lowerHigh) markers.push({ time, position: 'aboveBar', shape: 'square', color: MAROON, text: '[LH]', textColor: PLOT_BLUE });
+          if (cfg.showHHLL && higherHigh) markers.push({ time, position: 'aboveBar', shape: 'square', color: MAROON, text: '[HH]', textColor: PLOT_BLUE, id: 'shape0' });
+          if (cfg.showHHLL && lowerHigh) markers.push({ time, position: 'aboveBar', shape: 'square', color: MAROON, text: '[LH]', textColor: PLOT_BLUE, id: 'shape1' });
         }
         if (bot) {
           botLows.push(low[i - 2]);
           const [v2, v1, v0] = [at(botLows, botLows.length - 3), at(botLows, botLows.length - 2), low[i - 2]];
           const higherLow = gt(v0, v1) && gt(v0, v2);
           const lowerLow = gt(v1, v0) && gt(v2, v0);
-          if (cfg.showHHLL && higherLow) markers.push({ time, position: 'belowBar', shape: 'square', color: GREEN, text: '[HL]', textColor: PLOT_BLUE });
-          if (cfg.showHHLL && lowerLow) markers.push({ time, position: 'belowBar', shape: 'square', color: GREEN, text: '[LL]', textColor: PLOT_BLUE });
+          if (cfg.showHHLL && higherLow) markers.push({ time, position: 'belowBar', shape: 'square', color: GREEN, text: '[HL]', textColor: PLOT_BLUE, id: 'shape2' });
+          if (cfg.showHHLL && lowerLow) markers.push({ time, position: 'belowBar', shape: 'square', color: GREEN, text: '[LL]', textColor: PLOT_BLUE, id: 'shape3' });
         }
       }
 

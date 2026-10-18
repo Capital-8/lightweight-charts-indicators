@@ -9,6 +9,9 @@
  * The wave is filled to zero with a gradient whose opacity follows the wave, volume and flow alignment strength;
  * an SMA of the wave is the smoothed trend line, and bars take a bearish-to-bullish gradient of the wave.
  * The presets replace the four periods, as in Pine.
+ * Alerts (alertcondition, `alerts` of the result): wave crossing above / below zero, either, reversals from the
+ * overbought / oversold levels (as the original writes them: at or beyond the level and crossing back on the same
+ * bar, so they never fire), and the wave at or beyond the overbought / oversold level.
  *
  * Reference: "Smart Money Flow Signals [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +19,7 @@
 
 import { ta, math, getSourceSeries, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type SmartMoneyPreset = 'Default' | 'Fast Response' | 'Smooth Trend';
 export type SmartMoneyColorPreset = 'Classic' | 'Aqua' | 'Cosmic' | 'Ember' | 'Neon' | 'Custom';
@@ -107,6 +111,7 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 const ne = (a: number, b: number) => Math.abs(a - b) > EPS;
 /** Division whose denominator is guarded by the Pine code (or is |overbought level| >= 20): never 0 here */
 const div = (a: number, b: number) => (b === 0 ? NaN : a / b);
@@ -114,7 +119,7 @@ const div = (a: number, b: number) => (b === 0 ? NaN : a / b);
 export function calculate(
   bars: Bar[],
   inputs: Partial<SmartMoneyFlowSignalsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   let { momentumChannelPeriod, trendPeriod, mfiPeriod, signalSmoothing } = cfg;
   if (cfg.presetConfig === 'Fast Response') {
@@ -168,8 +173,7 @@ export function calculate(
   const volumeStrength = volumeSma.map((va, i) => (ne(va, 0) ? div(volume[i], va) : 1));
   const volumeWeight = volumeStrength.map((v) => Math.log(v + 1));
 
-  // Not computed: pressure_ratio (buy / sell pressure, used by no Pine output) and the signal conditions (only used
-  // by Pine alertconditions).
+  // Not computed: pressure_ratio (buy / sell pressure, used by no output of the original).
 
   // Volume-weighted momentum
   const esa = A(ta.ema(S(src), momentumChannelPeriod));
@@ -217,6 +221,17 @@ export function calculate(
     }
   }
 
+  // Signals of the alertconditions
+  const bullishSignal = crossedOver(compositeWave, 0);
+  const bearishSignal = crossedUnder(compositeWave, 0);
+  const extremeOverbought = compositeWave.map((w) => ge(w, overboughtLevel));
+  const extremeOversold = compositeWave.map((w) => le(w, oversoldLevel));
+  const obCross = crossedUnder(compositeWave, overboughtLevel);
+  const osCross = crossedOver(compositeWave, oversoldLevel);
+  const overboughtReversal = extremeOverbought.map((x, i) => x && obCross[i]);
+  const oversoldReversal = extremeOversold.map((x, i) => x && osCross[i]);
+  const anyChange = bullishSignal.map((x, i) => x || bearishSignal[i]);
+
   const constant = (v: number) => bars.map((b) => ({ time: b.time, value: v }));
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -231,8 +246,22 @@ export function calculate(
     fills: [{ plot1: 'plot1', plot2: 'plot0', options: { title: 'Flow Gradient' }, colors: fillColors }],
     markers: [],
     barColors,
+    alerts: alertStates(alertConditions, bars, [
+      bullishSignal, bearishSignal, anyChange, overboughtReversal, oversoldReversal, extremeOverbought, extremeOversold,
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Flow', message: 'Smart Money Flow: BULLISH crossover detected! Money flowing INTO {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Flow', message: 'Smart Money Flow: BEARISH crossover detected! Money flowing OUT of {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Any Flow Direction Change', message: 'Smart Money Flow: Direction change detected! Check chart {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert3', title: 'Overbought Reversal', message: 'Smart Money Flow: OVERBOUGHT reversal signal! Potential bearish reversal {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert4', title: 'Oversold Reversal', message: 'Smart Money Flow: OVERSOLD reversal signal! Potential bullish reversal {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert5', title: 'Extreme Overbought', message: 'Smart Money Flow: EXTREME overbought conditions! {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert6', title: 'Extreme Oversold', message: 'Smart Money Flow: EXTREME oversold conditions! {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const SmartMoneyFlowSignals = {
   calculate,
@@ -240,4 +269,5 @@ export const SmartMoneyFlowSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

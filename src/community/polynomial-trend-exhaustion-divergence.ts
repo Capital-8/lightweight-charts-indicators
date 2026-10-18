@@ -9,6 +9,9 @@
  * `divExtrapolate` bars ahead; when price fell over the lookback while the forecast is above the close (bullish), or
  * the reverse (bearish), by at least some ATRs and for some bars in a row, a DIV label is drawn (with a cooldown).
  * Exhaustion signals are crosses at one signal offset (ATR) from the smoothed high / low, divergence labels at two.
+ * The markers carry the ids of the original's plotshape outputs (shape0..shape3). Alerts (alertcondition, `alerts`
+ * of the result): 'Bull Exhaustion', 'Bear Exhaustion', 'Bullish Divergence', 'Bearish Divergence', true on the bars
+ * of each signal.
  *
  * Reference: "Polynomial Trend Exhaustion & Divergence" by B3AR_Trades
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +21,7 @@ import {
   ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PolynomialTrendExhaustionDivergenceInputs {
   smoothingType: 'None' | 'LinReg Blend' | 'Kalman';
@@ -235,7 +239,7 @@ function cubicFit(src: number[], i: number, len: number): [number, number, numbe
 export function calculate(
   bars: Bar[],
   inputs: Partial<PolynomialTrendExhaustionDivergenceInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const nBars = bars.length;
   const s = (f: (b: Bar) => number) => new Series(bars, f);
@@ -310,6 +314,7 @@ export function calculate(
   }
 
   const markers: MarkerData[] = [];
+  const flags: boolean[][] = [[], [], [], []];
   let prevSlope = NaN;
   let bullExhaustionCount = 0;
   let bearExhaustionCount = 0;
@@ -410,28 +415,41 @@ export function calculate(
     if (bearishDivRaw) barsSinceBearDiv = 0;
     const bullishDiv = bullishDivRaw && barsSinceBullDiv === 0;
     const bearishDiv = bearishDivRaw && barsSinceBearDiv === 0;
+    flags[0].push(bullExhaustion);
+    flags[1].push(bearExhaustion);
+    flags[2].push(bullishDiv);
+    flags[3].push(bearishDiv);
 
     // plotshape(..., location.absolute): no shape when the price is na
     const push = (on: boolean, price: number, m: Omit<MarkerData, 'time' | 'price'>) => {
       if (on && Number.isFinite(price)) markers.push({ time: b.time, price, ...m });
     };
     push(bullExhaustion, smoothHigh[i] + atr * cfg.signalOffset,
-      { position: 'atPriceMiddle', shape: 'xcross', color: cfg.bullExhaustionColor, size: 'tiny' });
+      { position: 'atPriceMiddle', shape: 'xcross', color: cfg.bullExhaustionColor, size: 'tiny', id: 'shape0' });
     push(bearExhaustion, smoothLow[i] - atr * cfg.signalOffset,
-      { position: 'atPriceMiddle', shape: 'xcross', color: cfg.bearExhaustionColor, size: 'tiny' });
+      { position: 'atPriceMiddle', shape: 'xcross', color: cfg.bearExhaustionColor, size: 'tiny', id: 'shape1' });
     push(bullishDiv, smoothLow[i] - atr * cfg.signalOffset * 2,
       { position: 'atPriceBottom', shape: 'labelUp', color: cfg.bullishDivColor, size: 'tiny', text: 'DIV',
-        textColor: '#FFFFFF' });
+        textColor: '#FFFFFF', id: 'shape2' });
     push(bearishDiv, smoothHigh[i] + atr * cfg.signalOffset * 2,
       { position: 'atPriceTop', shape: 'labelDown', color: cfg.bearishDivColor, size: 'tiny', text: 'DIV',
-        textColor: '#FFFFFF' });
+        textColor: '#FFFFFF', id: 'shape3' });
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const PolynomialTrendExhaustionDivergence = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bull Exhaustion', message: 'Exhaustion+Div → Bull Exhaustion Warning' },
+  { id: 'alert1', title: 'Bear Exhaustion', message: 'Exhaustion+Div → Bear Exhaustion Warning' },
+  { id: 'alert2', title: 'Bullish Divergence', message: 'Exhaustion+Div → Bullish Divergence' },
+  { id: 'alert3', title: 'Bearish Divergence', message: 'Exhaustion+Div → Bearish Divergence' },
+];
+
+export const PolynomialTrendExhaustionDivergence = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

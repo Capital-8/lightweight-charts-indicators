@@ -6,6 +6,8 @@
  * below the smoothing line). The area between the two lines is filled green when the MA is above the smoothing line,
  * red otherwise; the area between the price and the MA is filled green when the MA rises, red otherwise. Optional
  * arrows mark the colour changes (red to green, green to red).
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Color Change' / 'Bearish Color Change' on the bars of the
+ * red-to-green / green-to-red changes, when "Enable Alerts" is on.
  *
  * Reference: "UM EMA SMA WMA HMA with Directional Color Change" by UnderwearMillionaire
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 
 export type UmSourceOption = 'Close' | 'Open' | 'High' | 'Low' | 'OHLC4';
@@ -32,7 +35,7 @@ export interface UmEmaSmaWmaHmaWithDirectionalColorChangeInputs {
   smoothingLength: number;
   /** Show the colour change arrows */
   showArrows: boolean;
-  /** Enable the alerts (no output in the port) */
+  /** Enable the alerts (the two alert conditions are false when off) */
   enableAlerts: boolean;
 }
 
@@ -87,7 +90,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<UmEmaSmaWmaHmaWithDirectionalColorChangeInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series | number[]) => (Array.isArray(s) ? s : s.toArray()).map((v) => v ?? NaN);
@@ -146,11 +149,15 @@ export function calculate(
   const markers: MarkerData[] = [];
   const maFill: string[] = new Array(n);
   const priceFill: string[] = new Array(n);
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     // plotLong = outPrevColor == red and outCurrColor == green (outPrevColor: the same test on bar i - 1, red on bar 0)
     const prevUp = i > 0 && up[i - 1];
     const plotLong = !prevUp && up[i];
     const plotShort = prevUp && !up[i];
+    longFlags.push(plotLong && cfg.enableAlerts);
+    shortFlags.push(plotShort && cfg.enableAlerts);
     if (cfg.showArrows && plotLong) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: color.green });
     }
@@ -175,8 +182,16 @@ export function calculate(
       { plot1: 'plot2', plot2: 'plot0', colors: priceFill },
     ],
     markers,
+    // alertcondition(plotLong and enableAlerts) / alertcondition(plotShort and enableAlerts)
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Color Change', message: 'MA and Smoothing Line Bullish Color Change (Red to Green)' },
+  { id: 'alert1', title: 'Bearish Color Change', message: 'MA and Smoothing Line Bearish Color Change (Green to Red)' },
+];
 
 export const UmEmaSmaWmaHmaWithDirectionalColorChange = {
   calculate,
@@ -184,4 +199,5 @@ export const UmEmaSmaWmaHmaWithDirectionalColorChange = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

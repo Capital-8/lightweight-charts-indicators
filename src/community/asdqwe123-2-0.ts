@@ -6,6 +6,7 @@
  * running mean of the close ((b1[1] * (Period - 1) + close) / Period, seeded by SMA(close, Period)). Buy when
  * a4 <= xl and close > b1, sell when a4 >= xh and close < b1; the state (1 / -1) colours the bars green / red and
  * BUY / SELL labels mark its changes. ATR bands: close +- ATR(ATR Period) * multiplier.
+ * Alerts (alertcondition, `alerts` of the result): 'PC Long' / 'PC Short' on the bars of the BUY / SELL labels.
  *
  * Reference: "Purple Cloud 2.0 [ATP]" by luvuoov
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PurpleCloud20AtpInputs {
   /** Supertrend ATR length (the script computes ta.supertrend but no output uses it) */
@@ -71,7 +73,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<PurpleCloud20AtpInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const x1 = cfg.x1;
@@ -101,6 +103,7 @@ export function calculate(
   const barColors: BarColorData[] = [];
   const plot0: { time: number; value: number }[] = [];
   const plot1: { time: number; value: number }[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
   let b1Prev = NaN;
   let xsPrev = NaN; // xs[1] (na before bar 0)
   for (let i = 0; i < n; i++) {
@@ -116,6 +119,9 @@ export function calculate(
     // xs != xs[1]: false when xs[1] is na
     const changed = !isNaN(xs) && !isNaN(xsPrev) && xs !== xsPrev;
 
+    // alertcondition(buy and xs != xs[1], 'PC Long') / alertcondition(sell and xs != xs[1], 'PC Short')
+    longFlags.push(buy && changed);
+    shortFlags.push(sell && changed);
     if (xs === 1) barColors.push({ time: t, color: color.green });
     else if (xs === -1) barColors.push({ time: t, color: color.red });
     if (buy && changed) {
@@ -139,8 +145,15 @@ export function calculate(
     plots: { plot0, plot1 },
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'PC Long', message: 'PC Long' },
+  { id: 'alert1', title: 'PC Short', message: 'PC Short' },
+];
 
 export const PurpleCloud20Atp = {
   calculate,
@@ -148,4 +161,5 @@ export const PurpleCloud20Atp = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

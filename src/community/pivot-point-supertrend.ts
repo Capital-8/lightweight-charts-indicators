@@ -5,12 +5,15 @@
  * centre by center = (center * 2 + pivot) / 3. The bands are center -/+ Factor * ATR, trailed like
  * a SuperTrend. Buy / Sell on a trend change, optional pivot labels, centre line and
  * support / resistance levels.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Signal' / 'Sell Signal' on a trend change up / down, and
+ * 'Trend Changed' on either.
  *
  * Reference: "Pivot Point SuperTrend" by LonesomeTheBlue
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PivotPointSupertrendInputs {
   pivotLen: number;
@@ -60,7 +63,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<PivotPointSupertrendInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<PivotPointSupertrendInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { pivotLen: prd, atrFactor: Factor, atrLen: Pd, showPivot, showLabel, showCl, showSr } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -184,7 +187,21 @@ export function calculate(bars: Bar[], inputs: Partial<PivotPointSupertrendInput
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3 },
     markers,
+    // alertcondition(Trend == 1 and Trend[1] == -1) / (Trend == -1 and Trend[1] == 1) / (change(Trend)); Trend[1] is
+    // na on the first bar
+    alerts: alertStates(alertConditions, bars, [
+      trendArr.map((t, i) => i > 0 && t === 1 && trendArr[i - 1] === -1),
+      trendArr.map((t, i) => i > 0 && t === -1 && trendArr[i - 1] === 1),
+      trendArr.map((t, i) => i > 0 && t !== trendArr[i - 1]),
+    ]),
   };
 }
 
-export const PivotPointSupertrend = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Buy Signal' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Sell Signal' },
+  { id: 'alert2', title: 'Trend Changed', message: 'Trend Changed' },
+];
+
+export const PivotPointSupertrend = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

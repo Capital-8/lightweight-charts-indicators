@@ -7,6 +7,8 @@
  * zero, circles the first bar after a squeeze (both filtered by the close against an SMA filter when enabled).
  * Candles are coloured yellow in a squeeze, else green / red by the momentum sign. Pivot divergences between the
  * momentum and the price give Bull / Bear labels.
+ * Alerts (alertcondition, `alerts` of the result): bull / bear cross of zero, first bar after a squeeze long / short,
+ * bullish / bearish divergence (on the bar that confirms the pivot), true on the bars of each signal.
  *
  * Reference: "SMA Squeeze Oscillator" by Uncle_the_shooter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, PlotCandleData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SmaSqueezeOscillatorInputs {
   /** SMA 1 length (squeeze and momentum) */
@@ -121,7 +124,8 @@ type Gradient = { topValue: number[]; bottomValue: number[]; topColor: Array<str
 export function calculate(
   bars: Bar[],
   inputs: Partial<SmaSqueezeOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -220,6 +224,7 @@ export function calculate(
   const gSqBull = newGradient();
   const gSqBear = newGradient();
   const squeezeFill: string[] = new Array(n);
+  const flags: boolean[][] = alertConditions.map(() => []);
   const setGrad = (g: Gradient, i: number, on: boolean, top: number, bottom: number, topC: string, bottomC: string) => {
     g.topValue[i] = on ? top : NaN;
     g.bottomValue[i] = on ? bottom : NaN;
@@ -250,20 +255,28 @@ export function calculate(
     setGrad(gSqBear, i, sq && neg, 0, m, sqFade, sqStrong);
 
     // Cross signals (diamonds at the momentum)
-    if (crossUp[i] && trendUp && !isNaN(m)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: m, shape: 'diamond', color: cfg.bullCrossColor, size: 'small' });
+    const bullCross = !!crossUp[i] && trendUp && !isNaN(m);
+    const bearCross = !!crossDown[i] && trendDown && !isNaN(m);
+    if (bullCross) {
+      markers.push({ id: 'shape0', time: t, position: 'atPriceMiddle', price: m, shape: 'diamond', color: cfg.bullCrossColor, size: 'small' });
     }
-    if (crossDown[i] && trendDown && !isNaN(m)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: m, shape: 'diamond', color: cfg.bearCrossColor, size: 'small' });
+    if (bearCross) {
+      markers.push({ id: 'shape1', time: t, position: 'atPriceMiddle', price: m, shape: 'diamond', color: cfg.bearCrossColor, size: 'small' });
     }
     // First bar after a squeeze (circles at the momentum)
     const nowOutOfSqueeze = !sq && i > 0 && isSqueeze[i - 1];
-    if (nowOutOfSqueeze && pos && trendUp) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: m, shape: 'circle', color: cfg.firstLongColor, size: 'small' });
+    const firstLong = nowOutOfSqueeze && pos && trendUp;
+    const firstShort = nowOutOfSqueeze && neg && trendDown;
+    if (firstLong) {
+      markers.push({ id: 'shape2', time: t, position: 'atPriceMiddle', price: m, shape: 'circle', color: cfg.firstLongColor, size: 'small' });
     }
-    if (nowOutOfSqueeze && neg && trendDown) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: m, shape: 'circle', color: cfg.firstShortColor, size: 'small' });
+    if (firstShort) {
+      markers.push({ id: 'shape3', time: t, position: 'atPriceMiddle', price: m, shape: 'circle', color: cfg.firstShortColor, size: 'small' });
     }
+    // alertcondition(bullCross / bearCross / firstAfterSqueezeLong / firstAfterSqueezeShort /
+    //   calculateDivergence and bullCond / calculateDivergence and bearCond)
+    [bullCross, bearCross, firstLong, firstShort, cfg.calculateDivergence && bullCond[i], cfg.calculateDivergence && bearCond[i]]
+      .forEach((f, k) => flags[k].push(f));
 
     // Wave candles: barcolor and plotcandle(force_overlay = true); colour na draws nothing
     const wave = sq ? sqStrong : pos ? colBullStrong : neg ? colBearStrong : null;
@@ -282,11 +295,11 @@ export function calculate(
       plots.plot4.push({ time: tp, value: cfg.calculateDivergence && phFound[i] ? o : NaN,
         color: cfg.calculateDivergence && bearCond[i] ? cfg.bearColor : 'transparent' });
       if (cfg.calculateDivergence && bullCond[i] && !isNaN(o)) {
-        markers.push({ time: tp, position: 'atPriceBottom', price: o, shape: 'labelUp', color: bullLabel, text: 'Bull',
+        markers.push({ id: 'shape4', time: tp, position: 'atPriceBottom', price: o, shape: 'labelUp', color: bullLabel, text: 'Bull',
           textColor: cfg.textColor, size: 'small' });
       }
       if (cfg.calculateDivergence && bearCond[i] && !isNaN(o)) {
-        markers.push({ time: tp, position: 'atPriceTop', price: o, shape: 'labelDown', color: bearLabel, text: 'Bear',
+        markers.push({ id: 'shape5', time: tp, position: 'atPriceTop', price: o, shape: 'labelDown', color: bearLabel, text: 'Bear',
           textColor: cfg.textColor, size: 'small' });
       }
     }
@@ -309,8 +322,19 @@ export function calculate(
     markers,
     barColors,
     plotCandles: { waveCandles: candles },
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bull Cross Alert', message: 'Momentum crossed above zero' },
+  { id: 'alert1', title: 'Bear Cross Alert', message: 'Momentum crossed below zero' },
+  { id: 'alert2', title: '1st after Squeeze LONG Alert', message: 'First bullish momentum after squeeze' },
+  { id: 'alert3', title: '1st after Squeeze SHORT Alert', message: 'First bearish momentum after squeeze' },
+  { id: 'alert4', title: 'Bullish Divergence Alert', message: 'Bullish divergence detected on momentum' },
+  { id: 'alert5', title: 'Bearish Divergence Alert', message: 'Bearish divergence detected on momentum' },
+];
 
 export const SmaSqueezeOscillator = {
   calculate,
@@ -318,4 +342,5 @@ export const SmaSqueezeOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

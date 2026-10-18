@@ -111,10 +111,9 @@ export function calculate(bars: Bar[], inputs: Partial<PringSpecialKA2mInputs> =
   };
 
   // fill(bbUpperBand, bbLowerBand, color.new(color.green, 90), "BB Fill", display = isBB ? display.all : display.none)
-  const fills = isBB
-    ? [{ plot1: 'plot2', plot2: 'plot3', options: { title: 'BB Fill' },
-        colors: new Array<string>(n).fill(String(color.new(color.green, 90))) }]
-    : [];
+  // The fill is always declared (Style settings); without the bands (display.none) it draws nothing
+  const fills = [{ plot1: 'plot2', plot2: 'plot3', options: { title: 'BB Fill' },
+    colors: new Array<string>(n).fill(isBB ? String(color.new(color.green, 90)) : 'transparent') }];
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },

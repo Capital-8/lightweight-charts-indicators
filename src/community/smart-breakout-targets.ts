@@ -35,7 +35,9 @@
  * - `chart.timeframe`: the chart timeframe of the dashboard and of the higher timeframe; else read from the bars.
  *   `timezone` / `session`: the periods of the higher timeframe follow the exchange calendar.
  *
- * Limit of the port: the alerts (6 alert() calls, text or JSON messages) give no output.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): early close, bull breakout, bear breakout,
+ * TP1 / TP2 / TP3 hit and SL hit, as text or (with "Webhook JSON Format") JSON messages built as the original does
+ * (ticker id `chart.tickerid`, chart timeframe, prices in the symbol tick).
  *
  * Reference: "Smart Breakout Targets [WillyAlgoTrader]" by WillyAlgoTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -48,7 +50,11 @@ import {
 } from 'oakscriptjs';
 import type { BgColorData, BoxData, LabelData, LineDrawingData, LinefillData, TableData, TablePosition } from '../types';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
-import { backgroundColorOf, lastBarConfirmedOf, mintickOf, type ChartContext } from '../chart-context';
+import { backgroundColorOf, lastBarConfirmedOf, mintickOf, tickeridOf, type ChartContext } from '../chart-context';
+import type { AlertCall } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type SizeName = 'Auto' | 'Tiny' | 'Small' | 'Normal' | 'Large' | 'Huge';
 
@@ -286,7 +292,7 @@ export function calculate(
   chart?: ChartContext,
 ): IndicatorResult & {
   boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[]; linefills: LinefillData[]; tables: TableData[];
-  bgColors: BgColorData[];
+  bgColors: BgColorData[]; alertCalls: AlertCall[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -420,6 +426,10 @@ export function calculate(
   let signalStrength = 0;
 
   const bgColors: BgColorData[] = [];
+  const alertCalls: AlertCall[] = [];
+  // syminfo.tickerid and timeframe.period ("D" for 1D) of the alert messages
+  const tickerStr = tickeridOf(chart);
+  const tfStr = chartTf.replace(/^1([DWM])$/, '$1');
 
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === n - 1);
@@ -610,6 +620,8 @@ export function calculate(
     }
 
     // ── TP / SL hit detection ──
+    let tp1HitCond = false;
+    let tp2HitCond = false;
     let tp3HitCond = false;
     let slHitCond = false;
     let tradeClosed = false;
@@ -624,8 +636,8 @@ export function calculate(
           lossCount += 1;
         }
         if (!tradeClosed) {
-          if (!tp1Done && !isNaN(lastTP1) && ge(b.high, lastTP1)) tp1Done = true;
-          if (!tp2Done && !isNaN(lastTP2) && ge(b.high, lastTP2)) tp2Done = true;
+          if (!tp1Done && !isNaN(lastTP1) && ge(b.high, lastTP1)) tp1HitCond = tp1Done = true;
+          if (!tp2Done && !isNaN(lastTP2) && ge(b.high, lastTP2)) tp2HitCond = tp2Done = true;
           if (!isNaN(lastTP3) && ge(b.high, lastTP3)) {
             tp3HitCond = true;
             tradeClosed = true;
@@ -646,8 +658,8 @@ export function calculate(
           lossCount += 1;
         }
         if (!tradeClosed) {
-          if (!tp1Done && !isNaN(lastTP1) && le(b.low, lastTP1)) tp1Done = true;
-          if (!tp2Done && !isNaN(lastTP2) && le(b.low, lastTP2)) tp2Done = true;
+          if (!tp1Done && !isNaN(lastTP1) && le(b.low, lastTP1)) tp1HitCond = tp1Done = true;
+          if (!tp2Done && !isNaN(lastTP2) && le(b.low, lastTP2)) tp2HitCond = tp2Done = true;
           if (!isNaN(lastTP3) && le(b.low, lastTP3)) {
             tp3HitCond = true;
             tradeClosed = true;
@@ -850,6 +862,48 @@ export function calculate(
       table.cell(wm, 0, 0, 'WillyAlgoTrader', undefined, undefined, WM_COLOR, 'center', undefined, 'normal', clear);
     }
 
+    // ── Alerts: alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close) ──
+    {
+      const priceStr = tick(b.close);
+      const slAlertStr = isNaN(lastSL) ? '0' : tick(lastSL);
+      const tp1AlertStr = isNaN(lastTP1) ? '0' : tick(lastTP1);
+      const tp2AlertStr = isNaN(lastTP2) ? '0' : tick(lastTP2);
+      const tp3AlertStr = isNaN(lastTP3) ? '0' : tick(lastTP3);
+      const pnl = (v: number) => tick(nz(v, 0.0));
+      const send = (json: string, text: string) =>
+        alertCalls.push({ time: b.time as number, message: cfg.webhookInput ? json : text, freq: 'once_per_bar_close' });
+      const levels = `"sl":${slAlertStr},"tp1":${tp1AlertStr},"tp2":${tp2AlertStr},"tp3":${tp3AlertStr}`;
+      const levelsText = `SL: ${slAlertStr} | TP1: ${tp1AlertStr} | TP2: ${tp2AlertStr} | TP3: ${tp3AlertStr}`;
+      if (earlyClose) {
+        send(`{"action":"close","ticker":"${tickerStr}","reason":"new_signal","price":${priceStr},"pnl":${pnl(earlyPnl)},"tf":"${tfStr}"}`,
+          `◼ EARLY CLOSE (new signal) | ${tickerStr} | TF: ${tfStr} | P&L: ${pnl(earlyPnl)}`);
+      }
+      if (bullBreak) {
+        send(`{"action":"buy","ticker":"${tickerStr}","price":${priceStr},${levels},"tf":"${tfStr}"}`,
+          `🟢 BULL BREAKOUT | ${tickerStr} | TF: ${tfStr} | Price: ${priceStr} | ${levelsText}`);
+      }
+      if (bearBreak) {
+        send(`{"action":"sell","ticker":"${tickerStr}","price":${priceStr},${levels},"tf":"${tfStr}"}`,
+          `🔴 BEAR BREAKOUT | ${tickerStr} | TF: ${tfStr} | Price: ${priceStr} | ${levelsText}`);
+      }
+      if (tp1HitCond) {
+        send(`{"action":"tp","ticker":"${tickerStr}","level":1,"price":${tp1AlertStr},"tf":"${tfStr}"}`,
+          `✅ TP1 HIT | ${tickerStr} | TF: ${tfStr} | Level: ${tp1AlertStr}`);
+      }
+      if (tp2HitCond) {
+        send(`{"action":"tp","ticker":"${tickerStr}","level":2,"price":${tp2AlertStr},"tf":"${tfStr}"}`,
+          `✅ TP2 HIT | ${tickerStr} | TF: ${tfStr} | Level: ${tp2AlertStr}`);
+      }
+      if (tp3HitCond) {
+        send(`{"action":"close","ticker":"${tickerStr}","reason":"tp3","price":${tp3AlertStr},"pnl":${pnl(lastPnl)},"tf":"${tfStr}"}`,
+          `✅ TP3 HIT — TRADE CLOSED | ${tickerStr} | TF: ${tfStr} | Level: ${tp3AlertStr} | P&L: ${pnl(lastPnl)}`);
+      }
+      if (slHitCond) {
+        send(`{"action":"close","ticker":"${tickerStr}","reason":"sl","price":${slAlertStr},"pnl":${pnl(lastPnl)},"tf":"${tfStr}"}`,
+          `❌ SL HIT — TRADE CLOSED | ${tickerStr} | TF: ${tfStr} | Level: ${slAlertStr} | P&L: ${pnl(lastPnl)}`);
+      }
+    }
+
     // history of the bar for the next one
     prevIsSqueeze = isSqueeze;
     prevSqueezeBars = squeezeBars;
@@ -869,7 +923,8 @@ export function calculate(
     linefills: out.linefills ?? [],
     tables: out.tables ?? [],
     bgColors,
+    alertCalls,
   };
 }
 
-export const SmartBreakoutTargets = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const SmartBreakoutTargets = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

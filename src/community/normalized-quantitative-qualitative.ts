@@ -6,6 +6,10 @@
  * bands, and the slow line is a trailing level that follows them. The fast line is also drawn as columns coloured by
  * the zone (above 10 green, below -10 red, else yellow). Optional Buy / Sell labels on the crossings of the two lines.
  *
+ * Alerts (alertcondition, `alerts` of the result): the 8 conditions of the original on the fast line (QQEF, before
+ * the -50 shift) and the slow line: any cross, crossover / crossunder of the two lines, the fast line crossing 50
+ * (up / down), above 60, below 40, and back inside 40..60 (SIDEWAYS).
+ *
  * Reference: "Normalized Quantitative Qualitative Estimation" by KivancOzbilgic
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © KivancOzbilgic
@@ -13,6 +17,37 @@
 
 import { taCore, getSource, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cross Alert', message: 'QQE Crossing Signal!' },
+  { id: 'alert1', title: 'Crossover Alarm', message: 'QQE BUY SIGNAL!' },
+  { id: 'alert2', title: 'Crossunder Alarm', message: 'QQE SELL SIGNAL!' },
+  { id: 'alert3', title: 'Cross 0 Up Alert', message: 'QQE FAST Crossing 0 UP!' },
+  { id: 'alert4', title: 'Cross 0 Down Alert', message: 'QQE FAST Crossing 0 DOWN!' },
+  { id: 'alert5', title: 'Cross 10 Up Alert', message: 'QQE Above 10 UPTREND SIGNAL!' },
+  { id: 'alert6', title: 'Cross -10 Down Alert', message: 'QQE Below -10 DOWNTREND SIGNAL!' },
+  { id: 'alert7', title: 'SIDEWAYS', message: 'QQE Entering Sideways Market!' },
+];
+
+/** The 8 conditions on the (not normalised) QQEF / QQES lines */
+function qqeAlertFlags(qqef: number[], qqes: number[]): boolean[][] {
+  const up = crossedOver(qqef, qqes);
+  const dn = crossedUnder(qqef, qqes);
+  const under60 = crossedUnder(qqef, 60);
+  const over40 = crossedOver(qqef, 40);
+  return [
+    up.map((f, i) => f || dn[i]), // cross(QQEF, QQES)
+    up,
+    dn,
+    crossedOver(qqef, 50),
+    crossedUnder(qqef, 50),
+    crossedOver(qqef, 60),
+    crossedUnder(qqef, 40),
+    under60.map((f, i) => f || over40[i]), // crossunder(QQEF, 60) or crossover(QQEF, 40)
+  ];
+}
 
 export interface NormalizedQuantitativeQualitativeInputs {
   /** Source */
@@ -60,7 +95,7 @@ const nz = (x: number) => (Number.isNaN(x) ? 0 : x);
 export function calculate(
   bars: Bar[],
   inputs: Partial<NormalizedQuantitativeQualitativeInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = getSource(bars, cfg.src);
@@ -131,6 +166,7 @@ export function calculate(
       { value: -10, options: { title: 'Level', color: '#787B86', linestyle: 'dashed' } },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, qqeAlertFlags(Array.from(qqef), qqes)),
   };
 }
 
@@ -140,4 +176,5 @@ export const NormalizedQuantitativeQualitative = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

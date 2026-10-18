@@ -3,12 +3,14 @@
  *
  * Enhanced Ichimoku Cloud with Tenkan-Sen, Kijun-Sen, Chikou Span,
  * Senkou Span A/B cloud with dynamic trend coloring, and cross arrows.
+ * The cloud is the original's two 'Kumo (Cloud)' fills between Span A and Span B: lime where Span A >= Span B, red
+ * where Span A <= Span B. The Tenkan/Kijun crosses are the original's two plotarrow outputs (`arrows` of the result).
  *
  * Reference: "CM_Enhanced Ichimoku Cloud V5" by ChrisMoody (community)
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { ArrowData } from 'oakscriptjs';
 
 export interface CMEnhancedIchimokuInputs {
   conversionLen: number;
@@ -48,7 +50,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<CMEnhancedIchimokuInputs> = {}): Omit<IndicatorResult, 'markers'> {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<CMEnhancedIchimokuInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { arrows: ArrowData[] } {
   const { conversionLen, baseLen, spanBLen, displacement, showCrosses } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -114,29 +119,32 @@ export function calculate(bars: Bar[], inputs: Partial<CMEnhancedIchimokuInputs>
     }
   }
 
-  // Dynamic fill colors: lime cloud when Span A >= Span B, red cloud otherwise
-  const fillColors: string[] = new Array(n);
+  // Cloud fills (the original fills its linebr plots of Span A / B above and below, here the Span A / B plots):
+  // fill(p1, p2, color=lime, transp=70, title='Kumo (Cloud)'): p1 / p2 have values where leadingSpan1 >= leadingSpan2
+  // fill(p3, p4, color=red, transp=70, title='Kumo (Cloud)'): p3 / p4 have values where leadingSpan1 <= leadingSpan2
+  const LIME_FILL = 'rgba(0, 255, 0, 0.30)';
+  const RED_FILL = 'rgba(255, 0, 0, 0.30)';
+  const upColors: string[] = new Array(n);
+  const downColors: string[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const srcIdx = i - displacement;
-    if (srcIdx < 0 || srcIdx < warmup) {
-      fillColors[i] = 'transparent';
-    } else {
-      fillColors[i] = spanAValues[srcIdx] >= spanBValues[srcIdx]
-        ? 'rgba(0, 255, 0, 0.30)' : 'rgba(255, 0, 0, 0.30)';
-    }
+    const shown = !(srcIdx < 0 || srcIdx < warmup);
+    upColors[i] = shown && spanAValues[srcIdx] >= spanBValues[srcIdx] ? LIME_FILL : 'transparent';
+    downColors[i] = shown && spanAValues[srcIdx] <= spanBValues[srcIdx] ? RED_FILL : 'transparent';
   }
 
-  // plotarrow markers for Tenkan/Kijun crosses (Pine: cr1 input, default false)
-  const markers: MarkerData[] = [];
+  // plotarrow(cr1 and cupA ? cupA : na, "CrossUp Tenkan Kinjun Entry Arrow", colorup=yellow) and
+  // plotarrow(cr1 and cdnB*-1 ? cdnB*-1 : na, "CrossDn Tenkan Kinjun Entry Arrow", colordown=yellow)
+  const arrows: ArrowData[] = [];
   if (showCrosses) {
     for (let i = warmup + 1; i < n; i++) {
       // crossUpTenkanKinjun = turning[1] < standard[1] and turning > standard
       if (tenkanArr[i - 1] < kijunArr[i - 1] && tenkanArr[i] > kijunArr[i]) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#FFFF00', text: 'TK Cross Up' });
+        arrows.push({ time: bars[i].time, id: 'arrow0', value: 1, color: '#FFFF00' });
       }
       // crossDnTenkanKinjun = turning[1] > standard[1] and turning < standard
       if (tenkanArr[i - 1] > kijunArr[i - 1] && tenkanArr[i] < kijunArr[i]) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#FFFF00', text: 'TK Cross Dn' });
+        arrows.push({ time: bars[i].time, id: 'arrow1', value: -1, color: '#FFFF00' });
       }
     }
   }
@@ -144,9 +152,12 @@ export function calculate(bars: Bar[], inputs: Partial<CMEnhancedIchimokuInputs>
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': tenkanPlot, 'plot1': kijunPlot, 'plot2': spanAPlot, 'plot3': spanBPlot, 'plot4': chikouPlot },
-    fills: [{ plot1: 'plot2', plot2: 'plot3', options: { color: 'rgba(0, 255, 0, 0.30)' }, colors: fillColors }],
-    markers,
-  } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] };
+    fills: [
+      { plot1: 'plot2', plot2: 'plot3', options: { title: 'Kumo (Cloud)', color: LIME_FILL }, colors: upColors },
+      { plot1: 'plot2', plot2: 'plot3', options: { title: 'Kumo (Cloud)', color: RED_FILL }, colors: downColors },
+    ],
+    arrows,
+  };
 }
 
 export const CMEnhancedIchimoku = { calculate, metadata, defaultInputs, inputConfig, plotConfig };

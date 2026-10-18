@@ -9,6 +9,9 @@
  * bear line in a low zone with momentum, volume and RSI confirmation), position increase, position decrease, exit and
  * weak rebound, drawn as coloured candles between the two lines, as markers, and as strong up / down trend characters.
  * The background shows the market state; columns show |fund trend - bull bear line| / 10.
+ * Alerts (alertcondition, `alerts` of the result): one per signal (banker entry, position increase, position
+ * decrease, exit, weak rebound), and 'Overbought Warning' / 'Oversold Opportunity', whose conditions in the original
+ * (fund trend above 80 and crossing under 80 on the same bar, below 20 and crossing over 20) are never true.
  *
  * Reference: "Advanced Banker Chip Detector Pro" by Dr_Leong_Yee_Rock
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,6 +22,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar,
 } from 'oakscriptjs';
 import type { MarkerData, BgColorData, PlotCandleData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EnhancedKLSEBankerFlowOscillatorInputs {
   smoothLength: number;
@@ -111,7 +115,7 @@ export function calculate(
   inputs: Partial<EnhancedKLSEBankerFlowOscillatorInputs> = {},
 ): Omit<IndicatorResult, 'markers'> & {
   markers: MarkerData[]; bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]>;
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -297,6 +301,10 @@ export function calculate(
   const bull90 = String(color.new(cfg.bullColor, 90));
   const bear90 = String(color.new(cfg.bearColor, 90));
   const finite = (v: number) => (Number.isFinite(v) ? v : NaN);
+  const flags: boolean[][] = [[], [], [], [], [], [], []];
+  // fundtrend_crossunder_fixed_ob = ta.crossunder(fundtrend, 80); fundtrend_crossover_fixed_os = ta.crossover(fundtrend, 20)
+  const crossUnderOb = crossedUnder(fundtrend, 80);
+  const crossOverOs = crossedOver(fundtrend, 20);
 
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
@@ -317,6 +325,14 @@ export function calculate(
       && !!rsiRising[i] && gt(macdHist[i], at(macdHist, i, 1));
     const strongUp = gt(f, bb) && !!ftRising3[i];
     const strongDown = lt(f, bb) && !!ftFalling3[i];
+    flags[0].push(bankerEntry);
+    flags[1].push(incPos);
+    flags[2].push(decPos);
+    flags[3].push(exitSig);
+    flags[4].push(rebound);
+    // fundtrend > fixed_ob_level and fundtrend_crossunder_fixed_ob / fundtrend < fixed_os_level and ..._crossover_fixed_os
+    flags[5].push(gt(f, 80) && crossUnderOb[i]);
+    flags[6].push(lt(f, 20) && crossOverOs[i]);
 
     bgColors.push({ time: t, color: bgByState[ms] });
 
@@ -381,8 +397,20 @@ export function calculate(
       exitSignal: candles[3],
       weakRebound: candles[4],
     },
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Strong Banker Entry Signal', message: 'Strong Banker Entry Signal with volume confirmation! Consider long position.' },
+  { id: 'alert1', title: 'Position Increase Detected', message: 'Banker Increasing Position with momentum confirmation! Add to existing position.' },
+  { id: 'alert2', title: 'Position Decrease Detected', message: 'Banker Decreasing Position with volume confirmation! Consider partial profit taking.' },
+  { id: 'alert3', title: 'Exit Signal Detected', message: 'Banker Exit Signal with downward momentum! Consider closing long positions.' },
+  { id: 'alert4', title: 'Weak Rebound Detected', message: 'Banker Weak Rebound Signal - potential reversal point! Watch for confirmation.' },
+  { id: 'alert5', title: 'Overbought Warning', message: 'Market reaching overbought levels! Consider taking profits.' },
+  { id: 'alert6', title: 'Oversold Opportunity', message: 'Market reaching oversold levels! Look for entry signals.' },
+];
 
 export const EnhancedKLSEBankerFlowOscillator = {
   calculate,
@@ -392,4 +420,5 @@ export const EnhancedKLSEBankerFlowOscillator = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

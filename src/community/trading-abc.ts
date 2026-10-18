@@ -18,6 +18,7 @@
  *   the bar.
  *
  * Drawings are kept up to 500 lines and 500 labels (the oldest are removed).
+ * Alerts (alertcondition, `alerts` of the result): 'ABC Long' and 'ABC Short', true on the bars of each signal.
  *
  * Reference: "Trading ABC" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -30,6 +31,7 @@ import {
 } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TradingAbcInputs {
   /** ZigZag Period */
@@ -163,7 +165,7 @@ class Live<T extends { dead: boolean }> {
 export function calculate(
   bars: Bar[],
   inputs: Partial<TradingAbcInputs> = {},
-): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[] } {
+): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -185,6 +187,8 @@ export function calculate(
   const upFill: string[] = new Array(n);
   const dnFill: string[] = new Array(n);
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
 
   const lines = new Live<Ln>();
   const labels = new Live<Lb>();
@@ -351,6 +355,8 @@ export function calculate(
 
     const long = trend === 1 && abcBarCount <= 6 && lbounced && ge(lll, lastZzPoint);
     const short = trend === -1 && abcBarCount <= 6 && sbounced && le(hhh, lastZzPoint);
+    longFlags.push(long);
+    shortFlags.push(short);
     if (long) markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: upcol, size: 'small' });
     if (short) markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: dncol, size: 'small' });
   }
@@ -375,7 +381,15 @@ export function calculate(
     labels: labels.list.map((l) => ({
       time: T(l.x), price: l.y, text: l.text, color: NO_COLOR, textColor: BLUE, style: l.style,
     })),
+    // alertcondition(long, "ABC Long") / alertcondition(short, "ABC Short")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
-export const TradingAbc = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'ABC Long', message: 'ABC Long' },
+  { id: 'alert1', title: 'ABC Short', message: 'ABC Short' },
+];
+
+export const TradingAbc = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -10,6 +10,9 @@
  * chosen feature. The "Clusters" line interpolates between the nearest and the second nearest cluster index by
  * min / (min + second) distance; histograms show the cluster, step lines the centers, and the bars take the
  * cluster colour (gray when the plotted value is na).
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): "SPC: Market regime shifted → Now in
+ * cluster k<n>" on each bar whose cluster differs from the cluster of the bar before (and on bar 0, where the cluster
+ * of the bar before is na: the comparison is false).
  *
  * Reference: "Simplified Percentile Clustering" by InvestorUnknown
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -17,7 +20,10 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { BarColorData } from '../types';
+import type { AlertCall, BarColorData } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type MainPlot = 'Clusters' | 'RSI' | 'CCI' | 'Fisher' | 'DMI' | 'Z-Score' | 'MAR';
 
@@ -193,7 +199,7 @@ function centersOf(x: number[], mid: number[], lookback: number, pLow: number, p
 export function calculate(
   bars: Bar[],
   inputs: Partial<SimplifiedPercentileClusteringInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { lookback, k, mainPlot } = cfg;
@@ -281,6 +287,7 @@ export function calculate(
   const clusterVal: number[] = new Array(n);
   const currColor: string[] = new Array(n);
   const kCenter: number[][] = [new Array(n), new Array(n), new Array(n)];
+  const alertCalls: AlertCall[] = [];
   for (let t = 0; t < n; t++) {
     let minDist = NaN;
     let secondMinDist = NaN;
@@ -315,6 +322,11 @@ export function calculate(
     const pv = f >= 0 ? feats[f][t] : realClust;
     plotVal[t] = pv;
     clusterVal[t] = cluster;
+    // if not (curr_cluster == curr_cluster[1]): alert("SPC: Market regime shifted → Now in cluster " +
+    //   str.tostring(curr_cluster), freq = alert.freq_once_per_bar_close) (curr_cluster[1] is na on bar 0)
+    if (t === 0 || clusterVal[t - 1] !== cluster) {
+      alertCalls.push({ time: bars[t].time as number, message: 'SPC: Market regime shifted → Now in cluster k' + cluster, freq: 'once_per_bar_close' });
+    }
     currColor[t] = !Number.isFinite(pv) ? GRAY80 : colorOf(cluster); // if na(plot_val): gray
     kCenter[0][t] = f >= 0 ? centers[f][t][0] : 0;
     kCenter[1][t] = f >= 0 ? centers[f][t][1] : 1;
@@ -344,6 +356,7 @@ export function calculate(
     },
     // barcolor(curr_color)
     barColors: bars.map((b, i) => ({ time: b.time as number, color: currColor[i] })),
+    alertCalls,
   };
 }
 
@@ -353,4 +366,5 @@ export const SimplifiedPercentileClustering = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

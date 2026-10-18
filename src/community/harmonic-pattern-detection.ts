@@ -9,6 +9,9 @@
  *
  * With the default anchors (0) no bar matches: only the empty table is there.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Price Enter PRZ' when the close crosses over the lower PRZ or under
+ * the upper PRZ, 'Price Cross D' when the close crosses point D (both from the bar the zone is drawn on).
+ *
  * Port notes:
  * - An anchor time is a time in ms. A drawing time between two bars is given as the time of the next bar, where
  *   it is drawn; a time after the last bar is kept.
@@ -21,6 +24,7 @@
 
 import { str, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LineDrawingData, LabelData, BoxData, TableData, TableCellData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HarmonicPatternDetectionInputs {
   /** Tolerance of the AB / XA ratio of the Gartley and Butterfly patterns */
@@ -83,7 +87,7 @@ const CELL_TEXT = '#363A45';
 export function calculate(
   bars: Bar[],
   inputs: Partial<HarmonicPatternDetectionInputs> = {},
-): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[]; tables: TableData[] } {
+): IndicatorResult & { lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[]; tables: TableData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { x, a, b, c, d, precision } = cfg;
@@ -141,6 +145,8 @@ export function calculate(
   const last = Math.max(x, a, b, c);
   const plot0: { time: number; value: number; color: string }[] = [];
   const plot1: { time: number; value: number; color: string }[] = [];
+  const closes: number[] = [];
+  const dys: number[] = [];
 
   for (let i = 0; i < n; i++) {
     const time = tMs(i);
@@ -221,9 +227,20 @@ export function calculate(
     // plot(upper_prz, 'Upper PRZ', na); plot(lower_prz, 'Lower PRZ', na)
     plot0.push({ time: bars[i].time as number, value: upperPrz, color: 'transparent' });
     plot1.push({ time: bars[i].time as number, value: lowerPrz, color: 'transparent' });
+    closes.push(close);
+    dys.push(dy);
   }
 
   const tables: TableData[] = [{ position: 'top_right', columns: 2, rows: 4, bgColor: String(color.gray), cells }];
+
+  // alertcondition(ta.crossover(close, lower_prz) or ta.crossunder(close, upper_prz), 'Price Enter PRZ')
+  const overLower = crossedOver(closes, plot1.map((p) => p.value));
+  const underUpper = crossedUnder(closes, plot0.map((p) => p.value));
+  const enterPrz = overLower.map((v, i) => v || underUpper[i]);
+  // alertcondition(ta.cross(close, d_y), 'Price Cross D')
+  const overD = crossedOver(closes, dys);
+  const underD = crossedUnder(closes, dys);
+  const crossD = overD.map((v, i) => v || underD[i]);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -232,8 +249,15 @@ export function calculate(
     labels,
     boxes,
     tables,
+    alerts: alertStates(alertConditions, bars, [enterPrz, crossD]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Price Enter PRZ', message: 'Price entered the PRZ' },
+  { id: 'alert1', title: 'Price Cross D', message: 'Price crossed point D' },
+];
 
 export const HarmonicPatternDetection = {
   calculate,
@@ -241,4 +265,5 @@ export const HarmonicPatternDetection = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -5,6 +5,7 @@
  * or ALMA with offset 0 and sigma 0), smoothed by a linear regression of `len` bars: the fair value line. Three
  * band pairs at 1, 2 and 3 times mult * stdev(close, len) around it are filled. The line and the fills are green
  * when the fair value rises, pink when it falls, gray otherwise.
+ * Alerts (alertcondition, `alerts` of the result): the fair value rising (Long) / falling (Short).
  *
  * Reference: "Linear Regression Volume | Lyro RS" by LyroRS
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +13,7 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LinearRegressionVolumeLyroRsInputs {
   /** Length of the volume-weighted average, the linear regression and the standard deviation */
@@ -61,7 +63,10 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<LinearRegressionVolumeLyroRsInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<LinearRegressionVolumeLyroRsInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { len, mult } = cfg;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -90,10 +95,8 @@ export function calculate(bars: Bar[], inputs: Partial<LinearRegressionVolumeLyr
   const dev = A(ta.stdev(S(bars.map((b) => b.close)), len)).map((s) => mult * s);
 
   // bandColor = slope > 0 ? #40ed49 : slope < 0 ? #ff026f : color.gray
-  const bandColor = baseline.map((b, i) => {
-    const slope = i > 0 ? b - baseline[i - 1] : NaN;
-    return gt(slope, 0) ? LOWER_COL : lt(slope, 0) ? UPPER_COL : color.gray;
-  });
+  const slope = baseline.map((b, i) => (i > 0 ? b - baseline[i - 1] : NaN));
+  const bandColor = slope.map((sl) => (gt(sl, 0) ? LOWER_COL : lt(sl, 0) ? UPPER_COL : color.gray));
 
   const line = (k: number, col: string) => bars.map((b, i) => ({ time: b.time, value: baseline[i] + k * dev[i], color: col }));
   const fillCols = (t: number) => bandColor.map((c) => String(color.new(c, t)));
@@ -115,8 +118,16 @@ export function calculate(bars: Bar[], inputs: Partial<LinearRegressionVolumeLyr
       { plot1: 'plot3', plot2: 'plot4', colors: fillCols(92) },
       { plot1: 'plot5', plot2: 'plot6', colors: fillCols(96) },
     ],
+    // alertcondition(slope > 0, ...) / alertcondition(slope < 0, ...)
+    alerts: alertStates(alertConditions, bars, [slope.map((sl) => gt(sl, 0)), slope.map((sl) => lt(sl, 0))]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Linear Regression Volume - Long', message: 'Linear Regression Volume is Long {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Linear Regression Volume - Short', message: 'Linear Regression Volume is Short {{exchange}}:{{ticker}}' },
+];
 
 export const LinearRegressionVolumeLyroRs = {
   calculate,
@@ -124,4 +135,5 @@ export const LinearRegressionVolumeLyroRs = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

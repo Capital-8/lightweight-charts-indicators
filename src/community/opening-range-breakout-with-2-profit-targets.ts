@@ -206,8 +206,8 @@ export function calculate(
   const plots: Point[][] = [[], [], [], [], [], []];
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
-  const mark = (t: number, position: 'aboveBar' | 'belowBar', text: string) => {
-    markers.push({ time: t, position, shape: 'circle', color: 'transparent', text, textColor: WHITE });
+  const mark = (id: string, t: number, position: 'aboveBar' | 'belowBar', text: string) => {
+    markers.push({ id, time: t, position, shape: 'circle', color: 'transparent', text, textColor: WHITE });
   };
 
   for (let i = 0; i < n; i++) {
@@ -235,10 +235,10 @@ export function calculate(
     const upHit = (lvl: number) => ge(high, lvl) && [1, 2, 3, 4, 5].every((k) => lt(H(i - k), lvl));
     const downHit = (lvl: number) => le(low, lvl) && [1, 2, 3, 4, 5].every((k) => gt(L(i - k), lvl));
     if (cfg.snp && active) {
-      if (upHit(highRes2)) mark(t, 'aboveBar', '1');
-      if (downHit(lowRes2) && gt(low, lowRes3)) mark(t, 'belowBar', '1');
-      if (upHit(highRes3)) mark(t, 'aboveBar', '2');
-      if (downHit(lowRes3)) mark(t, 'belowBar', '2');
+      if (upHit(highRes2)) mark('char0', t, 'aboveBar', '1');
+      if (downHit(lowRes2) && gt(low, lowRes3)) mark('char1', t, 'belowBar', '1');
+      if (upHit(highRes3)) mark('char2', t, 'aboveBar', '2');
+      if (downHit(lowRes3)) mark('char3', t, 'belowBar', '2');
     }
   }
 

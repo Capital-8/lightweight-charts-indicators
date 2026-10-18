@@ -6,6 +6,9 @@
  * times a scale, clamped to 0.0001..0.9999. The line and the candles are green while the filter rises and red
  * otherwise.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'IIR One-Pole Long' when the filter crosses above its value of the
+ * bar before (ta.crossover(y, y[1])), 'IIR One-Pole Short' when it crosses under it.
+ *
  * Reference: "IIR One-Pole Price Filter [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © BackQuant
@@ -13,6 +16,7 @@
 
 import { getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface IirOnePolePriceFilterInputs {
   src: SourceType;
@@ -82,7 +86,7 @@ const gt = (a: number, b: number) => a - b > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<IirOnePolePriceFilterInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = getSourceSeries(bars, cfg.src).toArray().map((v) => v ?? NaN);
@@ -96,6 +100,8 @@ export function calculate(
   const plot0: { time: number; value: number; color: string }[] = [];
   const barColors: BarColorData[] = [];
   let yPrev = NaN; // y[1]
+  const ys: number[] = [];
+  const ys1: number[] = [];
   for (let i = 0; i < n; i++) {
     // prev = nz(y[1], src); y := prev + alpha * (src - prev)
     const prev = isNaN(yPrev) ? src[i] : yPrev;
@@ -107,6 +113,8 @@ export function calculate(
     if (cfg.paintCandles) barColors.push({ time: bars[i].time, color: barCol });
     // plot(showLine ? y : na, "One-Pole", color.new(barCol, transp), linewidth = lineW)
     plot0.push({ time: bars[i].time, value: cfg.showLine ? y : NaN, color: String(color.new(barCol, cfg.transp)) });
+    ys.push(y);
+    ys1.push(yPrev);
     yPrev = y;
   }
 
@@ -114,8 +122,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     barColors,
+    // longFlip = ta.crossover(y, y[1]) / shortFlip = ta.crossunder(y, y[1])
+    alerts: alertStates(alertConditions, bars, [crossedOver(ys, ys1), crossedUnder(ys, ys1)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'IIR One-Pole Long', message: 'IIR One-Pole Long {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'IIR One-Pole Short', message: 'IIR One-Pole Short {{exchange}}:{{ticker}}' },
+];
 
 export const IirOnePolePriceFilter = {
   calculate,
@@ -123,4 +139,5 @@ export const IirOnePolePriceFilter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

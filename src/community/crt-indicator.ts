@@ -5,6 +5,8 @@
  * that closes inside the first candle body (between its open and its high). Bullish CRT: a bearish candle, then a
  * bullish candle with a lower low that closes between the first candle low and its open. Triangles mark the
  * patterns; on a pattern bar the CRT High / CRT Low plots show the high / low of the two candles.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish CRT Alert' and 'Bearish CRT Alert', true on the bars of
+ * each pattern.
  *
  * Reference: "CRT indicator" by INTELA
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CrtIndicatorInputs {
   /** Show the CRT High / CRT Low plots */
@@ -46,12 +49,13 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<CrtIndicatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const markers: MarkerData[] = [];
   const boxHigh: number[] = new Array(n).fill(NaN);
   const boxLow: number[] = new Array(n).fill(NaN);
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -61,6 +65,8 @@ export function calculate(
       && gt(b.close, p.open) && gt(b.low, p.low);
     const bullishCRT = lt(p.close, p.open) && gt(b.close, b.open) && lt(b.low, p.low) && ge(b.close, p.low)
       && lt(b.close, p.open);
+    bullFlags.push(bullishCRT);
+    bearFlags.push(bearishCRT);
     if (bullishCRT) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: color.green, size: 'small' });
     }
@@ -80,8 +86,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
     markers,
+    // alertcondition(bullishCRT, 'Bullish CRT Alert') / alertcondition(bearishCRT, 'Bearish CRT Alert')
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish CRT Alert', message: 'Bullish CRT Pattern Detected' },
+  { id: 'alert1', title: 'Bearish CRT Alert', message: 'Bearish CRT Pattern Detected' },
+];
 
 export const CrtIndicator = {
   calculate,
@@ -89,4 +103,5 @@ export const CrtIndicator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -7,6 +7,8 @@
  * "Bernoulli Purest" first passes the measurement through a normal CDF. The columns are coloured by the trade band,
  * with darker colours when the percent rank of the result is extreme and an OBV based DI difference disagrees.
  * Triangles mark the extreme percent ranks.
+ * Alerts (alertcondition, `alerts` of the result): 'Alert on Down Triangle' (the percent rank crosses above
+ * 100 - limit) and 'Alert on Up Triangle' (it crosses below the limit).
  *
  * Reference: "Bernoulli Process - Binary Entropy Function" by kocurekc
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, math, fixnan, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 const TYPES = ['Value', 'SMA', 'Change', '%-Change', 'Momentum', 'Acceleration', 'Contribution', 'Volatility',
   'Elher_smoother'] as const;
@@ -98,7 +101,7 @@ type Arr = number[];
 export function calculate(
   bars: Bar[],
   inputs: Partial<BernoulliProcessEntropyInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { len, trange, avg, type, diLen, vPR, bc, vc, pb, pobv, xc, xn, smo } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const S = (a: Arr) => Series.fromArray(bars, a);
@@ -225,6 +228,11 @@ export function calculate(
     }
   }
 
+  // downAlert = hvp[1] < 100 - vPR and hvp > 100 - vPR; upAlert = hvp[1] > vPR and hvp < vPR
+  const prevHvp = (i: number) => (i > 0 ? hvp[i - 1] : NaN);
+  const downFlags = hvp.map((h, i) => prevHvp(i) < 100 - vPR && h > 100 - vPR);
+  const upFlags = hvp.map((h, i) => prevHvp(i) > vPR && h < vPR);
+
   const bands = pb && bc && vc && !xn;
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -235,8 +243,15 @@ export function calculate(
       plot3: bars.map((b, i) => ({ time: b.time, value: bands ? -infov[i] : NaN })),
     },
     markers,
+    alerts: alertStates(alertConditions, bars, [downFlags, upFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Alert on Down Triangle', message: 'Bernoulli Down Triangle!' },
+  { id: 'alert1', title: 'Alert on Up Triangle', message: 'Bernoulli Up Triangle!' },
+];
 
 export const BernoulliProcessEntropy = {
   calculate,
@@ -244,4 +259,5 @@ export const BernoulliProcessEntropy = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

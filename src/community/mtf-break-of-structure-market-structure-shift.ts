@@ -14,7 +14,11 @@
  * "Show Structure only on a lower Timeframe" hides the breaks of a timeframe below the chart timeframe. A timeframe
  * below the chart timeframe reads the bars of that timeframe inside each chart bar, which the chart bars do not have:
  * the port leaves out such a timeframe when it draws nothing, and throws an Error when it would draw something.
- * The alerts (alert() calls) give no output. At most 500 lines and 500 labels are kept.
+ * At most 500 lines and 500 labels are kept.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): on each drawn break of a timeframe, "New
+ * bullish MSS formed on <timeframe>" / "New bullish BOS formed on <timeframe>" (and bearish) when "Use TF k MSS Alert" /
+ * "Use TF k BOS Alert" is on, as the original (the first break of a timeframe only sets the direction).
  *
  * Reference: "Multi Timeframe Break of Structure(BOS) & Market Structure Shift(MSS)" by Lenny_Kiruthu
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -25,7 +29,7 @@ import {
   ta, Series, color, str, line, label, resetDrawings, setDrawingBar, timeframe, mapToChart,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { LabelData, LineDrawingData, PineSize } from '../types';
+import type { AlertCall, LabelData, LineDrawingData, PineSize } from '../types';
 import type { ChartContext } from '../chart-context';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 
@@ -92,6 +96,9 @@ export interface MtfBreakOfStructureMarketStructureShiftInputs {
   tf3BulMsCol: string;
   tf3BearMsCol: string;
 }
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 const GREEN = '#4CAF50';
 const RED = '#FF5252';
@@ -227,6 +234,8 @@ interface TimeframeSettings {
   useHighLow: boolean;
   displayPivots: boolean;
   displayTimeframe: boolean;
+  bosAlert: boolean;
+  mssAlert: boolean;
   multip: number;
   period: Period;
   swingLength: number;
@@ -243,7 +252,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<MtfBreakOfStructureMarketStructureShiftInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { labels: LabelData[]; lines: LineDrawingData[] } {
+): IndicatorResult & { labels: LabelData[]; lines: LineDrawingData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const chartTf = chartTimeframe(bars, chart);
@@ -257,6 +266,7 @@ export function calculate(
     return {
       useBosPlot: get('UseBosPlot'), useMssPlot: get('UseMssPlot'), chartFeature: get('ChartFeature'),
       useHighLow: get('UseHighLow'), displayPivots: get('DisplayPivots'), displayTimeframe: get('DisplayTimeframe'),
+      bosAlert: get('BosAlert'), mssAlert: get('MssAlert'),
       multip: get('Multip'), period: get('Period'), swingLength: get('SwingLength'), lineType: get('LineType'),
       lineWidth: get('LineWidth'), textSize: get('TextSize'), bulBosCol: get('BulBosCol'), bearBosCol: get('BearBosCol'),
       bulMsCol: get('BulMsCol'), bearMsCol: get('BearMsCol'),
@@ -333,6 +343,7 @@ export function calculate(
   };
 
   resetDrawings({ line: MAX_OBJECTS, label: MAX_OBJECTS });
+  const alertCalls: AlertCall[] = [];
 
   /** One Market_Structure() call: returns the step of bar i, or null when the timeframe draws nothing */
   const marketStructure = (s: TimeframeSettings, k: number) => {
@@ -456,6 +467,15 @@ export function calculate(
           label.new(timeAt(i, count / 2), price, `${kind} \n${display}`, 'bar_time', 'price', transparent,
             bullish ? 'label_down' : 'label_up', css, size);
         }
+        // bullish: if Prev_Breakout_Type == -1 and Use_MSS_Alert -> MSS alert, else if == 1 and Use_BOS_Alert -> BOS
+        // bearish: if Prev_Breakout_Type == 1 and Use_MSS_Alert -> MSS alert, else if == -1 and Use_BOS_Alert -> BOS
+        const against = bullish ? prevBreakoutType === -1 : prevBreakoutType === 1;
+        const along = bullish ? prevBreakoutType === 1 : prevBreakoutType === -1;
+        const dir = bullish ? 'bullish' : 'bearish';
+        const alertKind = against && s.mssAlert ? 'MSS' : along && s.bosAlert ? 'BOS' : '';
+        if (alertKind) {
+          alertCalls.push({ time: times[i] as number, message: `New ${dir} ${alertKind} formed on ${display}`, freq: 'once_per_bar_close' });
+        }
         prevBreakoutType = bullish ? 1 : -1;
       };
       if (highBroken && showsBreaks) brk(prevHigh, endHighTime, true);
@@ -487,6 +507,7 @@ export function calculate(
       time: l.x, price: l.y, text: l.text ?? '', color: 'transparent', textColor: String(l.textcolor),
       style: l.style as 'label_up' | 'label_down', size: l.size as PineSize,
     })),
+    alertCalls,
   };
 }
 
@@ -496,4 +517,5 @@ export const MtfBreakOfStructureMarketStructureShift = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

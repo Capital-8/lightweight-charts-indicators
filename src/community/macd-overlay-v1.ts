@@ -11,6 +11,8 @@
  * - Expansion-Only: the ribbon is tight and the histogram flat (squeeze) while the true range bursts at a histogram
  *   slope flip or near a cross (release).
  * Crosses blocked by a gate are gray dots; with the weakness gate off, weak crosses are faded triangles.
+ * Alerts (alertcondition, `alerts` of the result): 'MACD Signal Cross Up' / 'MACD Signal Cross Down' (any cross while
+ * the signals are shown, whatever the gates) and 'Weakness-Lite Flag' (a Weakness-Lite bar).
  *
  * Reference: "MACD Overlay v1 [JopAlgo]" by JopAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +20,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MacdOverlayV1Inputs {
   /** Calculation mode: Classic (MA MACD), VW (rolling VWAP MACD) or Compare (Classic + VW ghost ribbon) */
@@ -138,7 +141,7 @@ const PRESETS = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<MacdOverlayV1Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -234,6 +237,7 @@ export function calculate(
   const ghostColors: string[] = new Array(n);
   const fadeUpCol = String(color.new(BULL_BASE, style.weakFadeTr));
   const fadeDownCol = String(color.new(BEAR_BASE, style.weakFadeTr));
+  const flags: boolean[][] = [[], [], []];
   let weakCD = 0; // var int weakCD = 0
   for (let i = 0; i < n; i++) {
     const b = bars[i];
@@ -285,15 +289,20 @@ export function calculate(
     const dotUp = (cfg.showSignals && crossUp[i] && !expansionOk) || (cfg.showSignals && crossUp[i] && expansionOk && cfg.gateByWeak && isWeakLite);
     const dotDown = (cfg.showSignals && crossDown[i] && !expansionOk) || (cfg.showSignals && crossDown[i] && expansionOk && cfg.gateByWeak && isWeakLite);
 
-    // plotshape calls in Pine order, all size.tiny
-    if (useWeak && cfg.showWeakMk && isWeakLite && upBar) markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: BEAR_BASE, size: 'tiny' });
-    if (useWeak && cfg.showWeakMk && isWeakLite && !upBar) markers.push({ time: t, position: 'belowBar', shape: 'circle', color: BULL_BASE, size: 'tiny' });
-    if (solidUp) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: BULL_BASE, size: 'tiny' });
-    if (solidDown) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: BEAR_BASE, size: 'tiny' });
-    if (fadeUp) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: fadeUpCol, size: 'tiny' });
-    if (fadeDown) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: fadeDownCol, size: 'tiny' });
-    if (dotUp) markers.push({ time: t, position: 'belowBar', shape: 'circle', color: NOTE_DOT, size: 'tiny' });
-    if (dotDown) markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: NOTE_DOT, size: 'tiny' });
+    // alertcondition(showSignals and crossUp / crossDown, ...), alertcondition(weakSensitivity != "Off" and isWeakLite, ...)
+    flags[0].push(cfg.showSignals && crossUp[i]);
+    flags[1].push(cfg.showSignals && crossDown[i]);
+    flags[2].push(useWeak && isWeakLite);
+
+    // plotshape calls in Pine order, all size.tiny (ids shape0..shape7 in declaration order)
+    if (useWeak && cfg.showWeakMk && isWeakLite && upBar) markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: BEAR_BASE, size: 'tiny', id: 'shape0' });
+    if (useWeak && cfg.showWeakMk && isWeakLite && !upBar) markers.push({ time: t, position: 'belowBar', shape: 'circle', color: BULL_BASE, size: 'tiny', id: 'shape1' });
+    if (solidUp) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: BULL_BASE, size: 'tiny', id: 'shape2' });
+    if (solidDown) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: BEAR_BASE, size: 'tiny', id: 'shape3' });
+    if (fadeUp) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: fadeUpCol, size: 'tiny', id: 'shape4' });
+    if (fadeDown) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: fadeDownCol, size: 'tiny', id: 'shape5' });
+    if (dotUp) markers.push({ time: t, position: 'belowBar', shape: 'circle', color: NOTE_DOT, size: 'tiny', id: 'shape6' });
+    if (dotDown) markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: NOTE_DOT, size: 'tiny', id: 'shape7' });
   }
 
   const P = (vals: (i: number) => number, col: string) => bars.map((b, i) => ({ time: b.time, value: vals(i), color: col }));
@@ -314,8 +323,16 @@ export function calculate(
     ],
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'MACD Signal Cross Up', message: 'MACD crossed above Signal (primary).' },
+  { id: 'alert1', title: 'MACD Signal Cross Down', message: 'MACD crossed below Signal (primary).' },
+  { id: 'alert2', title: 'Weakness-Lite Flag', message: 'Weakness-Lite triggered on this bar.' },
+];
 
 export const MacdOverlayV1 = {
   calculate,
@@ -323,4 +340,5 @@ export const MacdOverlayV1 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -115,6 +115,8 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   // The script has one plotshape per size (a const size); only the one of the selected size can fire.
   const size = SIZES[cfg.markerSize];
+  // Style ids: shape0 .. shape3 = the bull markers Tiny .. Large, shape4 .. shape7 = the bear markers
+  const sizeIndex = (['Tiny', 'Small', 'Normal', 'Large'] as const).indexOf(cfg.markerSize);
   for (let i = 0; i < bars.length; i++) {
     const b = bars[i];
     // abnormal = volume >= avg_vol * abnormal_mul; bull = close >= open
@@ -128,8 +130,8 @@ export function calculate(
     });
     if (cfg.showMarker && abnormal && size) {
       markers.push(bull
-        ? { time: b.time, position: 'belowBar', shape: 'triangleUp', color: cfg.markerColor, size }
-        : { time: b.time, position: 'aboveBar', shape: 'triangleDown', color: cfg.markerColor, size });
+        ? { time: b.time, position: 'belowBar', shape: 'triangleUp', color: cfg.markerColor, size, id: `shape${sizeIndex}` }
+        : { time: b.time, position: 'aboveBar', shape: 'triangleDown', color: cfg.markerColor, size, id: `shape${4 + sizeIndex}` });
     }
     // bgcolor(show_bg and abnormal ? abn_bg : na)
     if (cfg.showBg && abnormal) bgColors.push({ time: b.time, color: cfg.abnBg });

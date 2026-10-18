@@ -8,6 +8,9 @@
  * Last bar: a flip is marked on a closed bar only. The port reads the state of the last bar from the optional third
  * argument (see src/chart-context.ts); without it every bar is taken as closed.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Red to Green Candle Flip' and 'Green to Red Candle Flip', true on
+ * the bars of each flip.
+ *
  * Reference: "Candle Color Flip" by LorPlant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -15,6 +18,7 @@
 import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 // The Pine script has no inputs
 export interface CandleColorFlipInputs {}
@@ -43,13 +47,14 @@ export function calculate(
   bars: Bar[],
   _inputs: Partial<CandleColorFlipInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
   const markers: MarkerData[] = [];
   const lime = '#00E676';
   const red = '#F23645';
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
 
   for (let i = 0; i < bars.length; i++) {
     const b = bars[i];
@@ -67,6 +72,8 @@ export function calculate(
     // bearFlip = barstate.isconfirmed and prevBull and noHigherHigh
     const bearFlip = barIsConfirmed(i) && prevBull && noHigherHigh;
     const bullFlip = barIsConfirmed(i) && prevBear && noLowerLow;
+    bullFlags.push(bullFlip);
+    bearFlags.push(bearFlip);
 
     // plotshape(bullFlip, "Red→Green Flip", shape.triangleup, location.belowbar, color.lime, size = size.tiny)
     if (bullFlip) markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: lime, size: 'tiny' });
@@ -74,13 +81,27 @@ export function calculate(
     if (bearFlip) markers.push({ time: b.time, position: 'aboveBar', shape: 'triangleDown', color: red, size: 'tiny' });
   }
 
-  // alertcondition(bullFlip, "Red to Green Candle Flip") and alertcondition(bearFlip, "Green to Red Candle Flip"):
-  // no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    // alertcondition(bullFlip, "Red to Green Candle Flip") / alertcondition(bearFlip, "Green to Red Candle Flip")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
 
-export const CandleColorFlip = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0',
+    title: 'Red to Green Candle Flip',
+    message: '{{ticker}} {{interval}} – Candle failed to make a lower low after a red bar. Close: {{close}}',
+  },
+  {
+    id: 'alert1',
+    title: 'Green to Red Candle Flip',
+    message: '{{ticker}} {{interval}} – Candle failed to make a higher high after a green bar. Close: {{close}}',
+  },
+];
+
+export const CandleColorFlip = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -11,11 +11,19 @@
  *   fill(emaslowplot, emaslowplot2, fillCol2, transp=80) -- EMA-5 vs EMA-9
  *   fill(emaslowplot2, emaslowplot3, fillCol3, transp=75) -- EMA-9 vs EMA-21
  *
+ * Alert (alertcondition, `alerts` of the result): 'Alert Signal', the close crossing EMA-5 and EMA-9 on the same bar.
+ *
  * Reference: "Bjorgum Triple EMA Strategy"
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Alert Signal', message: 'Price is crossing EMAs' },
+];
 
 export interface BjorgumTripleEmaInputs {
   fastLen: number;
@@ -48,7 +56,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<BjorgumTripleEmaInputs> = {}): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<BjorgumTripleEmaInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const { fastLen, medLen, slowLen } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -160,6 +171,17 @@ export function calculate(bars: Bar[], inputs: Partial<BjorgumTripleEmaInputs> =
     barColors.push({ time: bars[i].time, color });
   }
 
+  // c = cross(close, bjemaslow) and cross(close, bjemaslow2)
+  const close = bars.map((b) => b.close);
+  const cross = (a: number[], b: Array<number | null | undefined>) => {
+    const o = crossedOver(a, b);
+    const u = crossedUnder(a, b);
+    return o.map((v, i) => v || u[i]);
+  };
+  const crossFast = cross(close, fastArr);
+  const crossMed = cross(close, medArr);
+  const signal = crossFast.map((v, i) => v && crossMed[i]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3 },
@@ -169,7 +191,8 @@ export function calculate(bars: Bar[], inputs: Partial<BjorgumTripleEmaInputs> =
       { plot1: 'plot2', plot2: 'plot3', options: { color: 'rgba(100, 181, 246, 0.25)' }, colors: fillCol3 },
     ],
     barColors,
+    alerts: alertStates(alertConditions, bars, [signal]),
   };
 }
 
-export const BjorgumTripleEma = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BjorgumTripleEma = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

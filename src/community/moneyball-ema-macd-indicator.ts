@@ -6,12 +6,16 @@
  * is below EMA 20 and EMA 50 and the MACD is below 0; orange when MACD < 0 and MACD > signal; green when MACD > 0 and
  * MACD > signal; red when MACD < 0 and MACD < signal (optional); white when MACD < signal. Zero line at 0.
  *
+ * Alerts (alertcondition, `alerts` of the result): MACD / signal crossing the zero line, MACD new high above zero /
+ * new low below zero, and one per bar colour condition (orange, green, white, red, fuchsia), as the original.
+ *
  * Reference: "Moneyball EMA-MACD indicator [VinnieTheFish]" by VinnieTheFish
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type MaType = 'SMA' | 'EMA' | 'DEMA' | 'TEMA';
 
@@ -85,7 +89,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<MoneyballEmaMacdInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -116,6 +120,11 @@ export function calculate(
   const ema50 = ema(src, 50);
 
   const barColors: BarColorData[] = [];
+  const flags: boolean[][] = Array.from({ length: 11 }, () => new Array<boolean>(n).fill(false));
+  const macdXUp = crossedOver(macd, 0);
+  const macdXDown = crossedUnder(macd, 0);
+  const sigXUp = crossedOver(signal, 0);
+  const sigXDown = crossedUnder(signal, 0);
   for (let i = 0; i < n; i++) {
     const aboveZero = gt(macd[i], 0);
     const belowZero = lt(macd[i], 0);
@@ -134,6 +143,13 @@ export function calculate(
             : white ? cfg.barWhiteColor
               : null;
     if (c) barColors.push({ time: bars[i].time, color: c });
+    // new_high_macd = ta.change(macd) > 0 / new_low_macd = ta.change(macd) < 0
+    const change = i > 0 ? macd[i] - macd[i - 1] : NaN;
+    const newHigh = gt(change, 0);
+    const newLow = lt(change, 0);
+    const f = [macdXUp[i], macdXDown[i], sigXUp[i], sigXDown[i], aboveZero && macdAboveSignal && newHigh,
+      belowZero && macdBelowSignal && newLow, orange, green, white, red, fuchsia];
+    for (let k = 0; k < f.length; k++) flags[k][i] = f[k];
   }
 
   return {
@@ -145,8 +161,24 @@ export function calculate(
     // hline(0, 'Zero Line', color = color.white): default style dashed, width 1
     hlines: [{ value: 0, options: { title: 'Zero Line', color: color.white, linestyle: 'dashed', linewidth: 1 } }],
     barColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'MACD Crossed Above Zero', message: 'MACD has crossed above the zero line' },
+  { id: 'alert1', title: 'MACD Crossed Below Zero', message: 'MACD has crossed below the zero line' },
+  { id: 'alert2', title: 'Signal Line Crossed Above Zero', message: 'Signal line has crossed above the zero line' },
+  { id: 'alert3', title: 'Signal Line Crossed Below Zero', message: 'Signal line has crossed below the zero line' },
+  { id: 'alert4', title: 'MACD New High Above Zero Line', message: 'MACD has made a new high above the zero line' },
+  { id: 'alert5', title: 'MACD New Low Below Zero Line', message: 'MACD has made a new low below the zero line' },
+  { id: 'alert6', title: 'MACD Orange bar', message: 'MACD Orange bar condition' },
+  { id: 'alert7', title: 'MACD Green bar', message: 'MACD Green bar condition' },
+  { id: 'alert8', title: 'MACD White bar', message: 'MACD White bar condition' },
+  { id: 'alert9', title: 'MACD Red bar', message: 'MACD Red bar condition' },
+  { id: 'alert10', title: 'MACD Fuchsia bar', message: 'MACD Fuchsia bar condition' },
+];
 
 export const MoneyballEmaMacd = {
   calculate,
@@ -154,4 +186,5 @@ export const MoneyballEmaMacd = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

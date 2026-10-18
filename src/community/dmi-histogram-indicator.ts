@@ -7,6 +7,8 @@
  * The same colours paint candles on the price pane. +DI - 20 and SMA(-DI) - 22 are drawn; -DI, ADX, its SMA and
  * RMA(5 + +DI - -DI, 3) are hidden. Triangles mark ADX crossing under its SMA (top: +DI above SMA(-DI); bottom:
  * SMA(-DI) above +DI), bright when ADX > 33.
+ * Alerts (alertcondition, `alerts` of the result): the two ADX reversals (as the triangles, whether shown or not), ADX
+ * crossing over +DI, over SMA(-DI) and over its SMA, and +DI crossing over / under SMA(-DI).
  *
  * Reference: "DMI Histogram Indicator" by Chart0bserver
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DmiHistogramIndicatorInputs {
   /** EMA length of the ADX */
@@ -77,7 +80,8 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<DmiHistogramIndicatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -152,6 +156,15 @@ export function calculate(
     }
   }
 
+  // Alert conditions: bearishReversal / bullishReversal, ta.crossover(adx, plus) / (adx, smoothMinus) /
+  // (adx, smoothADX), bullishDI = ta.crossover(plus, smoothMinus), bearishDI = ta.crossunder(plus, smoothMinus)
+  const bearishReversal = bars.map((_b, i) => reversal[i] === 1 && gt(plus[i], smoothMinus[i]));
+  const bullishReversal = bars.map((_b, i) => reversal[i] === 1 && gt(smoothMinus[i], plus[i]));
+  const alertFlags = [
+    bearishReversal, bullishReversal, crossedOver(adx, plus), crossedOver(adx, smoothMinus), crossedOver(adx, smoothADX),
+    crossedOver(plus, smoothMinus), crossedUnder(plus, smoothMinus),
+  ];
+
   const levelColor = String(color.new(color.gray, 70));
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -173,8 +186,20 @@ export function calculate(
     ],
     markers,
     plotCandles: { dmiColoredCandles: candles },
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'ADX Bear Trend Reversal? ', message: 'Possible Bearish Reversal - ADX pivot downward while +DI > -DI' },
+  { id: 'alert1', title: 'ADX Bull Trend Reversal?', message: 'Possible Bullish Reversal - ADX pivot downward while -DI > +DI' },
+  { id: 'alert2', title: 'ADX Cross Above +DI', message: 'ADX crossed above +DI' },
+  { id: 'alert3', title: 'ADX Cross Above -DI', message: 'ADX crossed above -DI' },
+  { id: 'alert4', title: "ADX Cross Above it's MA", message: 'Possible Trend Strengthening - ADX pivot upward' },
+  { id: 'alert5', title: 'Bullish DI Cross', message: '+DI crossed above -DI (Possibly Bullish)' },
+  { id: 'alert6', title: 'Bearish DI Cross', message: '+DI crossed below -DI (Possibly Bearish)' },
+];
 
 export const DmiHistogramIndicator = {
   calculate,
@@ -182,4 +207,5 @@ export const DmiHistogramIndicator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

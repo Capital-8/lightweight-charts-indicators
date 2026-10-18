@@ -181,3 +181,27 @@ describe('community built-ins (#9)', () => {
     expect([...ids].sort()).toEqual(e.shapeConfig!.map((s) => s.id).sort());
   });
 });
+
+describe('community built-ins: arrows and the order of the Style rows (#12)', () => {
+  it('plotarrow outputs are declared as arrows; the result gives them with their ids', () => {
+    const e = entry('ehlers-mesa-ma');
+    expect(e.arrowConfig?.map((a) => a.id)).toEqual(['arrow0']);
+    const r: any = run('ehlers-mesa-ma');
+    expect(r.arrows.length).toBeGreaterThan(0);
+    expect(r.arrows.every((a: { id: string }) => a.id === 'arrow0')).toBe(true);
+  });
+
+  it('the row order names declared outputs only', () => {
+    for (const [id, decl] of Object.entries(COMMUNITY_STYLE_OUTPUTS)) {
+      if (!decl.styleOrder) continue;
+      const e = entry(id);
+      const known = new Set([
+        ...e.plotConfig.map((p) => `plot:${p.id}`),
+        ...(decl.shapes ?? []).map((s) => `${s.kind}:${s.id}`),
+        ...(decl.arrows ?? []).map((a) => `arrow:${a.id}`),
+        ...Object.keys(decl.candles ?? {}).flatMap((c) => [`candle:${c}`, `bar:${c}`]),
+      ]);
+      for (const o of decl.styleOrder) expect(known.has(`${o.kind}:${o.id}`), `${id} ${o.kind}:${o.id}`).toBe(true);
+    }
+  });
+});

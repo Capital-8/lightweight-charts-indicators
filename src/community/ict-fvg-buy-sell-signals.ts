@@ -6,6 +6,7 @@
  * above the high of two bars before; a bearish gap a bar whose high is below the low of two bars before. The midpoint
  * (CE) of the last gap of each side is drawn as circles. BUY: the bar trades into the last bullish gap, is in discount
  * (with the filter), is a bullish displacement bar (body >= ATR * multiple) and closes above the gap CE. SELL mirrors it.
+ * Alerts (alertcondition, `alerts` of the result): 'ICT Buy' and 'ICT Sell', true on the bars of each signal.
  *
  * Reference: "ICT FVG Buy/Sell Signals" by svmstellarvisionmedia
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface IctFvgBuySellSignalsInputs {
   /** Swing length of the dealing range pivots */
@@ -59,10 +61,16 @@ const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'ICT Buy', message: 'ICT Buy Signal' },
+  { id: 'alert1', title: 'ICT Sell', message: 'ICT Sell Signal' },
+];
+
 export function calculate(
   bars: Bar[],
   inputs: Partial<IctFvgBuySellSignalsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -79,6 +87,8 @@ export function calculate(
   const bearCeArr: number[] = new Array(n);
   const bgColors: BgColorData[] = [];
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = new Array(n).fill(false);
+  const shortFlags: boolean[] = new Array(n).fill(false);
 
   let drHigh = NaN; // var float drHigh = na
   let drLow = NaN; // var float drLow = na
@@ -131,6 +141,8 @@ export function calculate(
     // close > nz(lastBullCE, close)
     const longSignal = inBullZone && longOkPD && isBullDisp && gt(b.close, isNaN(lastBullCE) ? b.close : lastBullCE);
     const shortSignal = inBearZone && shortOkPD && isBearDisp && lt(b.close, isNaN(lastBearCE) ? b.close : lastBearCE);
+    longFlags[i] = longSignal;
+    shortFlags[i] = shortSignal;
     if (longSignal) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'labelUp', color: color.green, text: 'BUY',
         textColor: color.white, size: 'small' });
@@ -150,6 +162,8 @@ export function calculate(
     },
     markers,
     bgColors,
+    // alertcondition(longSignal, "ICT Buy") / alertcondition(shortSignal, "ICT Sell")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
@@ -159,4 +173,5 @@ export const IctFvgBuySellSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

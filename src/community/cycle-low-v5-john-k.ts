@@ -8,6 +8,8 @@
  * oversold, StochRSI previous oversold: one point each) must reach the threshold. An optional anchor level (the
  * close of the bar that opens at the anchor time, or a manual price, times a multiplier) limits the signals to
  * closes near that level and is drawn as a line.
+ * Alerts (alertcondition, `alerts` of the result): 'Cycle Low', true on the bars of the signal (also with the markers
+ * hidden).
  *
  * Reference: "Cycle Low (RSI + StochRSI) – v1.1 (Strict + Score, Overlay)" by John_Kal
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CycleLowRsiStochRsiInputs {
   src: SourceType;
@@ -103,7 +106,7 @@ const eq = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS) &&
 export function calculate(
   bars: Bar[],
   inputs: Partial<CycleLowRsiStochRsiInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -130,6 +133,7 @@ export function calculate(
   let barsRsi = NaN;
   let barsSt = NaN;
   let anchorPriceDetected = NaN; // var float anchor_price_detected = na
+  const cycleLowFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     if (rsiCrossUp[i]) barsRsi = 0;
@@ -159,6 +163,7 @@ export function calculate(
       : true;
 
     const cycleLow = oscOk && nearAnchor;
+    cycleLowFlags.push(cycleLow);
     // plotshape(plot_labels and cycleLow, shape.triangleup, size.small, color.lime, location.belowbar, text = "CL")
     if (cfg.plotLabels && cycleLow) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: color.lime, size: 'small', text: 'CL', textColor: '#2962FF' });
@@ -170,8 +175,15 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     markers,
+    // alertcondition(cycleLow, "Cycle Low", "Cycle Low on {{ticker}} {{interval}}")
+    alerts: alertStates(alertConditions, bars, [cycleLowFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cycle Low', message: 'Cycle Low on {{ticker}} {{interval}}' },
+];
 
 export const CycleLowRsiStochRsi = {
   calculate,
@@ -179,4 +191,5 @@ export const CycleLowRsiStochRsi = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

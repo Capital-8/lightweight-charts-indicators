@@ -8,6 +8,8 @@
  * when above. The curve is green / red by direction and a fill goes from the curve to the candle body edge
  * (min(open, close) when bullish, max(open, close) when bearish). Optional Long / Short characters mark the
  * direction changes.
+ * Alerts (alertcondition, `alerts` of the result): 'Open Long ▲' / 'Open Short ▼' on the confirmed bars on which the
+ * direction turns bullish / bearish (whether or not the characters are shown).
  *
  * Last bar: a trading signal needs a closed bar. The port reads the state of the last bar from the optional third
  * argument (see src/chart-context.ts); without it every bar is taken as closed.
@@ -20,6 +22,7 @@
 import { getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MachineLearningKnnTrendPredictorInputs {
   /** Source */
@@ -72,7 +75,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<MachineLearningKnnTrendPredictorInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -118,11 +121,14 @@ export function calculate(
     : dir === -1 ? String(color.new(color.red, transparency)) : 'transparent');
 
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     // startLongTrade = confirmed and direction == 1 and direction[1] != 1 (na != 1 is false)
     const prevDir = i > 0 ? direction[i - 1] : NaN;
     const startLong = barIsConfirmed(i) && direction[i] === 1 && !isNaN(prevDir) && prevDir !== 1;
     const startShort = barIsConfirmed(i) && direction[i] === -1 && !isNaN(prevDir) && prevDir !== -1;
+    longFlags.push(startLong);
+    shortFlags.push(startShort);
     // plotchar(SIG and startLongTrade, 'Long', '▲', location.belowbar, size.tiny, color.green)
     if (cfg.SIG && startLong) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'circle', color: 'transparent', text: '▲',
@@ -151,8 +157,16 @@ export function calculate(
     // fill(trendPlot, priceLine, getColor(direction, 90), fillgaps = false)
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Plots Background' }, colors: direction.map((d) => getColor(d, 90)) }],
     markers,
+    // alertcondition(startLongTrade, 'Open Long ▲') / alertcondition(startShortTrade, 'Open Short ▼')
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Open Long ▲', message: 'Open Long ▲ | {{ticker}}@{{close}} | ({{interval}})' },
+  { id: 'alert1', title: 'Open Short ▼', message: 'Open Short ▼ | {{ticker}}@{{close}} | ({{interval}})' },
+];
 
 export const MachineLearningKnnTrendPredictor = {
   calculate,
@@ -160,4 +174,5 @@ export const MachineLearningKnnTrendPredictor = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

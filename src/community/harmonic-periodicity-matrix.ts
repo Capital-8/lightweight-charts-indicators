@@ -114,10 +114,10 @@ export function calculate(
     const crossDn = w < signalLine[i] && cycleWave[i - 1] >= signalLine[i - 1];
     // plotshape(buySignal ? cycleWave - 8 : na, "Buy", shape.circle, location.absolute, upColor, size = size.tiny)
     if (crossUp && lt(w, -15)) {
-      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: w - 8, shape: 'circle', color: cfg.upColor, size: 'tiny' });
+      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: w - 8, shape: 'circle', color: cfg.upColor, size: 'tiny', id: 'shape0' });
     }
     if (crossDn && gt(w, 15)) {
-      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: w + 8, shape: 'circle', color: cfg.dnColor, size: 'tiny' });
+      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: w + 8, shape: 'circle', color: cfg.dnColor, size: 'tiny', id: 'shape1' });
     }
   }
 

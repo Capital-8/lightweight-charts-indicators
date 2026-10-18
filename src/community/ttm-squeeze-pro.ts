@@ -4,10 +4,20 @@
  * John Carter's TTM Squeeze Pro. Three Keltner Channel widths (1x, 1.5x, 2x)
  * for squeeze detection with enhanced squeeze classification.
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar), as the original computes them: no squeeze = the
+ * lower Bollinger Band below the lower widest Keltner Channel or the upper band above the upper one (Keltner basis:
+ * SMA of the source, width: SMA of the true range times KC Mult 3); "Squeeze Started" when the bar before had no
+ * squeeze and this bar has one ("Alert Price Action Squeeze" on), else "Squeeze Fired" when this bar has no squeeze
+ * and the bar before had one ("Alert Squeeze Firing" on).
+ *
  * Reference: "TTM Squeeze Pro" by John Carter
  */
 
 import { Series, ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import type { AlertCall } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface TTMSqueezeProInputs {
   bbLength: number;
@@ -17,6 +27,10 @@ export interface TTMSqueezeProInputs {
   kcMult2: number;
   kcMult3: number;
   src: SourceType;
+  /** alert("Squeeze Started") calls (`alertCalls`); no effect on the other outputs */
+  detectSqzStart: boolean;
+  /** alert("Squeeze Fired") calls (`alertCalls`); no effect on the other outputs */
+  detectSqzFire: boolean;
 }
 
 export const defaultInputs: TTMSqueezeProInputs = {
@@ -27,6 +41,8 @@ export const defaultInputs: TTMSqueezeProInputs = {
   kcMult2: 1.5,
   kcMult3: 2.0,
   src: 'close',
+  detectSqzStart: true,
+  detectSqzFire: true,
 };
 
 export const inputConfig: InputConfig[] = [
@@ -37,7 +53,14 @@ export const inputConfig: InputConfig[] = [
   { id: 'kcMult2', type: 'float', title: 'KC Mult 2 (Normal)', defval: 1.5, min: 0.01, step: 0.5 },
   { id: 'kcMult3', type: 'float', title: 'KC Mult 3 (Wide)', defval: 2.0, min: 0.01, step: 0.5 },
   { id: 'src', type: 'source', title: 'Source', defval: 'close' },
+  { id: 'detectSqzStart', type: 'bool', title: 'Alert Price Action Squeeze', defval: true },
+  { id: 'detectSqzFire', type: 'bool', title: 'Alert Squeeze Firing', defval: true },
 ];
+
+/** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
+const EPS = 1e-10;
+const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
 
 export const plotConfig: PlotConfig[] = [
   { id: 'plot0', title: 'Momentum', color: '#26A69A', lineWidth: 4, style: 'histogram' },
@@ -50,8 +73,11 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TTMSqueezeProInputs> = {}): IndicatorResult {
-  const { bbLength, bbMult, kcLength, kcMult1, kcMult2, kcMult3, src } = { ...defaultInputs, ...inputs };
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<TTMSqueezeProInputs> = {},
+): IndicatorResult & { alertCalls: AlertCall[] } {
+  const { bbLength, bbMult, kcLength, kcMult1, kcMult2, kcMult3, src, detectSqzStart, detectSqzFire } = { ...defaultInputs, ...inputs };
   const source = getSourceSeries(bars, src);
 
   // Bollinger Bands
@@ -116,10 +142,36 @@ export function calculate(bars: Bar[], inputs: Partial<TTMSqueezeProInputs> = {}
     return { time: bars[i].time, value: 0, color };
   });
 
+  // Alerts of the original: NoSqz = BB_lower < KC_lower_low or BB_upper > KC_upper_low, with
+  // KC_basis = ta.sma(close, length) and devKC = ta.sma(ta.tr, length) (ta.tr is na on the first bar)
+  const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
+  const upperBBArr = A(upperBB);
+  const lowerBBArr = A(lowerBB);
+  const kcBasis = A(ta.sma(source, kcLength));
+  const trArr = bars.map((b, i) => (i > 0
+    ? Math.max(b.high - b.low, Math.abs(b.high - bars[i - 1].close), Math.abs(b.low - bars[i - 1].close))
+    : NaN));
+  const devKC = A(ta.sma(Series.fromArray(bars, trArr), kcLength));
+  const noSqz = bars.map((_b, i) => lt(lowerBBArr[i], kcBasis[i] - devKC[i] * kcMult3)
+    || gt(upperBBArr[i], kcBasis[i] + devKC[i] * kcMult3));
+  const alertCalls: AlertCall[] = [];
+  for (let i = 0; i < bars.length; i++) {
+    // NoSqz[1] is na (false) on the first bar
+    const prevNoSqz = i > 0 && noSqz[i - 1];
+    // if Detect_Sqz_Start and NoSqz[1] and not NoSqz: alert("Squeeze Started")
+    // else if Detect_Sqz_Fire and NoSqz and not NoSqz[1]: alert("Squeeze Fired")
+    if (detectSqzStart && prevNoSqz && !noSqz[i]) {
+      alertCalls.push({ time: bars[i].time as number, message: 'Squeeze Started', freq: 'once_per_bar' });
+    } else if (detectSqzFire && noSqz[i] && !prevNoSqz) {
+      alertCalls.push({ time: bars[i].time as number, message: 'Squeeze Fired', freq: 'once_per_bar' });
+    }
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': momData, 'plot1': sqzData },
+    alertCalls,
   };
 }
 
-export const TTMSqueezePro = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const TTMSqueezePro = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

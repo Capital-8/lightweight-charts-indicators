@@ -7,6 +7,8 @@
  * tolerance of the level while the close stays beyond it. With the EMA trend filter, a BUY also needs a close above
  * the EMA and a SELL a close below it. BUY / SELL triangles and a background tint mark the signals; a signal ends the
  * wait for a retest until the next breakout.
+ * Alerts (alertcondition, `alerts` of the result): the BUY / SELL signals, and with 'Enable Alerts' the breakouts,
+ * retests, signals, closes crossing the EMA (with the EMA filter) and new pivots.
  *
  * Reference: "Pivot Breakout High&Low Signals [JPT]" by Jos-ProTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PivotBreakoutHighLowSignalsInputs {
   /** Pivot length (bars on each side of the pivot) */
@@ -24,7 +27,7 @@ export interface PivotBreakoutHighLowSignalsInputs {
   emaFilter: boolean;
   /** EMA length */
   emaLength: number;
-  /** Pine input "Enable Alerts": only used by Pine alertconditions */
+  /** Enable Alerts: the advanced alertconditions (all but 'Buy Alert' / 'Sell Alert') */
   enableAlerts: boolean;
 }
 
@@ -65,7 +68,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<PivotBreakoutHighLowSignalsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { pivotLen, emaFilter, emaLength } = cfg;
   const retestTolerance = cfg.retestTolerance / 100;
@@ -93,6 +96,10 @@ export function calculate(
   let bearLevel = NaN; // var float bearLevel
   let waitingBullRetest = false;
   let waitingBearRetest = false;
+  const f = {
+    buy: [] as boolean[], sell: [] as boolean[], bullBo: [] as boolean[], bearBo: [] as boolean[],
+    bullRt: [] as boolean[], bearRt: [] as boolean[],
+  };
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     if (!isNaN(pivotHigh[i])) lastPivotHigh = pivotHigh[i];
@@ -125,6 +132,9 @@ export function calculate(
     const sellSignal = bearRetest && (!emaFilter || gt(ema[i], b.close));
     if (buySignal) waitingBullRetest = false;
     if (sellSignal) waitingBearRetest = false;
+    f.buy.push(buySignal); f.sell.push(sellSignal);
+    f.bullBo.push(bullBreakout); f.bearBo.push(bearBreakout);
+    f.bullRt.push(bullRetest); f.bearRt.push(bearRetest);
 
     // plotshape(buySignal, 'BUY', location.belowbar, shape.triangleup, color.lime, size.large, text 'BUY')
     // plotshape(sellSignal, 'SELL', location.abovebar, shape.triangledown, color.red, size.large, text 'SELL')
@@ -142,7 +152,18 @@ export function calculate(
     if (sellSignal) bgColors.push({ time: b.time, color: sellBg });
   }
 
-  // Not computed: the alertcondition values (breakouts, retests, EMA crosses, new pivots); no alert output.
+  // bullTrendChange = ta.crossover(close, ema); bearTrendChange = ta.crossunder(close, ema)
+  const bullTrend = crossedOver(close, ema);
+  const bearTrend = crossedUnder(close, ema);
+  const on = cfg.enableAlerts;
+  const flags = [
+    f.buy, f.sell,
+    f.bullBo.map((v) => on && v), f.bearBo.map((v) => on && v),
+    f.bullRt.map((v) => on && v), f.bearRt.map((v) => on && v),
+    f.buy.map((v) => on && v), f.sell.map((v) => on && v),
+    bullTrend.map((v) => on && emaFilter && v), bearTrend.map((v) => on && emaFilter && v),
+    pivotHigh.map((v) => on && !isNaN(v)), pivotLow.map((v) => on && !isNaN(v)),
+  ];
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -155,8 +176,25 @@ export function calculate(
     },
     markers,
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'Pivot Breakout Retest BUY' },
+  { id: 'alert1', title: 'Sell Alert', message: 'Pivot Breakout Retest SELL' },
+  { id: 'alert2', title: 'Bullish Pivot Breakout', message: '🟢 [JPT] Bullish Pivot Breakout detected.\nPrice has broken above the previous Pivot High.' },
+  { id: 'alert3', title: 'Bearish Pivot Breakout', message: '🔴 [JPT] Bearish Pivot Breakout detected.\nPrice has broken below the previous Pivot Low.' },
+  { id: 'alert4', title: 'Bullish Retest Confirmed', message: '🟢 [JPT] Bullish Retest confirmed.\nPrice successfully retested the breakout level.' },
+  { id: 'alert5', title: 'Bearish Retest Confirmed', message: '🔴 [JPT] Bearish Retest confirmed.\nPrice successfully retested the breakout level.' },
+  { id: 'alert6', title: 'BUY Signal', message: '🚀 [JPT] BUY Signal\nPivot Breakout + Retest + EMA confirmation.' },
+  { id: 'alert7', title: 'SELL Signal', message: '📉 [JPT] SELL Signal\nPivot Breakdown + Retest + EMA confirmation.' },
+  { id: 'alert8', title: 'Bullish Trend Change', message: '📈 [JPT] Price crossed ABOVE the EMA.\nBullish trend bias detected.' },
+  { id: 'alert9', title: 'Bearish Trend Change', message: '📉 [JPT] Price crossed BELOW the EMA.\nBearish trend bias detected.' },
+  { id: 'alert10', title: 'New Pivot High', message: '🔺 [JPT] New Pivot High confirmed.' },
+  { id: 'alert11', title: 'New Pivot Low', message: '🔻 [JPT] New Pivot Low confirmed.' },
+];
 
 export const PivotBreakoutHighLowSignals = {
   calculate,
@@ -164,4 +202,5 @@ export const PivotBreakoutHighLowSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

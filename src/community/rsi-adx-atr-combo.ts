@@ -4,6 +4,7 @@
  * RSI of the source, an ADX built from the directional movements (RMA of +DM, -DM and the true range, DX, then the
  * RMA of DX) and the ATR, in one pane. The background is fuchsia when the RSI is between the two bounds, the ADX is
  * under its threshold and the ATR is under its threshold (a quiet, range-bound market).
+ * Alert (alertcondition, `alerts` of the result): 'All Conditions Met', true on the bars of that condition.
  *
  * Reference: "RSI + ADX + ATR Combo" by shawasutosh
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +12,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiAdxAtrComboInputs {
   rsiLen: number;
@@ -65,7 +67,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<RsiAdxAtrComboInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -99,12 +101,15 @@ export function calculate(
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
   const signal = String(color.new(color.fuchsia, 85));
   const bgColors: BgColorData[] = [];
+  const comboFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const rsiCond = gt(rsi[i], cfg.rsiLower) && lt(rsi[i], cfg.rsiUpper);
     const adxCond = lt(adx[i], cfg.adxThreshold);
     const atrCond = lt(atr[i], cfg.atrThreshold);
     // bgcolor(comboSignal ? color.new(color.fuchsia, 85) : na)
-    if (rsiCond && adxCond && atrCond) bgColors.push({ time: bars[i].time, color: signal });
+    const comboSignal = rsiCond && adxCond && atrCond;
+    comboFlags.push(comboSignal);
+    if (comboSignal) bgColors.push({ time: bars[i].time, color: signal });
   }
 
   return {
@@ -120,8 +125,15 @@ export function calculate(
       { value: cfg.adxThreshold, options: { title: 'ADX Threshold', color: color.gray, linestyle: 'dashed' } },
     ],
     bgColors,
+    // alertcondition(comboSignal, "All Conditions Met")
+    alerts: alertStates(alertConditions, bars, [comboFlags]),
   };
 }
+
+/** The original's alertcondition */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'All Conditions Met', message: 'RSI, ADX, and ATR conditions are all satisfied.' },
+];
 
 export const RsiAdxAtrCombo = {
   calculate,
@@ -129,4 +141,5 @@ export const RsiAdxAtrCombo = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

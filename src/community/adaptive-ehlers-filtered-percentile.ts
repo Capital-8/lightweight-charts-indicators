@@ -8,6 +8,7 @@
  * rank) of the distance between the source and the filter, times a multiplier. A close above the upper band starts a
  * bullish regime, a close below the lower band a bearish regime; LONG / SHORT signals mark the regime changes, and the
  * filter, the fill and the bars take the regime colour.
+ * Alerts (alertcondition, `alerts` of the result): 'Long Signal' and 'Short Signal', on the bars of the signals.
  *
  * Reference: "Adaptive Ehlers Filtered Percentile" by SchizoQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AdaptiveEhlersFilteredPercentileInputs {
   /** Source of the adaptive MA */
@@ -107,7 +109,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<AdaptiveEhlersFilteredPercentileInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -183,10 +185,13 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     // longSignal = SQ == 1 and SQ[1] != 1 (SQ[1] na on the first bar: != is false)
     const longSignal = sq[i] === 1 && i > 0 && sq[i - 1] !== 1;
     const shortSignal = sq[i] === -1 && i > 0 && sq[i - 1] !== -1;
+    longFlags.push(longSignal);
+    shortFlags.push(shortSignal);
     if (cfg.showSignals && longSignal) {
       markers.push({ time: t(i), position: 'belowBar', shape: 'triangleUp', color: cfg.longColor, size: 'small',
         text: 'LONG', textColor: color.white });
@@ -204,8 +209,16 @@ export function calculate(
     fills,
     markers,
     barColors,
+    // alertcondition(longSignal, ...) / alertcondition(shortSignal, ...)
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Signal', message: 'Adaptive Ehlers Filtered Percentile Long Signal on {{ticker}}' },
+  { id: 'alert1', title: 'Short Signal', message: 'Adaptive Ehlers Filtered Percentile Short Signal on {{ticker}}' },
+];
 
 export const AdaptiveEhlersFilteredPercentile = {
   calculate,
@@ -213,4 +226,5 @@ export const AdaptiveEhlersFilteredPercentile = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -12,6 +12,8 @@
  * (Nadaraya-Watson, rational quadratic kernel), the entry and exit markers, one label per bar with the prediction,
  * bar colours from the prediction, the "Backtest Stream" plot (1 / 2 / -1 / -2, not displayed) and a trade
  * statistics table.
+ * Alerts (alertcondition, `alerts` of the result): open / close long, open / close short, open / close position (either
+ * side) and the kernel bullish / bearish colour changes, as the original.
  *
  * The functions of the libraries "MLExtensions" (version 2) and "KernelFunctions" (version 2) by jdehorty that the
  * script uses are written in this file: n_rsi, n_wt, n_cci, n_adx, normalize, rescale, filter_volatility,
@@ -30,6 +32,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData, BarColorData, LabelData, TableData, TableCell } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type Feature = 'RSI' | 'WT' | 'CCI' | 'ADX';
 
@@ -256,7 +259,7 @@ export function calculate(
   barColors: BarColorData[];
   labels: LabelData[];
   tables: TableData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -598,16 +601,16 @@ export function calculate(
     const time = bars[i].time;
     const p = prediction[i];
     if (startLongTrade[i] && toBool(low[i])) {
-      markers.push({ time, position: 'belowBar', shape: 'labelUp', color: greenOf(p), size: 'small' });
+      markers.push({ id: 'shape0', time, position: 'belowBar', shape: 'labelUp', color: greenOf(p), size: 'small' });
     }
     if (startShortTrade[i] && toBool(high[i])) {
-      markers.push({ time, position: 'aboveBar', shape: 'labelDown', color: redOf(-p), size: 'small' });
+      markers.push({ id: 'shape1', time, position: 'aboveBar', shape: 'labelDown', color: redOf(-p), size: 'small' });
     }
     if (endLongTrade[i] && cfg.showExits && Number.isFinite(high[i])) {
-      markers.push({ time, position: 'atPriceMiddle', price: high[i], shape: 'xcross', color: stopBuyColor, size: 'tiny' });
+      markers.push({ id: 'shape2', time, position: 'atPriceMiddle', price: high[i], shape: 'xcross', color: stopBuyColor, size: 'tiny' });
     }
     if (endShortTrade[i] && cfg.showExits && Number.isFinite(low[i])) {
-      markers.push({ time, position: 'atPriceMiddle', price: low[i], shape: 'xcross', color: stopSellColor, size: 'tiny' });
+      markers.push({ id: 'shape3', time, position: 'atPriceMiddle', price: low[i], shape: 'xcross', color: stopSellColor, size: 'tiny' });
     }
   }
 
@@ -753,8 +756,25 @@ export function calculate(
     barColors,
     labels: labels.filter((l): l is LabelData => l !== null),
     tables,
+    alerts: alertStates(alertConditions, bars, [
+      startLongTrade, endLongTrade, startShortTrade, endShortTrade,
+      startLongTrade.map((v, i) => startShortTrade[i] || v), endLongTrade.map((v, i) => endShortTrade[i] || v),
+      alertBullish, alertBearish,
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Open Long ▲', message: 'LDC Open Long ▲ | {{ticker}}@{{close}} | ({{interval}})' },
+  { id: 'alert1', title: 'Close Long ▲', message: 'LDC Close Long ▲ | {{ticker}}@{{close}} | ({{interval}})' },
+  { id: 'alert2', title: 'Open Short ▼', message: 'LDC Open Short  | {{ticker}}@{{close}} | ({{interval}})' },
+  { id: 'alert3', title: 'Close Short ▼', message: 'LDC Close Short ▼ | {{ticker}}@{{close}} | ({{interval}})' },
+  { id: 'alert4', title: 'Open Position ▲▼', message: 'LDC Open Position ▲▼ | {{ticker}}@{{close}} | ({{interval}})' },
+  { id: 'alert5', title: 'Close Position ▲▼', message: 'LDC Close Position  ▲▼ | {{ticker}}@[{{close}}] | ({{interval}})' },
+  { id: 'alert6', title: 'Kernel Bullish Color Change', message: 'LDC Kernel Bullish ▲ | {{ticker}}@{{close}} | ({{interval}})' },
+  { id: 'alert7', title: 'Kernel Bearish Color Change', message: 'LDC Kernel Bearish ▼ | {{ticker}}@{{close}} | ({{interval}})' },
+];
 
 export const LorentzianClassification = {
   calculate,
@@ -762,4 +782,5 @@ export const LorentzianClassification = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

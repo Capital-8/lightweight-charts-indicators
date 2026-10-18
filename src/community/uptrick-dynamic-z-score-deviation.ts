@@ -8,6 +8,7 @@
  * close to the line and the z-score of an ALMA-smoothed RSI are both beyond their thresholds, the RSI EMA is below 40
  * (buy) / above 60 (sell) and the close turns up (buy) / down (sell). The label size follows the signal strength
  * |z price| + |z RSI| (tiny < 4, small < 6, normal from 6) or is fixed (small).
+ * Alerts (alertcondition, `alerts` of the result): 'Buy Alert' / 'Sell Alert' on the bars of the buy / sell labels.
  *
  * Reference: "Uptrick: Dynamic Z-Score Deviation" by Uptrick
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface UptrickDynamicZScoreDeviationInputs {
   maLen: number;
@@ -116,7 +118,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<UptrickDynamicZScoreDeviationInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -180,23 +182,29 @@ export function calculate(
   const markers: MarkerData[] = [];
   const upText = '𝐔𝐩';
   const downText = '𝐃𝐨𝐰𝐧';
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
   for (let i = 1; i < n; i++) {
     const t = bars[i].time;
     const buyCond = cfg.showSignals && lt(zPrice[i], -cfg.priceZThresh) && lt(zRsi[i], -cfg.rsiZThresh)
       && lt(rsiEma[i], 40) && gt(close[i], close[i - 1]);
     const sellCond = cfg.showSignals && gt(zPrice[i], cfg.priceZThresh) && gt(zRsi[i], cfg.rsiZThresh)
       && gt(rsiEma[i], 60) && lt(close[i], close[i - 1]);
+    buyFlags[i] = buyCond;
+    sellFlags[i] = sellCond;
     const strength = Math.abs(zPrice[i]) + Math.abs(zRsi[i]);
     // Strong (>= 6): normal; medium (4..6): small; weak (< 4): tiny; fixed (dynamic size off): small
     const size = !cfg.useDynamicSize ? 'small' : ge(strength, 6) ? 'normal' : ge(strength, 4) ? 'small' : lt(strength, 4) ? 'tiny' : null;
     if (size === null) continue;
+    // Style ids: Buy Strong / Medium / Weak / Fixed = shape0..3, Sell Strong / Medium / Weak / Fixed = shape4..7
+    const k = !cfg.useDynamicSize ? 3 : size === 'normal' ? 0 : size === 'small' ? 1 : 2;
     // plotshape(buyCond ..., location.belowbar, shape.labelup, color.rgb(92, 240, 215), text = "𝐔𝐩", textcolor = #000000)
     if (buyCond) {
-      markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: BULL, size, text: upText, textColor: '#000000' });
+      markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: BULL, size, text: upText, textColor: '#000000', id: `shape${k}` });
     }
     // plotshape(sellCond ..., location.abovebar, shape.labeldown, color.rgb(179, 42, 195), text = "𝐃𝐨𝐰𝐧", textcolor = color.white)
     if (sellCond) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: BEAR, size, text: downText, textColor: color.white });
+      markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: BEAR, size, text: downText, textColor: color.white, id: `shape${4 + k}` });
     }
   }
 
@@ -206,8 +214,16 @@ export function calculate(
     fills,
     markers,
     barColors,
+    // alertcondition(buyCond, "Buy Alert") / alertcondition(sellCond, "Sell Alert")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Alert', message: 'Uptrick Buy Reversal Signal' },
+  { id: 'alert1', title: 'Sell Alert', message: 'Uptrick Sell Reversal Signal' },
+];
 
 export const UptrickDynamicZScoreDeviation = {
   calculate,
@@ -215,4 +231,5 @@ export const UptrickDynamicZScoreDeviation = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -10,6 +10,9 @@
  * The VWAP day: on intraday bars the port reads the exchange time zone and the session of the symbol from the
  * optional third argument (see src/chart-context.ts) and starts the VWAP with the trading day of the exchange, as
  * the original. Without them the day starts at 00:00 UTC.
+ * Alerts (alertcondition, `alerts` of the result): the Buy / Sell and Reversal Up / Down crosses (whether or not
+ * their labels are shown), and the start of a bullish / bearish trend (the HMA above / below its value `slopeIndex`
+ * bars ago, and not on the bar before).
  *
  * Reference: "Uptrick: Zero Lag HMA Trend Suite" by Uptrick
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,6 +22,7 @@ import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputCon
 import type { MarkerData, BarColorData } from '../types';
 import type { ChartContext } from '../chart-context';
 import { periodChanges } from '../anchor-period';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ZeroLagHMATrendSuiteInputs {
   /** HMA length */
@@ -80,6 +84,7 @@ export const metadata = {
 
 /** Pine float comparison: a > b only when a - b > 1e-10 (false with na) */
 const gt = (a: number, b: number) => a - b > 1e-10;
+const lt = (a: number, b: number) => b - a > 1e-10;
 
 /**
  * Start of a new day (Pine ta.vwap anchor: timeframe.change("1D")); true on the first bar, where the sums start as in
@@ -93,7 +98,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ZeroLagHMATrendSuiteInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { length, atrLength, signalMultiplier, showBuySellSignals, showReversalSignals, showVWAP, slopeIndex } = cfg;
   const n = bars.length;
@@ -127,18 +132,35 @@ export function calculate(
   const crossover = (a: number[], b: number[], i: number) => i > 0 && a[i] > b[i] && a[i - 1] <= b[i - 1];
   const crossunder = (a: number[], b: number[], i: number) => i > 0 && a[i] < b[i] && a[i - 1] >= b[i - 1];
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
+  const revUpFlags: boolean[] = new Array(n).fill(false);
+  const revDownFlags: boolean[] = new Array(n).fill(false);
+  const bullStartFlags: boolean[] = new Array(n).fill(false);
+  const bearStartFlags: boolean[] = new Array(n).fill(false);
+  // isBullish = zeroLagHMA > zeroLagHMA[slopeIndex]; isBearish = zeroLagHMA < zeroLagHMA[slopeIndex]
+  const hmaBack = (i: number) => (i >= slopeIndex ? hma[i - slopeIndex] : NaN);
+  const isBullish = hma.map((v, i) => gt(v, hmaBack(i)));
+  const isBearish = hma.map((v, i) => lt(v, hmaBack(i)));
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
-    if (showBuySellSignals && crossunder(source, lower, i)) {
+    buyFlags[i] = crossunder(source, lower, i);
+    sellFlags[i] = crossover(source, upper, i);
+    revUpFlags[i] = crossover(source, lower, i);
+    revDownFlags[i] = crossunder(source, upper, i);
+    // isBullish and not isBullish[1] (false before the first bar)
+    bullStartFlags[i] = isBullish[i] && !(i > 0 && isBullish[i - 1]);
+    bearStartFlags[i] = isBearish[i] && !(i > 0 && isBearish[i - 1]);
+    if (showBuySellSignals && buyFlags[i]) {
       markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: '#40a998', text: '𝓤𝓹', textColor: '#FFFFFF' });
     }
-    if (showBuySellSignals && crossover(source, upper, i)) {
+    if (showBuySellSignals && sellFlags[i]) {
       markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: String(color.new('#B32AC3', 0)), text: '𝓓𝓸𝔀𝓷', textColor: '#FFFFFF' });
     }
-    if (showReversalSignals && crossover(source, lower, i)) {
+    if (showReversalSignals && revUpFlags[i]) {
       markers.push({ time: t, position: 'belowBar', shape: 'circle', color: String(color.new('#58EDD4C3', 0)), text: 'B', textColor: '#FFFFFF', size: 'small' });
     }
-    if (showReversalSignals && crossunder(source, upper, i)) {
+    if (showReversalSignals && revDownFlags[i]) {
       markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: String(color.new('#B129C0C3', 0)), text: 'B', textColor: '#FFFFFF', size: 'small' });
     }
   }
@@ -160,8 +182,19 @@ export function calculate(
     plots,
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, revUpFlags, revDownFlags, bullStartFlags, bearStartFlags]),
   };
 }
+
+/** alertcondition() calls of the original */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: 'Buy Signal: Price crossed below Zero Lag HMA minus ATR threshold.' },
+  { id: 'alert1', title: 'Sell Signal', message: 'Sell Signal: Price crossed above Zero Lag HMA plus ATR threshold.' },
+  { id: 'alert2', title: 'Reversal Up Signal', message: 'Reversal Up Signal: Price crossed above Zero Lag HMA minus ATR threshold.' },
+  { id: 'alert3', title: 'Reversal Down Signal', message: 'Reversal Down Signal: Price crossed below Zero Lag HMA plus ATR threshold.' },
+  { id: 'alert4', title: 'Bullish Trend Start', message: 'Trend Shift: Bullish trend started.' },
+  { id: 'alert5', title: 'Bearish Trend Start', message: 'Trend Shift: Bearish trend started.' },
+];
 
 export const ZeroLagHMATrendSuite = {
   calculate,
@@ -169,4 +202,5 @@ export const ZeroLagHMATrendSuite = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

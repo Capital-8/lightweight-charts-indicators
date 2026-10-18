@@ -5,12 +5,19 @@
  * outer cloud between the medium and slow EMAs is green when the fast EMA is above the slow EMA and red otherwise.
  * Crossovers of the fast EMA above / below the slow EMA give BUY / SELL triangles and labels.
  *
+ * Alerts (alertcondition, `alerts` of the result), on closed bars: 'BUY Signal' / 'SELL Signal' when the trend (fast
+ * EMA above / below the slow EMA) turns up / down from the trend saved on the last closed bar, 'Trend Change' on
+ * both. Chart context (optional third argument): `lastBarConfirmed` (true without a context) tells whether the last
+ * bar is closed.
+ *
  * Reference: "EMA Cloud Trend ─ Clean BUY/SELL" by ZkalishTR
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface EmaCloudTrendInputs {
   fastLen: number;
@@ -45,11 +52,13 @@ export const metadata = {
 /** Pine float comparisons: a > b only when a - b > 1e-10 (na compares false) */
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
+const lt = (a: number, b: number) => b - a > EPS;
 
 export function calculate(
   bars: Bar[],
   inputs: Partial<EmaCloudTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -92,6 +101,24 @@ export function calculate(
     prevB = b;
   }
 
+  // var int lastTrend = na; trendChanged = not na(lastTrend) and ((lastTrend == -1 and trendUp) or
+  // (lastTrend == 1 and trendDown)); if barstate.isconfirmed: lastTrend := trendUp ? 1 : -1
+  const lastConfirmed = lastBarConfirmedOf(chart);
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
+  const changeFlags: boolean[] = [];
+  let lastTrend = NaN;
+  for (let i = 0; i < n; i++) {
+    const trendUp = gt(ema8[i], ema36[i]);
+    const trendDown = lt(ema8[i], ema36[i]);
+    const trendChanged = !isNaN(lastTrend) && ((lastTrend === -1 && trendUp) || (lastTrend === 1 && trendDown));
+    const confirmed = i < n - 1 || lastConfirmed;
+    if (confirmed) lastTrend = trendUp ? 1 : -1;
+    buyFlags.push(trendChanged && trendUp && confirmed);
+    sellFlags.push(trendChanged && trendDown && confirmed);
+    changeFlags.push(trendChanged && confirmed);
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -107,8 +134,17 @@ export function calculate(
         colors: ema8.map((e, i) => (gt(e, ema36[i]) ? outerUp : outerDn)) },
     ],
     markers,
+    // alertcondition(trendChanged and trendUp / trendDown and barstate.isconfirmed) / (trendChanged and confirmed)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, changeFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY Signal', message: 'EMA Cloud → Strong BUY!' },
+  { id: 'alert1', title: 'SELL Signal', message: 'EMA Cloud → Strong SELL!' },
+  { id: 'alert2', title: 'Trend Change', message: "EMA Cloud Trend Changed → {{ema8 > ema36 ? 'BUY' : 'SELL'}}" },
+];
 
 export const EmaCloudTrend = {
   calculate,
@@ -116,4 +152,5 @@ export const EmaCloudTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

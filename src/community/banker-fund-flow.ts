@@ -6,12 +6,18 @@
  * Fund flow trend = double-smoothed stochastic-like normalization over 27 bars.
  * Bull/bear line = EMA(13) of typical price normalized over 34-bar highest/lowest.
  * Entry signal fires when fund_flow crosses above bull_bear and bull_bear < 25.
+ * Candles, as the original's five plotcandle outputs (in their order, each drawn on the bars where its colour is not
+ * na): yellow 0..50 entry candle; green (fund flow above the bull bear line), white (fund flow below 95 % of the
+ * previous fund flow), red (fund flow below the line) and blue (below the line and above 95 % of the previous fund
+ * flow) candles from the fund flow to the bull bear line.
+ * Alerts (alertcondition, `alerts` of the result): one per candle colour, with the candle's condition.
  *
  * Reference: "[blackcat] L3 Banker Fund Flow Trend Oscillator"
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface BankerFundFlowInputs {
   normLength: number;
@@ -82,7 +88,11 @@ function calcWeightedSimpleAverage(srcArr: number[], length: number, weight: num
   return output;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<BankerFundFlowInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<BankerFundFlowInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const { normLength, typicalLength, emaLength, entryThreshold } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -169,61 +179,41 @@ export function calculate(bars: Bar[], inputs: Partial<BankerFundFlowInputs> = {
     value: (i < warmup || v == null || isNaN(v)) ? NaN : v,
   }));
 
-  // plotCandle: color-coded candles showing fund flow status
-  // Pine draws 5 overlapping plotcandles; later ones render on top.
-  // Priority (highest on top → lowest): blue(5) > red(4) > white(3) > green(2)
-  const candles: PlotCandleData[] = [];
-  // Entry signal candle: plotcandle(0, 50, 0, 50, color=yellow when entry signal)
+  // The original's five plotcandle() outputs, in their order, each with its own colour condition (bordercolor = na).
+  // find_recent_value(fund_flow_trend * 0.95, 1): the previous value * 0.95, or the current one when it is na.
+  const YELLOW = '#FFEB3B', GREEN = '#4CAF50', WHITE = '#FFFFFF', RED = '#FF5252', BLUE = '#2962FF';
   const entryCandles: PlotCandleData[] = [];
-  for (let i = warmup; i < n; i++) {
+  const greenCandles: PlotCandleData[] = [];
+  const whiteCandles: PlotCandleData[] = [];
+  const redCandles: PlotCandleData[] = [];
+  const blueCandles: PlotCandleData[] = [];
+  const flags: boolean[][] = [[], [], [], [], []];
+  for (let i = 0; i < n; i++) {
     const fft = fundFlowTrend[i];
-    const bbl = bullBearArr[i];
-    if (isNaN(fft) || bbl == null || isNaN(bbl)) continue;
+    const bbl = bullBearArr[i] ?? NaN;
     const prevFft = i > 0 ? fundFlowTrend[i - 1] : NaN;
-    const prevBbl = i > 0 ? bullBearArr[i - 1] : NaN;
-    const threshold95 = isNaN(prevFft) ? fft : prevFft * 0.95;
+    const prevBbl = i > 0 ? bullBearArr[i - 1] ?? NaN : NaN;
+    const recent95 = isNaN(prevFft) ? fft * 0.95 : prevFft * 0.95;
+    // banker_entry_signal = ta.crossover(fund_flow_trend, bull_bear_line) and bull_bear_line < 25
+    const entry = fft > bbl && prevFft <= prevBbl && bbl < entryThreshold;
+    const green = fft > bbl;
+    const white = fft < recent95;
+    const red = fft < bbl;
+    const blue = fft < bbl && fft > recent95;
+    [entry, green, white, red, blue].forEach((f, k) => flags[k].push(f));
 
-    // Determine candle color following Pine's plotcandle layering order:
-    // plotcandle 2: green when fft > bbl
-    // plotcandle 3: white when fft < threshold95
-    // plotcandle 4: red when fft < bbl (on top of white)
-    // plotcandle 5: blue when fft < bbl AND fft > threshold95 (on top of red)
-    let color: string | undefined;
-    if (fft > bbl) {
-      color = '#26A69A'; // green - banker increase position
-    }
-    if (fft < threshold95) {
-      color = '#FFFFFF'; // white - banker decrease position
-    }
-    if (fft < bbl) {
-      color = '#EF5350'; // red - banker exit/quit (on top of white)
-    }
-    if (fft < bbl && fft > threshold95) {
-      color = '#2196F3'; // blue - weak rebound (on top of red)
-    }
-
-    candles.push({
-      time: bars[i].time,
-      open: fft,
-      high: Math.max(fft, bbl),
-      low: Math.min(fft, bbl),
-      close: bbl,
-      color,
+    const time = bars[i].time;
+    // plotcandle(0, 50, 0, 50, color = banker_entry_signal ? yellow : na, bordercolor = na)
+    if (entry) entryCandles.push({ time, open: 0, high: 50, low: 0, close: 50, color: YELLOW, borderColor: 'transparent' });
+    // plotcandle(fund_flow_trend, bull_bear_line, fund_flow_trend, bull_bear_line, color = <cond> ? <colour> : na)
+    if (isNaN(fft) || isNaN(bbl)) continue;
+    const candle = (color: string): PlotCandleData => ({
+      time, open: fft, high: Math.max(fft, bbl), low: Math.min(fft, bbl), close: bbl, color, borderColor: 'transparent',
     });
-
-    // Entry signal yellow candle (plotcandle 1): fixed 0-50 range
-    if (!isNaN(prevFft) && prevBbl != null && !isNaN(prevBbl) &&
-        prevFft <= prevBbl && fft > bbl && bbl < entryThreshold) {
-      entryCandles.push({
-        time: bars[i].time,
-        open: 0,
-        high: 50,
-        low: 0,
-        close: 50,
-        color: '#FFD700', // yellow
-        borderColor: 'transparent',
-      });
-    }
+    if (green) greenCandles.push(candle(GREEN));
+    if (white) whiteCandles.push(candle(WHITE));
+    if (red) redCandles.push(candle(RED));
+    if (blue) blueCandles.push(candle(BLUE));
   }
 
   return {
@@ -240,8 +230,19 @@ export function calculate(bars: Bar[], inputs: Partial<BankerFundFlowInputs> = {
       { plot1: 'hline_overbought', plot2: 'hline_strong', options: { color: 'rgba(224, 64, 251, 0.3)' } },
     ],
     markers,
-    plotCandles: { candle0: candles, entrySignal: entryCandles },
+    // later candles are drawn on top
+    plotCandles: { entrySignal: entryCandles, green: greenCandles, white: whiteCandles, red: redCandles, blue: blueCandles },
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const BankerFundFlow = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Alert on Yellow Candle', message: 'Yellow Candle!' },
+  { id: 'alert1', title: 'Alert on Green Candle', message: 'Green Candle!' },
+  { id: 'alert2', title: 'Alert on White Candle', message: 'White Candle!' },
+  { id: 'alert3', title: 'Alert on Red Candle', message: 'Red Candle!' },
+  { id: 'alert4', title: 'Alert on Blue Candle', message: 'Blue Candle!' },
+];
+
+export const BankerFundFlow = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

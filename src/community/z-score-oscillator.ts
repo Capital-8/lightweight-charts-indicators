@@ -9,6 +9,8 @@
  * Fills, a three-layer glow and an optional background tint mark the overbought / oversold territory; the main line
  * has a gradient (or sign) colour, more opaque when it moves away from zero. Optional pivot divergences between price
  * and the displayed value (regular and hidden) with Bull / Bear labels.
+ * Alerts (alertcondition, `alerts` of the result): crosses of the displayed value over / under the upper and lower
+ * levels and zero, and the four divergences.
  *
  * Last bar: with 'Delay Plot Until Candle Closes' a divergence is not drawn on an open bar. The port reads the state
  * of the last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as
@@ -22,6 +24,7 @@ import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputCon
 import type { MarkerData, BgColorData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type ZScoreTheme = 'Modern' | 'Classic' | 'Neon' | 'Monochrome' | 'Sunset' | 'Ocean';
 export type ZScoreDisplayMode = 'Oscillator' | 'Z-Score' | 'Percentile Rank';
@@ -228,7 +231,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ZScoreOscillatorInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -426,10 +429,10 @@ export function calculate(
     if (isNaN(price)) continue;
     const time = barTime(bars, i - lbR, interval);
     // plotshape(cond ? main_value[div_lbR] : na, offset = -div_lbR, style = shape.labelup / labeldown, location.absolute)
-    if (bullCond[i]) markers.push({ time, position: 'atPriceBottom', price, shape: 'labelUp', color: th.bull, text: ' Bull ', textColor });
-    if (hidBullCond[i]) markers.push({ time, position: 'atPriceBottom', price, shape: 'labelUp', color: th.bull, text: ' H Bull ', textColor });
-    if (bearCond[i]) markers.push({ time, position: 'atPriceTop', price, shape: 'labelDown', color: th.bear, text: ' Bear ', textColor });
-    if (hidBearCond[i]) markers.push({ time, position: 'atPriceTop', price, shape: 'labelDown', color: th.bear, text: ' H Bear ', textColor });
+    if (bullCond[i]) markers.push({ id: 'shape0', time, position: 'atPriceBottom', price, shape: 'labelUp', color: th.bull, text: ' Bull ', textColor });
+    if (hidBullCond[i]) markers.push({ id: 'shape1', time, position: 'atPriceBottom', price, shape: 'labelUp', color: th.bull, text: ' H Bull ', textColor });
+    if (bearCond[i]) markers.push({ id: 'shape2', time, position: 'atPriceTop', price, shape: 'labelDown', color: th.bear, text: ' Bear ', textColor });
+    if (hidBearCond[i]) markers.push({ id: 'shape3', time, position: 'atPriceTop', price, shape: 'labelDown', color: th.bear, text: ' H Bear ', textColor });
   }
 
   // bgcolor(show_bg_tint ? (in_extreme_ob ? color.new(theme_bear, 92) : in_extreme_os ? color.new(theme_bull, 92) : na) : na)
@@ -496,6 +499,20 @@ export function calculate(
     }),
   };
 
+  // alertcondition(...) of the original, in its order (ta.crossover / ta.crossunder: exact comparisons)
+  const alerts = alertStates(alertConditions, bars, [
+    crossedOver(main, upperLevel),
+    crossedUnder(main, lowerLevel),
+    crossedUnder(main, upperLevel),
+    crossedOver(main, lowerLevel),
+    crossedOver(main, 0),
+    crossedUnder(main, 0),
+    bullCond,
+    bearCond,
+    hidBullCond,
+    hidBearCond,
+  ]);
+
   const obFill = String(color.new(th.bear, cfg.showObOsFill ? 70 : 100));
   const osFill = String(color.new(th.bull, cfg.showObOsFill ? 70 : 100));
   return {
@@ -507,8 +524,23 @@ export function calculate(
     ],
     markers,
     bgColors,
+    alerts,
   };
 }
+
+/** alertcondition() calls of the original */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cross Above Upper Band', message: 'Crossed above upper band' },
+  { id: 'alert1', title: 'Cross Below Lower Band', message: 'Crossed below lower band' },
+  { id: 'alert2', title: 'Return From Overbought', message: 'Returning from overbought' },
+  { id: 'alert3', title: 'Return From Oversold', message: 'Returning from oversold' },
+  { id: 'alert4', title: 'Zero Cross Up', message: 'Crossed above zero' },
+  { id: 'alert5', title: 'Zero Cross Down', message: 'Crossed below zero' },
+  { id: 'alert6', title: 'Regular Bullish Divergence', message: 'Regular bullish divergence detected' },
+  { id: 'alert7', title: 'Regular Bearish Divergence', message: 'Regular bearish divergence detected' },
+  { id: 'alert8', title: 'Hidden Bullish Divergence', message: 'Hidden bullish divergence detected' },
+  { id: 'alert9', title: 'Hidden Bearish Divergence', message: 'Hidden bearish divergence detected' },
+];
 
 function nz(v: number): number {
   return Number.isFinite(v) ? v : 0;
@@ -521,4 +553,5 @@ export const ZScoreOscillator = {
   inputConfig,
   plotConfig,
   fillConfig,
+  alertConditions,
 };

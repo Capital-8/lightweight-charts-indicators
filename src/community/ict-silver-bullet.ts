@@ -521,15 +521,15 @@ export function calculate(
 
     // plotchar: session names (no character, a text), reached targets (a dot)
     if (showSB) {
-      const name = (text: string) => markers.push({
-        time: markerTime(i + tfs), position: 'top', shape: 'circle', color: NA_COLOR, text, textColor: col_SB,
+      const name = (text: string, id: string) => markers.push({
+        time: markerTime(i + tfs), position: 'top', shape: 'circle', color: NA_COLOR, text, textColor: col_SB, id,
       });
-      if (inLN && !prevLN) name('3-4 AM\nNY');
-      if (inAM && !prevAM) name('10-11 AM\nNY');
-      if (inPM && !prevPM) name('2-3 PM\nNY');
+      if (inLN && !prevLN) name('3-4 AM\nNY', 'char0');
+      if (inAM && !prevAM) name('10-11 AM\nNY', 'char1');
+      if (inPM && !prevPM) name('2-3 PM\nNY', 'char2');
     }
-    if (targetHi) markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'circle', color: NA_COLOR, text: '•', textColor: cResLine, size: 'small' });
-    if (targetLo) markers.push({ time: bars[i].time, position: 'belowBar', shape: 'circle', color: NA_COLOR, text: '•', textColor: cSupLine, size: 'small' });
+    if (targetHi) markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'circle', color: NA_COLOR, text: '•', textColor: cResLine, size: 'small', id: 'char3' });
+    if (targetLo) markers.push({ time: bars[i].time, position: 'belowBar', shape: 'circle', color: NA_COLOR, text: '•', textColor: cSupLine, size: 'small', id: 'char4' });
 
     prevLN = inLN;
     prevAM = inAM;

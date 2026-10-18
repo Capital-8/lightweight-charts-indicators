@@ -36,7 +36,11 @@
  * - The pivots with the adaptive length: the library function with a left length per bar.
  * - A "Higher Timeframe" below the chart timeframe (the default "240" on a daily chart) needs data that the chart
  *   bars do not have: the port throws an Error when "Enable HTF Confluence" is on.
- * - The alerts give no output.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close, on confirmed bars), as the original: with
+ * "Alert on Position Close" the stop / break-even stop and TP3 exits, with "Alert on TP1/TP2 & BE Updates" the TP1 /
+ * TP2 hits and the break-even move, and the entries ("SWEEP BUY" / "SWEEP SELL", text or webhook JSON). They read
+ * `chart.tickerid` and the chart timeframe.
  *
  * Reference: "Liquidity Pools Pro [WillyAlgoTrader]" by WillyAlgoTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -49,12 +53,15 @@ import {
   type DrawingVariable,
 } from 'oakscriptjs';
 import type {
-  BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TablePosition,
+  AlertCall, BoxData, LabelData, LabelStyle, LineDrawingData, PineSize, TableCellData, TableData, TablePosition,
 } from '../types';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
-import { backgroundColorOf, lastBarConfirmedOf, mintickOf, tickerOf, type ChartContext } from '../chart-context';
+import { backgroundColorOf, lastBarConfirmedOf, mintickOf, tickerOf, tickeridOf, type ChartContext } from '../chart-context';
 
 type FontSize = 'Tiny' | 'Small' | 'Normal' | 'Large' | 'Huge';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface LiquidityPoolsProInputs {
   adaptivePivot: boolean;
@@ -332,14 +339,16 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<LiquidityPoolsProInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[] } {
+): IndicatorResult & {
+  boxes: BoxData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[]; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const base = {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
   };
-  if (n === 0) return { ...base, boxes: [], lines: [], labels: [], tables: [] };
+  if (n === 0) return { ...base, boxes: [], lines: [], labels: [], tables: [], alertCalls: [] };
 
   // syminfo.mintick, chart.bg_color, barstate.isconfirmed
   const MINTICK = mintickOf(chart);
@@ -523,6 +532,14 @@ export function calculate(
   let tp2Reached = false;
   let tp3Reached = false;
   let beActive = false;
+  let activePoolStrength = NaN;
+  let tradeCounter = 0;
+  let activeTradeId = 0;
+  // alert() calls: syminfo.tickerid and timeframe.period of the messages
+  const alertCalls: AlertCall[] = [];
+  const tickerid = tickeridOf(chart);
+  const tfPeriod = chartTimeframe(bars, chart);
+  const nz = (v: number) => (Number.isNaN(v) ? 0 : v);
 
   // var line slLine = na ... var label entryLabel = na
   const slLine = varDrawing<Line>();
@@ -714,11 +731,23 @@ export function calculate(
     const confirmedBuy = sweepBuySignal && isConfirmed && isWarmedUp && !positionActive;
     const confirmedSell = sweepSellSignal && isConfirmed && isWarmedUp && !positionActive;
 
+    // replaced-trade close-out, from the old state
+    const replacingTrade = (confirmedBuy || confirmedSell) && activeDir !== 0;
+    const replacedSLHit = replacingTrade && (activeDir === 1 ? le(low, activeSL) : ge(high, activeSL));
+    const replacedTP3Hit = replacingTrade && !replacedSLHit;
+    const replacedWasBE = replacingTrade && beActive;
+    const replacedEntry = replacingTrade ? activeEntry : NaN;
+    const replacedSL = replacingTrade ? activeSL : NaN;
+    const replacedTP3 = replacingTrade ? activeTP3 : NaN;
+    const replacedTradeId = replacingTrade ? activeTradeId : 0;
+
     let justOpened = false;
     if (confirmedBuy || confirmedSell) {
       const sign = confirmedBuy ? 1.0 : -1.0;
       const wickDist = (confirmedBuy ? close - low : high - close) + riskAtr * cfg.wickBuffer;
       const slDist = cfg.slMode === 'Sweep Wick' && gt(wickDist, 0) && ge(wickDist, riskAtr * 0.1) ? wickDist : slDistance;
+      tradeCounter += 1;
+      activeTradeId = tradeCounter;
       activeEntry = close;
       activeSL = close - sign * slDist;
       activeTP1 = close + sign * slDist * effectiveTP1Mult;
@@ -726,6 +755,7 @@ export function calculate(
       activeTP3 = close + sign * slDist * effectiveTP3Mult;
       initialRiskDist = slDist;
       activeDir = confirmedBuy ? 1 : -1;
+      activePoolStrength = signalPoolStrength;
       tp1Reached = false;
       tp2Reached = false;
       tp3Reached = false;
@@ -748,10 +778,22 @@ export function calculate(
     if (tp3FirstTouch) tp3Reached = true;
 
     // break-even: the stop moves to the entry on the first touch of TP1
+    let beJustActivated = false;
     if (cfg.useBreakEven && tp1FirstTouch && !slHit && activeDir !== 0 && !beActive) {
       activeSL = activeEntry;
       beActive = true;
+      beJustActivated = true;
     }
+
+    // alert snapshots, before the reset
+    const closedBySL = slHit && activeDir !== 0;
+    const wasBeActive = beActive;
+    const alertTradeIdVal = activeTradeId;
+    const alertEntryVal = activeEntry;
+    const alertSLVal = effectiveSL;
+    const alertTP1Val = activeTP1;
+    const alertTP2Val = activeTP2;
+    const alertTP3Val = activeTP3;
 
     // exit on the stop or on TP3
     if ((slHit || tp3Hit) && activeDir !== 0) {
@@ -761,11 +803,69 @@ export function calculate(
       activeTP2 = NaN;
       activeTP3 = NaN;
       activeEntry = NaN;
+      activePoolStrength = NaN;
       initialRiskDist = NaN;
       tp1Reached = false;
       tp2Reached = false;
       tp3Reached = false;
       beActive = false;
+    }
+
+    // ── Alerts (alert() calls, alert.freq_once_per_bar_close; the state after the reset) ──
+    {
+      const alert = (message: string) => alertCalls.push({ time: b.time, message, freq: 'once_per_bar_close' });
+      const alertPrice = tickText(close);
+      const alertSLStr = tickText(nz(activeSL));
+      const alertTP1Str = tickText(nz(activeTP1));
+      const alertTP2Str = tickText(nz(activeTP2));
+      const alertTP3Str = tickText(nz(activeTP3));
+      const alertRRStr = str.tostring(effectiveTP1Mult, '#.#');
+      const alertStrStr = str.tostring(nz(activePoolStrength), '#');
+      const alertIdStr = str.tostring(activeTradeId);
+      const alertQtyStr = Number.isNaN(initialRiskDist) || le(initialRiskDist, 0)
+        ? '0' : str.tostring((cfg.acctSize * cfg.riskPerTrade) / 100.0 / initialRiskDist, '#.######');
+      const eventJson = (action: string, event: string, id: number, entry: number, price: number) =>
+        '{"action":"' + action + '","event":"' + event + '","id":' + str.tostring(id) + ',"ticker":"' + tickerid + '","tf":"' + tfPeriod
+        + '","entry":' + tickText(nz(entry)) + ',"price":' + tickText(nz(price)) + '}';
+      const entryJson = (action: string) =>
+        '{"action":"' + action + '","event":"entry","id":' + alertIdStr + ',"qty":' + alertQtyStr + ',"ticker":"' + tickerid + '","tf":"'
+        + tfPeriod + '","price":' + alertPrice + ',"sl":' + alertSLStr + ',"tp1":' + alertTP1Str + ',"tp2":' + alertTP2Str + ',"tp3":'
+        + alertTP3Str + ',"rr":' + alertRRStr + ',"pool_strength":' + alertStrStr + '}';
+      const entryText = (head: string) =>
+        head + tickerid + ' | ID: ' + alertIdStr + ' | TF: ' + tfPeriod + ' | Price: ' + alertPrice + ' | Pool: ' + alertStrStr
+        + '/100 | SL: ' + alertSLStr + ' | TP1: ' + alertTP1Str + ' | TP2: ' + alertTP2Str + ' | TP3: ' + alertTP3Str + ' | R:R: ' + alertRRStr;
+
+      if ((closedBySL || replacedSLHit) && cfg.alertClose && isConfirmed) {
+        const beStop = closedBySL ? wasBeActive : replacedWasBE;
+        const exId = closedBySL ? alertTradeIdVal : replacedTradeId;
+        const exEntry = closedBySL ? alertEntryVal : replacedEntry;
+        const exSL = closedBySL ? alertSLVal : replacedSL;
+        const slText = (beStop ? '🛡️ BE STOP-OUT | ' : '🛑 SL HIT | ') + tickerid + ' | ID: ' + str.tostring(exId) + ' | Entry: '
+          + tickText(nz(exEntry)) + ' | SL: ' + tickText(nz(exSL));
+        alert(cfg.webhook ? eventJson('exit', beStop ? 'be_stop' : 'sl_hit', exId, exEntry, exSL) : slText);
+      }
+      if (tp1FirstTouch && !slHit && cfg.alertUpdate && isConfirmed) {
+        const tp1Text = '🎯 TP1 HIT | ' + tickerid + ' | ID: ' + str.tostring(alertTradeIdVal) + ' | TP1: ' + tickText(alertTP1Val);
+        alert(cfg.webhook ? eventJson('update', 'tp1_hit', alertTradeIdVal, alertEntryVal, alertTP1Val) : tp1Text);
+      }
+      if (beJustActivated && cfg.alertUpdate && isConfirmed) {
+        const beText = '🛡️ BREAK-EVEN | ' + tickerid + ' | ID: ' + str.tostring(alertTradeIdVal) + ' | SL moved to ' + tickText(alertEntryVal);
+        alert(cfg.webhook ? eventJson('update', 'break_even', alertTradeIdVal, alertEntryVal, alertEntryVal) : beText);
+      }
+      if (tp2FirstTouch && !slHit && cfg.alertUpdate && isConfirmed) {
+        const tp2Text = '🎯 TP2 HIT | ' + tickerid + ' | ID: ' + str.tostring(alertTradeIdVal) + ' | TP2: ' + tickText(alertTP2Val);
+        alert(cfg.webhook ? eventJson('update', 'tp2_hit', alertTradeIdVal, alertEntryVal, alertTP2Val) : tp2Text);
+      }
+      if (((tp3FirstTouch && !slHit) || replacedTP3Hit) && cfg.alertClose && isConfirmed) {
+        const tp3Id = replacedTP3Hit ? replacedTradeId : alertTradeIdVal;
+        const tp3E = replacedTP3Hit ? replacedEntry : alertEntryVal;
+        const tp3V = replacedTP3Hit ? replacedTP3 : alertTP3Val;
+        const tp3Text = '🏆 TP3 HIT | ' + tickerid + ' | ID: ' + str.tostring(tp3Id) + ' | TP3: ' + tickText(nz(tp3V));
+        alert(cfg.webhook ? eventJson('exit', 'tp3_hit', tp3Id, tp3E, tp3V) : tp3Text);
+      }
+      // entries after the exits; a bar with both signals opens long: only the buy alert
+      if (confirmedBuy) alert(cfg.webhook ? entryJson('buy') : entryText('🟢 SWEEP BUY | '));
+      if (confirmedSell && !confirmedBuy) alert(cfg.webhook ? entryJson('sell') : entryText('🔴 SWEEP SELL | '));
     }
 
     // ── SL / TP lines and labels ──
@@ -974,7 +1074,8 @@ export function calculate(
       ...(l.yloc !== 'price' ? { yloc: l.yloc as 'abovebar' | 'belowbar' } : {}),
     })),
     tables,
+    alertCalls,
   };
 }
 
-export const LiquidityPoolsPro = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const LiquidityPoolsPro = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

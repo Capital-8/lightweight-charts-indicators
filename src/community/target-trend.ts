@@ -219,12 +219,12 @@ export function calculate(
     const sigUp = signalUp ? low - atrValue[i] * 2 : NaN;
     const sigDn = signalDown ? high + atrValue[i] * 2 : NaN;
     if (!Number.isNaN(sigUp)) {
-      markers.push({ time, position: 'atPriceMiddle', price: sigUp, shape: 'triangleUp', color: UP_COLOR, size: 'tiny' });
-      markers.push({ time, position: 'atPriceMiddle', price: sigUp, shape: 'triangleUp', color: up20, size: 'small' });
+      markers.push({ time, position: 'atPriceMiddle', price: sigUp, shape: 'triangleUp', color: UP_COLOR, size: 'tiny', id: 'shape0' });
+      markers.push({ time, position: 'atPriceMiddle', price: sigUp, shape: 'triangleUp', color: up20, size: 'small', id: 'shape1' });
     }
     if (!Number.isNaN(sigDn)) {
-      markers.push({ time, position: 'atPriceMiddle', price: sigDn, shape: 'triangleDown', color: DN_COLOR, size: 'tiny' });
-      markers.push({ time, position: 'atPriceMiddle', price: sigDn, shape: 'triangleDown', color: dn20, size: 'small' });
+      markers.push({ time, position: 'atPriceMiddle', price: sigDn, shape: 'triangleDown', color: DN_COLOR, size: 'tiny', id: 'shape2' });
+      markers.push({ time, position: 'atPriceMiddle', price: sigDn, shape: 'triangleDown', color: dn20, size: 'small', id: 'shape3' });
     }
   }
 

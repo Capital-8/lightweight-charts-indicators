@@ -10,6 +10,8 @@
  * The VWAP day: on intraday bars the port reads the exchange time zone and the session of the symbol from the
  * optional third argument (see src/chart-context.ts) and starts the VWAP with the trading day of the exchange, as
  * the original. Without them the day starts at 00:00 UTC.
+ * Alerts (alertcondition, `alerts` of the result): the filter crossing over / under its value of the bar before
+ * (slope up / down), the price crossing over / under the filter, and the filter crossing over / under the VWAP base.
  *
  * Reference: "Kalman VWAP Filter [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -20,6 +22,7 @@ import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputCon
 import type { BarColorData } from '../types';
 import type { ChartContext } from '../chart-context';
 import { periodChanges } from '../anchor-period';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface KalmanVwapFilterInputs {
   /** Price the filter observes */
@@ -107,7 +110,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<KalmanVwapFilterInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -155,6 +158,15 @@ export function calculate(
     ? bars.map((b, i) => ({ time: b.time, color: barCol[i] }))
     : [];
 
+  // slopeUp / slopeDown = ta.crossover / crossunder(kalmanVW, kalmanVW[1]); priceAbove / priceBelow =
+  // ta.crossover / crossunder(pricesource, kalmanVW); baseUp / baseDown = ta.crossover / crossunder(kalmanVW, vwapBase)
+  const kalman1 = kalman.map((_k, i) => (i > 0 ? kalman[i - 1] : NaN));
+  const alerts = alertStates(alertConditions, bars, [
+    crossedOver(kalman, kalman1), crossedUnder(kalman, kalman1),
+    crossedOver(price, kalman), crossedUnder(price, kalman),
+    crossedOver(kalman, vwapBase), crossedUnder(kalman, vwapBase),
+  ]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay, precision: 2 },
     plots: {
@@ -165,8 +177,19 @@ export function calculate(
       })),
     },
     barColors,
+    alerts,
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Kalman VWAP Slope Up', message: 'Kalman VWAP Slope Up {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Kalman VWAP Slope Down', message: 'Kalman VWAP Slope Down {{exchange}}:{{ticker}}' },
+  { id: 'alert2', title: 'Price Crosses Above Kalman VWAP', message: 'Price > Kalman VWAP {{exchange}}:{{ticker}}' },
+  { id: 'alert3', title: 'Price Crosses Below Kalman VWAP', message: 'Price < Kalman VWAP {{exchange}}:{{ticker}}' },
+  { id: 'alert4', title: 'Kalman VWAP Crosses Above VWAP Base', message: 'Kalman VWAP > VWAP Base {{exchange}}:{{ticker}}' },
+  { id: 'alert5', title: 'Kalman VWAP Crosses Below VWAP Base', message: 'Kalman VWAP < VWAP Base {{exchange}}:{{ticker}}' },
+];
 
 export const KalmanVwapFilter = {
   calculate,
@@ -174,4 +197,5 @@ export const KalmanVwapFilter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

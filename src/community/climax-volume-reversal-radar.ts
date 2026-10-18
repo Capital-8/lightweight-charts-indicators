@@ -5,12 +5,15 @@
  * below the close of `takingClose` bars ago on a volume above sma(volume, 10) * riskFactor; a bearish climax (red)
  * is an up bar that closes above that close on the same volume condition; other bars are gray. An optional SMA of
  * the volume is drawn as a line.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Climax Watch' and 'Bearish Climax Watch', true on the
+ * green and red columns.
  *
  * Reference: "Climax Volume Reversal Radar" by Ty_yanse
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ClimaxVolumeReversalRadarInputs {
   /** Show the volume MA */
@@ -53,7 +56,10 @@ const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const lt = (a: number, b: number) => b - a > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<ClimaxVolumeReversalRadarInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<ClimaxVolumeReversalRadarInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const volume = Series.fromArray(bars, bars.map((b) => b.volume ?? NaN));
@@ -61,11 +67,14 @@ export function calculate(bars: Bar[], inputs: Partial<ClimaxVolumeReversalRadar
   const avgVolume = A(ta.sma(volume, 10));
   const volumeMa = A(ta.sma(volume, cfg.lengthMA));
 
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   const plot0 = bars.map((b, i) => {
     const ref = i >= cfg.takingClose ? bars[i - cfg.takingClose].close : NaN;
     const highVolume = gt(vol[i], avgVolume[i] * cfg.riskFactor);
     const bullishClimax = lt(b.close, ref) && lt(b.close, b.open) && highVolume;
     const bearishClimax = gt(b.close, ref) && gt(b.close, b.open) && highVolume;
+    bullFlags.push(bullishClimax);
+    bearFlags.push(bearishClimax);
     const c = bullishClimax ? color.green : bearishClimax ? color.red : color.gray;
     return { time: b.time, value: vol[i], color: c };
   });
@@ -74,8 +83,16 @@ export function calculate(bars: Bar[], inputs: Partial<ClimaxVolumeReversalRadar
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
+    // alertcondition(bullishClimax, "Bullish Climax Watch") / alertcondition(bearishClimax, "Bearish Climax Watch")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Climax Watch', message: 'Bullish climax volume detected: possible capitulation or reversal watch zone.' },
+  { id: 'alert1', title: 'Bearish Climax Watch', message: 'Bearish climax volume detected: possible buying exhaustion or reversal watch zone.' },
+];
 
 export const ClimaxVolumeReversalRadar = {
   calculate,
@@ -83,4 +100,5 @@ export const ClimaxVolumeReversalRadar = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

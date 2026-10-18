@@ -152,8 +152,8 @@ export function calculate(bars: Bar[], inputs: Partial<RSIBBDispersionInputs> = 
   const hline30Plot = bars.map((b, i) => ({ time: b.time, value: i < warmup ? NaN : 30 }));
 
   const fills: FillData[] = [
-    // Pine: fill(s1, s2, color=white, transp=80) - dispersion band fill
-    { plot1: 'dispUp', plot2: 'dispDown', options: { color: 'rgba(255,255,255,0.20)', title: 'Dispersion Fill' } },
+    // Pine: fill(s1, s2, color=white, transp=80) - dispersion band fill (untitled: 'Plots Background')
+    { plot1: 'dispUp', plot2: 'dispDown', options: { color: 'rgba(255,255,255,0.20)', title: 'Plots Background' } },
     // Pine: fill(h1, h2, transp=95) - hline band fill between 70/30
     { plot1: 'hline70', plot2: 'hline30', options: { color: 'rgba(128,128,128,0.05)', title: 'OB/OS Band' } },
   ];

@@ -9,8 +9,8 @@
  *   - plot (channel_low): highest high over h_left bars (silver) -- plot1
  *   - plotshape triangleup: PTZ new high (green, above bar)
  *   - plotshape triangledown: PTZ new low (red, below bar)
- *   - plotarrow down: confirmed TZ high (placed at central bar)
- *   - plotarrow up: confirmed TZ low (placed at central bar)
+ *   - plotarrow down: confirmed TZ high (`arrows`, id arrow0, value -1, placed at the central bar high[h_right + 1])
+ *   - plotarrow up: confirmed TZ low (`arrows`, id arrow1, value 1, placed at the central bar low[h_right + 1])
  *   - plot (percent_total_tz): hidden (transp=100) -- plot2
  *   - plot (percent_total_ptz): hidden (transp=100) -- plot3
  *   - plot (percent_ptz_resolved): hidden (transp=100) -- plot4
@@ -18,7 +18,7 @@
  * Reference: "Transient Zones v1.1" by Jurij (community)
  */
 
-import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type ArrowData } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 
 export interface TransientZonesInputs {
@@ -59,7 +59,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TransientZonesInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<TransientZonesInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; arrows: ArrowData[] } {
   const { hLeft, hRight, samplePeriod, showPtz, showChannel } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -162,14 +162,21 @@ export function calculate(bars: Bar[], inputs: Partial<TransientZonesInputs> = {
     }
   }
 
-  // plotarrow: confirmed TZ arrows (placed at central bar via offset in Pine)
-  for (let i = 0; i < n; i++) {
-    if (centralIsHighest[i]) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'arrowDown', color: '#EF5350', text: 'TZ' });
+  // plotarrow(central_bar_is_highest ? -1 : 0, offset = -h_right - 1) / plotarrow(central_bar_is_lowest ? 1 : 0, ...):
+  // on bar i the central bar is i - h_right - 1 and the window lowest / highest(h_left + h_right + 1) ends at i; the
+  // offset draws the arrow on the central bar (a value 0 draws none)
+  const arrows: ArrowData[] = [];
+  for (let i = fullWindow - 1; i < n; i++) {
+    const c = i - hRight - 1;
+    if (c < 0) continue;
+    let fullLow = Infinity;
+    let fullHigh = -Infinity;
+    for (let j = i - fullWindow + 1; j <= i; j++) {
+      if (bars[j].low < fullLow) fullLow = bars[j].low;
+      if (bars[j].high > fullHigh) fullHigh = bars[j].high;
     }
-    if (centralIsLowest[i]) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'arrowUp', color: '#4CAF50', text: 'TZ' });
-    }
+    if (bars[c].high >= fullHigh) arrows.push({ time: bars[c].time, id: 'arrow0', value: -1, color: '#EF5350' });
+    if (bars[c].low <= fullLow) arrows.push({ time: bars[c].time, id: 'arrow1', value: 1, color: '#4CAF50' });
   }
 
   return {
@@ -183,6 +190,7 @@ export function calculate(bars: Bar[], inputs: Partial<TransientZonesInputs> = {
     },
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(192,192,192,0.08)' } }],
     markers,
+    arrows,
   };
 }
 

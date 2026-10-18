@@ -259,8 +259,9 @@ describe('Scalping PullBack Tool alerts', () => {
     const inputs = { fastEMAlength: 20, mediumEMAlength: 50, slowEMAlength: 100, hiLoLen: 10 };
     for (const useHAcandles of [true, false]) {
       const res = scalping.calculate(BARS, { ...inputs, useHAcandles });
-      const ups = (res.markers ?? []).filter((m) => m.shape === 'arrowUp').map((m) => m.time);
-      const downs = (res.markers ?? []).filter((m) => m.shape === 'arrowDown').map((m) => m.time);
+      // the plotarrow: the result's arrows, up for a positive value
+      const ups = ((res as any).arrows ?? []).filter((a: { value: number }) => a.value > 0).map((a: { time: number }) => a.time);
+      const downs = ((res as any).arrows ?? []).filter((a: { value: number }) => a.value < 0).map((a: { time: number }) => a.time);
       expect(ups.length).toBeGreaterThan(0);
       expect(downs.length).toBeGreaterThan(0);
       expect(res.alerts[0].times).toEqual(ups);

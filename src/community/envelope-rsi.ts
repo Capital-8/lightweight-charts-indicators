@@ -4,12 +4,15 @@
  * Price envelope overlay: basis = EMA or SMA of hl2, upper = basis*(1+pct), lower = basis*(1-pct).
  * Buy/Sell signals based on price crossing envelope bands + RSI filter.
  * TP/SL bands appear for 2 bars after each signal as green (TP) and red (SL) fills.
+ * Alerts (alertcondition, `alerts` of the result): 'Envelope RSI Buy signal!' and 'Envelope RSI Sell signal!', true
+ * on the bars of the Buy / Sell labels.
  *
  * Reference: "ENVELOPE - RSI - Buy Sell Signals" by Saleh_Toodarvari
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface EnvelopeRSIInputs {
   envelopeLen: number;
@@ -65,7 +68,10 @@ function cross(prevA: number, curA: number, prevB: number, curB: number): boolea
   return (prevA <= prevB && curA > curB) || (prevA >= prevB && curA < curB);
 }
 
-export function calculate(bars: Bar[], inputs: Partial<EnvelopeRSIInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<EnvelopeRSIInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { envelopeLen, envelopePct, exponential, rsiLen, overboughtRSI, oversoldRSI, tpPercent, slPercent } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -244,7 +250,17 @@ export function calculate(bars: Bar[], inputs: Partial<EnvelopeRSIInputs> = {}):
       { plot1: 'sellSig', plot2: 'slSig', options: { color: slFillColor }, colors: sellSigFillColors },
     ],
     markers,
+    // alertConditionBuy = cross_buy and condition_buy; alertConditionSell = cross_sell and condition_sell
+    alerts: alertStates(alertConditions, bars, [
+      crossBuyArr.map((c, i) => c && condBuyArr[i]), crossSellArr.map((c, i) => c && condSellArr[i]),
+    ]),
   };
 }
 
-export const EnvelopeRSI = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Envelope RSI Buy signal!', message: 'Buy signal' },
+  { id: 'alert1', title: 'Envelope RSI Sell signal!', message: 'Sell signal' },
+];
+
+export const EnvelopeRSI = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

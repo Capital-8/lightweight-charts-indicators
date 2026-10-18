@@ -24,7 +24,9 @@
  * The previous day high / low come from the daily bars built from the chart bars (`request.security` "D" with
  * lookahead); on a chart above one day they need the bars of a lower timeframe, which the chart bars do not have: the
  * port throws an Error when that option is on. Chart context: the exchange calendar of the days.
- * The alerts of the original (2 alertconditions, 2 alert() calls) have no output.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Engulfing' and 'Bearish Engulfing', true on the engulfing
+ * bars. alert() calls (`alertCalls`, once per bar): 'sellside liquidity level detected/updated for <ticker>' when a new
+ * sell-side liquidity zone is drawn, 'Price crossed sellside liquidity level' when the low takes a sell-side level.
  *
  * Reference: "Strong Demands & Supplies + Liquidity | Zonas de Compra e Venda" by Luis_TudoSobreTrading
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -35,9 +37,13 @@ import {
   drawingOutputs,
   type Box, type Label, type Line, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { AlertCall, MarkerData } from '../types';
 import { chartTimeframe, higherTimeframeBars, periodChanges, timeAfterLastBar } from '../anchor-period';
-import type { ChartContext } from '../chart-context';
+import { tickerOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface StrongDemandsSuppliesLiquidityInputs {
   showPreviousDayHighLow: boolean;
@@ -200,7 +206,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<StrongDemandsSuppliesLiquidityInputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -262,6 +268,14 @@ export function calculate(
 
   resetDrawings({ line: MAX_LINES, box: MAX_BOXES, label: MAX_LABELS });
   const markers: MarkerData[] = [];
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
+  const alertCalls: AlertCall[] = [];
+  /** alert(message) (alert.freq_once_per_bar): one call per bar and call site */
+  const alertOnce = (i: number, message: string) => {
+    const time = bars[i].time as number;
+    if (!alertCalls.some((c) => c.time === time && c.message === message)) alertCalls.push({ time, message, freq: 'once_per_bar' });
+  };
 
   // EHPDA
   const ogTop: number[] = [];
@@ -412,6 +426,8 @@ export function calculate(
     const open1 = p1 ? p1.open : NaN;
     const bullishEngulfing = !gt(b.open, close1) && !isNaN(close1) && lt(b.open, open1) && gt(b.close, open1);
     const bearishEngulfing = !lt(b.open, close1) && !isNaN(close1) && gt(b.open, open1) && lt(b.close, open1);
+    bullFlags.push(bullishEngulfing);
+    bearFlags.push(bearishEngulfing);
     if (bullishEngulfing && cfg.showEngulfing) {
       markers.push({ time: b.time, position: 'belowBar', shape: 'triangleUp', color: '#4caf50', size: 'tiny' });
     }
@@ -568,6 +584,8 @@ export function calculate(
             sellSideLiquidity.unshift({
               levelBox, zoneBox, labelBox, isZoneBroken: false, isLevelBroken: false, levelLine, extendedLine,
             });
+            // alert('sellside liquidity level detected/updated for ' + syminfo.ticker)
+            alertOnce(i, 'sellside liquidity level detected/updated for ' + tickerOf(chart));
           }
           if (sellSideLiquidity.length > VISIBLE_LEVELS) deleteLiquidity(sellSideLiquidity.pop()!);
         }
@@ -595,6 +613,8 @@ export function calculate(
         if (lt(b.low, lineY1(liqItem.levelLine))) {
           liqItem.isLevelBroken = true;
           liqItem.isZoneBroken = true;
+          // alert('Price crossed sellside liquidity level')
+          alertOnce(i, 'Price crossed sellside liquidity level');
         }
       } else if (liqItem.isZoneBroken) {
         const y = lineY1(liqItem.levelLine);
@@ -860,8 +880,17 @@ export function calculate(
     plots: {},
     markers,
     ...drawingOutputs(times, ms ? 'ms' : 's'),
+    // alertcondition(bullishEngulfing, "Bullish Engulfing") / alertcondition(bearishEngulfing, "Bearish Engulfing")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
+    alertCalls,
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Engulfing', message: '[CurrencyPair] [TimeFrame], Bullish candle engulfing previous candle' },
+  { id: 'alert1', title: 'Bearish Engulfing', message: '[CurrencyPair] [TimeFrame], Bearish candle engulfing previous candle' },
+];
 
 export const StrongDemandsSuppliesLiquidity = {
   calculate,
@@ -869,4 +898,6 @@ export const StrongDemandsSuppliesLiquidity = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

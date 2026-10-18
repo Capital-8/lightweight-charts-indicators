@@ -12,6 +12,9 @@
  * state of the last bar from the optional third argument (see src/chart-context.ts); without it every bar is taken as
  * closed.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Direction' and 'Bearish Direction', true on the bars of
+ * each direction signal (closed bars only).
+ *
  * Reference: "Trend Direction Zone" by MarketStructureLab
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © MarketStructureLab
@@ -23,6 +26,7 @@ import {
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TrendDirectionZoneInputs {
   /** Price source of the trend line */
@@ -116,7 +120,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<TrendDirectionZoneInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -183,6 +187,8 @@ export function calculate(
   const lower: { time: number; value: number; color: string }[] = [];
   const line: { time: number; value: number; color: string }[] = [];
   const fillColors: string[] = [];
+  const bullFlags: boolean[] = [];
+  const bearFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const bullishState = marketState[i] === 1;
@@ -190,6 +196,8 @@ export function calculate(
     const previousState = i > 0 ? marketState[i - 1] : 0; // nz(marketState[1], 0)
     const bullishSignal = barIsConfirmed(i) && bullishState && previousState !== 1;
     const bearishSignal = barIsConfirmed(i) && bearishState && previousState !== -1;
+    bullFlags.push(bullishSignal);
+    bearFlags.push(bearishSignal);
     const stateColor = bullishState ? cfg.bullColor : bearishState ? cfg.bearColor : color.gray;
     const zoneBorderColor = String(color.new(stateColor, 50));
     fillColors.push(cfg.showZone ? String(color.new(stateColor, 88)) : 'transparent');
@@ -220,8 +228,16 @@ export function calculate(
     plots: { plot0: upper, plot1: lower, plot2: line },
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Trend Zone Fill' }, colors: fillColors }],
     markers,
+    // alertcondition(bullishSignal, "Bullish Direction") / alertcondition(bearishSignal, "Bearish Direction")
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Direction', message: 'Trend Direction Zone: bullish direction confirmed' },
+  { id: 'alert1', title: 'Bearish Direction', message: 'Trend Direction Zone: bearish direction confirmed' },
+];
 
 export const TrendDirectionZone = {
   calculate,
@@ -229,4 +245,5 @@ export const TrendDirectionZone = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

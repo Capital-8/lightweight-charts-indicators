@@ -8,6 +8,9 @@
  * of the strength crossing up its 10th / 5th percentile or down its 90th / 95th percentile (mean lookback window).
  * Reversion marks: turns of an EMA of the strength SMA. A background tint shows strength and its EMA both beyond
  * +/-0.5. With "Allow Intrabar Updating" off, every output uses the values of the previous bar.
+ * Alerts (alertcondition, `alerts` of the result, on the current bar's values whatever "Allow Intrabar Updating"):
+ * '[DLO] Reversion Up' / '[DLO] Reversion Down' (cycle turns), '[DLO] MR Buy' / '[DLO] MR Sell' (percentile
+ * crosses), '[DLO] Osc Bullish Cross' / '[DLO] Osc Bearish Cross' (strength crossing 0).
  *
  * Reference: "Directional Logistic Oscillator | GainzAlgo" by GainzAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +18,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface DirectionalLogisticOscillatorInputs {
   /** DMI DI length (also the ADX smoothing) */
@@ -90,7 +94,8 @@ const lt = (a: number, b: number) => b - a > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<DirectionalLogisticOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -211,8 +216,23 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    // alertcondition(rev_up_c) / (rev_dn_c) / (bc1 or bc2) / (sc1 or sc2) / (ta.crossover(strength, 0)) /
+    // (ta.crossunder(strength, 0))
+    alerts: alertStates(alertConditions, bars, [
+      revUp, revDn, mrBuy, mrSell, crossedOver(strength, 0), crossedUnder(strength, 0),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '[DLO] Reversion Up', message: 'DLO: Potential bullish reversion detected (cycle turning upward)' },
+  { id: 'alert1', title: '[DLO] Reversion Down', message: 'DLO: Potential bearish reversion detected (cycle turning downward)' },
+  { id: 'alert2', title: '[DLO] MR Buy', message: 'DLO: Mean-reversion BUY – oscillator crossed up from extreme oversold zone (percentile-based)' },
+  { id: 'alert3', title: '[DLO] MR Sell', message: 'DLO: Mean-reversion SELL – oscillator crossed down from extreme overbought zone (percentile-based)' },
+  { id: 'alert4', title: '[DLO] Osc Bullish Cross', message: 'DLO: Oscillator crossed above zero → bullish momentum shift' },
+  { id: 'alert5', title: '[DLO] Osc Bearish Cross', message: 'DLO: Oscillator crossed below zero → bearish momentum shift' },
+];
 
 export const DirectionalLogisticOscillator = {
   calculate,
@@ -220,4 +240,5 @@ export const DirectionalLogisticOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

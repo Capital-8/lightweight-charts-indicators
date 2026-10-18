@@ -5,12 +5,14 @@
  * 80 / 60 / 40 / 20, 55 / 45 and dotted bands at 70 / 50 / 30. A fill between 60 and 40 marks the core zone; two
  * "throw zone" fills go from 60 up to max(upper top, 60) and from 40 down to min(lower bottom, 40). The data window
  * shows the distance of the RSI to each moving average.
+ * Alerts (alertcondition, `alerts` of the result): the RSI crossing above / below each of the three moving averages.
  *
  * Reference: "Cardwell RSI by TQ 1.2" by TradeQUO
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CardwellRsiByTqInputs {
   /** RSI source */
@@ -109,7 +111,10 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<CardwellRsiByTqInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<CardwellRsiByTqInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -171,8 +176,24 @@ export function calculate(bars: Bar[], inputs: Partial<CardwellRsiByTqInputs> = 
       { plot1: 'plot6', plot2: 'plot4', colors: new Array<string>(n).fill(throwCol) },
       { plot1: 'plot5', plot2: 'plot7', colors: new Array<string>(n).fill(throwCol) },
     ],
+    // alertcondition(ta.crossover(r, rFast), ...) / ta.crossunder(r, rFast), then rCustom and rSlow
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(r, rFast), crossedUnder(r, rFast),
+      crossedOver(r, rCustom), crossedUnder(r, rCustom),
+      crossedOver(r, rSlow), crossedUnder(r, rSlow),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RSI > Fast MA', message: 'RSI crossed above the Fast RSI MA.' },
+  { id: 'alert1', title: 'RSI < Fast MA', message: 'RSI crossed below the Fast RSI MA.' },
+  { id: 'alert2', title: 'RSI > Custom MA', message: 'RSI crossed above the Custom RSI MA.' },
+  { id: 'alert3', title: 'RSI < Custom MA', message: 'RSI crossed below the Custom RSI MA.' },
+  { id: 'alert4', title: 'RSI > Slow MA', message: 'RSI crossed above the Slow RSI MA.' },
+  { id: 'alert5', title: 'RSI < Slow MA', message: 'RSI crossed below the Slow RSI MA.' },
+];
 
 export const CardwellRsiByTq = {
   calculate,
@@ -180,4 +201,5 @@ export const CardwellRsiByTq = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

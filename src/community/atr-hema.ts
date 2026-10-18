@@ -6,6 +6,8 @@
  * when the change of the line is smaller than ATR(length) * multiplier (neutral zone) the line keeps its previous
  * colour. Triangles with L / S mark the changes from bearish to bullish and from bullish to bearish; the candles can
  * take the line colour.
+ * Alerts (alertcondition, `alerts` of the result): 'ATR HEMA Postive Trend' / 'ATR HEMA Negative Trend' on the bars of
+ * the L / S triangles.
  *
  * Reference: "ATR HEMA [SeerQuant]" by SeerQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type ATRHEMAColorScheme = 'Default' | 'Modern' | 'Cool' | 'Alternate' | 'Bright';
 
@@ -80,7 +83,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<ATRHEMAInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const [bull, bear] = SCHEMES[cfg.colScheme];
@@ -95,6 +98,7 @@ export function calculate(
   const hemaColor: (string | null)[] = new Array(n);
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
   let prevColorVar: string | null = null; // var color prevColor = na
   let hemaColorVar: string | null = null; // var color hemaColor = na
   for (let i = 0; i < n; i++) {
@@ -118,6 +122,8 @@ export function calculate(
     const shortSignal = hemaColorVar === bear && prevColorVar === bull;
     prevColorVar = hemaColorVar;
     hemaColor[i] = hemaColorVar;
+    longFlags.push(longSignal);
+    shortFlags.push(shortSignal);
 
     const t = bars[i].time;
     // barcolor(paint ? hemaColor : na)
@@ -142,8 +148,16 @@ export function calculate(
     },
     markers,
     barColors,
+    // alertcondition(longSignal, ...) / alertcondition(shortSignal, ...)
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'ATR HEMA Postive Trend', message: 'ATR HEMA Bullish Signal on: {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'ATR HEMA Negative Trend', message: 'ATR HEMA Bearish Signal on: {{exchange}}:{{ticker}}' },
+];
 
 export const ATRHEMA = {
   calculate,
@@ -151,4 +165,5 @@ export const ATRHEMA = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

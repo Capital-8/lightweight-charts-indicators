@@ -5,12 +5,15 @@
  * Resistance = fixnan(pivothigh(leftBars, rightBars)[1]), Support = fixnan(pivotlow(leftBars, rightBars)[1]).
  * Breaks: crossover(close, resistance) / crossunder(close, support). The volume filter
  * (osc > volumeThresh) applies only to the 'B' labels; the wick labels have no volume filter.
+ * Alerts (alertcondition, `alerts` of the result): 'Support Broken' (crossunder(close, support) and osc > volumeThresh)
+ * and 'Resistance Broken' (crossover(close, resistance) and osc > volumeThresh), not gated by Show Breaks.
  *
  * Reference: "Support and Resistance Levels with Breaks" [LuxAlgo] (community)
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SRLevelsBreaksInputs {
   toggleBreaks: boolean;
@@ -48,7 +51,7 @@ export const metadata = {
 const RED = '#FF5252';
 const GREEN = '#4CAF50';
 
-export function calculate(bars: Bar[], inputs: Partial<SRLevelsBreaksInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(bars: Bar[], inputs: Partial<SRLevelsBreaksInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { toggleBreaks, leftBars, rightBars, volumeThresh } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -84,30 +87,36 @@ export function calculate(bars: Bar[], inputs: Partial<SRLevelsBreaksInputs> = {
   }
 
   const markers: MarkerData[] = [];
+  const supportBroken: boolean[] = new Array(n).fill(false);
+  const resistanceBroken: boolean[] = new Array(n).fill(false);
   for (let i = 1; i < n; i++) {
-    if (!toggleBreaks) break;
     const { open, high, low, close } = bars[i];
     const prevClose = bars[i - 1].close;
     // Pine crossover / crossunder: false when a value is na
     const crossOver = close > highUse[i] && prevClose <= highUse[i - 1];
     const crossUnder = close < lowUse[i] && prevClose >= lowUse[i - 1];
     const volPass = osc[i] > volumeThresh;
+    // alertcondition(crossunder(close, lowUsePivot) and osc > volumeThresh, "Support Broken")
+    // alertcondition(crossover(close, highUsePivot) and osc > volumeThresh, "Resistance Broken")
+    supportBroken[i] = crossUnder && volPass;
+    resistanceBroken[i] = crossOver && volPass;
+    if (!toggleBreaks) continue;
 
     // Pine plotshape(..., style = shape.labeldown / labelup, color = color.red / color.green,
     //   textcolor = color.white, size = size.tiny)
     // For breaks with volume
     if (crossUnder && !(open - close < high - open) && volPass) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: RED, text: 'B', textColor: '#FFFFFF', size: 'tiny' });
+      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: RED, text: 'B', id: 'shape0', textColor: '#FFFFFF', size: 'tiny' });
     }
     if (crossOver && !(open - low > close - open) && volPass) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: GREEN, text: 'B', textColor: '#FFFFFF', size: 'tiny' });
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: GREEN, text: 'B', id: 'shape1', textColor: '#FFFFFF', size: 'tiny' });
     }
     // For bull / bear wicks (no volume filter)
     if (crossOver && open - low > close - open) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: GREEN, text: 'Bull Wick', textColor: '#FFFFFF', size: 'tiny' });
+      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: GREEN, text: 'Bull Wick', id: 'shape2', textColor: '#FFFFFF', size: 'tiny' });
     }
     if (crossUnder && open - close < high - open) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: RED, text: 'Bear Wick', textColor: '#FFFFFF', size: 'tiny' });
+      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: RED, text: 'Bear Wick', id: 'shape3', textColor: '#FFFFFF', size: 'tiny' });
     }
   }
 
@@ -127,7 +136,14 @@ export function calculate(bars: Bar[], inputs: Partial<SRLevelsBreaksInputs> = {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': levelPlot(highUse, '#FF0000'), 'plot1': levelPlot(lowUse, '#233dee') },
     markers,
+    alerts: alertStates(alertConditions, bars, [supportBroken, resistanceBroken]),
   };
 }
 
-export const SRLevelsBreaks = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Support Broken', message: 'Support Broken' },
+  { id: 'alert1', title: 'Resistance Broken', message: 'Resistance Broken' },
+];
+
+export const SRLevelsBreaks = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

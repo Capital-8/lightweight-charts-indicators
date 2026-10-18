@@ -19,6 +19,11 @@
  * The retests and breaks are only read on closed bars: when the chart context says that the last bar is still open,
  * that bar is not read.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Support Retest' / 'Resistance Retest' on the closed bars with a
+ * retest of a support / resistance level of the model (the "R" labels, at most once every 3 bars per level),
+ * 'Support Break' / 'Resistance Break' on the closed bars that end such a level (the "B" labels), whether or not the
+ * labels are shown.
+ *
  * Reference: "Support and Resistance Logistic Regression | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © fluxchart
@@ -27,6 +32,7 @@
 import { ta, str, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { LabelData, LineDrawingData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SupportAndResistanceLogisticRegressionInputs {
   /** Bars on each side of a pivot */
@@ -136,7 +142,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SupportAndResistanceLogisticRegressionInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'labels' | 'lines'> & { labels: LabelData[]; lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'labels' | 'lines'> & { labels: LabelData[]; lines: LineDrawingData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = Math.trunc(cfg.pivotLength);
@@ -202,15 +208,18 @@ export function calculate(
     }
   };
 
-  // updateSRLine(): retests and break of one level on a closed bar
-  const update = (sr: SrLine, i: number) => {
-    if (!isNaN(sr.endIndex)) return;
+  // updateSRLine(): retests and break of one level on a closed bar; gives [_retest, _break]
+  const update = (sr: SrLine, i: number): [boolean, boolean] => {
+    if (!isNaN(sr.endIndex)) return [false, false];
     const b = bars[i];
     const through = sr.isSupport ? lt(b.low, sr.level) : gt(b.high, sr.level);
-    if (!through) return;
+    if (!through) return [false, false];
     const closedBack = sr.isSupport ? gt(b.close, sr.level) : lt(b.close, sr.level);
+    let retest = false;
+    let broke = false;
     if (closedBack) {
       if (sr.detectedByRegression && i > sr.latestRetestIndex + RETEST_COOLDOWN) {
+        retest = true;
         sr.latestRetestIndex = i;
         if (cfg.showRetests) {
           newLabel(sr.isSupport
@@ -220,6 +229,7 @@ export function calculate(
       }
       sr.timesRespected += 1;
     } else {
+      broke = sr.detectedByRegression;
       if (sr.detectedByRegression && cfg.showBreaks) {
         newLabel(sr.isSupport
           ? { time: b.time, price: sr.level, text: 'B', yloc: 'abovebar', textColor: color.white, color: color.blue, style: 'label_down', size: 'tiny' }
@@ -228,13 +238,22 @@ export function calculate(
       sr.endIndex = i;
       sr.endTime = b.time;
     }
+    return [retest, broke];
   };
 
+  // _supportRetestDetected, _resistanceRetestDetected, _supportBreakDetected, _resistanceBreakDetected per bar
+  const flags: boolean[][] = [0, 1, 2, 3].map(() => new Array<boolean>(n).fill(false));
   for (let i = 0; i < n; i++) {
     const confirmed = i < n - 1 || lastConfirmed;
     if (!isNaN(pivotHigh[i])) addPivot(i, false, pivotHigh[i]);
     if (!isNaN(pivotLow[i])) addPivot(i, true, pivotLow[i]);
-    if (confirmed) for (const sr of allPivots) update(sr, i);
+    if (confirmed) {
+      for (const sr of allPivots) {
+        const [retest, broke] = update(sr, i);
+        if (retest) flags[sr.isSupport ? 0 : 1][i] = true;
+        if (broke) flags[sr.isSupport ? 2 : 3][i] = true;
+      }
+    }
   }
 
   // barstate.islast: the levels of the model
@@ -270,8 +289,17 @@ export function calculate(
     plots: {},
     lines,
     labels,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Support Retest', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Resistance Retest', message: 'Alert Fired!' },
+  { id: 'alert2', title: 'Support Break', message: 'Alert Fired!' },
+  { id: 'alert3', title: 'Resistance Break', message: 'Alert Fired!' },
+];
 
 export const SupportAndResistanceLogisticRegression = {
   calculate,
@@ -279,4 +307,5 @@ export const SupportAndResistanceLogisticRegression = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

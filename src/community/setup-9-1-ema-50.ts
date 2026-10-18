@@ -6,6 +6,7 @@
  * the MA rises. A sell signal is the first bar of a fall: its low is the entry level and its high the stop, kept
  * while the MA falls. Signal bars closing in the signal direction are coloured; arrows with text mark the signals.
  * A second MA (50-bar EMA by default) is drawn as a filter.
+ * Alerts (alertcondition, `alerts` of the result): '9.1 Buy Alert' / '9.1 Sell Alert', true on the signal bars.
  *
  * Reference: "Setup 9.1 (Larry Williams) + EMA 50" by oDouglasAlex
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type Setup91Ema50MaType = 'EMA' | 'SMA';
 
@@ -74,7 +76,7 @@ const lt = (a: number, b: number) => b - a > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<Setup91Ema50Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -91,6 +93,7 @@ export function calculate(
   const sellStp: number[] = new Array(n);
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   let buyTrigger = NaN; // var float buyTrigger = na
   let buyStop = NaN;
   let sellTrigger = NaN;
@@ -108,6 +111,8 @@ export function calculate(
     const sellSignal = ma1down && !prevDown;
     prevUp = ma1up;
     prevDown = ma1down;
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
 
     if (buySignal) {
       buyTrigger = b.high;
@@ -157,8 +162,16 @@ export function calculate(
     },
     markers,
     barColors,
+    // alertcondition(buySignal, "9.1 Buy Alert") / alertcondition(sellSignal, "9.1 Sell Alert")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '9.1 Buy Alert', message: '9.1 Setup - BUY Signal' },
+  { id: 'alert1', title: '9.1 Sell Alert', message: '9.1 Setup - SELL Signal' },
+];
 
 export const Setup91Ema50 = {
   calculate,
@@ -166,4 +179,5 @@ export const Setup91Ema50 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -11,6 +11,7 @@
  * their side. The trend turns up when the close passes the previous short stop and down when it falls below the
  * previous long stop. The active stop is drawn with a four-layer fill to the close, circles mark trend changes,
  * diamonds mark touches of the stop (with a cooldown), and the candles take the trend colour.
+ * Alerts (alertcondition, `alerts` of the result): 'Long Signal' and 'Short Signal', on the trend changes.
  *
  * Reference: "Adaptive ML Trailing Stop [BOSWaves]" by BOSWaves
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -19,6 +20,7 @@
 
 import { ta, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AdaptiveMLTrailingStopInputs {
   /** KAMA length (efficiency ratio period) */
@@ -150,7 +152,7 @@ function pineExtreme(len: number, isLow: boolean) {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AdaptiveMLTrailingStopInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const close = bars.map((b) => b.close);
@@ -288,12 +290,15 @@ export function calculate(
   // Markers: plotshape order Buy Signal, Sell Signal, Long Stop Touch, Short Stop Touch
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   let lastLongDiamond = -999;
   let lastShortDiamond = -999;
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const buy = trendArr[i] === 1 && prevTrendArr[i] === -1;
     const sell = trendArr[i] === -1 && prevTrendArr[i] === 1;
+    buyFlags.push(buy);
+    sellFlags.push(sell);
     // low <= longStop and low[1] > longStop[1] or math.abs(low - longStop) < atr * 0.5
     const lowPrev = i > 0 ? bars[i - 1].low : NaN;
     const highPrev = i > 0 ? bars[i - 1].high : NaN;
@@ -336,8 +341,16 @@ export function calculate(
     ],
     markers,
     barColors,
+    // alertcondition(trend == 1 and prevTrend == -1, ...) / alertcondition(trend == -1 and prevTrend == 1, ...)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Signal', message: 'KNN-KAMA Trailing Stop: Long Entry' },
+  { id: 'alert1', title: 'Short Signal', message: 'KNN-KAMA Trailing Stop: Short Entry' },
+];
 
 export const AdaptiveMLTrailingStop = {
   calculate,
@@ -345,4 +358,5 @@ export const AdaptiveMLTrailingStop = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

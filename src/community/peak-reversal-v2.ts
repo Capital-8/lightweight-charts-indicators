@@ -158,28 +158,28 @@ export function calculate(
     const colorBarUp = shade(sinceUp, adv ? '#1b5e20' : '#b71c1c', adv ? '#66bb6a' : '#ef5350', adv ? '#a5d6a7' : '#ef9a9a');
     const colorBarDown = shade(sinceDown, adv ? '#b71c1c' : '#1b5e20', adv ? '#ef5350' : '#66bb6a', adv ? '#ef9a9a' : '#a5d6a7');
     // barcolor(Mean Deviations Up) then barcolor(Mean Deviations Down): the later non-na colour is drawn
-    const barCol = cfg.showDeviations ? (colorBarDown ?? colorBarUp) : null;
-    if (barCol) barColors.push({ time: b.time, color: barCol });
+    if (cfg.showDeviations && colorBarUp) barColors.push({ id: 'barcolor0', time: b.time, color: colorBarUp });
+    if (cfg.showDeviations && colorBarDown) barColors.push({ id: 'barcolor1', time: b.time, color: colorBarDown });
 
     const longCross = ge(b.high, u);
     const shortCross = le(b.close, d);
     // showOnlyFirstSignal = true: cross and not cross[1]
     if (cfg.showBandCross && longCross && !prevLongCross) {
-      markers.push({ time: b.time, position: 'aboveBar', shape: upTriangleShape, color: upTriangleColor, size: 'tiny' });
+      markers.push({ id: 'shape0', time: b.time, position: 'aboveBar', shape: upTriangleShape, color: upTriangleColor, size: 'tiny' });
     }
     if (cfg.showBandCross && shortCross && !prevShortCross) {
-      markers.push({ time: b.time, position: 'belowBar', shape: downTriangleShape, color: downTriangleColor, size: 'tiny' });
+      markers.push({ id: 'shape1', time: b.time, position: 'belowBar', shape: downTriangleShape, color: downTriangleColor, size: 'tiny' });
     }
     prevLongCross = longCross;
     prevShortCross = shortCross;
 
     // plotchar('★', size.tiny): the character as text in the plotchar colour
     if (cfg.showFreeBars && ge(b.low, u)) {
-      markers.push({ time: b.time, position: 'aboveBar', shape: 'circle', color: 'transparent', text: '★',
+      markers.push({ id: 'char2', time: b.time, position: 'aboveBar', shape: 'circle', color: 'transparent', text: '★',
         textColor: upStarColor, size: 'tiny' });
     }
     if (cfg.showFreeBars && le(b.high, d)) {
-      markers.push({ time: b.time, position: 'belowBar', shape: 'circle', color: 'transparent', text: '★',
+      markers.push({ id: 'char3', time: b.time, position: 'belowBar', shape: 'circle', color: 'transparent', text: '★',
         textColor: downStarColor, size: 'tiny' });
     }
   }

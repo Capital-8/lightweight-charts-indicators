@@ -5,6 +5,8 @@
  * lower than the volume of any down (or flat) bar of the last "Pocket Pivot Lookback Days" bars (up bars count as
  * volume 0). It draws a blue triangle below the bar. Optionally, a gap-up bar (low above the previous high by more
  * than "Gap-up Value in %" percent of the low) is coloured blue.
+ * Alerts (alertcondition, `alerts` of the result): 'Pocket Pivot Breakout Alert' on the pocket pivot bars and
+ * 'Gap-Up Alert' on the gap-up bars (only with "Gap-up Bar" on, as in the original).
  *
  * Reference: "Pocket Pivot Breakout" by simatricks
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PocketPivotBreakoutInputs {
   /** Minimum body of the green bar, in percent of the close */
@@ -53,10 +56,11 @@ const lt = (a: number, b: number) => b - a > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<PocketPivotBreakoutInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const ppFlags: boolean[] = [], gapFlags: boolean[] = [];
   const num = (v: number | undefined) => (v === undefined || v === null ? NaN : v);
 
   // volchk = array.new<float>(ppdays + 1); for i = 1 to ppdays (counts down when ppdays < 1)
@@ -84,6 +88,8 @@ export function calculate(
     let ppchk = 0;
     for (const k of idxs) if (lt(vol, volchk[k])) ppchk += 1;
     const ispp = ppchk < 1 && greenday;
+    ppFlags.push(ispp);
+    gapFlags.push(gapup);
 
     // plotshape(ispp ? 1 : 0, style = shape.triangleup, location = location.belowbar, color = color.blue,
     // size = size.auto): with location.belowbar the series is read as a bool (0 draws no shape)
@@ -97,7 +103,15 @@ export function calculate(
     plots: {},
     markers,
     barColors,
+    // alertcondition(ispp, 'Pocket Pivot Breakout Alert') / alertcondition(gapup, 'Gap-Up Alert')
+    alerts: alertStates(alertConditions, bars, [ppFlags, gapFlags]),
   };
 }
 
-export const PocketPivotBreakout = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Pocket Pivot Breakout Alert', message: 'Pocket Pivot Breakout Alert' },
+  { id: 'alert1', title: 'Gap-Up Alert', message: 'Gap-Up Alert' },
+];
+
+export const PocketPivotBreakout = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

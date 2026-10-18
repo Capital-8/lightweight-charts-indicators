@@ -6,6 +6,8 @@
  * osc = mom / (dev / atrRatio). The oscillator is the EMA(2) of osc. A cross above the upper threshold sets the trend
  * to long, a cross below the lower threshold to short. The area between zero and the oscillator is blue (trend >= 0)
  * or red, and the price candles are drawn in the trend colour on the price pane.
+ * Alerts (alertcondition, `alerts` of the result): 'ATR-DevOsc Long' on a cross above the upper threshold,
+ * 'ATR-DevOsc Short' on a cross below the lower threshold.
  *
  * Reference: "ATR-Scaled Deviation Oscillator" by C_H_I_P_A
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AtrScaledDeviationOscillatorInputs {
   /** Momentum length: close - close[len] */
@@ -71,7 +74,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AtrScaledDeviationOscillatorInputs> = {},
-): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { plotCandles: Record<string, PlotCandleData[]> } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { len, devLen, upper, lower, atrLen, atrMult } = cfg;
   const n = bars.length;
@@ -131,8 +134,19 @@ export function calculate(
     ],
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Plots Background' }, colors: fillColors }],
     plotCandles: { trendCandles: candles },
+    // alertcondition(longSignal, ...) / alertcondition(shortSignal, ...)
+    alerts: alertStates(alertConditions, bars, [
+      bars.map((_b, i) => !!longSignal[i]),
+      bars.map((_b, i) => !!shortSignal[i]),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'ATR-DevOsc Long', message: 'ATR-DevOsc: Long signal on {{ticker}} at {{close}}' },
+  { id: 'alert1', title: 'ATR-DevOsc Short', message: 'ATR-DevOsc: Short signal on {{ticker}} at {{close}}' },
+];
 
 export const AtrScaledDeviationOscillator = {
   calculate,
@@ -140,4 +154,5 @@ export const AtrScaledDeviationOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

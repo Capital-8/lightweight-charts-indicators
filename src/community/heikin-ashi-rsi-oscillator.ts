@@ -4,6 +4,7 @@
  * Zero-centered RSI displayed as Heikin Ashi candles.
  * Includes smoothed RSI overlay line and optional Stochastic RSI.
  * OB/OS bands at configurable levels.
+ * Stochastic of the RSI line (Show Stoch RSI): K / D lines (transparent with Ribbon) and the ribbon fill between them.
  *
  * Reference: "Heikin Ashi RSI Oscillator" by JayRogers
  */
@@ -19,6 +20,8 @@ export interface HeikinAshiRsiOscillatorInputs {
   showPlot: boolean;
   showHist: boolean;
   showStoch: boolean;
+  /** Stochastic as a ribbon fill (K / D lines transparent) */
+  ribbon: boolean;
   smoothK: number;
   smoothD: number;
   stochLen: number;
@@ -37,6 +40,7 @@ export const defaultInputs: HeikinAshiRsiOscillatorInputs = {
   showPlot: true,
   showHist: true,
   showStoch: false,
+  ribbon: true,
   smoothK: 3,
   smoothD: 3,
   stochLen: 14,
@@ -55,6 +59,7 @@ export const inputConfig: InputConfig[] = [
   { id: 'showPlot', type: 'bool', title: 'Show RSI Line', defval: true },
   { id: 'showHist', type: 'bool', title: 'Show Histogram', defval: true },
   { id: 'showStoch', type: 'bool', title: 'Show Stoch RSI', defval: false },
+  { id: 'ribbon', type: 'bool', title: 'Ribbon?', defval: true },
   { id: 'smoothK', type: 'int', title: 'Stoch Smooth K', defval: 3, min: 1 },
   { id: 'smoothD', type: 'int', title: 'Stoch Smooth D', defval: 3, min: 1 },
   { id: 'stochLen', type: 'int', title: 'Stoch Length', defval: 14, min: 1 },
@@ -72,7 +77,15 @@ export const plotConfig: PlotConfig[] = [
   { id: 'plot3', title: 'Upper Extreme', color: '#787B86', lineWidth: 1 },
   { id: 'plot4', title: 'Lower Extreme', color: '#787B86', lineWidth: 1 },
   { id: 'plot5', title: 'Histogram', color: '#787B86', lineWidth: 1, style: 'histogram' },
+  { id: 'plot6', title: 'Stoch K', color: '#0094FF', lineWidth: 1 },
+  { id: 'plot7', title: 'Stoch D', color: '#FF6A00', lineWidth: 1 },
 ];
+
+const COL_NONE = 'rgba(0, 0, 0, 0)';
+const COL_STOCH_K = '#0094FF';
+const COL_STOCH_D = '#FF6A00';
+const COL_STOCH_K_FILL = 'rgba(0, 148, 255, 0.5)';
+const COL_STOCH_D_FILL = 'rgba(255, 106, 0, 0.5)';
 
 export const plotCandleConfig = [
   { id: 'harsi', title: 'HA RSI Candles' },
@@ -210,14 +223,30 @@ export function calculate(bars: Bar[], inputs: Partial<HeikinAshiRsiOscillatorIn
   const fillMid = bars.map(() => 'rgba(33,150,243,0.05)');
   const fillLowerExtreme = bars.map(() => 'rgba(0,255,0,0.1)');
 
+  // StochK = f_zstoch(RSI, stochLen, smoothK, stochFit): (sma(stoch(RSI, RSI, RSI, len) - 50, smoothK) / 100) * scale;
+  // StochD = sma(StochK, smoothD)
+  const num = (v: number | null | undefined) => (v == null ? NaN : v);
+  const rsiS = Series.fromArray(bars, rsiLine);
+  const zstoch = ta.stoch(rsiS, rsiS, rsiS, cfg.stochLen).toArray().map((v) => num(v) - 50);
+  const stochK = ta.sma(Series.fromArray(bars, zstoch), cfg.smoothK).toArray().map((v) => (num(v) / 100) * cfg.stochFit);
+  const stochD = ta.sma(Series.fromArray(bars, stochK), cfg.smoothD).toArray().map(num);
+  // plot(i_showStoch ? StochK : na, "Stoch K", not i_ribbon ? colStochK : colNone) / "Stoch D"
+  const plot6 = stochK.map((v, i) => ({ time: bars[i].time, value: cfg.showStoch ? v : NaN, color: cfg.ribbon ? COL_NONE : COL_STOCH_K }));
+  const plot7 = stochD.map((v, i) => ({ time: bars[i].time, value: cfg.showStoch ? v : NaN, color: cfg.ribbon ? COL_NONE : COL_STOCH_D }));
+  // fill(plot_stochK, plot_stochD, i_ribbon ? colStochFill : na): colStochFill = StochK >= StochD ? K colour : D colour (50 %)
+  const fillStoch = stochK.map((k, i) => (!cfg.ribbon ? 'transparent' : !(stochD[i] - k > 1e-10) && !isNaN(k) && !isNaN(stochD[i])
+    ? COL_STOCH_K_FILL : COL_STOCH_D_FILL));
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3, 'plot4': plot4, 'plot5': plot5 },
+    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3, 'plot4': plot4, 'plot5': plot5, 'plot6': plot6, 'plot7': plot7 },
     plotCandles: { harsi: candles },
     fills: [
       { plot1: 'plot1', plot2: 'plot3', colors: fillUpperExtreme },
       { plot1: 'plot1', plot2: 'plot2', colors: fillMid },
       { plot1: 'plot2', plot2: 'plot4', colors: fillLowerExtreme },
+      // untitled fill of the original: its default title
+      { plot1: 'plot6', plot2: 'plot7', options: { title: 'Plots Background' }, colors: fillStoch },
     ],
     hlines: [
       { value: 0, options: { color: '#787B86', linestyle: 'dotted' as const, title: 'Zero' } },

@@ -7,6 +7,9 @@
  * a fill to zero draw the CCI as an area; fills past +100 / -100 shade the extreme zones. With the divergence
  * option, regular bullish (CCI higher low, price lower low) and bearish (CCI lower high, price higher high)
  * divergences between 5 / 5 pivots are drawn on the pivot bar with Bull / Bear labels.
+ * Alerts (alertcondition, `alerts` of the result): 'Strong Buy' / 'Strong Sell' (CCI beyond 0.8 x the extreme level,
+ * 1.3 x the adaptive level 100 + 0.3 x stdev(cci, 30), as the momentum crosses zero), 'Buy Signal' / 'Sell Signal'
+ * (CCI beyond the adaptive level x sensitivity / 10 with momentum and velocity turning back) and the two divergences.
  *
  * Reference: "CCI [Hash Adaptive]" by Hash_Capital
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +18,7 @@
 import { ta, Series, math, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CciHashCapitalInputs {
   /** CCI period */
@@ -29,6 +33,8 @@ export interface CciHashCapitalInputs {
   showGlowEffect: boolean;
   /** Glow intensity (1-10) */
   glowIntensity: number;
+  /** Signal sensitivity (1-10): the Buy / Sell Signal alerts */
+  signalSensitivity: number;
 }
 
 export const defaultInputs: CciHashCapitalInputs = {
@@ -39,6 +45,7 @@ export const defaultInputs: CciHashCapitalInputs = {
   colorIntensity: 7.0,
   showGlowEffect: true,
   glowIntensity: 5.0,
+  signalSensitivity: 6.0,
 };
 
 export const inputConfig: InputConfig[] = [
@@ -49,6 +56,7 @@ export const inputConfig: InputConfig[] = [
   { id: 'colorIntensity', type: 'float', title: 'Color Intensity', defval: 7.0, min: 1.0, max: 10.0, step: 1.0 },
   { id: 'showGlowEffect', type: 'bool', title: 'Glow Effect', defval: true },
   { id: 'glowIntensity', type: 'float', title: 'Glow Intensity', defval: 5.0, min: 1.0, max: 10.0, step: 1.0 },
+  { id: 'signalSensitivity', type: 'float', title: 'Signal Sensitivity', defval: 6.0, min: 1.0, max: 10, step: 1.0 },
 ];
 
 const WHITE_100 = String(color.new(color.white, 100));
@@ -80,7 +88,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<CciHashCapitalInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -213,6 +221,28 @@ export function calculate(
       colors: cci.map((c) => (lt(c, -100) ? String(color.new('#FF0000', 90)) : 'transparent')) },
   ];
 
+  // Signals: momentum = ta.change(cci), velocity = ta.change(momentum), adaptive levels 100 + 0.3 x ta.stdev(cci, 30)
+  const momentum = cci.map((c, i) => (i > 0 ? c - cci[i - 1] : NaN));
+  const velocity = momentum.map((m, i) => (i > 0 ? m - momentum[i - 1] : NaN));
+  const volatility = A(ta.stdev(S(cci), 30));
+  const momentumCrossUp = crossedOver(momentum, 0);
+  const momentumCrossDown = crossedUnder(momentum, 0);
+  const signalMultiplier = cfg.signalSensitivity / 10.0;
+  const flags: boolean[][] = [[], [], [], [], [], []];
+  for (let i = 0; i < n; i++) {
+    const upperLevel = 100 + volatility[i] * 0.3;
+    const lowerLevel = -100 - volatility[i] * 0.3;
+    const extremeUpper = upperLevel * 1.3;
+    const extremeLower = lowerLevel * 1.3;
+    // extremeOversoldReversal, extremeOverboughtReversal, oversoldReversal, overboughtReversal, bullCond, bearCond
+    flags[0].push(lt(cci[i], extremeLower * 0.8) && momentumCrossUp[i]);
+    flags[1].push(gt(cci[i], extremeUpper * 0.8) && momentumCrossDown[i]);
+    flags[2].push(lt(cci[i], lowerLevel * signalMultiplier) && gt(momentum[i], 0) && gt(velocity[i], 0));
+    flags[3].push(gt(cci[i], upperLevel * signalMultiplier) && lt(momentum[i], 0) && lt(velocity[i], 0));
+    flags[4].push(bullCond[i]);
+    flags[5].push(bearCond[i]);
+  }
+
   const lineColor = String(color.new(color.white, 50));
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -224,8 +254,19 @@ export function calculate(
     ],
     fills,
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Strong Buy', message: 'Extreme oversold reversal signal' },
+  { id: 'alert1', title: 'Strong Sell', message: 'Extreme overbought reversal signal' },
+  { id: 'alert2', title: 'Buy Signal', message: 'Oversold reversal detected' },
+  { id: 'alert3', title: 'Sell Signal', message: 'Overbought reversal detected' },
+  { id: 'alert4', title: 'Bullish Divergence', message: 'Bullish Divergence detected on CCI - Potential reversal UP' },
+  { id: 'alert5', title: 'Bearish Divergence', message: 'Bearish Divergence detected on CCI - Potential reversal DOWN' },
+];
 
 export const CciHashCapital = {
   calculate,
@@ -233,4 +274,5 @@ export const CciHashCapital = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

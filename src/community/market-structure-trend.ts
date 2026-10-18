@@ -7,6 +7,8 @@
  * turns bullish above the last swing high plus the buffer. The structure line is the last swing low in an uptrend
  * and the last swing high in a downtrend, drawn with a glow; four radial fill bands go from the line to the bar
  * midpoint. Circles mark the trend flips; optional bar and background colours follow the trend.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Structure Shift', 'Bearish Structure Shift' and 'Any
+ * Structure Shift', true on the confirmed bars of the trend flips.
  *
  * Last bar: the structure direction and level change on a closed bar only. The port reads the state of the last bar
  * from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
@@ -19,6 +21,14 @@
 import { ta, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, BgColorData, MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Structure Shift', message: 'Market Structure Trend: BULLISH structure shift confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Structure Shift', message: 'Market Structure Trend: BEARISH structure shift confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Any Structure Shift', message: 'Market Structure Trend: Market structure trend flipped on {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export interface MarketStructureTrendInputs {
   /** 'Default' uses the manual structure inputs; the presets override them */
@@ -122,7 +132,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<MarketStructureTrendInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -157,6 +167,7 @@ export function calculate(
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [], anyFlags: boolean[] = [];
 
   let swingHigh = NaN; // var float swing_high = na
   let swingLow = NaN; // var float swing_low = na
@@ -201,6 +212,9 @@ export function calculate(
 
     const bullShift = dir === 1 && prevDir === -1 && barIsConfirmed(i);
     const bearShift = dir === -1 && prevDir === 1 && barIsConfirmed(i);
+    bullFlags.push(bullShift);
+    bearFlags.push(bearShift);
+    anyFlags.push(bullShift || bearShift);
     const structureColor = dir === -1 ? bearishColor : bullishColor;
 
     const line = dir === 0 ? NaN : level;
@@ -225,8 +239,8 @@ export function calculate(
 
     // plotshape(..., style = shape.circle, location = location.absolute, size = size.tiny)
     if (cfg.showMarkers && !isNaN(line)) {
-      if (bullShift) markers.push({ time: t, position: 'atPriceMiddle', price: line, shape: 'circle', color: bullishColor, size: 'tiny' });
-      if (bearShift) markers.push({ time: t, position: 'atPriceMiddle', price: line, shape: 'circle', color: bearishColor, size: 'tiny' });
+      if (bullShift) markers.push({ time: t, position: 'atPriceMiddle', price: line, shape: 'circle', color: bullishColor, size: 'tiny', id: 'shape0' });
+      if (bearShift) markers.push({ time: t, position: 'atPriceMiddle', price: line, shape: 'circle', color: bearishColor, size: 'tiny', id: 'shape1' });
     }
     if (cfg.showCandles && dir !== 0) barColors.push({ time: t, color: String(color.new(structureColor, cfg.barTrans)) });
     if (cfg.showBgcolor && dir !== 0) bgColors.push({ time: t, color: String(color.new(structureColor, cfg.bgTrans)) });
@@ -240,6 +254,7 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags, anyFlags]),
   };
 }
 
@@ -249,4 +264,5 @@ export const MarketStructureTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

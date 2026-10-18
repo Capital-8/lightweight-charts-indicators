@@ -5,6 +5,8 @@
  * (100 when down is 0, 0 when up is 0), with bands at 70 / 50 / 30, a band fill and gradient fills above 70 and
  * below 30. MACD: fast MA - slow MA (EMA or SMA) of a second source, a signal MA (EMA or SMA) of the MACD and the
  * histogram MACD - signal (teal at or above 0, red below), with a zero line.
+ * Alerts (alertcondition, `alerts` of the result): the RSI crossing over 70, under 30 and across 50, the MACD
+ * crossing over / under its signal and the histogram crossing over / under 0.
  *
  * Reference: "RSI & MACD Suite" by aaboomar
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@ import {
   ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig,
   type FillConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type MaType = 'EMA' | 'SMA';
 
@@ -87,7 +90,10 @@ const EPS = 1e-10;
 const eq = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) <= EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 
-export function calculate(bars: Bar[], inputs: Partial<RsiMacdSuiteInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<RsiMacdSuiteInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -126,6 +132,18 @@ export function calculate(bars: Bar[], inputs: Partial<RsiMacdSuiteInputs> = {})
   // fill(rsiPlot, midLinePlot, 100, 70, top_color = color.new(color.green, 0), bottom_color = color.new(color.green, 100))
   // fill(rsiPlot, midLinePlot, 30, 0, top_color = color.new(color.red, 100), bottom_color = color.new(color.red, 0))
   const fillArr = <T>(v: T) => new Array<T>(n).fill(v);
+  // ta.cross(rsi, 50) = crossover or crossunder
+  const rsiOver50 = crossedOver(rsi, 50);
+  const rsiUnder50 = crossedUnder(rsi, 50);
+  const alertFlags = [
+    crossedOver(rsi, 70),
+    crossedUnder(rsi, 30),
+    rsiOver50.map((v, i) => v || rsiUnder50[i]),
+    crossedOver(macd, signal),
+    crossedUnder(macd, signal),
+    crossedOver(hist, 0),
+    crossedUnder(hist, 0),
+  ];
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay, precision: 2 },
     plots,
@@ -142,8 +160,20 @@ export function calculate(bars: Bar[], inputs: Partial<RsiMacdSuiteInputs> = {})
           topColor: fillArr<string | null>(String(color.new(color.red, 100))),
           bottomColor: fillArr<string | null>(String(color.new(color.red, 0))) } },
     ],
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RSI Overbought', message: 'RSI crossed above 70 (Overbought)' },
+  { id: 'alert1', title: 'RSI Oversold', message: 'RSI crossed below 30 (Oversold)' },
+  { id: 'alert2', title: 'RSI Midline Cross', message: 'RSI crossed the 50 midline' },
+  { id: 'alert3', title: 'MACD Bullish Cross', message: 'MACD line crossed above Signal line (Bullish)' },
+  { id: 'alert4', title: 'MACD Bearish Cross', message: 'MACD line crossed below Signal line (Bearish)' },
+  { id: 'alert5', title: 'MACD Histogram Bullish', message: 'MACD Histogram crossed above zero (Bullish momentum)' },
+  { id: 'alert6', title: 'MACD Histogram Bearish', message: 'MACD Histogram crossed below zero (Bearish momentum)' },
+];
 
 export const RsiMacdSuite = {
   calculate,
@@ -153,4 +183,5 @@ export const RsiMacdSuite = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

@@ -7,6 +7,8 @@
  * support level. Three candlestick pattern families are marked only when they agree with the trend: hammer /
  * shooting star (shadow and body proportions of the bar range), bullish / bearish engulfing (the body wraps the
  * previous body and is 1.2 times larger) and morning / evening star (three-bar reversal).
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Setup' / 'Bearish Setup', any bullish / bearish pattern
+ * aligned with the trend.
  *
  * Reference: "Aura Trend & Candlestick Matrix [Pineify]" by Pineify
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AuraTrendCandlestickMatrixInputs {
   /** Fast EMA length */
@@ -74,7 +77,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AuraTrendCandlestickMatrixInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -109,6 +112,7 @@ export function calculate(
   const NaB = { open: NaN, high: NaN, low: NaN, close: NaN };
   const msGreen = String(color.new(GREEN, 20));
   const msRed = String(color.new(RED, 20));
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const b1 = i >= 1 ? bars[i - 1] : NaB;
@@ -152,6 +156,15 @@ export function calculate(
     const eveningStar = prev2Gc && rc && lt(bodWidth, prevBodWidth * 0.5) && lt(cBot, prev2CBot) && lt(b.close, mid2);
 
     // Pattern alignment with the trend cloud
+    const validBullEng = cfg.showEng && bullEngulfing && trend[i] === 1;
+    const validBearEng = cfg.showEng && bearEngulfing && trend[i] === -1;
+    const validHammer = cfg.showHams && hammer && trend[i] === 1;
+    const validSstar = cfg.showHams && sstar && trend[i] === -1;
+    const validMStar = cfg.showStars && morningStar && trend[i] === 1;
+    const validEStar = cfg.showStars && eveningStar && trend[i] === -1;
+    // alertcondition(valid_bull_eng or valid_hammer or valid_m_star) / (valid_bear_eng or valid_sstar or valid_e_star)
+    bullFlags.push(validBullEng || validHammer || validMStar);
+    bearFlags.push(validBearEng || validSstar || validEStar);
     if (cfg.showEng && bullEngulfing && trend[i] === 1) {
       markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: GREEN, size: 'small' });
     }
@@ -197,8 +210,15 @@ export function calculate(
     ],
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Setup', message: 'Aura Matrix: Bullish Pattern detected aligned with the Trend Cloud!' },
+  { id: 'alert1', title: 'Bearish Setup', message: 'Aura Matrix: Bearish Pattern detected aligned with the Trend Cloud!' },
+];
 
 export const AuraTrendCandlestickMatrix = {
   calculate,
@@ -206,4 +226,5 @@ export const AuraTrendCandlestickMatrix = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -142,17 +142,18 @@ export function calculate(
     shortFill[i] = cfg.highlightState && dir[i] === -1 ? SHORT_FILL : 'transparent';
     if (buySignal && !isNaN(longStop[i])) {
       // plotshape(buySignal ? longStop : na, 'Long Stop Start', location.absolute, shape.circle, size.tiny)
-      markers.push({ time: t, position: 'atPriceMiddle', price: longStop[i], shape: 'circle', color: LONG, size: 'tiny' });
+      markers.push({ id: 'shape0', time: t, position: 'atPriceMiddle', price: longStop[i], shape: 'circle', color: LONG, size: 'tiny' });
       // plotshape(buySignal and showLabels ? longStop : na, 'Buy Label', text = 'Buy', shape.labelup, size.tiny)
       if (cfg.showLabels) {
-        markers.push({ time: t, position: 'atPriceBottom', price: longStop[i], shape: 'labelUp', color: LONG,
+        markers.push({ id: 'shape1', time: t, position: 'atPriceBottom', price: longStop[i], shape: 'labelUp', color: LONG,
           text: 'Buy', textColor: color.white, size: 'tiny' });
       }
     }
     if (sellSignal && !isNaN(shortStop[i])) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: shortStop[i], shape: 'circle', color: SHORT, size: 'tiny' });
+      // plotshape(sellSignal ? shortStop : na, 'Short Stop Start', ...) / plotshape(..., 'Sell Label', text = 'Sell')
+      markers.push({ id: 'shape2', time: t, position: 'atPriceMiddle', price: shortStop[i], shape: 'circle', color: SHORT, size: 'tiny' });
       if (cfg.showLabels) {
-        markers.push({ time: t, position: 'atPriceTop', price: shortStop[i], shape: 'labelDown', color: SHORT,
+        markers.push({ id: 'shape3', time: t, position: 'atPriceTop', price: shortStop[i], shape: 'labelDown', color: SHORT,
           text: 'Sell', textColor: color.white, size: 'tiny' });
       }
     }

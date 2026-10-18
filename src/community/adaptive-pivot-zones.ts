@@ -6,6 +6,7 @@
  * lines and fills are bullish when the close is above the highest level, bearish below the lowest one, and keep
  * their previous colour (or take the neutral colour) in between. Optional bar colours: bull above the middle level,
  * bear below it.
+ * Alerts (alertcondition, `alerts` of the result): the close crosses over / under the middle level.
  *
  * Reference: "Adaptive Pivot Zones" by Uncle_the_shooter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AdaptivePivotZonesInputs {
   /** Pivot length (bars on each side) */
@@ -93,7 +95,7 @@ type Point = { time: number; value: number; color: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<AdaptivePivotZonesInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -160,6 +162,13 @@ export function calculate(
     }
   }
 
+  // bullCross = not na(smoothedLine2) and ta.crossover(close, smoothedLine2); bearCross alike with ta.crossunder
+  const close = bars.map((b) => b.close);
+  const crossUp = crossedOver(close, s2);
+  const crossDown = crossedUnder(close, s2);
+  const bullCross = crossUp.map((c, i) => !isNaN(s2[i]) && c);
+  const bearCross = crossDown.map((c, i) => !isNaN(s2[i]) && c);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2 },
@@ -168,8 +177,15 @@ export function calculate(
       { plot1: 'plot1', plot2: 'plot2', options: { title: 'Fill 2-3' }, colors: fillColors },
     ],
     barColors,
+    alerts: alertStates(alertConditions, bars, [bullCross, bearCross]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend Change', message: 'Price crossed ABOVE mid pivot → Bullish bias' },
+  { id: 'alert1', title: 'Bearish Trend Change', message: 'Price crossed BELOW mid pivot → Bearish bias' },
+];
 
 export const AdaptivePivotZones = {
   calculate,
@@ -177,4 +193,5 @@ export const AdaptivePivotZones = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -8,6 +8,7 @@
  * last two are normalized to 0..1 by their min / max over len bars. The fast average uses the source and the fast
  * length; the slow one uses the fast average, the slow length and half the alpha. ACD = fast - slow (PPO: in % of
  * the slow one), signal = EMA (or Wilder's RMA) of ACD, histogram = ACD - signal. Colours follow ACD vs signal.
+ * Alerts (alertcondition, `alerts` of the result): ACD crosses over the signal, under it, and either cross.
  *
  * Reference: "Adaptive Convergence Divergence" by singhxgurjit
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +17,7 @@
  */
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type AdaptiveConvergenceDivergenceMaType = 'ACMO' | 'ARSI' | 'FRMA' | 'VOLA';
 
@@ -87,7 +89,10 @@ const neZero = (x: number) => !isNaN(x) && Math.abs(x) > EPS;
 /** math.max / math.min: na when an argument is na */
 const clampAlpha = (alpha: number) => (isNaN(alpha) ? NaN : Math.max(0.01, Math.min(alpha, 1)));
 
-export function calculate(bars: Bar[], inputs: Partial<AdaptiveConvergenceDivergenceInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<AdaptiveConvergenceDivergenceInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -173,14 +178,25 @@ export function calculate(bars: Bar[], inputs: Partial<AdaptiveConvergenceDiverg
   // fill(plotOsc, plotSign, color = color.new(trendColor, fillTrans))
   const fills = [{ plot1: 'plot0', plot2: 'plot1', colors: bars.map((_b, i) => String(color.new(trendColor(i), cfg.fillTrans))) }];
 
-  // alertcondition(co, ...), alertcondition(cu, ...), alertcondition(co or cu, ...): no output
+  // co = ta.crossover(osc, signal); cu = ta.crossunder(osc, signal)
+  const co = crossedOver(osc, signal);
+  const cu = crossedUnder(osc, signal);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2 },
     fills,
+    // alertcondition(co, ...), alertcondition(cu, ...), alertcondition(co or cu, ...)
+    alerts: alertStates(alertConditions, bars, [co, cu, co.map((c, i) => c || cu[i])]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish 🐂', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Bearish 🐻', message: 'Alert Fired!' },
+  { id: 'alert2', title: '🐂 Bulls ⚔️ Bears 🐻', message: 'Alert Fired!' },
+];
 
 export const AdaptiveConvergenceDivergence = {
   calculate,
@@ -188,4 +204,5 @@ export const AdaptiveConvergenceDivergence = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

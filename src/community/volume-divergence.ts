@@ -163,8 +163,8 @@ export function calculate(bars: Bar[], inputs: Partial<VolumeDivergenceInputs> =
       const hiddenBullCond = cfg.plotHiddenBull && curLow > lastPlLow && curVol < lastPlVol && plInRange;
       regBullPlot[p] = { time: bars[p].time, value: curVol, color: bullCond ? BULL_COLOR : NONE_COLOR };
       hidBullPlot[p] = { time: bars[p].time, value: curVol, color: hiddenBullCond ? HIDDEN_BULL_COLOR : NONE_COLOR };
-      if (bullCond) markers.push({ time: bars[p].time, position: 'atPriceBottom', price: curVol, shape: 'labelUp', color: BULL_COLOR, text: ' Bull ', textColor: TEXT_COLOR });
-      if (hiddenBullCond) markers.push({ time: bars[p].time, position: 'atPriceBottom', price: curVol, shape: 'labelUp', color: BULL_COLOR, text: ' H Bull ', textColor: TEXT_COLOR });
+      if (bullCond) markers.push({ time: bars[p].time, position: 'atPriceBottom', price: curVol, shape: 'labelUp', color: BULL_COLOR, text: ' Bull ', textColor: TEXT_COLOR, id: 'shape0' });
+      if (hiddenBullCond) markers.push({ time: bars[p].time, position: 'atPriceBottom', price: curVol, shape: 'labelUp', color: BULL_COLOR, text: ' H Bull ', textColor: TEXT_COLOR, id: 'shape1' });
       lastPlVol = curVol;
       lastPlLow = curLow;
     }
@@ -179,8 +179,8 @@ export function calculate(bars: Bar[], inputs: Partial<VolumeDivergenceInputs> =
       const hiddenBearCond = cfg.plotHiddenBear && curHigh < lastPhHigh && curVol > lastPhVol && phInRange;
       regBearPlot[p] = { time: bars[p].time, value: curVol, color: bearCond ? BEAR_COLOR : NONE_COLOR };
       hidBearPlot[p] = { time: bars[p].time, value: curVol, color: hiddenBearCond ? HIDDEN_BEAR_COLOR : NONE_COLOR };
-      if (bearCond) markers.push({ time: bars[p].time, position: 'atPriceTop', price: curVol, shape: 'labelDown', color: BEAR_COLOR, text: ' Bear ', textColor: TEXT_COLOR });
-      if (hiddenBearCond) markers.push({ time: bars[p].time, position: 'atPriceTop', price: curVol, shape: 'labelDown', color: BEAR_COLOR, text: ' H Bear ', textColor: TEXT_COLOR });
+      if (bearCond) markers.push({ time: bars[p].time, position: 'atPriceTop', price: curVol, shape: 'labelDown', color: BEAR_COLOR, text: ' Bear ', textColor: TEXT_COLOR, id: 'shape2' });
+      if (hiddenBearCond) markers.push({ time: bars[p].time, position: 'atPriceTop', price: curVol, shape: 'labelDown', color: BEAR_COLOR, text: ' H Bear ', textColor: TEXT_COLOR, id: 'shape3' });
       lastPhVol = curVol;
       lastPhHigh = curHigh;
     }

@@ -5,11 +5,46 @@
  * QQEF = EMA(RSI, SF) − 50, QQES trailing stop − 50.
  * ATR of RSI uses double-WWMA (alpha = 1/length).
  *
+ * Alerts (alertcondition, `alerts` of the result): the 8 conditions of the original on the fast line (QQEF, before
+ * the -50 shift) and the slow line: any cross, crossover / crossunder of the two lines, the fast line crossing 50
+ * (up / down), above 60, below 40, and back inside 40..60 (SIDEWAYS).
+ *
  * Pine source: "Normalized Quantitative Qualitative Estimation" by KivancOzbilgic
  */
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cross Alert', message: 'QQE Crossing Signal!' },
+  { id: 'alert1', title: 'Crossover Alarm', message: 'QQE BUY SIGNAL!' },
+  { id: 'alert2', title: 'Crossunder Alarm', message: 'QQE SELL SIGNAL!' },
+  { id: 'alert3', title: 'Cross 0 Up Alert', message: 'QQE FAST Crossing 0 UP!' },
+  { id: 'alert4', title: 'Cross 0 Down Alert', message: 'QQE FAST Crossing 0 DOWN!' },
+  { id: 'alert5', title: 'Cross 10 Up Alert', message: 'QQE Above 10 UPTREND SIGNAL!' },
+  { id: 'alert6', title: 'Cross -10 Down Alert', message: 'QQE Below -10 DOWNTREND SIGNAL!' },
+  { id: 'alert7', title: 'SIDEWAYS', message: 'QQE Entering Sideways Market!' },
+];
+
+/** The 8 conditions on the (not normalised) QQEF / QQES lines */
+function qqeAlertFlags(qqef: number[], qqes: number[]): boolean[][] {
+  const up = crossedOver(qqef, qqes);
+  const dn = crossedUnder(qqef, qqes);
+  const under60 = crossedUnder(qqef, 60);
+  const over40 = crossedOver(qqef, 40);
+  return [
+    up.map((f, i) => f || dn[i]), // cross(QQEF, QQES)
+    up,
+    dn,
+    crossedOver(qqef, 50),
+    crossedUnder(qqef, 50),
+    crossedOver(qqef, 60),
+    crossedUnder(qqef, 40),
+    under60.map((f, i) => f || over40[i]), // crossunder(QQEF, 60) or crossover(QQEF, 40)
+  ];
+}
 
 export interface NormalizedQQEInputs {
   rsiLen: number;
@@ -46,7 +81,10 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<NormalizedQQEInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<NormalizedQQEInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { rsiLen, smoothFactor, qqeFactor, src, showSignals } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -59,8 +97,9 @@ export function calculate(bars: Bar[], inputs: Partial<NormalizedQQEInputs> = {}
   // Pine: TR=abs(RSII-RSII[1])
   const TR: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
-    const cur = QQEF[i] ?? 0;
-    const prev = i > 0 ? (QQEF[i - 1] ?? 0) : 0;
+    // na while RSII or RSII[1] is na
+    const cur = QQEF[i] ?? NaN;
+    const prev = i > 0 ? (QQEF[i - 1] ?? NaN) : NaN;
     TR[i] = Math.abs(cur - prev);
   }
 
@@ -74,8 +113,9 @@ export function calculate(bars: Bar[], inputs: Partial<NormalizedQQEInputs> = {}
   WWMA[0] = TR[0];
   ATRRSI[0] = WWMA[0];
   for (let i = 1; i < n; i++) {
-    WWMA[i] = wwalpha * TR[i] + (1 - wwalpha) * WWMA[i - 1];
-    ATRRSI[i] = wwalpha * WWMA[i] + (1 - wwalpha) * ATRRSI[i - 1];
+    // nz(WWMA[1]) / nz(ATRRSI[1]): an na value before (TR is na on the first bars) counts as 0
+    WWMA[i] = wwalpha * TR[i] + (1 - wwalpha) * (isNaN(WWMA[i - 1]) ? 0 : WWMA[i - 1]);
+    ATRRSI[i] = wwalpha * WWMA[i] + (1 - wwalpha) * (isNaN(ATRRSI[i - 1]) ? 0 : ATRRSI[i - 1]);
   }
 
   // Pine: QUP=QQEF+ATRRSI*4.236, QDN=QQEF-ATRRSI*4.236
@@ -155,7 +195,8 @@ export function calculate(bars: Bar[], inputs: Partial<NormalizedQQEInputs> = {}
       { value: -10, options: { color: '#787B86', linestyle: 'dashed' as const, title: 'Lower' } },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, qqeAlertFlags(QQEF.map((v) => v ?? NaN), QQES)),
   };
 }
 
-export const NormalizedQQE = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const NormalizedQQE = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -9,12 +9,15 @@
  * - barcolor: green for bull/buysignal bars, red for bear/sellsignal bars
  * - bgcolor for Stoch RSI crossover alerts (mid-level, OB/OS-level, K>upper, K<lower)
  * - Moving average filter (EMA/WMA/SMA/None) gating Stoch RSI crossover checks
+ * - Alerts (alertcondition, `alerts` of the result): 'Bullish EMA Cross' / 'Bearish EMA Cross' when the fast EMA
+ *   crosses over / under the slow EMA, 'Stoch RSI Crossover' on the mid-level Stoch RSI crossover alerts (up or down)
  *
  * Reference: "[@btc_charlie] Trader XO Macro Trend Scanner"
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TraderXOInputs {
   fastEMA: number;
@@ -88,7 +91,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<TraderXOInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<TraderXOInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const {
     fastEMA, slowEMA, defEMA, bothEMAs,
     smoothK, smoothD, rsiLength, stochLength,
@@ -140,7 +143,6 @@ export function calculate(bars: Bar[], inputs: Partial<TraderXOInputs> = {}): Om
   const dArr = ta.sma(Series.fromArray(bars, kArr), smoothD).toArray();
 
   const warmup = Math.max(fastEMA, slowEMA, defEMA);
-  const stochWarmup = rsiLength + stochLength + smoothK + smoothD;
 
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
@@ -148,6 +150,8 @@ export function calculate(bars: Bar[], inputs: Partial<TraderXOInputs> = {}): Om
 
   let countBuy = 0;
   let countSell = 0;
+  // alertcondition(crossupalert or crossdownalert, 'Stoch RSI Crossover')
+  const stochCrossFlags: boolean[] = new Array(n).fill(false);
 
   // EMA plots with per-bar conditional coloring
   const consolidatedEMAPlot: { time: number; value: number; color?: string }[] = [];
@@ -214,10 +218,11 @@ export function calculate(bars: Bar[], inputs: Partial<TraderXOInputs> = {}): Om
       // In Pine, later barcolor calls override earlier ones. Since buysignal and bull
       // are mutually exclusive (buysignal needs countBuy==1, bull needs countBuy>=2),
       // we can just check all conditions.
+      // `id`: the barcolor() call (barcolor0 buysignal, barcolor1 sellsignal, barcolor2 bull, barcolor3 bear)
       if (buysignal || bull) {
-        barColors.push({ time: bars[i].time, color: '#26A69A' });
+        barColors.push({ id: buysignal ? 'barcolor0' : 'barcolor2', time: bars[i].time, color: '#26A69A' });
       } else if (sellsignal || bear) {
-        barColors.push({ time: bars[i].time, color: '#EF5350' });
+        barColors.push({ id: sellsignal ? 'barcolor1' : 'barcolor3', time: bars[i].time, color: '#EF5350' });
       }
 
       // Pine: plotshape Bull triangle below bar
@@ -241,8 +246,8 @@ export function calculate(bars: Bar[], inputs: Partial<TraderXOInputs> = {}): Om
         });
       }
 
-      // Stoch RSI crossover bgcolor signals
-      if (i >= stochWarmup) {
+      // Stoch RSI crossover bgcolor signals (k and d known on this bar and the bar before)
+      {
         const kVal = kArr[i];
         const dVal = dArr[i];
         const kPrev = kArr[i - 1];
@@ -267,42 +272,41 @@ export function calculate(bars: Bar[], inputs: Partial<TraderXOInputs> = {}): Om
           const aboveBandalert = kPrev >= upperBand && kVal < upperBand; // ta.crossunder(k, bandno0)
           const belowBandalert = kPrev <= lowerBand && kVal > lowerBand; // ta.crossover(k, bandno1)
 
-          // Pine bgcolor line 121: mid-level crossover (guarded by crossoverAlertBgColourMidOnOff)
+          stochCrossFlags[i] = crossupalert || crossdownalert;
+          const t = bars[i].time;
+
+          // bgcolor0 (Middle Level): crossupalert and MidOnOff ? #4CAF50 : crossdownalert and MidOnOff ? #FF0000 : na
           if (crossoverBgMid) {
             if (crossupalert) {
-              bgColors.push({ time: bars[i].time, color: 'rgba(76,175,80,0.30)' });
+              bgColors.push({ id: 'bgcolor0', time: t, color: 'rgba(76,175,80,0.30)' });
             } else if (crossdownalert) {
-              bgColors.push({ time: bars[i].time, color: 'rgba(255,0,0,0.30)' });
+              bgColors.push({ id: 'bgcolor0', time: t, color: 'rgba(255,0,0,0.30)' });
             }
           }
 
-          // Pine bgcolor line 122: OB/OS-level crossover (guarded by crossoverAlertBgColourOBOSOnOff)
+          // bgcolor1 (OB/OS Level): crossupOSalert and OBOSOnOff ? #fbc02d : crossdownOBalert and OBOSOnOff ? #000000 : na
           if (crossoverBgOBOS) {
             if (crossupOSalert) {
-              bgColors.push({ time: bars[i].time, color: 'rgba(251,192,45,0.30)' });
+              bgColors.push({ id: 'bgcolor1', time: t, color: 'rgba(251,192,45,0.30)' });
             } else if (crossdownOBalert) {
-              bgColors.push({ time: bars[i].time, color: 'rgba(0,0,0,0.30)' });
+              bgColors.push({ id: 'bgcolor1', time: t, color: 'rgba(0,0,0,0.30)' });
             }
           }
 
-          // Pine bgcolor line 123: K > Upper level (guarded by crossoverAlertBgColourGreaterThanOnOff)
-          // bgcolor(color=aboveBandalert and ... ? #ff0014 : crossdownalert and crossoverAlertBgColourMidOnOff ? #FF0000 : na, ...)
-          if (crossoverBgGreater) {
-            if (aboveBandalert) {
-              bgColors.push({ time: bars[i].time, color: 'rgba(255,0,20,0.30)' });
-            } else if (crossdownalert && crossoverBgMid) {
-              bgColors.push({ time: bars[i].time, color: 'rgba(255,0,0,0.30)' });
-            }
+          // bgcolor2 (K > Upper level): aboveBandalert and GreaterThanOnOff ? #ff0014
+          //   : crossdownalert and MidOnOff ? #FF0000 : na
+          if (aboveBandalert && crossoverBgGreater) {
+            bgColors.push({ id: 'bgcolor2', time: t, color: 'rgba(255,0,20,0.30)' });
+          } else if (crossdownalert && crossoverBgMid) {
+            bgColors.push({ id: 'bgcolor2', time: t, color: 'rgba(255,0,0,0.30)' });
           }
 
-          // Pine bgcolor line 124: K < Lower level (guarded by crossoverAlertBgColourLessThanOnOff)
-          // bgcolor(color=belowBandalert and ... ? #4CAF50 : crossdownalert and crossoverAlertBgColourMidOnOff ? #FF0000 : na, ...)
-          if (crossoverBgLess) {
-            if (belowBandalert) {
-              bgColors.push({ time: bars[i].time, color: 'rgba(76,175,80,0.30)' });
-            } else if (crossdownalert && crossoverBgMid) {
-              bgColors.push({ time: bars[i].time, color: 'rgba(255,0,0,0.30)' });
-            }
+          // bgcolor3 (K < Lower level): belowBandalert and LessThanOnOff ? #4CAF50
+          //   : crossdownalert and MidOnOff ? #FF0000 : na
+          if (belowBandalert && crossoverBgLess) {
+            bgColors.push({ id: 'bgcolor3', time: t, color: 'rgba(76,175,80,0.30)' });
+          } else if (crossdownalert && crossoverBgMid) {
+            bgColors.push({ id: 'bgcolor3', time: t, color: 'rgba(255,0,0,0.30)' });
           }
         }
       }
@@ -319,7 +323,18 @@ export function calculate(bars: Bar[], inputs: Partial<TraderXOInputs> = {}): Om
     markers,
     barColors,
     bgColors,
+    // alertcondition(ta.crossover(v_fastEMA, v_slowEMA)) / alertcondition(ta.crossunder(v_fastEMA, v_slowEMA))
+    alerts: alertStates(alertConditions, bars, [
+      crossedOver(fastEMAArr, slowEMAArr), crossedUnder(fastEMAArr, slowEMAArr), stochCrossFlags,
+    ]),
   };
 }
 
-export const TraderXO = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish EMA Cross', message: 'Bullish EMA crossover' },
+  { id: 'alert1', title: 'Bearish EMA Cross', message: 'Bearish EMA Crossover' },
+  { id: 'alert2', title: 'Stoch RSI Crossover', message: 'STOCH RSI CROSSOVER' },
+];
+
+export const TraderXO = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

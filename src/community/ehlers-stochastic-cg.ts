@@ -100,12 +100,16 @@ export function calculate(bars: Bar[], inputs: Partial<EhlersStochasticCGInputs>
     barColors.push({ time: bars[i].time, color });
   }
 
-  // Pine: fill(v1, v2, color=red, transp=92) and fill(v2, v1, color=lime, transp=92)
-  // Red when CG below Trigger, green when CG above Trigger
-  const fillColors: string[] = [];
+  // The original: duml = plot(max(v2, t)) (hidden helper), fill(cmil, duml, red, title="NegativeFill") and
+  // fill(tl, duml, lime, title="PositiveFill"): the red area shows where CG is below Trigger, the green one where
+  // CG is above it. The port draws both between CG and Trigger, each on the bars of its side.
+  const negColors: string[] = [];
+  const posColors: string[] = [];
   for (let i = 0; i < n; i++) {
-    if (i < warmup) { fillColors.push('transparent'); continue; }
-    fillColors.push(rawK[i] >= trigger[i] ? 'rgba(0,230,118,0.15)' : 'rgba(239,83,80,0.15)');
+    const above = i >= warmup && rawK[i] >= trigger[i];
+    const below = i >= warmup && rawK[i] < trigger[i];
+    negColors.push(below ? 'rgba(239,83,80,0.15)' : 'transparent');
+    posColors.push(above ? 'rgba(0,230,118,0.15)' : 'transparent');
   }
 
   return {
@@ -117,7 +121,8 @@ export function calculate(bars: Bar[], inputs: Partial<EhlersStochasticCGInputs>
       { value: -0.8, options: { color: '#787B86', linestyle: 'dotted' as const, title: 'OS Level' } },
     ],
     fills: [
-      { plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(239, 83, 80, 0.15)' }, colors: fillColors },
+      { plot1: 'plot1', plot2: 'plot0', options: { title: 'NegativeFill', color: 'rgba(239, 83, 80, 0.15)' }, colors: negColors },
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'PositiveFill', color: 'rgba(0, 230, 118, 0.15)' }, colors: posColors },
     ],
     barColors,
   };

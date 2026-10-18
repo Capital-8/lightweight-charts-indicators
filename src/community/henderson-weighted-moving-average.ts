@@ -7,6 +7,8 @@
  * HWMA = sum(src[i] * w) / sum(w); a missing older value (first bars) is replaced by the current source. The line is
  * green when the HWMA rises and pink when it falls. Optional bar colours, wick colours and background colours follow
  * the HWMA direction.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Color Change' / 'Bearish Color Change' when the line turns
+ * green / pink, 'Any Color Change' when its colour changes (from the second bar).
  *
  * Reference: "Henderson Weighted Moving Average" by everget
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -16,6 +18,7 @@
 
 import { getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, BgColorData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HendersonWeightedMovingAverageInputs {
   /** Number of filter terms */
@@ -92,7 +95,8 @@ function hwmaWeight(m: number, j: number): number {
 export function calculate(
   bars: Bar[],
   inputs: Partial<HendersonWeightedMovingAverageInputs> = {},
-): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { barColors: BarColorData[]; bgColors: BgColorData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = getSourceSeries(bars, cfg.src).toArray().map((v) => v ?? NaN);
@@ -143,14 +147,29 @@ export function calculate(
     if (cfg.applyBgColors) bgColors.push({ time: t, color: bull ? BULLISH_BG : BEARISH_BG });
   }
 
+  // bullishColorChangeAlert = maColor[1] != bullishColor and maColor == bullishColor; bearish: the same with
+  // bearishColor; anyColorChangeAlert = maColor != maColor[1] (no history on the first bar: false)
+  const col = plot0.map((p) => p.color);
+  const bullFlags = col.map((c, b) => b > 0 && col[b - 1] !== BULLISH && c === BULLISH);
+  const bearFlags = col.map((c, b) => b > 0 && col[b - 1] !== BEARISH && c === BEARISH);
+  const anyFlags = col.map((c, b) => b > 0 && c !== col[b - 1]);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     barColors,
     bgColors,
     plotCandles: { wickCandles: candles },
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags, anyFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Color Change', message: 'HWMA - Bullish Color Change\nSymbol: {{exchange}}:{{ticker}}\nPrice: {{close}}' },
+  { id: 'alert1', title: 'Bearish Color Change', message: 'HWMA - Bearish Color Change\nSymbol: {{exchange}}:{{ticker}}\nPrice: {{close}}' },
+  { id: 'alert2', title: 'Any Color Change', message: 'HWMA - Any Color Change\nSymbol: {{exchange}}:{{ticker}}\nPrice: {{close}}' },
+];
 
 export const HendersonWeightedMovingAverage = {
   calculate,
@@ -158,4 +177,5 @@ export const HendersonWeightedMovingAverage = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

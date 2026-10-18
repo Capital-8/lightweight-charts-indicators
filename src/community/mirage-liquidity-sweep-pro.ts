@@ -15,6 +15,8 @@
  * - Outputs: a cross on each qualifying sweep, a label on each entry, the swept level and the wick beyond it,
  *   equal highs / lows, the resting liquidity levels of the last bar (BSL / SSL), the liquidity target, the entry /
  *   stop / target lines and labels of the latest trade, optional score labels, the dashboard and the watermark.
+ * - Alerts (alert() calls, `alertCalls` of the result, once per bar close): each entry (text or webhook JSON), the
+ *   stop hit (Alert on SL Hit), and the break-even and first touches of the targets (Alert on TP / Break-Even).
  *
  * Chart context (optional third argument):
  * - `chart.mintick`: the symbol tick of the price texts. Without it 0.01.
@@ -22,7 +24,8 @@
  *   Without it the dark theme.
  * - `chart.lastBarConfirmed`: when the last bar is still open, it gives no sweep, no entry and no exit. Without it
  *   every bar is taken as closed.
- * - `chart.timeframe`: the chart timeframe (dashboard text). Without it, it is taken from the bars.
+ * - `chart.timeframe`: the chart timeframe (dashboard and alert text). Without it, it is taken from the bars.
+ * - `chart.tickerid`: the ticker id of the alert messages. Without it an empty text.
  * - `chart.timezone` and `chart.session`: the exchange calendar of the bars of the higher timeframe. Without them
  *   the UTC calendar and the bars (see anchor-period.ts).
  *
@@ -30,7 +33,6 @@
  * - The bars of the higher timeframe are built from the chart bars, so their EMA starts at the first chart bar.
  * - A higher timeframe input below the chart timeframe (the default "240" on a daily chart) needs data that the
  *   chart bars do not have: the port throws an Error when "Use HTF Bias (score)" is on.
- * - The alerts give no output.
  *
  * Reference: "Mirage Liquidity Sweep Pro [WillyAlgoTrader]" by WillyAlgoTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -41,10 +43,13 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type {
-  LabelData, LabelStyle, LineDrawingData, MarkerData, PineSize, TableCellData, TableData, TableMergeData, TablePosition,
+  AlertCall, LabelData, LabelStyle, LineDrawingData, MarkerData, PineSize, TableCellData, TableData, TableMergeData, TablePosition,
 } from '../types';
 import { periodStarts, chartTimeframe, securityBars } from '../anchor-period';
-import { backgroundColorOf, lastBarConfirmedOf, mintickOf, type ChartContext } from '../chart-context';
+import { backgroundColorOf, lastBarConfirmedOf, mintickOf, tickeridOf, type ChartContext } from '../chart-context';
+
+/** The original makes alert() calls (`alertCalls` of the result) */
+export const hasAlertFunction = true;
 
 type LineStyleName = 'Solid' | 'Dashed' | 'Dotted';
 type Corner = 'Top Left' | 'Top Right' | 'Bottom Left' | 'Bottom Right' | 'Middle Right';
@@ -339,14 +344,16 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<MirageLiquiditySweepProInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[] } {
+): IndicatorResult & {
+  markers: MarkerData[]; lines: LineDrawingData[]; labels: LabelData[]; tables: TableData[]; alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const base = {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
   };
-  if (n === 0) return { ...base, markers: [], lines: [], labels: [], tables: [] };
+  if (n === 0) return { ...base, markers: [], lines: [], labels: [], tables: [], alertCalls: [] };
 
   // syminfo.mintick, chart.bg_color, barstate.isconfirmed, timeframe.period
   const MINTICK = mintickOf(chart);
@@ -354,6 +361,12 @@ export function calculate(
   const tickText = (v: number) => str.tostring(v, 'mintick', MINTICK);
   const fmtPrice = (v: number) => (Number.isNaN(v) ? '—' : tickText(v));
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
+  // syminfo.tickerid and timeframe.period of the alert messages
+  const TICKERID = tickeridOf(chart);
+  const TF_PERIOD = chartTimeframe(bars, chart);
+  const alertCalls: AlertCall[] = [];
+  let hitSL = NaN; // var float hitSL = na
+  let hitEntry = NaN; // var float hitEntry = na
 
   // ── Theme and colours ──
   const isDark = cfg.theme === 'Dark' ? true : cfg.theme === 'Light' ? false : (color.r(backgroundColorOf(chart)) as number) < 128;
@@ -701,6 +714,7 @@ export function calculate(
       sweepTrend = side;
     }
 
+    const beActiveAtBarStart = beActive;
     const effectiveSL = activeSL;
     const canCheckHit = activeDir !== 0 && !Number.isNaN(entryBar) && i > entryBar && confirmed;
     const slHit = canCheckHit && (activeDir === 1 ? le(low, effectiveSL) : ge(high, effectiveSL));
@@ -713,12 +727,19 @@ export function calculate(
     if (tp1FirstTouch) tp1Reached = true;
     if (tp2FirstTouch) tp2Reached = true;
     if (tp3FirstTouch) tp3Reached = true;
+    let beJustActivated = false;
     if (cfg.useBreakEven && tp1FirstTouch && !beActive) {
       activeSL = activeEntry;
       beActive = true;
+      beJustActivated = true;
     }
 
     // Snapshot before the reset
+    if (slHit) {
+      hitSL = effectiveSL;
+      hitEntry = activeEntry;
+    }
+    const exitBeActive = beActiveAtBarStart;
     const exitEntry = activeEntry;
     const exitTP1 = activeTP1;
     const exitTP2 = activeTP2;
@@ -756,6 +777,33 @@ export function calculate(
       lastSigType = 'Bearish';
       lastSigScore = sigScore;
     }
+
+    // ── Alerts: alert(..., alert.freq_once_per_bar_close) ──
+    const nz = (v: number) => (Number.isNaN(v) ? 0 : v);
+    const alertAt = (message: string) => alertCalls.push({ time, message, freq: 'once_per_bar_close' });
+    if (openLong || openShort) {
+      const aPrice = tickText(close);
+      const aScore = str.tostring(nz(sigScore), '#');
+      const aSL = tickText(nz(activeSL));
+      const aTP1 = tickText(nz(activeTP1));
+      const aTP2 = tickText(nz(activeTP2));
+      const aTP3 = tickText(nz(activeTP3));
+      const aRR = str.tostring(effTP1, '#.#');
+      const json = (action: string) => '{"action":"' + action + '","ticker":"' + TICKERID + '","price":' + aPrice
+        + ',"score":' + aScore + ',"sl":' + aSL + ',"tp1":' + aTP1 + ',"tp2":' + aTP2 + ',"tp3":' + aTP3 + ',"rr":' + aRR + '}';
+      const text = (head: string) => head + ' | ' + TICKERID + ' | TF: ' + TF_PERIOD + ' | Score: ' + aScore + ' | Price: '
+        + aPrice + ' | SL: ' + aSL + ' | TP1: ' + aTP1 + ' | TP2: ' + aTP2 + ' | TP3: ' + aTP3 + ' | R:R: ' + aRR;
+      if (openLong) alertAt(cfg.webhook ? json('buy') : text('🟢 LONG (Sweep)'));
+      if (openShort) alertAt(cfg.webhook ? json('sell') : text('🔴 SHORT (Sweep)'));
+    }
+    if (slHit && cfg.showSlHitAlert) {
+      alertAt((exitBeActive ? '🛡️ BE STOP-OUT | ' : '🛑 SL HIT | ') + TICKERID + ' | Entry: ' + tickText(nz(hitEntry))
+        + ' | SL: ' + tickText(nz(hitSL)));
+    }
+    if (beJustActivated && cfg.alertTpHit) alertAt('🛡️ BREAK-EVEN | ' + TICKERID + ' | SL moved to ' + tickText(nz(exitEntry)));
+    if (tp1FirstTouch && cfg.alertTpHit) alertAt('🎯 TP1 HIT | ' + TICKERID + ' | Price: ' + tickText(nz(exitTP1)));
+    if (tp2FirstTouch && cfg.alertTpHit) alertAt('🎯🎯 TP2 HIT | ' + TICKERID + ' | Price: ' + tickText(nz(exitTP2)));
+    if (tp3FirstTouch && cfg.alertTpHit) alertAt('🏆 TP3 HIT | ' + TICKERID + ' | Price: ' + tickText(nz(exitTP3)));
 
     // ── Markers: sweep marks and entries (a price series at a bar location: na and 0 draw nothing) ──
     if (cfg.showSweeps && bullQ && low !== 0) markers.push({ time, position: 'belowBar', shape: 'xcross', color: BULL_SWEEP, size: 'tiny' });
@@ -1031,7 +1079,8 @@ export function calculate(
       ...(l.tooltip !== undefined ? { tooltip: l.tooltip } : {}),
     })),
     tables,
+    alertCalls,
   };
 }
 
-export const MirageLiquiditySweepPro = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const MirageLiquiditySweepPro = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

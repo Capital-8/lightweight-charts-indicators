@@ -8,11 +8,14 @@
  *       sup = f_derma(c_minus, length) / avg_vola
  *       adp = 100 * wma(dem, DER_avg), asp = 100 * wma(sup, DER_avg)
  *       anp_s = wma(adp - asp, smooth)
+ * Alerts (alertcondition, `alerts` of the result): the signal crosses 0 up / down / either way, and crosses over /
+ * under the sentiment line ('VADER Speeding Up' / 'VADER Slowing Down').
  *
  * Reference: "RedK VADER v4.0" by RedKTrader
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RedKVADERInputs {
   length: number;
@@ -70,7 +73,7 @@ function derma(bars: Bar[], data: number[], len: number, maType: string): number
   }
 }
 
-export function calculate(bars: Bar[], inputs: Partial<RedKVADERInputs> = {}): IndicatorResult {
+export function calculate(bars: Bar[], inputs: Partial<RedKVADERInputs> = {}): IndicatorResult & { alerts: AlertConditionState[] } {
   const { length, DER_avg, MA_Type, smooth, showSenti, senti, vCalc, vlookbk } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -239,6 +242,21 @@ export function calculate(bars: Bar[], inputs: Partial<RedKVADERInputs> = {}): I
     }
   }
 
+  // Alert_up = ta.crossover(anp_s, 0), Alert_dn = ta.crossunder(anp_s, 0), Alert_swing = ta.cross(anp_s, 0)
+  // v_speedup = ta.crossover(anp_s, V_senti), v_slowdn = ta.crossunder(anp_s, V_senti)
+  // The original's lines are na until their averages are known (the relative volume from bar vlookbk - 1, the
+  // price change from bar 1): the port's values before that are not crossed
+  const cFirst = vCalc === 'Relative' ? Math.max(vlookbk - 1, 1) : 1;
+  const sigFirst = cFirst + (length - 1) + (DER_avg - 1) + (smooth - 1);
+  const sentiFirst = cFirst + (length - 1) + (senti - 1) + (smooth - 1);
+  const sig = anpSmooth.map((v, i) => (i < sigFirst ? NaN : v ?? NaN));
+  const sentiLine = vSenti.map((v, i) => (i < sentiFirst ? NaN : v ?? NaN));
+  const alertUp = crossedOver(sig, 0);
+  const alertDn = crossedUnder(sig, 0);
+  const alertSwing = alertUp.map((f, i) => f || alertDn[i]);
+  const speedUp = crossedOver(sig, sentiLine);
+  const slowDn = crossedUnder(sig, sentiLine);
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2, 'plot3': plot3 },
@@ -248,7 +266,17 @@ export function calculate(bars: Bar[], inputs: Partial<RedKVADERInputs> = {}): I
     fills: [
       { plot1: 'plot1', plot2: 'plot2', options: { color: 'rgba(0, 128, 0, 0.2)' }, colors: fillColors },
     ],
+    alerts: alertStates(alertConditions, bars, [alertUp, alertDn, alertSwing, speedUp, slowDn]),
   };
 }
 
-export const RedKVADER = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '.   VADER Crossing 0 Up', message: 'VADER Up - Buying Energy Detected!' },
+  { id: 'alert1', title: '..  VADER Crossing 0 Down', message: 'VADER Down - Selling Energy Detected!' },
+  { id: 'alert2', title: '... VADER Crossing 0', message: 'VADER Swing - Possible Reversal' },
+  { id: 'alert3', title: '*  VADER Speeding Up', message: 'VADER Speeding Up!' },
+  { id: 'alert4', title: '** VADER Slowing Down', message: 'VADER Slowing Down!' },
+];
+
+export const RedKVADER = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

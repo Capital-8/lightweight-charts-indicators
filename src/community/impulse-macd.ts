@@ -101,24 +101,16 @@ export function calculate(bars: Bar[], inputs: Partial<ImpulseMACDInputs> = {}):
   const toPlot = (arr: number[]) =>
     arr.map((value, i) => ({ time: bars[i].time, value: isNaN(value) ? NaN : value }));
 
-  // 4-color ImpulseMACD: lime (>hi, rising), green (>hi, falling), red (<lo, falling), orange (<lo, rising)
-  const hiArr2 = hi.toArray();
-  const loArr2 = lo.toArray();
+  // plot(md, color=mdc): mdc = src>mi ? src>hi ? lime : green : src<lo ? red : orange (the original's colours; na
+  // compares false)
+  const hlc3Src = hlc3.toArray();
   const mdPlot = mdArr.map((value, i) => {
     const v = isNaN(value) ? NaN : value;
+    const s = hlc3Src[i] ?? NaN;
     const m = miArr[i] ?? NaN;
-    const h = hiArr2[i] ?? NaN;
-    const l = loArr2[i] ?? NaN;
-    let color: string;
-    if (m > h) {
-      const prev = i > 0 ? mdArr[i - 1] : NaN;
-      color = v >= prev ? '#00FF00' : '#008000'; // lime : green
-    } else if (m < l) {
-      const prev = i > 0 ? mdArr[i - 1] : NaN;
-      color = v <= prev ? '#FF0000' : '#FF8C00'; // red : orange
-    } else {
-      color = '#808080';
-    }
+    const h = hiArr[i] ?? NaN;
+    const l = loArr[i] ?? NaN;
+    const color = s > m ? (s > h ? '#00FF00' : '#008000') : (s < l ? '#FF0000' : '#FF7F00');
     return { time: bars[i].time, value: v, color };
   });
 

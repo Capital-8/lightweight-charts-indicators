@@ -5,6 +5,7 @@
  * (MDI) is the EMA of 100 * its bar-to-bar change / close. The trend state turns long when the MDI is above 0 and the
  * close is above the close slowLen bars ago, short when the MDI is below 0 and the close is below it; otherwise it
  * keeps its value. Bars take the trend colour; LONG / SHORT triangles mark the state changes.
+ * Alerts (alertcondition, `alerts` of the result): 'Long Signal' and 'Short Signal', true on the state changes.
  *
  * Reference: "Projected Crossover Trend" by SchizoQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ProjectedCrossoverTrendInputs {
   src: SourceType;
@@ -69,7 +71,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<ProjectedCrossoverTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -88,6 +90,7 @@ export function calculate(
   const t = (i: number) => bars[i].time;
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
   let sq = 0; // var int SQ = 0
   for (let i = 0; i < n; i++) {
     const prevSq = sq;
@@ -97,6 +100,8 @@ export function calculate(
     // SQ[1] is na on the first bar: na != 1 is false
     const longSignal = i > 0 && sq === 1 && prevSq !== 1;
     const shortSignal = i > 0 && sq === -1 && prevSq !== -1;
+    longFlags.push(longSignal);
+    shortFlags.push(shortSignal);
 
     // barcolor(colorBars ? (SQ == 1 ? longColor : shortColor) : na)
     if (cfg.colorBars) barColors.push({ time: t(i), color: sq === 1 ? cfg.longColor : cfg.shortColor });
@@ -118,8 +123,16 @@ export function calculate(
     },
     markers,
     barColors,
+    // alertcondition(longSignal, "Long Signal") / alertcondition(shortSignal, "Short Signal")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Signal', message: 'Projected Crossover Trend LONG Signal on {{ticker}}' },
+  { id: 'alert1', title: 'Short Signal', message: 'Projected Crossover Trend SHORT Signal on {{ticker}}' },
+];
 
 export const ProjectedCrossoverTrend = {
   calculate,
@@ -127,4 +140,5 @@ export const ProjectedCrossoverTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -24,6 +24,8 @@
  * Chart values from the optional third argument (src/chart-context.ts): the state of the last bar (breaks and
  * signals are only detected on closed bars), the symbol tick (stop loss / take profit prices in the panel), and the
  * exchange calendar of the higher-timeframe, day and week periods. The killzones use their own time zone input.
+ * Alerts (alertcondition, `alerts` of the result): the original's 21 conditions (swing CHoCH / BOS, new order blocks
+ * and high-score ones, breakers, inducement sweeps, new IFVGs, validated signals, OTE entries, IFVG retests).
  *
  * Reference: "ICT Validated SMC v1.8" by GoodBadBitcoin
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -38,6 +40,7 @@ import type { BgColorData, BoxData, LabelData, LineDrawingData, MarkerData, Pine
 import { barInterval } from '../bar-time';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import { lastBarConfirmedOf, mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type SizeName = 'tiny' | 'small' | 'normal' | 'large';
 type KzTimezone = 'America/New_York' | 'Europe/London' | 'Europe/Berlin' | 'Asia/Tokyo' | 'Asia/Singapore' | 'Australia/Sydney' | 'UTC';
@@ -475,6 +478,31 @@ function previousPeriodHighLow(bars: Bar[], tf: string, chart?: ChartContext): [
   return g >= 0 ? [s.htf[g].high, s.htf[g].low] : [NaN, NaN];
 }
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish CHoCH', message: 'ICT-V: Bullish Change of Character detected' },
+  { id: 'alert1', title: 'Bearish CHoCH', message: 'ICT-V: Bearish Change of Character detected' },
+  { id: 'alert2', title: 'Bullish BOS', message: 'ICT-V: Bullish Break of Structure' },
+  { id: 'alert3', title: 'Bearish BOS', message: 'ICT-V: Bearish Break of Structure' },
+  { id: 'alert4', title: 'Bullish OB Formed', message: 'ICT-V: Validated Bullish Order Block detected — check confluence score' },
+  { id: 'alert5', title: 'Bearish OB Formed', message: 'ICT-V: Validated Bearish Order Block detected — check confluence score' },
+  { id: 'alert6', title: 'High-Score Bullish OB', message: 'ICT-V: High-confluence Bullish OB (5+ score) — strong setup' },
+  { id: 'alert7', title: 'High-Score Bearish OB', message: 'ICT-V: High-confluence Bearish OB (5+ score) — strong setup' },
+  { id: 'alert8', title: 'Bullish Breaker', message: 'ICT-V: Bullish Breaker Block formed — failed bearish OB flipped to support' },
+  { id: 'alert9', title: 'Bearish Breaker', message: 'ICT-V: Bearish Breaker Block formed — failed bullish OB flipped to resistance' },
+  { id: 'alert10', title: 'Inducement Swept', message: 'ICT-V: Inducement level swept — internal swing taken out while higher structure holds' },
+  { id: 'alert11', title: 'Bullish IFVG Formed', message: 'ICT-V: Bullish Inversion FVG formed — old bearish FVG flipped to support' },
+  { id: 'alert12', title: 'Bearish IFVG Formed', message: 'ICT-V: Bearish Inversion FVG formed — old bullish FVG flipped to resistance' },
+  { id: 'alert13', title: 'Validated Long Signal', message: 'ICT-V: Validated LONG signal — check panel for confluence score' },
+  { id: 'alert14', title: 'Validated Short Signal', message: 'ICT-V: Validated SHORT signal — check panel for confluence score' },
+  { id: 'alert15', title: 'Price Entered Bullish OTE', message: 'ICT-V: Price entered bullish OTE zone — watch for entry confirmation' },
+  { id: 'alert16', title: 'Price Entered Bearish OTE', message: 'ICT-V: Price entered bearish OTE zone — watch for entry confirmation' },
+  { id: 'alert17', title: 'Bullish OTE + FVG Entry', message: 'ICT-V: Price entered bullish OTE with FVG confluence — high-quality zone' },
+  { id: 'alert18', title: 'Bearish OTE + FVG Entry', message: 'ICT-V: Price entered bearish OTE with FVG confluence — high-quality zone' },
+  { id: 'alert19', title: 'Bullish IFVG Retest', message: 'ICT-V: Price retesting bullish IFVG — flipped FVG acting as support' },
+  { id: 'alert20', title: 'Bearish IFVG Retest', message: 'ICT-V: Price retesting bearish IFVG — flipped FVG acting as resistance' },
+];
+
 export function calculate(
   bars: Bar[],
   inputs: Partial<IctAutoValidatedSmcInputs> = {},
@@ -482,9 +510,10 @@ export function calculate(
 ): Omit<IndicatorResult, 'lines' | 'labels' | 'boxes' | 'tables' | 'markers' | 'bgColors'> & {
   lines: LineDrawingData[]; labels: LabelData[]; boxes: BoxData[]; tables: TableData[]; markers: MarkerData[];
   bgColors: BgColorData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
+  const alertFlags: boolean[][] = alertConditions.map(() => new Array(n).fill(false));
   const ms = n > 0 && bars[0].time >= 1e12;
   const toMs = (t: number) => (ms ? t : t * 1000);
   const liveLast = !lastBarConfirmedOf(chart);
@@ -596,6 +625,21 @@ export function calculate(
     const confirmed = !isLast || !liveLast;
     setDrawingBar(i, isLast);
     const t = bars[i].time;
+    // alert flags of this bar (the original's bool flags, reset on each bar)
+    let newIDMTriggered = false;
+    let newBullIFVG = false;
+    let newBearIFVG = false;
+    let ifvgRetestBull = false;
+    let ifvgRetestBear = false;
+    let newBullOB = false;
+    let newBearOB = false;
+    let newOBScore = 0;
+    let newBullBreaker = false;
+    let newBearBreaker = false;
+    let oteEnteredBull = false;
+    let oteEnteredBear = false;
+    let oteFVGEnteredBull = false;
+    let oteFVGEnteredBear = false;
 
     htfStructureBullish = cfg.useHTF ? htf!.bull[i] : swingBullish;
     const htfAligned = (setupBullish: boolean) => !cfg.useHTF || (setupBullish && htfStructureBullish)
@@ -854,6 +898,7 @@ export function calculate(
             : gt(high[i], idm.price) && lt(close[i], idm.price)) {
             idm.triggered = true;
             idm.triggerIdx = i;
+            newIDMTriggered = true;
             delLabel(idm.lbl);
             idm.lbl = label.new(i, idm.isBullish ? low[i] : high[i], 'IDM ⚡', 'bar_index', 'price', color.new(idmColor, 70),
               idm.isBullish ? 'label_up' : 'label_down', idmColor, chartSize);
@@ -930,6 +975,8 @@ export function calculate(
             ? label.new(i, f.top, 'IFVG ▼', 'bar_index', 'price', color.new('#FFD600', 85), 'label_down', color.new('#FFD600', 0), chartSize)
             : label.new(i, f.bottom, 'IFVG ▲', 'bar_index', 'price', color.new('#FFD600', 85), 'label_up', color.new('#FFD600', 0), chartSize);
           ifvgList.push(iv);
+          if (bullMit) newBearIFVG = true;
+          else newBullIFVG = true;
         }
       }
       while (fvgList.length > cfg.fvgMaxCount * 3) {
@@ -947,6 +994,8 @@ export function calculate(
         const priceInZone = ge(high[i], iv.bottom) && le(low[i], iv.top);
         if (priceInZone && !iv.retested && i > iv.idx) {
           iv.retested = true;
+          if (iv.isBullish) ifvgRetestBull = true;
+          else ifvgRetestBear = true;
           if (iv.bx) box.set_border_width(iv.bx, 2);
         } else if (iv.retested) {
           if ((iv.isBullish && lt(close[i], iv.bottom)) || (!iv.isBullish && gt(close[i], iv.top))) {
@@ -1073,6 +1122,9 @@ export function calculate(
             color.new(col, 80), bull ? 'label_up' : 'label_down', col, chartSize);
         }
         orderBlocks.push(ob);
+        if (bull) newBullOB = true;
+        else newBearOB = true;
+        newOBScore = score;
       }
     }
 
@@ -1104,6 +1156,8 @@ export function calculate(
             : label.new(i, ob.bottom, 'BRK ▲', 'bar_index', 'price', color.new(base, 80), 'label_up', color.new(base, 0), chartSize);
         }
         breakerBlocks.push(brk);
+        if (bullMit) newBearBreaker = true;
+        else newBullBreaker = true;
       }
       while (orderBlocks.length > cfg.obMaxCount * 3) {
         const oldest = orderBlocks.shift()!;
@@ -1146,6 +1200,13 @@ export function calculate(
           : ge(high[i], ote.zoneBottom) && lt(close[i], ote.zoneTop);
         if (entered && !ote.triggered) {
           ote.triggered = true;
+          if (ote.isBullish) {
+            oteEnteredBull = true;
+            if (ote.hasFVGOverlap) oteFVGEnteredBull = true;
+          } else {
+            oteEnteredBear = true;
+            if (ote.hasFVGOverlap) oteFVGEnteredBear = true;
+          }
           if (ote.bx) box.set_border_width(ote.bx, 2);
         }
         if (ote.isBullish ? lt(close[i], ote.legLow) : gt(close[i], ote.legHigh)) {
@@ -1376,19 +1437,33 @@ export function calculate(
       }
     }
 
+    // plotshape outputs: ids shape0 (Long Signal), shape1 (Short Signal), shape2 (Long SL), shape3 (Short SL)
     if (longSignal) {
-      markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: sigLongColor, size: 'small' });
+      markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: sigLongColor, size: 'small', id: 'shape0' });
     }
     if (shortSignal) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: sigShortColor, size: 'small' });
+      markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: sigShortColor, size: 'small', id: 'shape1' });
     }
     const slColor = String(color.new(sigShortColor, 30));
     if (longSignal && cfg.showSigSL && !na(sigLongSL)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: sigLongSL, shape: 'xcross', color: slColor, size: 'tiny' });
+      markers.push({
+        time: t, position: 'atPriceMiddle', price: sigLongSL, shape: 'xcross', color: slColor, size: 'tiny', id: 'shape2',
+      });
     }
     if (shortSignal && cfg.showSigSL && !na(sigShortSL)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: sigShortSL, shape: 'xcross', color: slColor, size: 'tiny' });
+      markers.push({
+        time: t, position: 'atPriceMiddle', price: sigShortSL, shape: 'xcross', color: slColor, size: 'tiny', id: 'shape3',
+      });
     }
+
+    // alertcondition() flags, in the original's order
+    [
+      sBrkType === 'CHoCH' && sBrkBull, sBrkType === 'CHoCH' && !sBrkBull,
+      sBrkType === 'BOS' && sBrkBull, sBrkType === 'BOS' && !sBrkBull,
+      newBullOB, newBearOB, newBullOB && newOBScore >= 5, newBearOB && newOBScore >= 5,
+      newBullBreaker, newBearBreaker, newIDMTriggered, newBullIFVG, newBearIFVG, longSignal, shortSignal,
+      oteEnteredBull, oteEnteredBear, oteFVGEnteredBull, oteFVGEnteredBear, ifvgRetestBull, ifvgRetestBear,
+    ].forEach((f, k) => { alertFlags[k][i] = f; });
     const levelLines = (y: number, text: string, col: string) => {
       line.new(i, y, i + 8, y, 'bar_index', 'none', color.new(col, 40), 'dotted', 1);
       label.new(i + 8, y, text, 'bar_index', 'price', color.new(col, 90), 'label_left', col, 'tiny');
@@ -1536,6 +1611,7 @@ export function calculate(
     tables,
     markers,
     bgColors,
+    alerts: alertStates(alertConditions, bars, alertFlags),
   };
 }
 
@@ -1545,4 +1621,5 @@ export const IctAutoValidatedSmc = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

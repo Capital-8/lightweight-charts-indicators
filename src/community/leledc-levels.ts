@@ -4,12 +4,14 @@
  * Bar counting method for exhaustion detection.
  * Counts consecutive bars closing above/below close[4].
  * When counter reaches length, signals potential exhaustion (top/bottom).
+ * Alerts (alertcondition, `alerts` of the result): 'Up' and 'Down', true on the bars of a bullish / bearish exhaustion.
  *
  * Reference: "Leledc Levels" (community)
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LeledcLevelsInputs {
   length: number;
@@ -38,7 +40,7 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<LeledcLevelsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+export function calculate(bars: Bar[], inputs: Partial<LeledcLevelsInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const { length, bars: barCount } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const lookback = 4;
@@ -60,6 +62,9 @@ export function calculate(bars: Bar[], inputs: Partial<LeledcLevelsInputs> = {})
 
   let resistance = NaN;
   let support = NaN;
+  // alertcondition(lowlel, "Up") / alertcondition(highlel, "Down"): lowlel = Lelex == 1 ? low : na (a non-zero value)
+  const upFlags: boolean[] = new Array(n).fill(false);
+  const downFlags: boolean[] = new Array(n).fill(false);
 
   for (let i = 0; i < n; i++) {
     if (i < lookback) {
@@ -89,6 +94,9 @@ export function calculate(bars: Bar[], inputs: Partial<LeledcLevelsInputs> = {})
       sindex = 0;
       lelex = 1;
     }
+
+    upFlags[i] = lelex === 1 && !isNaN(low) && low !== 0;
+    downFlags[i] = lelex === -1 && !isNaN(high) && high !== 0;
 
     // Markers for exhaustion arrows
     if (lelex === -1) {
@@ -120,7 +128,14 @@ export function calculate(bars: Bar[], inputs: Partial<LeledcLevelsInputs> = {})
     plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2 },
     markers,
     barColors,
+    alerts: alertStates(alertConditions, bars, [upFlags, downFlags]),
   };
 }
 
-export const LeledcLevels = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions (no message: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Up', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Down', message: 'Alert Fired!' },
+];
+
+export const LeledcLevels = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

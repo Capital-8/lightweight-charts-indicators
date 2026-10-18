@@ -5,6 +5,8 @@
  * but moves at most `Terminal Velocity` * ATR per bar, and only in the trend direction. When the close crosses the
  * stop the direction flips and the stop restarts at the target of the new direction. Bull / bear stop lines with a
  * glow, a gradient cloud between the stop and the close, a dot on the flips and candles coloured by the direction.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Flip' and 'Bearish Flip', true on the bars where the
+ * direction flips up / down.
  *
  * Reference: "Terminal Velocity Stop | Lyro RS" by LyroRS
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface TerminalVelocityStopLyroRsInputs {
   /** ATR length */
@@ -84,7 +87,8 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TerminalVelocityStopLyroRsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   let [upC, dnC] = PALETTES[cfg.colMode] ?? ['transparent', 'transparent'];
@@ -172,8 +176,16 @@ export function calculate(
     fills,
     markers: [],
     plotCandles: { candles },
+    // alertcondition(flipUp, 'Bullish Flip') / alertcondition(flipDown, 'Bearish Flip')
+    alerts: alertStates(alertConditions, bars, [bars.map((_b, i) => flipUp(i)), bars.map((_b, i) => flipDown(i))]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Flip', message: 'TVS | Lyro RS: Bullish stop flip on {{ticker}} ({{interval}})' },
+  { id: 'alert1', title: 'Bearish Flip', message: 'TVS | Lyro RS: Bearish stop flip on {{ticker}} ({{interval}})' },
+];
 
 export const TerminalVelocityStopLyroRs = {
   calculate,
@@ -181,4 +193,5 @@ export const TerminalVelocityStopLyroRs = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

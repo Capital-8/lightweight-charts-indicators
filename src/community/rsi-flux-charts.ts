@@ -12,8 +12,11 @@
  * ("possible pivot") with a label giving the RSI and the probability (at most one label per side every 9 bars), and
  * a dashboard table with the RSI and the larger probability of the last bar. At most 500 labels are kept.
  *
- * The arrows are markers below (up) and above (down) the bars; the fixed arrow height of the original is not
- * ported. The debug options of the original (constant DEBUG = false) have no input and are left out.
+ * The four plotarrow outputs are the `arrows` of the result (value 1 = up arrow, -1 = down arrow; the fixed arrow
+ * height of the original is not ported). The debug options of the original (constant DEBUG = false) have no input
+ * and are left out.
+ * Alerts (alertcondition, `alerts` of the result): 'Possible Bullish Pivot' and 'Possible Bearish Pivot', true on the
+ * bars of the full arrows.
  *
  * Chart context (optional third argument): the original draws arrows and labels on closed bars only. When the
  * context says that the last bar is still open (`lastBarConfirmed` false), the last bar has no arrow and no label
@@ -24,9 +27,13 @@
  * Original notice: © Flux Charts®
  */
 
-import { ta, array, str, color, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
-import type { LabelData, MarkerData, TableData, TableCellData, TablePosition } from '../types';
+import {
+  ta, array, str, color, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
+  type ArrowData,
+} from 'oakscriptjs';
+import type { LabelData, TableData, TableCellData, TablePosition } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiFluxChartsInputs {
   rsiLength: number;
@@ -166,7 +173,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<RsiFluxChartsInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers' | 'labels' | 'tables'> & { markers: MarkerData[]; labels: LabelData[]; tables: TableData[] } {
+): Omit<IndicatorResult, 'markers' | 'labels' | 'tables'> & { arrows: ArrowData[]; labels: LabelData[]; tables: TableData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const highLen = Math.trunc(cfg.highPivotLen);
@@ -230,7 +238,9 @@ export function calculate(
   const bullFaint = String(color.new(bullishColor, 70));
   const bearFaint = String(color.new(bearishColor, 70));
 
-  const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
+  const possibleBullFlags: boolean[] = new Array(n).fill(false);
+  const possibleBearFlags: boolean[] = new Array(n).fill(false);
   const labels: LabelData[] = [];
   const newLabel = (l: LabelData) => {
     labels.push(l);
@@ -273,13 +283,15 @@ export function calculate(
     const wasBear = prevColor === -1 || (sameColor && prevColor === 1);
     prevColor = cur;
 
-    // plotarrow(): up arrows below the bar, down arrows above the bar
-    if (isBull && confirmed) markers.push({ time: b.time, position: 'belowBar', shape: 'arrowUp', color: bullFaint });
-    if (isBear && confirmed) markers.push({ time: b.time, position: 'aboveBar', shape: 'arrowDown', color: bearFaint });
+    // plotarrow(): 1 = up arrow (below the bar), -1 = down arrow (above the bar)
+    if (isBull && confirmed) arrows.push({ time: b.time, id: 'arrow0', value: 1, color: bullFaint });
+    if (isBear && confirmed) arrows.push({ time: b.time, id: 'arrow1', value: -1, color: bearFaint });
     const possibleBull = cur === 0 && wasBull && confirmed;
     const possibleBear = cur === 0 && wasBear && confirmed;
-    if (possibleBull) markers.push({ time: b.time, position: 'belowBar', shape: 'arrowUp', color: bullishColor });
-    if (possibleBear) markers.push({ time: b.time, position: 'aboveBar', shape: 'arrowDown', color: bearishColor });
+    possibleBullFlags[i] = possibleBull;
+    possibleBearFlags[i] = possibleBear;
+    if (possibleBull) arrows.push({ time: b.time, id: 'arrow2', value: 1, color: bullishColor });
+    if (possibleBear) arrows.push({ time: b.time, id: 'arrow3', value: -1, color: bearishColor });
 
     if (cfg.kdeLabelsEnabled || cfg.rsiLabelsEnabled) {
       const text = (prob: number) =>
@@ -329,11 +341,19 @@ export function calculate(
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
-    markers,
+    arrows,
     labels,
     tables,
+    // alertcondition(na(curColor) and curColor[1] == bullishColor / bearishColor and barstate.isconfirmed, ...)
+    alerts: alertStates(alertConditions, bars, [possibleBullFlags, possibleBearFlags]),
   };
 }
+
+/** The original's alertconditions (no message: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Possible Bullish Pivot', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Possible Bearish Pivot', message: 'Alert Fired!' },
+];
 
 export const RsiFluxCharts = {
   calculate,
@@ -341,4 +361,5 @@ export const RsiFluxCharts = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

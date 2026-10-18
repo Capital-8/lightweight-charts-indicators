@@ -16,7 +16,11 @@
  * Drawings are kept up to 500 boxes and 500 lines (the oldest are removed).
  *
  * Chart values read: the chart foreground colour (the "OG" text). Without a chart context it is the dark theme
- * colour #DBDBDB. The 6 alert conditions of the script have no output.
+ * colour #DBDBDB.
+ *
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish FVG', 'Bearish FVG', 'Bullish OG', 'Bearish OG',
+ * 'Bullish VI', 'Bearish VI', each true on the bars where that imbalance is found (with its kind shown and its
+ * minimum width met, as the boxes).
  *
  * Reference: "Imbalance Detector [LuxAlgo]" by LuxAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -26,6 +30,7 @@
 import { ta, color, str, barTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LineDrawingData, PineSize, TableCellData, TableData } from '../types';
 import { foregroundColorOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type WidthMethod = 'Points' | '%' | 'ATR';
 
@@ -188,7 +193,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ImbalanceDetectorInputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // chart.fg_color
@@ -224,6 +229,8 @@ export function calculate(
   let prevBearOg = false;
   let prevBullGapBtm = NaN;
   let prevBearGapTop = NaN;
+  // bull_fvg, bear_fvg, bull_og, bear_og, bull_vi, bear_vi per bar
+  const flags: boolean[][] = [[], [], [], [], [], []];
 
   for (let i = 0; i < n; i++) {
     const bar = bars[i];
@@ -299,6 +306,12 @@ export function calculate(
       register(lines, { time1: time(i - 2), price1: avg, time2: time(i + cfg.fvgExtend), price2: avg, color: cfg.bearFvgCss });
     }
 
+    flags[0].push(isBullFvg);
+    flags[1].push(isBearFvg);
+    flags[2].push(isBullOg);
+    flags[3].push(isBearOg);
+    flags[4].push(isBullVi);
+    flags[5].push(isBearVi);
     prevBullVi = isBullVi;
     prevBearVi = isBearVi;
     prevBullOg = isBullOg;
@@ -360,7 +373,18 @@ export function calculate(
     boxes,
     lines,
     tables,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const ImbalanceDetector = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish FVG', message: 'Bullish FVG detected' },
+  { id: 'alert1', title: 'Bearish FVG', message: 'Bearish FVG detected' },
+  { id: 'alert2', title: 'Bullish OG', message: 'Bullish OG detected' },
+  { id: 'alert3', title: 'Bearish OG', message: 'Bearish OG detected' },
+  { id: 'alert4', title: 'Bullish VI', message: 'Bullish VI detected' },
+  { id: 'alert5', title: 'Bearish VI', message: 'Bearish VI detected' },
+];
+
+export const ImbalanceDetector = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

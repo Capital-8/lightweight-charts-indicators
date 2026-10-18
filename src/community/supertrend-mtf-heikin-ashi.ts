@@ -12,6 +12,10 @@
  * the exchange calendar of the chart context, else the UTC rule of anchor-period.ts). A timeframe below the chart
  * timeframe needs lower-timeframe data: the port throws an Error.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Supertrend Trend Up' / 'Supertrend  Trend Down' on the trend
+ * changes of the chart timeframe line, 'Supertrend HTF Trend Up' / 'Supertrend HTF Trend Down' on those of the higher
+ * timeframe line.
+ *
  * Reference: "Supertrend MTF Heikin Ashi" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © LonesomeTheBlue
@@ -20,6 +24,7 @@
 import { taCore, timeframe, heikinAshi, mapToChart, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SupertrendMtfHeikinAshiInputs {
   /** HTF Method: the higher timeframe from the chart timeframe ("Auto") or the timeframe input */
@@ -119,7 +124,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SupertrendMtfHeikinAshiInputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const v = (x: number) => (Number.isFinite(x) ? x : NaN);
@@ -169,6 +174,7 @@ export function calculate(
   const plot1 = [];
   const plot2 = [];
   const plot3 = [];
+  const flags: boolean[][] = [[], [], [], []];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const tr = st.trend[i];
@@ -183,13 +189,29 @@ export function calculate(
     // TrendHtf == 1 and TrendHtf[1] == -1 ? TrailingslHtf : na (and the reverse)
     plot2.push({ time: t, value: th === 1 && th1 === -1 ? v(stH.trailing[i]) : NaN });
     plot3.push({ time: t, value: th === -1 && th1 === 1 ? v(stH.trailing[i]) : NaN });
+    // alertcondition(Trend == 1 and Trend[1] == -1) / (Trend == -1 and Trend[1] == 1), the same with TrendHtf
+    // (Trend[1] is na on the first bar: false)
+    const trp = i > 0 ? st.trend[i - 1] : NaN;
+    flags[0].push(tr === 1 && trp === -1);
+    flags[1].push(tr === -1 && trp === 1);
+    flags[2].push(th === 1 && th1 === -1);
+    flags[3].push(th === -1 && th1 === 1);
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1, plot2, plot3 },
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Supertrend Trend Up', message: 'Supertrend Trend Up' },
+  { id: 'alert1', title: 'Supertrend  Trend Down', message: 'Supertrend Trend Down' },
+  { id: 'alert2', title: 'Supertrend HTF Trend Up', message: 'Supertrend HTF Trend Upl' },
+  { id: 'alert3', title: 'Supertrend HTF Trend Down', message: 'Supertrend HTF Trend Down' },
+];
 
 export const SupertrendMtfHeikinAshi = {
   calculate,
@@ -197,4 +219,5 @@ export const SupertrendMtfHeikinAshi = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -22,6 +22,9 @@
  *   bands), gradient fills above 70 and below 30, candles coloured by the trailing stop direction.
  * The closed-bar steps (bank row, weights, signals) do not run on a last bar that is still open: the chart context
  * says when the last bar is still open (fallback: closed).
+ * Alerts (alertcondition, `alerts` of the result): 'Long Signal', 'Short Signal', 'Any Signal', 'Trend Flip Up',
+ * 'Trend Flip Down' and 'Any Trend Flip'; alert() calls (`alertCalls`, once per bar close) on the closed bars with a
+ * signal (rank and confidence in the message) or a trailing stop flip.
  *
  * Reference: "Machine Learning RSI | AI Classification & Ranking (Zeiierman)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,11 +32,16 @@
  */
 
 import {
-  ta, Series, getSourceSeries, color,
+  ta, Series, getSourceSeries, color, str,
   type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
-import type { MarkerData, PlotCandleData } from '../types';
-import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import type { AlertCall, MarkerData, PlotCandleData } from '../types';
+import { lastBarConfirmedOf, tickerOf, type ChartContext } from '../chart-context';
+import { chartTimeframe } from '../anchor-period';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type MaType = 'None' | 'SMA' | 'SMA + Bollinger Bands' | 'EMA' | 'SMMA (RMA)' | 'WMA' | 'VWMA';
 
@@ -295,7 +303,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<MachineLearningRsiAiClassificationRankingInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): IndicatorResult & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -433,6 +442,7 @@ export function calculate(
   const stDir = new Array<number>(n);
   const stLine = new Array<number>(n);
   const rank = new Array<number>(n);
+  const conf = new Array<number>(n);
   const triggerLong = new Array<boolean>(n);
   const triggerShort = new Array<boolean>(n);
   const changed: boolean[] = [];
@@ -504,6 +514,7 @@ export function calculate(
       - (earlyFlip ? 15.0 : 0.0) - (k < kNeighbors ? 10.0 * (kNeighbors - k) / kNeighbors : 0.0);
     const cf = bd === 0 ? 0.0 : max(0.0, min(100.0, rawConf));
     rank[i] = rk;
+    conf[i] = cf;
 
     // signals
     const flipLong = stanceState === 1 && i > 0 && prevState !== 1;
@@ -577,21 +588,39 @@ export function calculate(
   const placebuy = A(ta.lowest(new Series(bars, (b) => b.low), 5));
   const placesell = A(ta.highest(new Series(bars, (b) => b.high), 5));
   const markers: MarkerData[] = [];
-  const mark = (i: number, price: number, shape: 'circle' | 'triangleUp' | 'triangleDown', col: string, size: 'tiny' | 'small') => {
+  const mark = (i: number, price: number, shape: 'circle' | 'triangleUp' | 'triangleDown', col: string, size: 'tiny' | 'small', id: string) => {
     if (!Number.isNaN(price)) {
-      markers.push({ time: time(i), position: 'atPriceMiddle', price, shape, color: col, size, forceOverlay: true });
+      markers.push({ time: time(i), id, position: 'atPriceMiddle', price, shape, color: col, size, forceOverlay: true });
     }
   };
   for (let i = 0; i < n; i++) {
     const p = i > 0 ? stDir[i - 1] : NaN;
-    if (cfg.showSt && stDir[i] === 1 && p === -1) mark(i, stLine[i], 'circle', cfg.trailBull, 'tiny');
-    if (cfg.showSt && stDir[i] === -1 && p === 1) mark(i, stLine[i], 'circle', cfg.trailBear, 'tiny');
+    if (cfg.showSt && stDir[i] === 1 && p === -1) mark(i, stLine[i], 'circle', cfg.trailBull, 'tiny', 'shape0');
+    if (cfg.showSt && stDir[i] === -1 && p === 1) mark(i, stLine[i], 'circle', cfg.trailBear, 'tiny', 'shape1');
   }
   for (let i = 0; i < n; i++) {
-    if (cfg.showMarks && triggerLong[i]) mark(i, placebuy[i], 'triangleUp', cfg.sigBull, 'tiny');
-    if (cfg.showMarks && triggerShort[i]) mark(i, placesell[i], 'triangleDown', cfg.sigBear, 'tiny');
-    if (cfg.showMarks && triggerLong[i]) mark(i, placebuy[i], 'triangleUp', String(color.new(cfg.sigBull, 50)), 'small');
-    if (cfg.showMarks && triggerShort[i]) mark(i, placesell[i], 'triangleDown', String(color.new(cfg.sigBear, 50)), 'small');
+    if (cfg.showMarks && triggerLong[i]) mark(i, placebuy[i], 'triangleUp', cfg.sigBull, 'tiny', 'shape2');
+    if (cfg.showMarks && triggerShort[i]) mark(i, placesell[i], 'triangleDown', cfg.sigBear, 'tiny', 'shape3');
+    if (cfg.showMarks && triggerLong[i]) mark(i, placebuy[i], 'triangleUp', String(color.new(cfg.sigBull, 50)), 'small', 'shape4');
+    if (cfg.showMarks && triggerShort[i]) mark(i, placesell[i], 'triangleDown', String(color.new(cfg.sigBear, 50)), 'small', 'shape5');
+  }
+
+  // alertcondition(...) and, on confirmed bars, alert(..., alert.freq_once_per_bar_close)
+  const flipUp = stDir.map((d, i) => i > 0 && d === 1 && stDir[i - 1] === -1);
+  const flipDn = stDir.map((d, i) => i > 0 && d === -1 && stDir[i - 1] === 1);
+  const anySignal = triggerLong.map((v, i) => v || triggerShort[i]);
+  const anyFlip = flipUp.map((v, i) => v || flipDn[i]);
+  const ticker = tickerOf(chart);
+  const period = chartTimeframe(bars, chart);
+  const alertCalls: AlertCall[] = [];
+  const call = (i: number, message: string) => alertCalls.push({ time: time(i), message, freq: 'once_per_bar_close' });
+  for (let i = 0; i < n; i++) {
+    if (!confirmed(i)) continue;
+    const scores = `Rank ${str.tostring(rank[i], '#')} / Conf ${str.tostring(conf[i], '#')}`;
+    if (triggerLong[i]) call(i, `🟢 LONG  |  ${ticker} (${period})  ${scores}`);
+    if (triggerShort[i]) call(i, `🔴 SHORT |  ${ticker} (${period})  ${scores}`);
+    if (flipUp[i]) call(i, `▲ Trend Up  |  ${ticker} (${period})`);
+    if (flipDn[i]) call(i, `▼ Trend Down  |  ${ticker} (${period})`);
   }
 
   const fill = (v: number) => new Array<number>(n).fill(v);
@@ -622,8 +651,20 @@ export function calculate(
     ],
     markers,
     plotCandles: { candles },
+    alerts: alertStates(alertConditions, bars, [triggerLong, triggerShort, anySignal, flipUp, flipDn, anyFlip]),
+    alertCalls,
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Signal', message: 'ML RSI: Long signal — rank & confidence gates passed.' },
+  { id: 'alert1', title: 'Short Signal', message: 'ML RSI: Short signal — rank & confidence gates passed.' },
+  { id: 'alert2', title: 'Any Signal', message: 'ML RSI: New entry signal.' },
+  { id: 'alert3', title: 'Trend Flip Up', message: 'ML Supertrend flipped to UPTREND.' },
+  { id: 'alert4', title: 'Trend Flip Down', message: 'ML Supertrend flipped to DOWNTREND.' },
+  { id: 'alert5', title: 'Any Trend Flip', message: 'ML Supertrend changed direction.' },
+];
 
 export const MachineLearningRsiAiClassificationRanking = {
   calculate,
@@ -633,4 +674,6 @@ export const MachineLearningRsiAiClassificationRanking = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
+  hasAlertFunction,
 };

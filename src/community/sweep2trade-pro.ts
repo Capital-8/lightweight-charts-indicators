@@ -9,6 +9,8 @@
  * (lowest low) of the previous `bosLb` bars (wick or close cross), a close in the top (bottom) quarter of the bar, a
  * close above (below) the T3, and with the regime filter a T3 rising (falling) over 3 bars with the close on the
  * right side and R² of close against bar_index over `r2Len` bars above the minimum.
+ * Alerts (alertcondition, `alerts` of the result): BUY / SELL sequence complete and SWEEP Long / Short cleared, true on
+ * the bars of the matching markers.
  *
  * Reference: "Sweep2Trade Pro [CHE]" by chervolino
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -17,6 +19,23 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0',
+    title: 'S2T Pro [CHE] BUY: Sequence complete',
+    message: 'S2T Pro [CHE] – BUY: Bullish sweep → T3↑ → confirmation (trend filter possibly active).',
+  },
+  { id: 'alert1', title: 'S2T Pro [CHE] SWEEP Long (bullish)', message: 'S2T Pro [CHE] – SWEEP LONG (bullish) cleared (T3 rising).' },
+  {
+    id: 'alert2',
+    title: 'S2T Pro [CHE] SELL: Sequence complete',
+    message: 'S2T Pro [CHE] – SELL: Bearish sweep → T3↓ → confirmation (trend filter possibly active).',
+  },
+  { id: 'alert3', title: 'S2T Pro [CHE] SWEEP Short (bearish)', message: 'S2T Pro [CHE] – SWEEP SHORT (bearish) cleared (T3 falling).' },
+];
 
 export interface Sweep2TradeProInputs {
   /** T3 length */
@@ -97,7 +116,7 @@ const PINE_TEXT = '#2962FF';
 export function calculate(
   bars: Bar[],
   inputs: Partial<Sweep2TradeProInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -131,6 +150,7 @@ export function calculate(
   const plot0 = bars.map((b, i) => ({ time: b.time, value: t3[i], color: t3Col(i) }));
 
   const markers: MarkerData[] = [];
+  const flags: boolean[][] = [[], [], [], []];
   let phaseL = 0;
   let phaseS = 0;
   let timeoutBarL = NaN;
@@ -215,6 +235,12 @@ export function calculate(
       timeoutBarS = NaN;
     }
 
+    // alertcondition(buySignal) / (sweepSignalLong) / (sellSignal) / (sweepSignalShort)
+    flags[0].push(buySignal);
+    flags[1].push(sweepSignalLong);
+    flags[2].push(sellSignal);
+    flags[3].push(sweepSignalShort);
+
     const t = b.time;
     if (sweepSignalLong) {
       markers.push({ time: t, position: 'belowBar', shape: 'xcross', color: color.aqua, text: 'SWEEP L OK',
@@ -238,6 +264,7 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
@@ -247,4 +274,5 @@ export const Sweep2TradePro = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

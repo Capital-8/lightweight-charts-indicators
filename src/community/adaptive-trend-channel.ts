@@ -134,17 +134,18 @@ export function calculate(
   const bearFillStrong = String(color.new(cfg.downtrendPaint, 45));
 
   // ta.crossover(regime, 0) / ta.crossunder(regime, 0): exact comparisons (no 1e-10 tolerance); na on the previous
-  // bar gives false
+  // bar gives false. plotshape(flipDown ? roof : na, "Bearish flip") is shape0, plotshape(flipUp ? floor : na,
+  // "Bullish flip") shape1
   const markers: MarkerData[] = [];
   for (let i = 1; i < n; i++) {
     const flipUp = regimeArr[i] > 0 && regimeArr[i - 1] <= 0;
     const flipDown = regimeArr[i] < 0 && regimeArr[i - 1] >= 0;
     if (flipDown && !isNaN(roof[i])) {
-      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: roof[i], shape: 'circle',
+      markers.push({ id: 'shape0', time: bars[i].time, position: 'atPriceMiddle', price: roof[i], shape: 'circle',
         color: cfg.downtrendPaint, size: 'small' });
     }
     if (flipUp && !isNaN(floor[i])) {
-      markers.push({ time: bars[i].time, position: 'atPriceMiddle', price: floor[i], shape: 'circle',
+      markers.push({ id: 'shape1', time: bars[i].time, position: 'atPriceMiddle', price: floor[i], shape: 'circle',
         color: cfg.uptrendPaint, size: 'small' });
     }
   }

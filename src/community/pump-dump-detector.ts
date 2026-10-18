@@ -6,6 +6,8 @@
  * an early pump when the close is above the previous close, an early dump when it is below. A confirmed pump /
  * dump is an early signal with a close-to-close change of at least the pump threshold (%) / at most the dump
  * threshold (%). Each signal draws a marker and a background tint.
+ * Alerts (alertcondition, `alerts` of the result): 'Early Pump', 'Confirmed Pump', 'Early Dump' and 'Confirmed Dump'
+ * (titles with the original's emoji), true on the bars of each signal.
  *
  * Reference: "Pump & Dump Detector (sensitive)" by btcpayer
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PumpDumpDetectorInputs {
   /** Pump threshold: close-to-close change (%) */
@@ -74,7 +77,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<PumpDumpDetectorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -96,6 +99,7 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  const flags: boolean[][] = [[], [], [], []];
   for (let i = 0; i < n; i++) {
     const close = bars[i].close;
     const close1 = i > 0 ? bars[i - 1].close : NaN;
@@ -110,6 +114,10 @@ export function calculate(
     const earlyDump = base && lt(close, close1);
     const confirmedPump = pricePump && earlyPump;
     const confirmedDump = priceDump && earlyDump;
+    flags[0].push(earlyPump);
+    flags[1].push(confirmedPump);
+    flags[2].push(earlyDump);
+    flags[3].push(confirmedDump);
 
     const t = bars[i].time;
     // bgcolor / plotshape in the Pine order (a later bgcolor is drawn on top)
@@ -140,7 +148,17 @@ export function calculate(
     plots: {},
     markers,
     bgColors,
+    // alertcondition(earlyPumpSignal / confirmedPumpSignal / earlyDumpSignal / confirmedDumpSignal)
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const PumpDumpDetector = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '🚨 Early Pump', message: 'EARLY PUMP signal on {{ticker}}' },
+  { id: 'alert1', title: '💥 Confirmed Pump', message: 'CONFIRMED PUMP on {{ticker}}' },
+  { id: 'alert2', title: '🔻 Early Dump', message: 'EARLY DUMP signal on {{ticker}}' },
+  { id: 'alert3', title: '🔥 Confirmed Dump', message: 'CONFIRMED DUMP on {{ticker}}' },
+];
+
+export const PumpDumpDetector = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

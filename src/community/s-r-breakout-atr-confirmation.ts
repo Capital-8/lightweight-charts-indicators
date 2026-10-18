@@ -5,6 +5,7 @@
  * is a close above the resistance with a candle body (close - open) larger than ATR * multiplier and, with the volume
  * filter, a volume above its SMA; a bearish breakout is the mirror below the support. Breakouts get a BUY / SELL
  * label and a green / red background.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Breakout' and 'Bearish Breakout', true on the breakouts.
  *
  * Reference: "S&R Breakout ATR Confirmation" by Jos-ProTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SRBreakoutAtrConfirmationInputs {
   /** Support / resistance length */
@@ -62,7 +64,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<SRBreakoutAtrConfirmationInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -85,6 +87,7 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   const bullBg = String(color.new(color.green, 90));
   const bearBg = String(color.new(color.red, 90));
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const { open, close } = bars[i];
     const bullStrength = gt(close - open, atr[i] * cfg.atrMultiplier);
@@ -92,6 +95,8 @@ export function calculate(
     const volumeConfirm = gt(volume[i], volMA[i]);
     const bullBreakout = gt(close, resistance[i]) && bullStrength && (!cfg.useVolume || volumeConfirm);
     const bearBreakout = lt(close, support[i]) && bearStrength && (!cfg.useVolume || volumeConfirm);
+    bullFlags.push(bullBreakout);
+    bearFlags.push(bearBreakout);
     // plotshape(..., style = shape.labelup / labeldown, text = 'BUY' / 'SELL'): Pine default size (auto) and
     // default text colour (#2962FF)
     if (bullBreakout) {
@@ -112,8 +117,16 @@ export function calculate(
     plots: { plot0, plot1 },
     markers,
     bgColors,
+    // alertcondition(bullBreakout, 'Bullish Breakout') / alertcondition(bearBreakout, 'Bearish Breakout')
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Breakout', message: 'Breakout Confirmation Pro BUY Signal' },
+  { id: 'alert1', title: 'Bearish Breakout', message: 'Breakout Confirmation Pro SELL Signal' },
+];
 
 export const SRBreakoutAtrConfirmation = {
   calculate,
@@ -121,4 +134,5 @@ export const SRBreakoutAtrConfirmation = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -7,6 +7,8 @@
  * the up / down colour (Type 1: res against res[1] / res[2]; Type 2: res against 50). Labels mark the crosses of
  * res with res[1] (Type 1) and with 50 (Type 2), triangles the crosses of 30 / 70 (Type 3) and arrows the crosses of
  * the custom thresholds (Type 4), which are also drawn as lines.
+ * Alerts (alertcondition, `alerts` of the result): the original's eight conditions, true on every bar where res is
+ * above / below res[1] (Type 1), 50 (Type 2), 30 / 70 (Type 3) or the long / short thresholds (Type 4).
  *
  * Reference: "Pulse RSI | Lyro RS" by LyroRS
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface PulseRsiLyroRsInputs {
   /** Length of the SMA, the linear regression and the EMAs */
@@ -109,7 +112,8 @@ const PALETTES: Record<PulseRsiLyroRsInputs['colMode'], [string, string]> = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<PulseRsiLyroRsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = cfg.len;
@@ -189,21 +193,21 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const t = b.time;
-    const add = (on: boolean, m: Omit<MarkerData, 'time' | 'size' | 'forceOverlay' | 'color'>, c: string | null) => {
+    const add = (on: boolean, m: Omit<MarkerData, 'time' | 'size' | 'forceOverlay' | 'color'> & { id: string }, c: string | null) => {
       if (on) markers.push({ time: t, ...m, color: c ?? NA, size: 'tiny', forceOverlay: true });
     };
     // Type 1: shape.labelup / labeldown, colour colType1, text 𝓛𝓸𝓷𝓰 / 𝓢𝓱𝓸𝓻𝓽 in black
-    add(cfg.sigType1Enable && x1.over[i], { position: 'belowBar', shape: 'labelUp', text: '𝓛𝓸𝓷𝓰', textColor: '#000000' }, colType1[i]);
-    add(cfg.sigType1Enable && x1.under[i], { position: 'aboveBar', shape: 'labelDown', text: '𝓢𝓱𝓸𝓻𝓽', textColor: '#000000' }, colType1[i]);
+    add(cfg.sigType1Enable && x1.over[i], { id: 'shape0', position: 'belowBar', shape: 'labelUp', text: '𝓛𝓸𝓷𝓰', textColor: '#000000' }, colType1[i]);
+    add(cfg.sigType1Enable && x1.under[i], { id: 'shape1', position: 'aboveBar', shape: 'labelDown', text: '𝓢𝓱𝓸𝓻𝓽', textColor: '#000000' }, colType1[i]);
     // Type 2: colour colType2
-    add(cfg.sigType2Enable && x2.over[i], { position: 'belowBar', shape: 'labelUp', text: '𝓛𝓸𝓷𝓰', textColor: '#000000' }, colType2[i]);
-    add(cfg.sigType2Enable && x2.under[i], { position: 'aboveBar', shape: 'labelDown', text: '𝓢𝓱𝓸𝓻𝓽', textColor: '#000000' }, colType2[i]);
+    add(cfg.sigType2Enable && x2.over[i], { id: 'shape2', position: 'belowBar', shape: 'labelUp', text: '𝓛𝓸𝓷𝓰', textColor: '#000000' }, colType2[i]);
+    add(cfg.sigType2Enable && x2.under[i], { id: 'shape3', position: 'aboveBar', shape: 'labelDown', text: '𝓢𝓱𝓸𝓻𝓽', textColor: '#000000' }, colType2[i]);
     // Type 3: triangles crossover(res, 30) / crossunder(res, 70)
-    add(cfg.sigType3Enable && x3a.over[i], { position: 'belowBar', shape: 'triangleUp' }, upC);
-    add(cfg.sigType3Enable && x3b.under[i], { position: 'aboveBar', shape: 'triangleDown' }, dnC);
+    add(cfg.sigType3Enable && x3a.over[i], { id: 'shape4', position: 'belowBar', shape: 'triangleUp' }, upC);
+    add(cfg.sigType3Enable && x3b.under[i], { id: 'shape5', position: 'aboveBar', shape: 'triangleDown' }, dnC);
     // Type 4: labels with ⬆ / ⬇ in white
-    add(cfg.sigType4Enable && x4a.over[i], { position: 'belowBar', shape: 'labelUp', text: '⬆', textColor: color.white }, upC);
-    add(cfg.sigType4Enable && x4b.under[i], { position: 'aboveBar', shape: 'labelDown', text: '⬇', textColor: color.white }, dnC);
+    add(cfg.sigType4Enable && x4a.over[i], { id: 'shape6', position: 'belowBar', shape: 'labelUp', text: '⬆', textColor: color.white }, upC);
+    add(cfg.sigType4Enable && x4b.under[i], { id: 'shape7', position: 'aboveBar', shape: 'labelDown', text: '⬇', textColor: color.white }, dnC);
 
     // plotcandle(open, high, low, close, "Candle Color", pc_flType1, pc_flType1, bordercolor = pc_flType1,
     //   force_overlay = true, display = display.pane)
@@ -230,8 +234,28 @@ export function calculate(
     hlines: [{ value: 50, options: { title: 'MidLine', color: '#787B86', linestyle: 'dashed' } }],
     markers,
     plotCandles: { candleColor: candles },
+    // alertcondition(res > res[1] / res < res[1] / res > 50 / res < 50 / res > 30 / res < 70 / res > Threshold_L_Fl /
+    // res < Threshold_S_Fl)
+    alerts: alertStates(alertConditions, bars, [
+      res.map((r, i) => gt(r, r1(i))), res.map((r, i) => lt(r, r1(i))),
+      res.map((r) => gt(r, 50)), res.map((r) => lt(r, 50)),
+      res.map((r) => gt(r, 30)), res.map((r) => lt(r, 70)),
+      res.map((r) => gt(r, cfg.thresholdLong)), res.map((r) => lt(r, cfg.thresholdShort)),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Pulse RSI Long / Type 1-Trend', message: 'Pulse RSI Trend is Long {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'Pulse RSI Short / Type 1-Trend', message: 'Pulse RSI Trend is Short {{exchange}}:{{ticker}}' },
+  { id: 'alert2', title: 'Pulse RSI Long / Type 2-Trend', message: 'Pulse RSI Trend is Long {{exchange}}:{{ticker}}' },
+  { id: 'alert3', title: 'Pulse RSI Short / Type 2-Trend', message: 'Pulse RSI Trend is Short {{exchange}}:{{ticker}}' },
+  { id: 'alert4', title: 'Pulse RSI Long / Type 3-Oversold/Overbought', message: 'Pulse RSI Oversold is Long {{exchange}}:{{ticker}}' },
+  { id: 'alert5', title: 'Pulse RSI Short / Type 3-Oversold/Overbought', message: 'Pulse RSI Overbought is Short {{exchange}}:{{ticker}}' },
+  { id: 'alert6', title: 'Pulse RSI Long / Type 4-Custom Threshold L/S', message: 'Pulse RSI Threshold HIT Long {{exchange}}:{{ticker}}' },
+  { id: 'alert7', title: 'Pulse RSI Short / Type 4-Custom Threshold L/S', message: 'Pulse RSI Threshold HIT Short {{exchange}}:{{ticker}}' },
+];
 
 export const PulseRsiLyroRs = {
   calculate,
@@ -239,4 +263,5 @@ export const PulseRsiLyroRs = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

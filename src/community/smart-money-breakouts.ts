@@ -13,6 +13,8 @@
  * until the trade ends: the "Target" label turns green when the target is reached, red when the stop is hit (by
  * the close or by the high / low, "SL Type"). Bars, candles and the background are coloured while a trade is open.
  * The table counts the winning and losing trades.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY' / 'Sell' on the bars of a bullish / bearish break that opens
+ * a trade.
  *
  * At most 500 lines and 500 labels are kept (the oldest are removed first).
  * The tooltip of a stopped trade shows the stop rounded to the price tick.
@@ -28,6 +30,7 @@ import { ta, math, str, array, color, Series, type IndicatorResult, type InputCo
 import type { BarColorData, BgColorData, LabelData, LineDrawingData, PlotCandleData, TableData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SmartMoneyBreakoutsInputs {
   /** Swing length: bars on each side of a pivot */
@@ -130,7 +133,7 @@ export function calculate(
   barColors: BarColorData[];
   bgColors: BgColorData[];
   plotCandles: Record<string, PlotCandleData[]>;
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // syminfo.mintick
@@ -191,6 +194,8 @@ export function calculate(
   const candles: PlotCandleData[] = [];
   const bgBear = String(color.rgb(136, 4, 15, 90));
   const bgBull = String(color.rgb(8, 191, 158, 90));
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const bar = bars[i];
@@ -273,6 +278,9 @@ export function calculate(
     const long = BUY && !tradeIsOn;
     const short = SELL && !tradeIsOn;
     const tradeFire = long || short;
+    // alertcondition(Long, "BUY") / alertcondition(Short, "Sell")
+    longFlags.push(long);
+    shortFlags.push(short);
     if (long && !tradeIsOn) {
       longTrade = true;
       shortTrade = false;
@@ -361,8 +369,15 @@ export function calculate(
       style: l.style, size: l.size, ...(l.yloc ? { yloc: l.yloc } : {}), ...(l.tooltip ? { tooltip: l.tooltip } : {}),
     })),
     tables: [table],
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions (no message given: the default one) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'Sell', message: 'Alert Fired!' },
+];
 
 export const SmartMoneyBreakouts = {
   calculate,
@@ -370,4 +385,5 @@ export const SmartMoneyBreakouts = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

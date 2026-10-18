@@ -18,8 +18,12 @@
  *   and bullish engulfing ("EG"), on closed bars, against 14-bar EMAs of the body and wicks.
  * - The last `Channel History Length` channels are kept; the latest active one extends to the right ("Extend
  *   Channel"). Presets "Stocks", "Forex", "Crypto" replace the main settings.
- * Deleting a channel deletes its labels (pattern and break labels). At most 500 lines and 500 labels are kept. The
- * alerts of the original have no output.
+ * Deleting a channel deletes its labels (pattern and break labels). At most 500 lines and 500 labels are kept.
+ *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): "New Bullish Channel" / "New Bearish Channel" on
+ * the bar a channel starts (always, as the original: its "New Channel Alert" switch is read by nothing), "Inverted
+ * Hammer", "Bearish Engulfing", "Hammer", "Bullish Engulfing" with their labels when their alert switch is on, and
+ * "Channel Break Up" / "Channel Break Down" on the break of the active channel when "Channel Break Alert" is on.
  *
  * Chart context: the state of the last bar (`barstate.isconfirmed`).
  *
@@ -33,6 +37,10 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Line, type Linefill, type Label,
 } from 'oakscriptjs';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import type { AlertCall } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface ChannelsWithPatternsInputs {
   preset: 'User' | 'Stocks' | 'Forex' | 'Crypto';
@@ -71,7 +79,7 @@ export interface ChannelsWithPatternsInputs {
   bullishEngulfingColor: string;
   bearishEngulfingColor: string;
   candleTextColor: string;
-  /** Alert switches (no output) */
+  /** Alert switches of the alert() calls (`alertCalls`); "New Channel Alert" is read by nothing, as in the original */
   newChannelAlert: boolean;
   breakAlert: boolean;
   hammerAlert: boolean;
@@ -253,7 +261,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ChannelsWithPatternsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const lastConfirmed = lastBarConfirmedOf(chart);
@@ -356,6 +364,7 @@ export function calculate(
     for (const l of linesOf(ch)) line.set_extend(l, condition ? 'right' : 'none');
   };
 
+  const alertCalls: AlertCall[] = [];
   const history: Channel[] = [];
   let active = false;
   let last: boolean | null = null; // var bool last = na
@@ -369,6 +378,7 @@ export function calculate(
   for (let i = 0; i < n; i++) {
     setDrawingBar(i, i === n - 1);
     const b = bars[i];
+    const alert = (message: string) => alertCalls.push({ time: b.time as number, message, freq: 'once_per_bar' });
     const isConfirmed = confirmed(i);
 
     // pivots()
@@ -446,11 +456,17 @@ export function calculate(
         if (condition) destructor(ch);
         return condition;
       }
-      if (up && cfg.showBreakLabel) {
-        ch.labels.push(label.new(i, b.low, 'Break Up', 'bar_index', 'belowbar', cfg.breakUpColor, 'label_up', cfg.textColor));
+      if (up) {
+        if (cfg.showBreakLabel) {
+          ch.labels.push(label.new(i, b.low, 'Break Up', 'bar_index', 'belowbar', cfg.breakUpColor, 'label_up', cfg.textColor));
+        }
+        if (cfg.breakAlert) alert('Channel Break Up');
       }
-      if (down && cfg.showBreakLabel) {
-        ch.labels.push(label.new(i, b.high, 'Break Down', 'bar_index', 'abovebar', cfg.breakDownColor, 'label_down', cfg.textColor));
+      if (down) {
+        if (cfg.showBreakLabel) {
+          ch.labels.push(label.new(i, b.high, 'Break Down', 'bar_index', 'abovebar', cfg.breakDownColor, 'label_down', cfg.textColor));
+        }
+        if (cfg.breakAlert) alert('Channel Break Down');
       }
       return condition;
     };
@@ -473,6 +489,7 @@ export function calculate(
       if (breakCondition(ch, b.high, b.low, true)) {
         active = false;
       } else {
+        alert('New Bullish Channel');
         last = true;
         extendHistory();
         history.push(ch);
@@ -485,6 +502,7 @@ export function calculate(
         destructor(ch);
         active = false;
       } else {
+        alert('New Bearish Channel');
         last = false;
         extendHistory();
         history.push(ch);
@@ -526,20 +544,24 @@ export function calculate(
         if (ihammer) {
           ch.labels.push(label.new(i, b.high, 'iH', 'bar_index', 'abovebar', cfg.ihColor, 'label_down', cfg.candleTextColor,
             undefined, undefined, 'Inverted Hammer'));
+          if (cfg.ihammerAlert) alert('Inverted Hammer');
         }
         if (bearishEngulfing) {
           ch.labels.push(label.new(i, b.high, 'EG', 'bar_index', 'abovebar', cfg.bearishEngulfingColor, 'label_down',
             cfg.candleTextColor, undefined, undefined, 'Bearish Engulfing'));
+          if (cfg.bearishEngulfingAlert) alert('Bearish Engulfing');
         }
       }
       if (lowCondition) {
         if (hammer) {
           ch.labels.push(label.new(i, b.low, 'H', 'bar_index', 'belowbar', cfg.hColor, 'label_up', cfg.candleTextColor,
             undefined, undefined, 'Hammer'));
+          if (cfg.hammerAlert) alert('Hammer');
         }
         if (bullishEngulfing) {
           ch.labels.push(label.new(i, b.high, 'EG', 'bar_index', 'belowbar', cfg.bullishEngulfingColor, 'label_up',
             cfg.candleTextColor, undefined, undefined, 'Bullish Engulfing'));
+          if (cfg.bullishEngulfingAlert) alert('Bullish Engulfing');
         }
       }
 
@@ -558,6 +580,7 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     ...drawingOutputs(bars),
+    alertCalls,
   };
 }
 
@@ -567,4 +590,5 @@ export const ChannelsWithPatterns = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

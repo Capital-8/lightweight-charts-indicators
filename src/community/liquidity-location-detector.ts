@@ -155,10 +155,10 @@ export function calculate(
     plot1.push({ time: t, value: emaS[i], color: cfg.ema2Col });
     // plotshape(ta.crossover(ema_f, ema_s) ? ema_f : na, location.absolute, display = ema1 ? display.all : display.none)
     if (crossUp(emaF[i], emaS[i]) && cfg.ema1) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: emaF[i], shape: 'circle', color: cfg.ema1Col, size: 'tiny' });
+      markers.push({ id: 'shape0', time: t, position: 'atPriceMiddle', price: emaF[i], shape: 'circle', color: cfg.ema1Col, size: 'tiny' });
     }
     if (crossDn(emaF[i], emaS[i]) && cfg.ema2) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: emaF[i], shape: 'circle', color: cfg.ema2Col, size: 'tiny' });
+      markers.push({ id: 'shape1', time: t, position: 'atPriceMiddle', price: emaF[i], shape: 'circle', color: cfg.ema2Col, size: 'tiny' });
     }
 
     // liquidity_display()

@@ -18,7 +18,8 @@
  * Chart context (optional third argument): `chart.mintick`, the symbol tick of the label texts and of the
  * "already reached" test. Without it 0.01.
  *
- * Limit of the port: the two alert conditions give no output.
+ * Alerts (alertcondition, `alerts` of the result): 'Price Crossed Above OB Level' (close crosses over the
+ * overbought cross-up level) and 'Price Crossed Below OS Level' (close crosses under the oversold cross-down level).
  *
  * Reference: "RSI Support & Resistance by DGT" by dgtrd
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -31,6 +32,7 @@ import {
 } from 'oakscriptjs';
 import type { LabelData, LineDrawingData, LinefillData, MarkerData, PineSize, TableData } from '../types';
 import { mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiSupportResistanceByDgtInputs {
   /** Source */
@@ -192,7 +194,7 @@ export function calculate(
   chart?: ChartContext,
 ): IndicatorResult & {
   markers: MarkerData[]; lines: LineDrawingData[]; linefills: LinefillData[]; labels: LabelData[]; tables: TableData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // syminfo.mintick
@@ -356,6 +358,12 @@ export function calculate(
     });
   }
 
+  // alertcondition(ta.crossover(close, crossover_overbought), 'Price Crossed Above OB Level')
+  // alertcondition(ta.crossunder(close, crossunder_oversold), 'Price Crossed Below OS Level')
+  const closes = bars.map((b) => b.close);
+  const aboveOB = crossedOver(closes, crossoverOverbought);
+  const belowOS = crossedUnder(closes, crossunderOversold);
+
   const bullFill = cfg.fill ? String(color.new(bullColor, 90)) : 'transparent';
   const bearFill = cfg.fill ? String(color.new(bearColor, 90)) : 'transparent';
   const revBullFill = cfg.shRRSI ? String(color.new(bullColor, 90)) : 'transparent';
@@ -387,8 +395,21 @@ export function calculate(
     linefills,
     labels,
     tables,
+    alerts: alertStates(alertConditions, bars, [aboveOB, belowOS]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0', title: 'Price Crossed Above OB Level',
+    message: 'RSI S&R: Price crossed above prior RSI overbought level\n{{exchange}}:{{ticker}} | Price={{close}} | {{time}}',
+  },
+  {
+    id: 'alert1', title: 'Price Crossed Below OS Level',
+    message: 'RSI S&R: Price crossed below prior RSI oversold level\n{{exchange}}:{{ticker}} | Price={{close}} | {{time}}',
+  },
+];
 
 export const RsiSupportResistanceByDgt = {
   calculate,
@@ -397,4 +418,5 @@ export const RsiSupportResistanceByDgt = {
   inputConfig,
   plotConfig,
   fillConfig,
+  alertConditions,
 };

@@ -5,6 +5,8 @@
  * volume is at or above mean + stdev * devK, yellow when at or below mean - stdev * devK, light grey otherwise.
  * The mean volume line and a filled band at mean +- 1 stdev. Optionally the price candles of the high volume bars
  * are coloured.
+ * Alerts (alertcondition, `alerts` of the result): 'High Volume Alert' / 'Low Volume Alert' on the bars whose volume is
+ * at or above the high threshold / at or below the low threshold.
  *
  * Reference: "Volume Bars Color" by Evgenyc111
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolumeBarsColorInputs {
   /** SMA / stdev length of the volume */
@@ -65,7 +68,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeBarsColorInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -102,8 +105,16 @@ export function calculate(
     // fill(High Band, Low Band, color.new(#9ad1ff, 90), title = 'Band Fill')
     fills: [{ plot1: 'plot2', plot2: 'plot3', options: { title: 'Band Fill', color: bandFill }, colors: new Array<string>(n).fill(bandFill) }],
     barColors,
+    // alertcondition(volume >= highVolumeThreshold) / alertcondition(volume <= lowVolumeThreshold)
+    alerts: alertStates(alertConditions, bars, [bars.map((_, i) => isHigh(i)), bars.map((_, i) => isLow(i))]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'High Volume Alert', message: 'Anomalous High Volume detected!' },
+  { id: 'alert1', title: 'Low Volume Alert', message: 'Anomalous Low Volume detected!' },
+];
 
 export const VolumeBarsColor = {
   calculate,
@@ -111,4 +122,5 @@ export const VolumeBarsColor = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

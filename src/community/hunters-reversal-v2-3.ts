@@ -13,6 +13,8 @@
  * A cooldown per direction filters the signals; a BIG triangle marks a signal when at least `bigTierMin` criteria
  * fired in the last `clusterWindow` bars; an X marks a move of invalATR * ATR beyond the signal bar high / low within
  * `invalBars` bars. An EMA reference line is drawn.
+ * Alerts (alertcondition, `alerts` of the result): the original's 8 conditions (sweep, divergence, extension and BIG
+ * per direction), true on the bar the signal is found (not moved back by the plot offsets).
  *
  * Reference: "Hunters Reversal v2.3" by d_jaeger
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -21,6 +23,7 @@
 import { ta, Series, color, callsite, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface HuntersReversalV23Inputs {
   pivotLeft: number;
@@ -140,10 +143,22 @@ const lt = (a: number, b: number) => b - a > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bear Liquidity Sweep', message: 'HuntersRev v2.3: Bear Sweep on {{ticker}}' },
+  { id: 'alert1', title: 'Bull Liquidity Sweep', message: 'HuntersRev v2.3: Bull Sweep on {{ticker}}' },
+  { id: 'alert2', title: 'Bear Divergence', message: 'HuntersRev v2.3: Bear Divergence on {{ticker}}' },
+  { id: 'alert3', title: 'Bull Divergence', message: 'HuntersRev v2.3: Bull Divergence on {{ticker}}' },
+  { id: 'alert4', title: 'Bear Extension', message: 'HuntersRev v2.3: Bear Extension on {{ticker}}' },
+  { id: 'alert5', title: 'Bull Extension', message: 'HuntersRev v2.3: Bull Extension on {{ticker}}' },
+  { id: 'alert6', title: 'Bear BIG (cluster)', message: 'HuntersRev v2.3: BEAR CLUSTER on {{ticker}}' },
+  { id: 'alert7', title: 'Bull BIG (cluster)', message: 'HuntersRev v2.3: BULL CLUSTER on {{ticker}}' },
+];
+
 export function calculate(
   bars: Bar[],
   inputs: Partial<HuntersReversalV23Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -206,14 +221,19 @@ export function calculate(
 
   const markers: MarkerData[] = [];
   const interval = barInterval(bars);
-  const mark = (i: number, offset: number, bear: boolean, c: string, size: 'tiny' | 'small' | 'large', x = false) => {
+  // id: the original's plotshape output (shape0..shape9 in declaration order)
+  const mark = (
+    id: string, i: number, offset: number, bear: boolean, c: string, size: 'tiny' | 'small' | 'large', x = false,
+  ) => {
     const j = i + offset;
     if (j < 0) return;
     markers.push({
       time: barTime(bars, j, interval), position: bear ? 'aboveBar' : 'belowBar',
-      shape: x ? 'xcross' : bear ? 'triangleDown' : 'triangleUp', color: c, size,
+      shape: x ? 'xcross' : bear ? 'triangleDown' : 'triangleUp', color: c, size, id,
     });
   };
+  // alertcondition flags, in the original's order
+  const flags: boolean[][] = Array.from({ length: 8 }, () => new Array(n).fill(false));
   const invalColor = String(color.new(color.maroon, 30));
 
   for (let i = 0; i < n; i++) {
@@ -376,16 +396,19 @@ export function calculate(
     if (bullInvalidated) lastBullLevel = NaN;
 
     // Plot shapes (sweeps at offset -sweepConfirmBars, divergences and extensions at offset -pivotRight)
-    if (cfg.showSweep && bearSweepFinal) mark(i, -cfg.sweepConfirmBars, true, color.fuchsia, 'small');
-    if (cfg.showSweep && bullSweepFinal) mark(i, -cfg.sweepConfirmBars, false, color.aqua, 'small');
-    if (cfg.showDiv && bearDivFinal) mark(i, -pr, true, color.red, 'small');
-    if (cfg.showDiv && bullDivFinal) mark(i, -pr, false, color.green, 'small');
-    if (cfg.showExt && bearExtFinal) mark(i, -pr, true, color.orange, 'small');
-    if (cfg.showExt && bullExtFinal) mark(i, -pr, false, color.lime, 'small');
-    if (cfg.showBig && bearBig) mark(i, 0, true, color.red, 'large');
-    if (cfg.showBig && bullBig) mark(i, 0, false, color.green, 'large');
-    if (cfg.useInval && bearInvalidated) mark(i, 0, true, invalColor, 'tiny', true);
-    if (cfg.useInval && bullInvalidated) mark(i, 0, false, invalColor, 'tiny', true);
+    if (cfg.showSweep && bearSweepFinal) mark('shape0', i, -cfg.sweepConfirmBars, true, color.fuchsia, 'small');
+    if (cfg.showSweep && bullSweepFinal) mark('shape1', i, -cfg.sweepConfirmBars, false, color.aqua, 'small');
+    if (cfg.showDiv && bearDivFinal) mark('shape2', i, -pr, true, color.red, 'small');
+    if (cfg.showDiv && bullDivFinal) mark('shape3', i, -pr, false, color.green, 'small');
+    if (cfg.showExt && bearExtFinal) mark('shape4', i, -pr, true, color.orange, 'small');
+    if (cfg.showExt && bullExtFinal) mark('shape5', i, -pr, false, color.lime, 'small');
+    if (cfg.showBig && bearBig) mark('shape6', i, 0, true, color.red, 'large');
+    if (cfg.showBig && bullBig) mark('shape7', i, 0, false, color.green, 'large');
+    if (cfg.useInval && bearInvalidated) mark('shape8', i, 0, true, invalColor, 'tiny', true);
+    if (cfg.useInval && bullInvalidated) mark('shape9', i, 0, false, invalColor, 'tiny', true);
+
+    [bearSweepFinal, bullSweepFinal, bearDivFinal, bullDivFinal, bearExtFinal, bullExtFinal, bearBig, bullBig]
+      .forEach((f, k) => { flags[k][i] = f; });
   }
 
   return {
@@ -394,6 +417,7 @@ export function calculate(
       plot0: bars.map((b, i) => ({ time: b.time, value: cfg.showEMA ? emaVal[i] : NaN, color: EMA_COLOR })),
     },
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
@@ -403,4 +427,5 @@ export const HuntersReversalV23 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

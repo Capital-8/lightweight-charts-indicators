@@ -445,11 +445,11 @@ export function calculate(
     const sellFinal = cfg.showBuySell && sellCond && (!cfg.buySellUseStoch || stochBear);
     // plotshape(buyFinal ? osc : na, "BUY", shape.labelup, location.absolute, text = "BUY", size = size.small)
     if (buyFinal && !isNaN(osc[i])) {
-      markers.push({ time: t(i), position: 'atPriceBottom', price: osc[i], shape: 'labelUp', color: buyCol, text: 'BUY',
+      markers.push({ id: 'shape0', time: t(i), position: 'atPriceBottom', price: osc[i], shape: 'labelUp', color: buyCol, text: 'BUY',
         textColor, size: 'small' });
     }
     if (sellFinal && !isNaN(osc[i])) {
-      markers.push({ time: t(i), position: 'atPriceTop', price: osc[i], shape: 'labelDown', color: sellCol, text: 'SELL',
+      markers.push({ id: 'shape1', time: t(i), position: 'atPriceTop', price: osc[i], shape: 'labelDown', color: sellCol, text: 'SELL',
         textColor, size: 'small' });
     }
     // Divergence labels: plotshape(cond ? osc[lbR] : na, offset = -lbR, location.absolute)
@@ -457,19 +457,19 @@ export function calculate(
     if (i - lbR < 0 || isNaN(price)) continue;
     const at = barTime(bars, i - lbR, interval);
     if (bullCond[i]) {
-      markers.push({ time: at, position: 'atPriceBottom', price, shape: 'labelUp', color: cfg.bullDivColor, text: ' Bull ',
+      markers.push({ id: 'shape2', time: at, position: 'atPriceBottom', price, shape: 'labelUp', color: cfg.bullDivColor, text: ' Bull ',
         textColor });
     }
     if (hiddenBullCond[i]) {
-      markers.push({ time: at, position: 'atPriceBottom', price, shape: 'labelUp', color: cfg.bullDivColor,
+      markers.push({ id: 'shape3', time: at, position: 'atPriceBottom', price, shape: 'labelUp', color: cfg.bullDivColor,
         text: ' H Bull ', textColor });
     }
     if (bearCond[i]) {
-      markers.push({ time: at, position: 'atPriceTop', price, shape: 'labelDown', color: cfg.bearDivColor, text: ' Bear ',
+      markers.push({ id: 'shape4', time: at, position: 'atPriceTop', price, shape: 'labelDown', color: cfg.bearDivColor, text: ' Bear ',
         textColor });
     }
     if (hiddenBearCond[i]) {
-      markers.push({ time: at, position: 'atPriceTop', price, shape: 'labelDown', color: cfg.bearDivColor,
+      markers.push({ id: 'shape5', time: at, position: 'atPriceTop', price, shape: 'labelDown', color: cfg.bearDivColor,
         text: ' H Bear ', textColor });
     }
   }

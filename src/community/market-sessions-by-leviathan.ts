@@ -12,6 +12,9 @@
  * - Zones: background colours on the bars of a session; Timeline: squares along the bottom of the chart;
  *   Candles (or "Color Candles"): bar colours
  * "Hide Weekends" leaves out the sessions of Saturday (days 1 to 6 of the week, Sunday being day 1).
+ * Alerts (alertcondition, `alerts` of the result): the start of each session, and per session "New High" (high above
+ * the session high, as the original computes it after its updates of the bar) and "New Low" (low above the session
+ * low, as the original writes it), on the bars of the session.
  *
  * Notes on the port:
  * - The lookback is counted back from the current time: the `now` value of the chart (optional third argument);
@@ -38,6 +41,7 @@ import type { MarkerData, BarColorData, BgColorData, LineDrawingData, BoxData, L
 import { barTime } from '../bar-time';
 import { chartTimeframe } from '../anchor-period';
 import { mintickOf, nowOf, timezoneOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type LineStyleName = 'Solid' | 'Dashed' | 'Dotted';
 
@@ -229,7 +233,7 @@ export function calculate(
 ): Omit<IndicatorResult, 'markers'> & {
   markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[];
   lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   // syminfo.mintick, syminfo.timezone
   const MINTICK = mintickOf(chart);
@@ -292,6 +296,8 @@ export function calculate(
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
+  // alert flags: session starts (4), new highs (4), new lows (4), in the order Tokyo, London, New York, Sydney
+  const flags: boolean[][] = Array.from({ length: 12 }, () => []);
 
   for (let i = 0; i < n; i++) {
     const bar = bars[i];
@@ -402,19 +408,21 @@ export function calculate(
     // Coloring candles: eight barcolor() calls, the last one with a colour wins. The fourth one colours the New York
     // bars with the Sydney colour when Sydney is shown, as the original
     if (candles && inRange) {
+      // c: the colour of the winning call, id: barcolor<k> of that call (k counted over the eight calls)
       let c: string | null = null;
+      let id = '';
       if (!cfg.merge) {
-        if (tokyo.show && tokyo.active) c = tokyo.lineCol;
-        if (london.show && london.active) c = london.lineCol;
-        if (newYork.show && newYork.active) c = newYork.lineCol;
-        if (sydney.show && newYork.active) c = sydney.lineCol;
+        if (tokyo.show && tokyo.active) { c = tokyo.lineCol; id = 'barcolor0'; }
+        if (london.show && london.active) { c = london.lineCol; id = 'barcolor1'; }
+        if (newYork.show && newYork.active) { c = newYork.lineCol; id = 'barcolor2'; }
+        if (sydney.show && newYork.active) { c = sydney.lineCol; id = 'barcolor3'; }
       } else {
         sessions.forEach((s, k) => {
           const next = sessions[(k + 1) % 4];
-          if (s.show && s.active && (next.show ? !next.active : true)) c = s.lineCol;
+          if (s.show && s.active && (next.show ? !next.active : true)) { c = s.lineCol; id = `barcolor${4 + k}`; }
         });
       }
-      if (c !== null) barColors.push({ time: t, color: c });
+      if (c !== null) barColors.push({ time: t, id, color: c });
     }
 
     // Background colours of the 'Zones' display: time == time(timeframe.period, session), in the exchange time zone,
@@ -423,7 +431,8 @@ export function calculate(
       sessions.forEach((s, k) => {
         const next = sessions[(k + 1) % 4];
         if (!s.show || (cfg.merge && next.active)) return;
-        if (sessionTime(s.session)(tMs) === tMs) bgColors.push({ time: t, color: s.col });
+        // bgcolor<k>: the four calls without merge, then the four with merge
+        if (sessionTime(s.session)(tMs) === tMs) bgColors.push({ time: t, id: `bgcolor${(cfg.merge ? 4 : 0) + k}`, color: s.col });
       });
     }
 
@@ -432,9 +441,16 @@ export function calculate(
       sessions.forEach((s, k) => {
         const next = sessions[(k + 1) % 4];
         const on = cfg.merge && next.show ? s.show && s.active && !next.active : s.show && s.active;
-        if (on) markers.push({ time: t, position: 'bottom', shape: 'square', color: s.col, size: 'auto' });
+        if (on) markers.push({ time: t, id: `shape${k}`, position: 'bottom', shape: 'square', color: s.col, size: 'auto' });
       });
     }
+
+    // alertcondition(inX and not inX[1]), (high > XHighPrice and inX), (low > XLowPrice and inX)
+    sessions.forEach((s, k) => {
+      flags[k].push(s.start);
+      flags[4 + k].push(s.active && high > s.high);
+      flags[8 + k].push(s.active && low > s.low);
+    });
 
     for (const s of sessions) s.prev = s.active;
   }
@@ -464,8 +480,25 @@ export function calculate(
     lines: outLines,
     boxes: outBoxes,
     labels: outLabels,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Tokyo Open', message: 'The Tokyo Session has started' },
+  { id: 'alert1', title: 'London Open', message: 'The London Session has started' },
+  { id: 'alert2', title: 'New York Open', message: 'The New York Session has started' },
+  { id: 'alert3', title: 'Sydney Open', message: 'The Sydney Session has started' },
+  { id: 'alert4', title: 'Tokyo Session - New High', message: 'New High in Tokyo Session' },
+  { id: 'alert5', title: 'London Session - New High', message: 'New High in London Session' },
+  { id: 'alert6', title: 'New York Session - New High', message: 'New High in New York Session' },
+  { id: 'alert7', title: 'Sydney Session - New High', message: 'New High in Sydney Session' },
+  { id: 'alert8', title: 'Tokyo Session - New Low', message: 'New Low in Tokyo Session' },
+  { id: 'alert9', title: 'London Session - New Low', message: 'New Low in London Session' },
+  { id: 'alert10', title: 'New York Session - New Low', message: 'New Low In New York Session' },
+  { id: 'alert11', title: 'Sydney Session - New Low', message: 'New Low In Sydney Session' },
+];
 
 export const MarketSessionsByLeviathan = {
   calculate,
@@ -473,4 +506,5 @@ export const MarketSessionsByLeviathan = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

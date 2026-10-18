@@ -7,6 +7,9 @@
  * fast < slow < trend, yellow otherwise. Buy / Sell labels when the averages are stacked up / down and the fast
  * crossed the slow or the slow crossed the trend on this bar; exit crosses when the stack ends.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Long Entry', 'Short Entry', 'Exit Long', 'Exit Short', true on
+ * the bars of the Buy / Sell / exit marks.
+ *
  * Reference: "Moving Average Crossover with Shading Signals" by Decam9
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © Decam9
@@ -14,6 +17,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type MovingAverageCrossoverWithShadingSignalsMaType = 'EMA' | 'SMA';
 
@@ -90,7 +94,7 @@ const le = (a: number, b: number): boolean => !isNaN(a) && !isNaN(b) && !(a - b 
 export function calculate(
   bars: Bar[],
   inputs: Partial<MovingAverageCrossoverWithShadingSignalsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -136,6 +140,7 @@ export function calculate(
   const markers: MarkerData[] = [];
   let prevUp = false;
   let prevDown = false;
+  const flags: boolean[][] = [0, 1, 2, 3].map(() => new Array<boolean>(n).fill(false));
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     shading[i] = ge(fast[i], slow[i])
@@ -145,12 +150,17 @@ export function calculate(
     const downtrend = le(fast[i], slow[i]) && le(slow[i], trend[i]);
     const justCrossed = crossFastSlow.call(fast[i], slow[i]) || crossSlowTrend.call(slow[i], trend[i]);
     // plotshape(long, location.belowbar, shape.labelup, color.green, size.tiny, 'Buy')
-    if (uptrend && justCrossed) markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: color.green, size: 'tiny' });
+    if (uptrend && justCrossed) markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: color.green, size: 'tiny', id: 'shape0' });
     // plotshape(short, location.abovebar, shape.labeldown, color.red, size.tiny, 'Sell')
-    if (downtrend && justCrossed) markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: color.red, size: 'tiny' });
+    if (downtrend && justCrossed) markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: color.red, size: 'tiny', id: 'shape1' });
     // exitLong = uptrend[1] and not uptrend: xcross above the bar, green; exitShort likewise, red
-    if (prevUp && !uptrend) markers.push({ time: t, position: 'aboveBar', shape: 'xcross', color: color.green, size: 'tiny' });
-    if (prevDown && !downtrend) markers.push({ time: t, position: 'aboveBar', shape: 'xcross', color: color.red, size: 'tiny' });
+    if (prevUp && !uptrend) markers.push({ time: t, position: 'aboveBar', shape: 'xcross', color: color.green, size: 'tiny', id: 'shape2' });
+    if (prevDown && !downtrend) markers.push({ time: t, position: 'aboveBar', shape: 'xcross', color: color.red, size: 'tiny', id: 'shape3' });
+    // long / short / exitLong / exitShort
+    flags[0][i] = uptrend && justCrossed;
+    flags[1][i] = downtrend && justCrossed;
+    flags[2][i] = prevUp && !uptrend;
+    flags[3][i] = prevDown && !downtrend;
     prevUp = uptrend;
     prevDown = downtrend;
   }
@@ -166,8 +176,17 @@ export function calculate(
     // fill(ma1, ma2, color = Shading)
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Plots Background' }, colors: shading }],
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Entry', message: 'Buy' },
+  { id: 'alert1', title: 'Short Entry', message: 'Sell' },
+  { id: 'alert2', title: 'Exit Long', message: 'Exit Long' },
+  { id: 'alert3', title: 'Exit Short', message: 'Exit Short' },
+];
 
 export const MovingAverageCrossoverWithShadingSignals = {
   calculate,
@@ -175,4 +194,5 @@ export const MovingAverageCrossoverWithShadingSignals = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

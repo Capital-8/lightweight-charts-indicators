@@ -5,6 +5,8 @@
  * step lines. BUY labels below the bar on a bullish engulfing candle or a hammer (lower wick at least 2 bodies,
  * upper wick at most 1 body); SELL labels above the bar on a bearish engulfing candle or a shooting star (upper
  * wick at least 2 bodies, lower wick at most 1 body).
+ * Alerts (alertcondition, `alerts` of the result): 'Candle BUY' and 'Candle SELL', true on the bars of each signal
+ * (also when the labels are hidden).
  *
  * Reference: "Candle BUY SELL + Support Resistance [v6]" by JohnsonForexTrader
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CandleBuySellSupportResistanceInputs {
   /** Pivot length (left and right bars) */
@@ -58,7 +61,7 @@ const le = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(a - b > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<CandleBuySellSupportResistanceInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -74,6 +77,7 @@ export function calculate(
   const plot0: { time: number; value: number; color: string }[] = [];
   const plot1: { time: number; value: number; color: string }[] = [];
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   let support = NaN; // var float support = na
   let resistance = NaN; // var float resistance = na
   for (let i = 0; i < n; i++) {
@@ -95,6 +99,8 @@ export function calculate(
 
     const buySignal = bullishEngulfing || hammer;
     const sellSignal = bearishEngulfing || shootingStar;
+    buyFlags.push(buySignal);
+    sellFlags.push(sellSignal);
 
     plot0.push({ time: b.time, value: cfg.showSupport ? support : NaN, color: color.green });
     plot1.push({ time: b.time, value: cfg.showResistance ? resistance : NaN, color: color.red });
@@ -117,8 +123,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
     markers,
+    // alertcondition(buySignal, "Candle BUY") / alertcondition(sellSignal, "Candle SELL")
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Candle BUY', message: 'Candle BUY signal detected.' },
+  { id: 'alert1', title: 'Candle SELL', message: 'Candle SELL signal detected.' },
+];
 
 export const CandleBuySellSupportResistance = {
   calculate,
@@ -126,4 +140,5 @@ export const CandleBuySellSupportResistance = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

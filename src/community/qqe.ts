@@ -3,12 +3,15 @@
  *
  * Basic QQE indicator. RSI smoothed with EMA, then dynamic trailing stop
  * computed from ATR-like RSI volatility multiplied by qqeFactor.
+ * Alerts (alertcondition, `alerts` of the result): the original's five conditions, crosses of the smoothed RSI
+ * with the trailing stop (any cross, crossover, crossunder) and with 50, on the plotted values.
  *
  * Reference: "QQE" by Glaz
  */
 
 import { ta, getSourceSeries, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface QQEInputs {
   rsiLen: number;
@@ -42,7 +45,10 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<QQEInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<QQEInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { rsiLen, smoothFactor, qqeFactor, src } = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const wildersLen = rsiLen * 2 - 1;
@@ -130,26 +136,44 @@ export function calculate(bars: Bar[], inputs: Partial<QQEInputs> = {}): Omit<In
   }
 
   // Pine: fill(QQF, QQS, color=QQEF>QQES ? green : na) / fill(QQF, QQS, color=QQEF<QQES ? red : na)
-  const fillColors: string[] = [];
+  const upFillColors: string[] = [];
+  const downFillColors: string[] = [];
   for (let i = 0; i < n; i++) {
-    if (i < warmup) {
-      fillColors.push('rgba(0,0,0,0)');
-    } else {
-      const sr = srArr[i] ?? 0;
-      const tr = trailing[i];
-      fillColors.push(sr > tr ? 'rgba(38,166,154,0.3)' : 'rgba(239,83,80,0.3)');
-    }
+    const up = i >= warmup && (srArr[i] ?? 0) > trailing[i];
+    const down = i >= warmup && !up;
+    upFillColors.push(up ? 'rgba(38,166,154,0.3)' : 'rgba(0,0,0,0)');
+    downFillColors.push(down ? 'rgba(239,83,80,0.3)' : 'rgba(0,0,0,0)');
   }
+
+  // Alerts on the plotted values (na before the warm-up compares false): cross(a, b) = crossover or crossunder
+  const fast = plot0.map((p) => p.value);
+  const slow = plot1.map((p) => p.value);
+  const over = crossedOver(fast, slow), under = crossedUnder(fast, slow);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1 },
-    fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(38,166,154,0.3)' }, colors: fillColors }],
+    fills: [
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'UpTrend Highligter', color: 'rgba(38,166,154,0.3)' }, colors: upFillColors },
+      { plot1: 'plot0', plot2: 'plot1', options: { title: 'DownTrend Highligter', color: 'rgba(239,83,80,0.3)' }, colors: downFillColors },
+    ],
     hlines: [
       { value: 50, options: { color: '#787B86', linestyle: 'dotted' as const, title: 'Midline' } },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, [
+      over.map((v, i) => v || under[i]), over, under, crossedOver(fast, 50), crossedUnder(fast, 50),
+    ]),
   };
 }
 
-export const QQE = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Cross Alert', message: 'QQE Crossing Signal!' },
+  { id: 'alert1', title: 'Crossover Alarm', message: 'QQE BUY SIGNAL!' },
+  { id: 'alert2', title: 'Crossunder Alarm', message: 'QQE SELL SIGNAL!' },
+  { id: 'alert3', title: 'Cross 50 Up Alert', message: 'QQE FAST Crossing 50 UP!' },
+  { id: 'alert4', title: 'Cross 50 Down Alert', message: 'QQE FAST Crossing 50 DOWN!' },
+];
+
+export const QQE = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -162,12 +162,18 @@ export function calculate(bars: Bar[], inputs: Partial<VolumaticSRLevelsInputs> 
     const alphaL = lowerChanged ? 0 : Math.min(1, Math.max(0.2, nv / 100));
     fillColorsLower.push(lowerChanged ? 'transparent' : `rgba(28,194,114,${alphaL.toFixed(2)})`);
 
-    // Markers for max volume threshold signals
-    if (nv > lowerThreshold && !isNaN(lower2Arr[i])) {
-      markers.push({ time: t, position: 'belowBar', shape: 'circle', color: supCss });
+    // plotshape(n_vol > threshold ? level -/+ atr * n_vol : na, shape.circle, location.absolute, size.tiny): four
+    // outputs, Style ids shape0 / shape1 (support - / +) and shape2 / shape3 (resistance + / -)
+    const dot = (price: number, col: string, id: string) => {
+      if (!isNaN(price)) markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'circle', color: col, size: 'tiny', id });
+    };
+    if (nv > lowerThreshold) {
+      dot(lower2Arr[i] - atr * nv, supCss, 'shape0');
+      dot(lower2Arr[i] + atr * nv, supCss, 'shape1');
     }
-    if (nv > upperThreshold && !isNaN(upper2Arr[i])) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: resCss });
+    if (nv > upperThreshold) {
+      dot(upper2Arr[i] + atr * nv, resCss, 'shape2');
+      dot(upper2Arr[i] - atr * nv, resCss, 'shape3');
     }
 
     // Bar color for high volume bars

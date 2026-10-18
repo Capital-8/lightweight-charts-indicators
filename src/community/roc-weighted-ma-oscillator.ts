@@ -7,6 +7,8 @@
  * the neutral threshold, bear below its negative, and keeps the previous colour inside the neutral zone. A colour
  * change from bear to bull (bull to bear) gives a long (short) triangle on the price pane. Gradient fills between
  * 2.5 and 3 (and -2.5 and -3) follow the oscillator; optional candle colours.
+ * Alerts (alertcondition, `alerts` of the result): 'ROC Weighted MA Postive Trend' (oscillator above the neutral
+ * threshold) and 'ROC Weighted MA Negative Trend' (oscillator below the neutral threshold), as the original.
  *
  * Reference: "ROC-Weighted MA Oscillator [SeerQuant]" by SeerQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, getSourceSeries, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type RocWeightedMAType = 'SMA' | 'EMA' | 'SMMA' | 'WMA' | 'VWMA' | 'TEMA' | 'DEMA' | 'LSMA' | 'HMA' | 'ALMA';
 export type RocWeightedColorScheme = 'Default' | 'Modern' | 'Cool' | 'Alternate' | 'Bright';
@@ -94,7 +97,7 @@ const finite = (v: number) => (Number.isFinite(v) ? v : NaN);
 export function calculate(
   bars: Bar[],
   inputs: Partial<RocWeightedMAOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { rocLen, maLen, sigLen, neutralThr, paint } = cfg;
   const [bull, bear, neutral] = SCHEMES[cfg.colScheme];
@@ -168,8 +171,16 @@ export function calculate(
     ],
     markers,
     barColors,
+    // alertcondition(oscillator > neutralThr) / alertcondition(oscillator < neutralThr)
+    alerts: alertStates(alertConditions, bars, [osc.map((o) => gt(o, neutralThr)), osc.map((o) => gt(neutralThr, o))]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'ROC Weighted MA Postive Trend', message: 'ROC Weighted MA Bullish Signal on: {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'ROC Weighted MA Negative Trend', message: 'ROC Weighted MA Bearish Signal on: {{exchange}}:{{ticker}}' },
+];
 
 /** ma(source, length, type) of the script */
 function movingAverage(bars: Bar[], src: number[], length: number, type: RocWeightedMAType): number[] {
@@ -207,4 +218,4 @@ function movingAverage(bars: Bar[], src: number[], length: number, type: RocWeig
   }
 }
 
-export const RocWeightedMAOscillator = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const RocWeightedMAOscillator = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

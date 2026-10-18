@@ -5,6 +5,8 @@
  * bar) the stop rises to max(stop, close - nLoss); while it stays below, the stop falls to min(stop, close + nLoss);
  * on a flip the stop restarts at close - nLoss or close + nLoss. The stop is not drawn: BUY / SELL labels mark the
  * bars where the close crosses above / below it.
+ * Alerts (alertcondition, `alerts` of the result): 'UT Buy Signal' / 'UT Sell Signal' on the bars of the BUY / SELL
+ * labels.
  *
  * Reference: "Pure UT Bot - Signals Only" by BhargavMeghnathi
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface UtBotTrendVolumeInputs {
   /** Sensitivity (ATR multiplier) */
@@ -52,7 +55,7 @@ const min = (a: number, b: number) => (isNaN(a) || isNaN(b) ? NaN : Math.min(a, 
 export function calculate(
   bars: Bar[],
   inputs: Partial<UtBotTrendVolumeInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const xATR = ta.atr(bars, cfg.atrPeriod).toArray().map((v) => v ?? NaN);
@@ -96,12 +99,19 @@ export function calculate(
     }
   }
 
-  // alertcondition(buySignal, "UT Buy Signal") and alertcondition(sellSignal, "UT Sell Signal"): no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    // alertcondition(buySignal, "UT Buy Signal") / alertcondition(sellSignal, "UT Sell Signal")
+    alerts: alertStates(alertConditions, bars, [buySignal, sellSignal]),
   };
 }
 
-export const UtBotTrendVolume = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'UT Buy Signal', message: 'UT Bot BUY' },
+  { id: 'alert1', title: 'UT Sell Signal', message: 'UT Bot SELL' },
+];
+
+export const UtBotTrendVolume = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

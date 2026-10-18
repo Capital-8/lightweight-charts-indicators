@@ -5,12 +5,18 @@
  * Triangles mark the crossovers (BUY) and crossunders (SELL) of the two lines; circles mark the bars where the fast
  * line turns red (green) while the slow line is red (green). The signals are drawn one bar earlier (offset -1).
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close) on confirmed bars (`barstate.isconfirmed`:
+ * the last bar only when the chart context, the optional third argument, says it is closed, `lastBarConfirmed`; true
+ * without a context): "BUY EMM" on a crossover, else "SELL EMM" on a crossunder, else "Point Buy" on a buy circle,
+ * else "Point Sell" on a sell circle.
+ *
  * Reference: "Crossover EMMM" by NunyadzilaTrading
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { AlertCall, MarkerData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 import { barInterval, barTime } from '../bar-time';
 
 export interface CrossoverEmmmInputs {
@@ -59,7 +65,8 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<CrossoverEmmmInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -97,6 +104,8 @@ export function calculate(
   const markers: MarkerData[] = [];
   const pointSell = String(color.rgb(255, 82, 82, 46));
   const pointBuy = String(color.rgb(76, 175, 79, 49));
+  const alertCalls: AlertCall[] = [];
+  const lastConfirmed = lastBarConfirmedOf(chart);
   for (let i = 1; i < n; i++) {
     // color == color: na colours compare false
     const redCircle = ma1Color[i - 1] === color.green && ma1Color[i] === color.red && ma2Color[i] === color.red;
@@ -115,6 +124,13 @@ export function calculate(
     if (greenCircle) {
       markers.push({ time: t, position: 'belowBar', shape: 'circle', color: pointBuy, size: 'small' });
     }
+    // if barstate.isconfirmed: alert_message := crossover ? "BUY EMM" : crossunder ? "SELL EMM" : green circle ?
+    // "Point Buy" : red circle ? "Point Sell" : na; if not na(alert_message): alert(alert_message, once_per_bar_close)
+    if (i < n - 1 || lastConfirmed) {
+      const message = crossover[i] ? 'BUY EMM' : crossunder[i] ? 'SELL EMM' : greenCircle ? 'Point Buy'
+        : redCircle ? 'Point Sell' : null;
+      if (message) alertCalls.push({ time: bars[i].time, message, freq: 'once_per_bar_close' });
+    }
   }
 
   return {
@@ -124,8 +140,12 @@ export function calculate(
       plot1: shifted(ma2, ma2Color, cfg.offset2),
     },
     markers,
+    alertCalls,
   };
 }
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export const CrossoverEmmm = {
   calculate,
@@ -133,4 +153,5 @@ export const CrossoverEmmm = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

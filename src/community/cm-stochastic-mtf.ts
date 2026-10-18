@@ -205,12 +205,12 @@ export function calculate(bars: Bar[], inputs: Partial<CmStochasticMtfInputs> = 
     const crossDownAll = gt(k1, d1) && lt(outK[i], outD[i]);
 
     // Six bgcolor calls, in the order of the original (a later call is drawn over an earlier one)
-    if (cfg.sbh && aboveLine) bgColors.push({ time, color: red70 });
-    if (cfg.sbh && belowLine) bgColors.push({ time, color: lime70 });
-    if (cfg.sch && crossUp) bgColors.push({ time, color: lime40 });
-    if (cfg.sch && crossDn) bgColors.push({ time, color: red40 });
-    if (cfg.sac && crossUpAll) bgColors.push({ time, color: lime40 });
-    if (cfg.sac && crossDownAll) bgColors.push({ time, color: red40 });
+    if (cfg.sbh && aboveLine) bgColors.push({ id: 'bgcolor0', time, color: red70 });
+    if (cfg.sbh && belowLine) bgColors.push({ id: 'bgcolor1', time, color: lime70 });
+    if (cfg.sch && crossUp) bgColors.push({ id: 'bgcolor2', time, color: lime40 });
+    if (cfg.sch && crossDn) bgColors.push({ id: 'bgcolor3', time, color: red40 });
+    if (cfg.sac && crossUpAll) bgColors.push({ id: 'bgcolor4', time, color: lime40 });
+    if (cfg.sac && crossDownAll) bgColors.push({ id: 'bgcolor5', time, color: red40 });
 
     plots.plot0.push(point(i, outK[i]));
     plots.plot1.push(point(i, outD[i]));
@@ -222,13 +222,13 @@ export function calculate(bars: Bar[], inputs: Partial<CmStochasticMtfInputs> = 
     plots.plot6.push(point(i, cfg.sml ? 50 : NaN));
 
     // plotchar 'B' at the bottom / 'S' at the top (transp = 0)
-    const letter = (on: boolean, text: string, position: 'bottom' | 'top', textColor: string) => {
-      if (on) markers.push({ time, position, shape: 'circle', color: 'transparent', text, textColor });
+    const letter = (id: string, on: boolean, text: string, position: 'bottom' | 'top', textColor: string) => {
+      if (on) markers.push({ id, time, position, shape: 'circle', color: 'transparent', text, textColor });
     };
-    letter(cfg.sl && crossUp, 'B', 'bottom', LIME_HEX);
-    letter(cfg.sl && crossDn, 'S', 'top', RED_HEX);
-    letter(cfg.sacl && crossUpAll, 'B', 'bottom', LIME_HEX);
-    letter(cfg.sacl && crossDownAll, 'S', 'top', RED_HEX);
+    letter('char0', cfg.sl && crossUp, 'B', 'bottom', LIME_HEX);
+    letter('char1', cfg.sl && crossDn, 'S', 'top', RED_HEX);
+    letter('char2', cfg.sacl && crossUpAll, 'B', 'bottom', LIME_HEX);
+    letter('char3', cfg.sacl && crossDownAll, 'S', 'top', RED_HEX);
   }
 
   return {

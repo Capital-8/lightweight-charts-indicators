@@ -4,13 +4,24 @@
  * ATR-based dynamic trailing reverse indicator.
  * In uptrend, trail = max(prev_trail, close - k*ATR).
  * If close < trail, flip to downtrend (and vice versa).
- * Two plot series: green for uptrend, red for downtrend.
+ * Two plot series: green for uptrend, red for downtrend, each filled to ohlc4 (hidden plot) while its trend is on.
+ *
+ * Alerts (alertcondition, `alerts` of the result): "NRTR Direction Change", "NRTR Buy" and "NRTR Sell" (the trend
+ * changes, from the first drawn bar).
  *
  * Reference: "Nick Rypock Trailing Reverse"
  */
 
 import { ta, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertcondition() calls, in declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'NRTR Direction Change', message: 'NRTR has changed direction, {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'NRTR Buy', message: 'NRTR Buy, {{exchange}}:{{ticker}}' },
+  { id: 'alert2', title: 'NRTR Sell', message: 'NRTR Sell, {{exchange}}:{{ticker}}' },
+];
 
 export interface NRTRInputs {
   atrPeriod: number;
@@ -30,6 +41,7 @@ export const inputConfig: InputConfig[] = [
 export const plotConfig: PlotConfig[] = [
   { id: 'plot0', title: 'NRTR Up', color: '#26A69A', lineWidth: 2 },
   { id: 'plot1', title: 'NRTR Down', color: '#EF5350', lineWidth: 2 },
+  { id: 'plot2', title: 'Mid Price', color: '#2962FF', lineWidth: 1, display: 'none' },
 ];
 
 export const metadata = {
@@ -38,7 +50,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<NRTRInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<NRTRInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const { atrPeriod, mult } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -88,7 +103,11 @@ export function calculate(bars: Bar[], inputs: Partial<NRTRInputs> = {}): Omit<I
 
   // Markers: buy when trend flips to 1, sell when trend flips to -1
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = new Array(n).fill(false);
+  const sellFlags: boolean[] = new Array(n).fill(false);
   for (let i = warmup; i < n; i++) {
+    buyFlags[i] = dirArr[i] === 1 && dirArr[i - 1] === -1;
+    sellFlags[i] = dirArr[i] === -1 && dirArr[i - 1] === 1;
     if (dirArr[i] === 1 && dirArr[i - 1] === -1) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'circle', color: '#26A69A', text: '' });
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: '#26A69A', text: 'Buy' });
@@ -108,25 +127,28 @@ export function calculate(bars: Bar[], inputs: Partial<NRTRInputs> = {}): Omit<I
     value: (i < warmup || dirArr[i] !== -1) ? NaN : v,
   }));
 
-  // Fill: ohlc4 to longStop (green) and ohlc4 to shortStop (red)
-  // Pine uses fill(midPricePlot, longStopPlot) and fill(midPricePlot, shortStopPlot)
-  // Since plot0=longStop and plot1=shortStop are mutually exclusive (linebr),
-  // we use a static fill between them representing the trailing envelope
-  const fillColors: string[] = [];
+  // midPricePlot = plot(ohlc4, display = display.none)
+  const plot2 = bars.map((b) => ({ time: b.time, value: (b.open + b.high + b.low + b.close) / 4 }));
+  // fill(midPricePlot, longStopPlot, 'Long State Filling', trend == 1 ? long fill : na)
+  // fill(midPricePlot, shortStopPlot, 'Short State Filling', trend == -1 ? short fill : na)
+  const longFill: string[] = [];
+  const shortFill: string[] = [];
   for (let i = 0; i < n; i++) {
-    if (i < warmup) {
-      fillColors.push('rgba(0,0,0,0)');
-    } else {
-      fillColors.push(dirArr[i] === 1 ? 'rgba(38,166,154,0.15)' : 'rgba(239,83,80,0.15)');
-    }
+    const on = i >= warmup;
+    longFill.push(on && dirArr[i] === 1 ? 'rgba(38,166,154,0.15)' : 'rgba(0,0,0,0)');
+    shortFill.push(on && dirArr[i] === -1 ? 'rgba(239,83,80,0.15)' : 'rgba(0,0,0,0)');
   }
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
-    plots: { 'plot0': plot0, 'plot1': plot1 },
-    fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(38,166,154,0.15)' }, colors: fillColors }],
+    plots: { 'plot0': plot0, 'plot1': plot1, 'plot2': plot2 },
+    fills: [
+      { plot1: 'plot2', plot2: 'plot0', options: { title: 'Long State Filling', color: 'rgba(38,166,154,0.15)' }, colors: longFill },
+      { plot1: 'plot2', plot2: 'plot1', options: { title: 'Short State Filling', color: 'rgba(239,83,80,0.15)' }, colors: shortFill },
+    ],
     markers,
+    alerts: alertStates(alertConditions, bars, [buyFlags.map((f, i) => f || sellFlags[i]), buyFlags, sellFlags]),
   };
 }
 
-export const NRTR = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const NRTR = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

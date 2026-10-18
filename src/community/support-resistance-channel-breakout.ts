@@ -6,6 +6,9 @@
  * label is drawn when the close leaves the resistance channel top (or the support channel bottom) after a close
  * inside it on the previous bar, at least `breakout_cooldown` bars after the previous breakout of the same side.
  *
+ * Alerts (alertcondition, `alerts` of the result): '🔔 Breakout Resistance Channel' and '🔔 Breakout Support Channel' on
+ * the bars of each breakout, '🔔 Breakout Support/Resistance Channel' on both (whether or not the labels are shown).
+ *
  * Reference: "Support/Resistance Channel Breakout [SuprAlgo]" by SuprAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  * Original notice: © SuprAlgo
@@ -13,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SupportResistanceChannelBreakoutInputs {
   /** Channel multiplier (1 = 0.0001 %) */
@@ -75,7 +79,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceChannelBreakoutInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -105,6 +109,7 @@ export function calculate(
   const markers: MarkerData[] = [];
   let lastTop = NaN; // var int last_top_breakout = na
   let lastBot = NaN;
+  const flags: boolean[][] = [[], [], []];
   for (let i = 0; i < n; i++) {
     const close = bars[i].close;
     const prevClose = i > 0 ? bars[i - 1].close : NaN;
@@ -118,6 +123,9 @@ export function calculate(
     const finalBot = potentialBot && canBot;
     if (finalTop) lastTop = i;
     if (finalBot) lastBot = i;
+    flags[0].push(finalTop);
+    flags[1].push(finalBot);
+    flags[2].push(finalTop || finalBot);
     if (cfg.showBreakout && finalTop) {
       markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: pos50,
         text: 'Breakout ↑', textColor: color.white, size: 'normal' });
@@ -152,8 +160,16 @@ export function calculate(
         gradient: { topValue: supTop, bottomValue: supLow, topColor: fill(pos30), bottomColor: fill(pos100) } },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '🔔 Breakout Resistance Channel', message: 'Breakout above resistance Channel detected.' },
+  { id: 'alert1', title: '🔔 Breakout Support Channel', message: 'Breakout below support Channel detected.' },
+  { id: 'alert2', title: '🔔 Breakout Support/Resistance Channel', message: 'Breakout Support/Resistance Channel detected.' },
+];
 
 export const SupportResistanceChannelBreakout = {
   calculate,
@@ -161,4 +177,5 @@ export const SupportResistanceChannelBreakout = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

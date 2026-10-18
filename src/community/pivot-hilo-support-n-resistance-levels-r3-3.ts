@@ -20,8 +20,10 @@
  * MA filter on the pivots: the pivot functions then run only on the bars that pass the filter and keep the values
  * of those bars only (the rule of a call inside a branch).
  *
- * At most 50 level lines are kept (the default of the platform). The 4 alert conditions of the script have no
- * output. The two moving average plots are circles joined by a line in the original; the port gives circles.
+ * At most 50 level lines are kept (the default of the platform). The fractal break arrows are the original's
+ * plotarrow outputs (`arrows` of the result). Alerts (alertcondition, `alerts` of the result): 'Fractal Break Arrow'
+ * (either break), 'Fractal Break Long', 'Fractal Break Short' and 'Any Swing' (a HH / LH / HL / LL pivot).
+ * The two moving average plots are circles joined by a line in the original; the port gives circles.
  *
  * Reference: "Pivot Hilo Support n Resistance Levels R5.4" by JustUncleL
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -32,7 +34,9 @@ import {
   ta, Series, getSourceSeries, color, callsite, line, resetDrawings, setDrawingBar, varDrawing,
   type Line, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
+import type { ArrowData } from 'oakscriptjs';
 import type { BarColorData, LineDrawingData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type MaType = 'SMA' | 'EMA' | 'WMA' | 'VWMA' | 'Smooth SMA' | 'DEMA' | 'TEMA' | 'Hull MA' | 'ZeroLag EMA' | 'Triangular MA' | 'SuperSmooth MA';
 
@@ -164,7 +168,8 @@ const truthy = (v: number) => !Number.isNaN(v) && v !== 0;
 export function calculate(
   bars: Bar[],
   inputs: Partial<PivotHiloSupportNResistanceLevelsR33Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; lines: LineDrawingData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; lines: LineDrawingData[]; arrows: ArrowData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { left, right, Shunt } = cfg;
   const n = bars.length;
@@ -289,6 +294,8 @@ export function calculate(
   const colors: Record<'plot6' | 'plot7', Array<string | undefined>> = { plot6: new Array(n), plot7: new Array(n) };
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
+  const arrows: ArrowData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [], swingFlags: boolean[] = [];
   // Level lines in the drawing registry of the library (line limit of the script); `var line pvthiLine / pvtloLine`
   resetDrawings({ line: MAX_LINES });
   const pvthiLine = varDrawing<Line>();
@@ -326,6 +333,8 @@ export function calculate(
     const lowerhigh = hasHi && gt(h1, h0) && (!three || (gt(h2, h0) && gt(h3, h0))) ? pvthi : NaN;
     const higherlow = hasLo && lt(l1, l0) && (!three || (lt(l2, l0) && lt(l3, l0))) ? pvtlo : NaN;
     const lowerlow = hasLo && gt(l1, l0) && (!three || (gt(l2, l0) && gt(l3, l0))) ? pvtlo : NaN;
+    // anySwing = not (na(higherhigh) and na(lowerhigh) and na(higherlow) and na(lowerlow))
+    swingFlags.push(![higherhigh, lowerhigh, higherlow, lowerlow].every((v) => Number.isNaN(v)));
 
     if (target >= 0) {
       const time = bars[target].time;
@@ -391,12 +400,12 @@ export function calculate(
       && (!cfg.filterFB || ((fastLonger || gt(fastMa[i], slowMa[i])) && gt(bar.close, fastMa[i])));
     const sell = lt(bar.close, pvtlos) && ge(bar.open, pvtlos)
       && (!cfg.filterFB || ((fastLonger || lt(fastMa[i], slowMa[i])) && lt(bar.close, fastMa[i])));
-    if (cfg.ShowFB && buy) {
-      markers.push({ time: bar.time, position: 'belowBar', shape: 'arrowUp', color: String(color.new(LIME, 20)) });
-    }
-    if (cfg.ShowFB && sell) {
-      markers.push({ time: bar.time, position: 'aboveBar', shape: 'arrowDown', color: String(color.new(RED, 20)) });
-    }
+    buyFlags.push(buy);
+    sellFlags.push(sell);
+    // plotarrow(ShowFB and buy ? 1 : na, 'BUY Arrow', colorup = color.lime, transp = 20)
+    if (cfg.ShowFB && buy) arrows.push({ time: bar.time, id: 'arrow0', value: 1, color: String(color.new(LIME, 20)) });
+    // plotarrow(ShowFB and sell ? -1 : na, 'SELL Arrow', colordown = color.red, transp = 20)
+    if (cfg.ShowFB && sell) arrows.push({ time: bar.time, id: 'arrow1', value: -1, color: String(color.new(RED, 20)) });
   }
 
   setDrawingBar(null);
@@ -414,10 +423,21 @@ export function calculate(
     plots,
     markers,
     barColors,
+    arrows,
     lines: line.all().map((l) => ({
       time1: bars[l.x1].time, price1: l.y1, time2: bars[l.x2].time, price2: l.y2, color: String(l.color), width: 1, style: 'solid' as const,
     })),
+    // alertcondition(buy or sell) / (buy) / (sell) / (anySwing)
+    alerts: alertStates(alertConditions, bars, [buyFlags.map((b, i) => b || sellFlags[i]), buyFlags, sellFlags, swingFlags]),
   };
 }
 
-export const PivotHiloSupportNResistanceLevelsR33 = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Fractal Break Arrow', message: 'Alert' },
+  { id: 'alert1', title: 'Fractal Break Long', message: 'Long' },
+  { id: 'alert2', title: 'Fractal Break Short', message: 'Short' },
+  { id: 'alert3', title: 'Any Swing', message: 'AnySwing' },
+];
+
+export const PivotHiloSupportNResistanceLevelsR33 = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

@@ -5,18 +5,25 @@
  * Tracks brick open/close levels and generates trend direction.
  * Includes a breakout detection system and an EMA-based trend filter
  * with configurable reversal thresholds.
+ * Chart style: 'Area' (open / close lines and their fill), 'Candle' (the bricks as candles, `plotCandles`) or
+ * 'Dont Show'.
+ * Alerts (alertcondition, `alerts` of the result): breakout uptrend / downtrend started, main trend turns up / down,
+ * Renko trend turns up / down.
  *
  * Reference: "Renko Chart" by LonesomeTheBlue
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BarColorData } from '../types';
+import type { MarkerData, BarColorData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RenkoChartInputs {
   mode: 'ATR' | 'Traditional';
   atrPeriod: number;
   boxSize: number;
   source: 'close' | 'hl';
+  /** Chart Style As */
+  showStyle: 'Candle' | 'Area' | 'Dont Show';
   showBreakout: boolean;
   breakoutLength: number;
   showTrend: boolean;
@@ -32,6 +39,7 @@ export const defaultInputs: RenkoChartInputs = {
   atrPeriod: 14,
   boxSize: 10.0,
   source: 'hl',
+  showStyle: 'Area',
   showBreakout: true,
   breakoutLength: 1,
   showTrend: true,
@@ -47,6 +55,7 @@ export const inputConfig: InputConfig[] = [
   { id: 'atrPeriod', type: 'int', title: '[ATR] Atr Period', defval: 14, min: 1 },
   { id: 'boxSize', type: 'float', title: '[Traditional] Brick Size', defval: 10.0, min: 0.000001 },
   { id: 'source', type: 'string', title: 'Source', defval: 'hl', options: ['close', 'hl'] },
+  { id: 'showStyle', type: 'string', title: 'Chart Style As', defval: 'Area', options: ['Candle', 'Area', 'Dont Show'] },
   { id: 'showBreakout', type: 'bool', title: 'Show Breakout Trend', defval: true },
   { id: 'breakoutLength', type: 'int', title: 'Length for Breakout', defval: 1, min: 1 },
   { id: 'showTrend', type: 'bool', title: 'Show Trend', defval: true },
@@ -64,13 +73,23 @@ export const plotConfig: PlotConfig[] = [
   { id: 'trendLine', title: 'Trend', color: '#008000', lineWidth: 3 },
 ];
 
+/** plotcandle(showstyle == 'Candle' ? oprice : na, ..., title = 'Renko Candles', color = trend == 1 ? upcolor : downcolor) */
+export const plotCandleConfig = [{ id: 'renkoCandles', title: 'Renko Candles' }];
+
 export const metadata = {
   title: 'Renko Chart',
   shortTitle: 'Renko',
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<RenkoChartInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+type RenkoChartResult = Omit<IndicatorResult, 'markers'> & {
+  markers: MarkerData[];
+  barColors: BarColorData[];
+  plotCandles: Record<string, PlotCandleData[]>;
+  alerts: AlertConditionState[];
+};
+
+export function calculate(bars: Bar[], inputs: Partial<RenkoChartInputs> = {}): RenkoChartResult {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const reversal = 2;
@@ -204,6 +223,8 @@ export function calculate(bars: Bar[], inputs: Partial<RenkoChartInputs> = {}): 
   // Breakout detection
   const botrend: number[] = new Array(n).fill(0);
   const switchArr: number[] = new Array(n).fill(0);
+  const setAFlags: boolean[] = new Array(n).fill(false);
+  const setBFlags: boolean[] = new Array(n).fill(false);
   {
     // Simplified breakout: detect when trend changes and brick count meets Length
     for (let i = 1; i < n; i++) {
@@ -222,6 +243,8 @@ export function calculate(bars: Bar[], inputs: Partial<RenkoChartInputs> = {}): 
       }
 
       botrend[i] = setA === 1 ? 1 : setB === 1 ? -1 : botrend[i - 1];
+      setAFlags[i] = setA === 1;
+      setBFlags[i] = setB === 1;
     }
   }
 
@@ -303,15 +326,17 @@ export function calculate(bars: Bar[], inputs: Partial<RenkoChartInputs> = {}): 
   const upColor = '#0000FF';   // blue for up (Blue/Red theme default)
   const downColor = '#FF0000'; // red for down
 
+  const areaOn = (cfg.showStyle ?? 'Area') === 'Area';
+  const candleOn = cfg.showStyle === 'Candle';
   const openPlot = oprice.map((v, i) => ({
     time: bars[i].time,
-    value: i < warmup || v <= 0 ? NaN : v,
+    value: !areaOn || i < warmup || v <= 0 ? NaN : v,
     color: '#808080',
   }));
 
   const closePlot = icloseprice.map((v, i) => ({
     time: bars[i].time,
-    value: i < warmup || v <= 0 ? NaN : v,
+    value: !areaOn || i < warmup || v <= 0 ? NaN : v,
     color: '#808080',
   }));
 
@@ -348,9 +373,29 @@ export function calculate(bars: Bar[], inputs: Partial<RenkoChartInputs> = {}): 
 
   // Fill between open and close with trend color
   const fillColors = bars.map((_b, i) => {
-    if (i < warmup || oprice[i] <= 0 || icloseprice[i] <= 0) return 'transparent';
+    if (!areaOn || i < warmup || oprice[i] <= 0 || icloseprice[i] <= 0) return 'transparent';
     return trend[i] === 1 ? 'rgba(0,0,255,0.30)' : 'rgba(255,0,0,0.30)';
   });
+
+  // plotcandle(showstyle == 'Candle' ? oprice : na, max(oprice, icloseprice), min(oprice, icloseprice), icloseprice,
+  //   title = 'Renko Candles', color = trend == 1 ? upcolor : downcolor)
+  const renkoCandles: PlotCandleData[] = bars.map((b, i) => {
+    const on = candleOn && i >= warmup;
+    const o = oprice[i];
+    const c = icloseprice[i];
+    return {
+      time: b.time as number,
+      open: on ? o : NaN,
+      high: on ? Math.max(o, c) : NaN,
+      low: on ? Math.min(o, c) : NaN,
+      close: on ? c : NaN,
+      color: trend[i] === 1 ? upColor : downColor,
+    };
+  });
+
+  // alertcondition(setA == 1), (setB == 1), (change(mtrend) > 0), (change(mtrend) < 0), (change(trend) > 0),
+  // (change(trend) < 0)
+  const chg = (a: number[], sign: number) => a.map((v, i) => i > 0 && (v - a[i - 1]) * sign > 0);
 
   // Bar colors
   const barColors: BarColorData[] = [];
@@ -400,7 +445,21 @@ export function calculate(bars: Bar[], inputs: Partial<RenkoChartInputs> = {}): 
     ],
     markers,
     barColors,
-  } as Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] };
+    plotCandles: { renkoCandles },
+    alerts: alertStates(alertConditions, bars, [
+      setAFlags, setBFlags, chg(mtrend, 1), chg(mtrend, -1), chg(trend, 1), chg(trend, -1),
+    ]),
+  } as RenkoChartResult;
 }
 
-export const RenkoChart = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Breakout Uptrend started', message: 'Breakout Uptrend started' },
+  { id: 'alert1', title: 'Breakout Downtrend started', message: 'Breakout Downtrend started' },
+  { id: 'alert2', title: 'Main Trend is Up', message: 'Main Trend is Up' },
+  { id: 'alert3', title: 'Main Trend is Down', message: 'Main Trend is Down' },
+  { id: 'alert4', title: 'Renko Trend is Up', message: 'Renko Trend is Up' },
+  { id: 'alert5', title: 'Renko Trend is Down', message: 'Renko Trend is Down' },
+];
+
+export const RenkoChart = { calculate, metadata, defaultInputs, inputConfig, plotConfig, plotCandleConfig, alertConditions };

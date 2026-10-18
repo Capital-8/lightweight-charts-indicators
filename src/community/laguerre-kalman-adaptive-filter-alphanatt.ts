@@ -6,12 +6,14 @@
  * gamma * (1 + 10 * stdev(close, adaptivePeriod) / close), clamped to 0.1..0.99. The line is the EMA(3) of the mean
  * of the Kalman estimate and the adaptive filter. It is cyan when it rises by more than the threshold and the close
  * is above it on this bar and the bar before, else magenta.
+ * Alerts (alertcondition, `alerts` of the result): the close crossing over / under the line.
  *
  * Reference: "Laguerre-Kalman Adaptive Filter | AlphaNatt" by AlphaNatt
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LaguerreKalmanAdaptiveFilterAlphanattInputs {
   /** Laguerre gamma */
@@ -58,7 +60,7 @@ const nz = (v: number) => (isNaN(v) ? 0 : v);
 export function calculate(
   bars: Bar[],
   inputs: Partial<LaguerreKalmanAdaptiveFilterAlphanattInputs> = {},
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { gamma, adaptivePeriod, noiseLevel, threshold } = cfg;
   const n = bars.length;
@@ -112,8 +114,16 @@ export function calculate(
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
+    // alertcondition(ta.crossover(close, smoothed), ...) / alertcondition(ta.crossunder(close, smoothed), ...)
+    alerts: alertStates(alertConditions, bars, [crossedOver(close, smoothed), crossedUnder(close, smoothed)]),
   };
 }
+
+/** The original's alertconditions (each declared twice by the original, listed once) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Filter Cross Up', message: 'Price crossed above Laguerre-Kalman Filter' },
+  { id: 'alert1', title: 'Filter Cross Down', message: 'Price crossed below Laguerre-Kalman Filter' },
+];
 
 export const LaguerreKalmanAdaptiveFilterAlphanatt = {
   calculate,
@@ -121,4 +131,5 @@ export const LaguerreKalmanAdaptiveFilterAlphanatt = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

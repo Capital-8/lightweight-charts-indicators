@@ -11,12 +11,15 @@
  * adaptive-ATR supertrend trail whose band width follows the model drive. Glow fills, flip triangles and optional
  * source-switch labels and trend candles.
  *
+ * Alerts (alertcondition, `alerts` of the result): the supertrend flipping up / down and the selected source changing.
+ *
  * Reference: "AI Source Switching Moving Average (Zeiierman)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
 
 import { ta, math, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, PlotCandleData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 const MA_TYPES = ['SMA', 'EMA', 'WMA', 'VWMA', 'RMA', 'HMA', 'TEMA', 'ZLEMA', 'KAMA', 'ALMA'];
 
@@ -144,7 +147,8 @@ const normScore = (x: number) => 1.0 / (1.0 + Math.exp(-clamp(x, -8, 8)));
 export function calculate(
   bars: Bar[],
   inputs: Partial<AISourceSwitchingMovingAverageInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const h = cfg.horizonBars;
@@ -403,6 +407,9 @@ export function calculate(
   const dnGlow: (string | null)[] = [];
   const markers: MarkerData[] = [];
   const candles: PlotCandleData[] = [];
+  const flipUpFlags: boolean[] = new Array(n).fill(false);
+  const flipDnFlags: boolean[] = new Array(n).fill(false);
+  const changedFlags: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const up = stDir[i] === 1;
@@ -422,24 +429,28 @@ export function calculate(
         color: candleCol, wickColor: candleCol, borderColor: candleCol });
     }
     // source switch labels (bestId != bestId[1])
-    if (cfg.showSourceMarks && i > 0 && bestId[i] !== bestId[i - 1]) {
+    changedFlags[i] = i > 0 && bestId[i] !== bestId[i - 1];
+    if (cfg.showSourceMarks && changedFlags[i]) {
       const marks: MarkerData[] = [
-        { time: t, position: 'belowBar', shape: 'labelUp', color: c(cfg.neutralCol, 0), text: 'O', textColor: color.white, size: 'tiny' },
-        { time: t, position: 'belowBar', shape: 'labelUp', color: c(cfg.bullCol, 0), text: 'H', textColor: color.black, size: 'tiny' },
-        { time: t, position: 'aboveBar', shape: 'labelDown', color: c(cfg.bearCol, 0), text: 'L', textColor: color.white, size: 'tiny' },
-        { time: t, position: 'belowBar', shape: 'labelUp', color: c(color.white, 0), text: 'C', textColor: color.black, size: 'tiny' },
+        { id: 'shape0', time: t, position: 'belowBar', shape: 'labelUp', color: c(cfg.neutralCol, 0), text: 'O', textColor: color.white, size: 'tiny' },
+        { id: 'shape1', time: t, position: 'belowBar', shape: 'labelUp', color: c(cfg.bullCol, 0), text: 'H', textColor: color.black, size: 'tiny' },
+        { id: 'shape2', time: t, position: 'aboveBar', shape: 'labelDown', color: c(cfg.bearCol, 0), text: 'L', textColor: color.white, size: 'tiny' },
+        { id: 'shape3', time: t, position: 'belowBar', shape: 'labelUp', color: c(color.white, 0), text: 'C', textColor: color.black, size: 'tiny' },
       ];
       markers.push(marks[bestId[i]]);
     }
     // flip triangles at the trail (tiny, and small at transparency 50)
+    // stFlipUp = stDir == 1 and stDir[1] == -1, stFlipDn = stDir == -1 and stDir[1] == 1
     const prevDir = i > 0 ? stDir[i - 1] : NaN;
-    if (cfg.showFlipMarks && up && prevDir === -1 && !isNaN(trailUp[i])) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: trailUp[i], shape: 'triangleUp', color: cfg.bullCol, size: 'tiny' });
-      markers.push({ time: t, position: 'atPriceMiddle', price: trailUp[i], shape: 'triangleUp', color: c(cfg.bullCol, 50), size: 'small' });
+    flipUpFlags[i] = up && prevDir === -1;
+    flipDnFlags[i] = stDir[i] === -1 && prevDir === 1;
+    if (cfg.showFlipMarks && flipUpFlags[i] && !isNaN(trailUp[i])) {
+      markers.push({ id: 'shape4', time: t, position: 'atPriceMiddle', price: trailUp[i], shape: 'triangleUp', color: cfg.bullCol, size: 'tiny' });
+      markers.push({ id: 'shape6', time: t, position: 'atPriceMiddle', price: trailUp[i], shape: 'triangleUp', color: c(cfg.bullCol, 50), size: 'small' });
     }
-    if (cfg.showFlipMarks && stDir[i] === -1 && prevDir === 1 && !isNaN(trailDn[i])) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: trailDn[i], shape: 'triangleDown', color: cfg.bearCol, size: 'tiny' });
-      markers.push({ time: t, position: 'atPriceMiddle', price: trailDn[i], shape: 'triangleDown', color: c(cfg.bearCol, 50), size: 'small' });
+    if (cfg.showFlipMarks && flipDnFlags[i] && !isNaN(trailDn[i])) {
+      markers.push({ id: 'shape5', time: t, position: 'atPriceMiddle', price: trailDn[i], shape: 'triangleDown', color: cfg.bearCol, size: 'tiny' });
+      markers.push({ id: 'shape7', time: t, position: 'atPriceMiddle', price: trailDn[i], shape: 'triangleDown', color: c(cfg.bearCol, 50), size: 'small' });
     }
   }
 
@@ -454,9 +465,19 @@ export function calculate(
       { plot1: 'plot2', plot2: 'plot3', gradient: { topValue: trailDn, bottomValue: close, topColor: dnGlow, bottomColor: none } },
     ],
     markers,
-    plotCandles: cfg.showCandles ? { aiTrendCandles: candles } : {},
+    // plotcandle(showCandles ? open : na, ...): the output is there, with no candle when off
+    plotCandles: { aiTrendCandles: candles },
+    // alertcondition(stFlipUp) / (stFlipDn) / (sourceChanged)
+    alerts: alertStates(alertConditions, bars, [flipUpFlags, flipDnFlags, changedFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'AI Trend Flip Up', message: 'AI Source Adaptive MA flipped bullish' },
+  { id: 'alert1', title: 'AI Trend Flip Down', message: 'AI Source Adaptive MA flipped bearish' },
+  { id: 'alert2', title: 'AI Source Changed', message: 'AI Source Selector switched OHLC source' },
+];
 
 /** ma(src, len, typ) of the script */
 function movingAverage(bars: Bar[], src: number[], len: number, typ: string): number[] {
@@ -505,4 +526,5 @@ export const AISourceSwitchingMovingAverage = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

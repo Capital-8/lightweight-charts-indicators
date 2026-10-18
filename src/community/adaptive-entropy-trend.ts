@@ -8,6 +8,7 @@
  * (fast multiplier) and outer (slow multiplier). The trend turns up when the close is above the inner upper band and
  * down when it is below the inner lower band; the bands, fills and candles take the trend colour.
  * Presets replace the lookback and the multipliers (Fast Response 12 / 1.4 / 2.8, Smooth Trend 40 / 2.2 / 4.5).
+ * Alerts (alertcondition, `alerts` of the result): the trend turns bullish, bearish, or either.
  *
  * Reference: "Adaptive Entropy Trend [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type AdaptiveEntropyTrendPreset = 'Default' | 'Fast Response' | 'Smooth Trend';
 export type AdaptiveEntropyTrendColorPreset = 'Classic' | 'Aqua' | 'Cosmic' | 'Cyber' | 'Neon' | 'Custom';
@@ -89,7 +91,10 @@ const PRESETS: Record<Exclude<AdaptiveEntropyTrendColorPreset, 'Custom'>, [strin
 const gt = (a: number, b: number) => a - b > 1e-10;
 const lt = (a: number, b: number) => b - a > 1e-10;
 
-export function calculate(bars: Bar[], inputs: Partial<AdaptiveEntropyTrendInputs> = {}): IndicatorResult & { barColors: BarColorData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<AdaptiveEntropyTrendInputs> = {},
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -123,6 +128,7 @@ export function calculate(bars: Bar[], inputs: Partial<AdaptiveEntropyTrendInput
   const innerLower: number[] = new Array(n);
   const outerLower: number[] = new Array(n);
   const trendColor: string[] = new Array(n);
+  const direction: number[] = new Array(n);
   let adaptiveEma = NaN; // var float adaptiveEma = na
   let trendDirection = 0; // var int trendDirection = 0
   for (let b = 0; b < n; b++) {
@@ -157,6 +163,7 @@ export function calculate(bars: Bar[], inputs: Partial<AdaptiveEntropyTrendInput
 
     if (gt(close, innerUpper[b])) trendDirection = 1;
     else if (lt(close, innerLower[b])) trendDirection = -1;
+    direction[b] = trendDirection;
     trendColor[b] = trendDirection === 1 ? bullColor : trendDirection === -1 ? bearColor : NEUTRAL;
   }
 
@@ -165,6 +172,9 @@ export function calculate(bars: Bar[], inputs: Partial<AdaptiveEntropyTrendInput
   const outerT = cfg.fillTransparency;
   const innerT = Math.min(cfg.fillTransparency + 6, 100);
   const fillColors = (transp: number) => trendColor.map((c) => String(color.new(c, transp)));
+  // trendTurnedBullish = trendDirection == 1 and trendDirection[1] != 1 (na on the first bar: false), bearish alike
+  const turnedBull = direction.map((d, i) => d === 1 && i > 0 && direction[i - 1] !== 1);
+  const turnedBear = direction.map((d, i) => d === -1 && i > 0 && direction[i - 1] !== -1);
 
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
@@ -185,8 +195,17 @@ export function calculate(bars: Bar[], inputs: Partial<AdaptiveEntropyTrendInput
     ],
     // barcolor(enableBarcolor ? color.new(trendColor, 20) : na, title = 'Trend Bar Color')
     barColors: cfg.enableBarcolor ? bars.map((_b, i) => ({ time: t(i), color: String(color.new(trendColor[i], 20)) })) : [],
+    // alertcondition(trendTurnedBullish / trendTurnedBearish / trendChanged, ...)
+    alerts: alertStates(alertConditions, bars, [turnedBull, turnedBear, turnedBull.map((v, i) => v || turnedBear[i])]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend Signal', message: 'Adaptive Entropy Trend: BULLISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Trend Signal', message: 'Adaptive Entropy Trend: BEARISH trend confirmed on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert2', title: 'Trend Direction Changed', message: 'Adaptive Entropy Trend: Trend direction changed on {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const AdaptiveEntropyTrend = {
   calculate,
@@ -194,4 +213,5 @@ export const AdaptiveEntropyTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

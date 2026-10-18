@@ -6,6 +6,8 @@
  * negative and rising). BUY / SELL labels at -5 / +5 when the sentiment crosses zero, a grey background when
  * |sentiment| > 40. The hidden Risk Flow area is |sentiment| - |riskOsc - riskOscInv|, with Chandelier exits of the
  * highest / lowest close and ATR normalised by the close range.
+ * Alerts (alertcondition, `alerts` of the result): 'Aura Buy Signal', 'Aura Sell Signal' (the zero crosses) and
+ * 'Aura Extreme Risk' (|sentiment| > 40).
  *
  * Reference: "Aura Sentiment & Risk Flow [Pineify]" by Pineify
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AuraSentimentRiskFlowInputs {
   /** RSI length of the sentiment */
@@ -74,7 +77,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<AuraSentimentRiskFlowInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -107,6 +110,7 @@ export function calculate(
   const plot2: { time: number; value: number; color: string }[] = [];
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [], extremeFlags: boolean[] = [];
 
   for (let i = 0; i < n; i++) {
     const t = bars[i].time as number;
@@ -141,7 +145,11 @@ export function calculate(
         text: 'SELL', textColor: color.white, size: 'tiny' });
     }
     // bgcolor(math.abs(sentimentOsc) > 40 ? color.new(colNeut, 90) : na)
-    if (gt(Math.abs(s), 40)) bgColors.push({ time: t, color: bgExtreme });
+    const isExtreme = gt(Math.abs(s), 40);
+    if (isExtreme) bgColors.push({ time: t, color: bgExtreme });
+    buyFlags.push(!!crossUp[i]);
+    sellFlags.push(!!crossDn[i]);
+    extremeFlags.push(isExtreme);
   }
 
   return {
@@ -152,8 +160,17 @@ export function calculate(
     ],
     markers,
     bgColors,
+    // alertcondition(buySignal) / alertcondition(sellSignal) / alertcondition(isExtreme)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, extremeFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Aura Buy Signal', message: 'Aura Flow: BUY Signal - Bullish Sentiment Crossing Up' },
+  { id: 'alert1', title: 'Aura Sell Signal', message: 'Aura Flow: SELL Signal - Bearish Sentiment Crossing Down' },
+  { id: 'alert2', title: 'Aura Extreme Risk', message: 'Aura Flow: Extreme Risk Zone - Sentiment at extremes' },
+];
 
 export const AuraSentimentRiskFlow = {
   calculate,
@@ -161,4 +178,5 @@ export const AuraSentimentRiskFlow = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -6,6 +6,8 @@
  * label marks the first bar (not already long) with a positive score, a close above the upper band and RSI above 50;
  * a Short label marks the first bar (not already short) with a negative score, a close below the lower band and RSI
  * below 50. A Long signal ends the short state and a Short signal ends the long state.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): "Long Entry Tiggered!" on each Long signal and
+ * "Short Entry Tiggered!" on each Short signal (the original's spelling).
  *
  * Reference: "IU Smart Flow System" by Shivam_Mandrai
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,7 +15,10 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { AlertCall, MarkerData } from '../types';
+
+/** The original calls alert() */
+export const hasAlertFunction = true;
 
 export interface IuSmartFlowSystemInputs {
   /** Imbalance length */
@@ -54,7 +59,7 @@ const lt = (a: number, b: number) => b - a > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<IuSmartFlowSystemInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -69,6 +74,7 @@ export function calculate(
   const bullTrend: number[] = new Array(n);
   const bearTrend: number[] = new Array(n);
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
   let inLong = false; // var in_long = false
   let inShort = false; // var in_short = false
   for (let i = 0; i < n; i++) {
@@ -104,6 +110,9 @@ export function calculate(
       markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: color.red, text: 'Short',
         textColor: color.white, size: 'auto' });
     }
+    // if long_entry: alert("Long Entry Tiggered!", alert.freq_once_per_bar); the same for short_entry
+    if (longEntry) alertCalls.push({ time: bars[i].time, message: 'Long Entry Tiggered!', freq: 'once_per_bar' });
+    if (shortEntry) alertCalls.push({ time: bars[i].time, message: 'Short Entry Tiggered!', freq: 'once_per_bar' });
   }
 
   const fillCol = String(color.new(color.gray, 90));
@@ -116,6 +125,7 @@ export function calculate(
     // fill(bull_trend_plot, bear_trend_plot, color = color.new(color.gray, 90))
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: fillCol } }],
     markers,
+    alertCalls,
   };
 }
 
@@ -125,4 +135,5 @@ export const IuSmartFlowSystem = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

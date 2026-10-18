@@ -17,7 +17,9 @@
  *
  * Chart values read: the chart foreground colour (channel box, mid line, breakout label texts; without a chart
  * context: the dark theme colour #DBDBDB) and the symbol tick (prices in the trade labels; without it: 0.01).
- * The 6 alert conditions of the script have no output.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Breakout' / 'Bearish Breakout' on the bars of the breakout
+ * labels; 'TP1 Hit', 'TP2 Hit', 'TP3 Hit' and 'SL Hit' when the high (low) of the bar reaches a level of the current
+ * trade that the previous high (low) had not reached (long trade; the mirror for a short one).
  *
  * Reference: "Breakout Targets [AlgoAlpha]" by AlgoAlpha
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -27,6 +29,17 @@
 import { ta, Series, color, str, barTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BoxData, LabelData, LineDrawingData, LinefillData, MarkerData } from '../types';
 import { foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Breakout', message: 'Bullish Breakout Detected' },
+  { id: 'alert1', title: 'Bearish Breakout', message: 'Bearish Breakout Detected' },
+  { id: 'alert2', title: 'TP1 Hit', message: 'Take Profit 1 Hit' },
+  { id: 'alert3', title: 'TP2 Hit', message: 'Take Profit 2 Hit' },
+  { id: 'alert4', title: 'TP3 Hit', message: 'Take Profit 3 Hit' },
+  { id: 'alert5', title: 'SL Hit', message: 'Stop Loss Hit' },
+];
 
 export interface BreakoutTargetsInputs {
   /** Range Detection Period */
@@ -120,6 +133,8 @@ const MAX_LINES = 50;
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const ge = (a: number, b: number) => a - b >= -EPS;
+const lt = (a: number, b: number) => gt(b, a);
+const le = (a: number, b: number) => ge(b, a);
 const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 
 /** A drawing of the script (`dead` = deleted; `kept` = a `var` variable of the script refers to it) */
@@ -175,7 +190,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<BreakoutTargetsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult {
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { len, green, red } = cfg;
   // overlap = not input.bool(true, "Prevent Overlap")
@@ -232,6 +247,7 @@ export function calculate(
   let pivlLvl = NaN;
   let pivlIndex = NaN;
   let wede = 0;
+  const flags: boolean[][] = [[], [], [], [], [], []];
 
   for (let i = 0; i < n; i++) {
     const bar = bars[i];
@@ -358,13 +374,45 @@ export function calculate(
       }
     }
 
+    // alertcondition(upbreak != 0, "Bullish Breakout") / alertcondition(downbreak != 0, "Bearish Breakout")
+    const isUpbreak = !Number.isNaN(upbreak) && !eq(upbreak, 0);
+    const isDownbreak = !Number.isNaN(downbreak) && !eq(downbreak, 0);
+    flags[0].push(isUpbreak);
+    flags[1].push(isDownbreak);
+    // tp1_val .. sl_val = line.get_y1(...) of the current trade (na without a trade); levels crossed on this bar
+    const [slVal, tp1Val, tp2Val, tp3Val] = tradeLines.length > 0
+      ? [tradeLines[1].y1, tradeLines[2].y1, tradeLines[3].y1, tradeLines[4].y1] : [NaN, NaN, NaN, NaN];
+    const high1 = i > 0 ? bars[i - 1].high : NaN;
+    const low1 = i > 0 ? bars[i - 1].low : NaN;
+    let tp1HitCond = false;
+    let tp2HitCond = false;
+    let tp3HitCondAlert = false;
+    let slHitCond = false;
+    if (!Number.isNaN(tp1Val)) {
+      if (tradeDir === 1) {
+        tp1HitCond = ge(bar.high, tp1Val) && lt(high1, tp1Val);
+        tp2HitCond = ge(bar.high, tp2Val) && lt(high1, tp2Val);
+        tp3HitCondAlert = ge(bar.high, tp3Val) && lt(high1, tp3Val);
+        slHitCond = le(bar.low, slVal) && gt(low1, slVal);
+      } else if (tradeDir === -1) {
+        tp1HitCond = le(bar.low, tp1Val) && gt(low1, tp1Val);
+        tp2HitCond = le(bar.low, tp2Val) && gt(low1, tp2Val);
+        tp3HitCondAlert = le(bar.low, tp3Val) && gt(low1, tp3Val);
+        slHitCond = ge(bar.high, slVal) && lt(high1, slVal);
+      }
+    }
+    flags[2].push(tp1HitCond);
+    flags[3].push(tp2HitCond);
+    flags[4].push(tp3HitCondAlert);
+    flags[5].push(slHitCond);
+
     // plotshape(upbreak != 0 ? upbreak : na, ...), plotshape(downbreak != 0 ? downbreak : na, ...)
-    if (!Number.isNaN(upbreak) && !eq(upbreak, 0)) {
+    if (isUpbreak) {
       markers.push({
         time: bar.time, position: 'atPriceBottom', price: upbreak, shape: 'labelUp', color: green, text: '▲', textColor: chartFg,
       });
     }
-    if (!Number.isNaN(downbreak) && !eq(downbreak, 0)) {
+    if (isDownbreak) {
       markers.push({
         time: bar.time, position: 'atPriceTop', price: downbreak, shape: 'labelDown', color: red, text: '▼', textColor: chartFg,
       });
@@ -396,7 +444,8 @@ export function calculate(
     lines: allLines.filter(drawn).map(lineOut),
     labels,
     linefills,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const BreakoutTargets = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BreakoutTargets = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

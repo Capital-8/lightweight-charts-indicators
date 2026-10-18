@@ -16,7 +16,8 @@
  * higher-timeframe candle (`security` without lookahead on historical bars), or of the last bar on the chart
  * timeframe. Without a context the close time follows a 24x7 UTC calendar.
  *
- * The two alerts of the original (New High, New Low) have no output.
+ * Alerts (alertcondition, `alerts` of the result): 'New High' / 'New Low', true on the bars whose high (low) is the
+ * highest high (lowest low) of the candles.
  *
  * Reference: "Multi Time Frame Candles with Volume" by LonesomeTheBlue
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -28,6 +29,7 @@ import {
   type Line, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { type ChartContext, mintickOf, nowOf } from '../chart-context';
 import { chartTimeframe, hasCalendar, higherTimeframeBars, periodChanges } from '../anchor-period';
 
@@ -146,7 +148,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<MultiTimeFrameCandlesWithVolumeInfo3dInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const num = Math.trunc(cfg.numofcandles);
@@ -158,7 +160,9 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
   };
-  if (n === 0) return { ...result, bgColors: [] };
+  if (n === 0) return { ...result, bgColors: [], alerts: alertStates(alertConditions, bars, []) };
+  const newHighFlags = new Array<boolean>(n).fill(false);
+  const newLowFlags = new Array<boolean>(n).fill(false);
 
   // newbar = change(time(Timeframe)) != 0 (false on the first bar)
   const newbar = periodChanges(bars, cfg.timeframe, chart);
@@ -256,6 +260,8 @@ export function calculate(
 
     const newhigh = eq(b.high, maxlevel);
     const newlow = eq(b.low, minlevel);
+    newHighFlags[i] = newhigh;
+    newLowFlags[i] = newlow;
     if (highline.value) line.delete(highline.value);
     if (lowline.value) line.delete(lowline.value);
     if (newhigh && num > 1) {
@@ -323,8 +329,15 @@ export function calculate(
   }
   setDrawingBar(null);
 
-  return { ...result, bgColors, ...drawingOutputs(bars) };
+  // alertcondition(newhigh, 'New High') / alertcondition(newlow, 'New Low')
+  return { ...result, bgColors, ...drawingOutputs(bars), alerts: alertStates(alertConditions, bars, [newHighFlags, newLowFlags]) };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New High', message: 'New High' },
+  { id: 'alert1', title: 'New Low', message: 'New Low' },
+];
 
 /** array.min (na skipped; na when no value) */
 function arrayMin(a: number[]): number {
@@ -346,4 +359,5 @@ export const MultiTimeFrameCandlesWithVolumeInfo3d = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

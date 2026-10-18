@@ -4,6 +4,8 @@
  * The oscillator is the RSI of the source minus its SMA. Glow plots and a five-layer fill to zero draw the
  * oscillator. Pivot divergences between price and oscillator give Bull / Bear lines and labels (drawn on the pivot
  * bar), and crosses of the overbought / oversold levels or of zero give triangle signals at the pane edges.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Divergence' and 'Bearish Divergence', true on the bar
+ * that confirms the divergence (the pivot is pivotLength bars back).
  *
  * Reference: "PulseWave + Divergence" by Uncle_the_shooter
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { ta, Series, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barInterval, barTime } from '../bar-time';
 
 export interface PulsewaveDivergenceInputs {
@@ -125,7 +128,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<PulsewaveDivergenceInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -271,24 +274,24 @@ export function calculate(
       const price = oscLbr(i);
       if (bullCond[i] && !isNaN(price)) {
         markers.push({ time: barTime(bars, i - lb, interval), position: 'atPriceBottom', price, shape: 'labelUp',
-          color: cfg.bullDivColor, text: ' Bull ', textColor: cfg.textColor });
+          color: cfg.bullDivColor, text: ' Bull ', textColor: cfg.textColor, id: 'shape0' });
       }
       if (bearCond[i] && !isNaN(price)) {
         markers.push({ time: barTime(bars, i - lb, interval), position: 'atPriceTop', price, shape: 'labelDown',
-          color: cfg.bearDivColor, text: ' Bear ', textColor: cfg.textColor });
+          color: cfg.bearDivColor, text: ' Bear ', textColor: cfg.textColor, id: 'shape1' });
       }
     }
     // Signal triangles: plotshape(cond ? osc : na, location.bottom (buy) / location.top (sell), size.tiny)
-    const buy = (on: boolean) => {
-      if (on && !isNaN(osc[i])) markers.push({ time: t(i), position: 'bottom', shape: 'triangleUp', color: cfg.oversoldColor, size: 'tiny' });
+    const buy = (on: boolean, id: string) => {
+      if (on && !isNaN(osc[i])) markers.push({ time: t(i), position: 'bottom', shape: 'triangleUp', color: cfg.oversoldColor, size: 'tiny', id });
     };
-    const sell = (on: boolean) => {
-      if (on && !isNaN(osc[i])) markers.push({ time: t(i), position: 'top', shape: 'triangleDown', color: cfg.overboughtColor, size: 'tiny' });
+    const sell = (on: boolean, id: string) => {
+      if (on && !isNaN(osc[i])) markers.push({ time: t(i), position: 'top', shape: 'triangleDown', color: cfg.overboughtColor, size: 'tiny', id });
     };
-    buy(showObos && crossover(cfg.oversold, i));
-    sell(showObos && crossunder(cfg.overbought, i));
-    buy(showZero && crossover(0, i));
-    sell(showZero && crossunder(0, i));
+    buy(showObos && crossover(cfg.oversold, i), 'shape2');
+    sell(showObos && crossunder(cfg.overbought, i), 'shape3');
+    buy(showZero && crossover(0, i), 'shape4');
+    sell(showZero && crossunder(0, i), 'shape5');
   }
 
   return {
@@ -300,8 +303,16 @@ export function calculate(
     ],
     fills,
     markers,
+    // alertcondition(bullCond, "Bullish Divergence") / alertcondition(bearCond, "Bearish Divergence")
+    alerts: alertStates(alertConditions, bars, [bullCond, bearCond]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Divergence', message: 'New bullish divergence detected, Pivot Lookback Right bars to the left of current bar.' },
+  { id: 'alert1', title: 'Bearish Divergence', message: 'New bearish divergence detected, Pivot Lookback Right bars to the left of current bar.' },
+];
 
 export const PulsewaveDivergence = {
   calculate,
@@ -309,4 +320,5 @@ export const PulsewaveDivergence = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -20,6 +20,8 @@
  * - Fair value gaps (optional): the latest gap wider than "Width Filter" x ATR(144) is drawn as a box that follows
  *   the price until it is filled.
  * - Table: the date and time of each session zone, its status and a countdown to its open or close.
+ * - Alerts (alert() calls, `alertCalls` of the result, once per bar): "<ticker> buyside / sellside session level
+ *   breached, price <close>, timeframe <timeframe>" on each new sweep zone (`chart.ticker` and `chart.mintick`).
  *
  * At most 500 lines and 500 boxes are kept (the oldest are removed).
  *
@@ -36,8 +38,10 @@
 import { ta, str, color, time, timeframe, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { chartTimeframe } from '../anchor-period';
 import { barInterval, barTime } from '../bar-time';
-import { foregroundColorOf, nowOf, symbolTypeOf, type ChartContext } from '../chart-context';
-import type { BoxData, LineDrawingData, LinefillData, TableCellData, TableData } from '../types';
+import { foregroundColorOf, mintickOf, nowOf, symbolTypeOf, tickerOf, type ChartContext } from '../chart-context';
+import type { AlertCall, BoxData, LineDrawingData, LinefillData, TableCellData, TableData } from '../types';
+
+export const hasAlertFunction = true;
 
 export interface SessionSweepsInputs {
   swpBZ: boolean;
@@ -289,7 +293,7 @@ export function calculate(
   inputs: Partial<SessionSweepsInputs> = {},
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'boxes' | 'lines' | 'linefills' | 'tables'> & {
-  lines: LineDrawingData[]; boxes: BoxData[]; linefills: LinefillData[]; tables: TableData[];
+  lines: LineDrawingData[]; boxes: BoxData[]; linefills: LinefillData[]; tables: TableData[]; alertCalls: AlertCall[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -335,6 +339,19 @@ export function calculate(
     S.oH[S.s.indexOf(nypmST)] = hourOf(cfg.nypmSRT);
     S.cH[S.s.indexOf(nypmST)] = hourOf(cfg.nypmEND);
   };
+
+  // alert(syminfo.ticker + ' buyside / sellside session level breached, price ' + str.tostring(close, format.mintick)
+  //   + ', timeframe ' + timeframe.period, alert.freq_once_per_bar)
+  const alertCalls: AlertCall[] = [];
+  const TICKER = tickerOf(chart);
+  const MINTICK = mintickOf(chart);
+  const PERIOD = chartTimeframe(bars, chart);
+  const breached = (i: number, side: 'buyside' | 'sellside') => alertCalls.push({
+    time: bars[i].time,
+    message: TICKER + ' ' + side + ' session level breached, price ' + str.tostring(bars[i].close, 'mintick', MINTICK)
+      + ', timeframe ' + PERIOD,
+    freq: 'once_per_bar',
+  });
 
   // f_pSWP(): one session (its lines) and the sweep rules, which share S
   const pSWP = (i: number, site: Site, show: boolean, cSes: string, dst: boolean, cC: string, mm: boolean, bg: boolean, sM: boolean) => {
@@ -431,6 +448,7 @@ export function calculate(
       const m = swpBM * atr;
       if (!S.bsB) {
         if (gt(b.high, pSH) && lt(b.open, pSH)) {
+          breached(i, 'buyside');
           S.bzBX = boxes.add({ left: i - 1, top: Math.min(pSH + m, b.high), right: i + 1, bottom: pSH, bg: cfg.swpBC, dead: false });
           S.bzB = true;
           S.bsB = true;
@@ -459,6 +477,7 @@ export function calculate(
         const lpSH = S.fSHp;
         if (!S.lbsB) {
           if (gt(b.high, lpSH) && lt(b.open, lpSH)) {
+            breached(i, 'buyside');
             S.lbzBX = boxes.add({ left: i - 1, top: Math.min(lpSH + m, b.high), right: i + 1, bottom: lpSH, bg: cfg.swpBC, dead: false });
             S.lbzB = true;
             S.lbsB = true;
@@ -490,6 +509,7 @@ export function calculate(
       const m = swpSM * atr;
       if (!S.ssB) {
         if (lt(b.low, pSL) && gt(b.open, pSL)) {
+          breached(i, 'sellside');
           S.szBX = boxes.add({ left: i - 1, top: pSL, right: i + 1, bottom: Math.max(pSL - m, b.low), bg: cfg.swpSC, dead: false });
           S.szB = true;
           S.ssB = true;
@@ -518,6 +538,7 @@ export function calculate(
         const lpSL = S.fSLp;
         if (!S.lssB) {
           if (lt(b.low, lpSL) && gt(b.open, lpSL)) {
+            breached(i, 'sellside');
             S.lszBX = boxes.add({ left: i - 1, top: lpSL, right: i + 1, bottom: Math.max(lpSL - m, b.low), bg: cfg.swpSC, dead: false });
             S.lszB = true;
             S.lssB = true;
@@ -730,7 +751,8 @@ export function calculate(
     // a fill between two lines disappears with its lines
     linefills: fills.filter((f) => drawnLine(f.a) && drawnLine(f.b)).map((f) => ({ line1: toLine(f.a), line2: toLine(f.b), color: f.color })),
     tables,
+    alertCalls,
   };
 }
 
-export const SessionSweeps = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const SessionSweeps = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

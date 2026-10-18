@@ -14,6 +14,9 @@
  * - Timestamps: a vertical line on the bar at each listed time
  * - Day of week labels (characters along the top or the bottom of the chart)
  * - A data table on the last bar: the current range of each killzone and the hit rates
+ * - Alerts (alert() calls, `alertCalls` of the result, once per bar): "Broke <killzone> High / Low" when the price goes
+ *   through the pivot of the latest session ("Alert Broken Pivots"), "Hit PDH / PDL / PWH / ..." when it goes through
+ *   the previous day / week / month high or low ("Alert High/Low Break")
  *
  * Pine details kept: in the timestamp and opening price lists, an entry is not drawn on a bar that follows a bar of
  * the last entry of the list (the previous bar test of the loop reads the last entry).
@@ -45,7 +48,12 @@
 import { array, color, math, str, timeframe, time as pineTime, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { chartTimeframe, periodChanges } from '../anchor-period';
 import { backgroundColorOf, foregroundColorOf, mintickOf, type ChartContext } from '../chart-context';
-import type { BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PineSize, TableCellData, TableData, TablePosition } from '../types';
+import type {
+  AlertCall, BoxData, LabelData, LabelStyle, LineDrawingData, MarkerData, PineSize, TableCellData, TableData, TablePosition,
+} from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type LineType = 'Solid' | 'Dotted' | 'Dashed';
 type SizeName = 'Auto' | 'Tiny' | 'Small' | 'Normal' | 'Large' | 'Huge';
@@ -464,7 +472,10 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<IctKillzonesPivotsTfoInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[]; markers: MarkerData[] } {
+): IndicatorResult & {
+  lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[]; markers: MarkerData[];
+  alertCalls: AlertCall[];
+} {
   const cfg = { ...defaultInputs, ...inputs };
   // syminfo.mintick, chart.fg_color, chart.bg_color
   const mintick = mintickOf(chart);
@@ -513,6 +524,7 @@ export function calculate(
   const boxes = new Live<Bx>();
   const labels = new Live<Lb>();
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
   const newLine = (x1: number, y1: number, x2: number, y2: number, byTime: boolean, css: string, style: LineStyle, width: number, extend?: 'both') =>
     lines.add({ x1, y1, x2, y2, byTime, color: css, style, width, extend, dead: false });
   const newLabel = (x: number, y: number, byTime: boolean, text: string, textColor: string, style: LabelStyle, tooltip: string) =>
@@ -749,12 +761,15 @@ export function calculate(
       if (kz.box.length > 0 && showPivots) {
         for (let k = 0; k < kz.box.length; k++) {
           if (extCurrent && k !== 0) continue;
-          const side = (ln: Ln[], lb: Lb[], valid: boolean[], track: Track, hit: (y: number) => boolean, hitStyle: LabelStyle) => {
+          const side = (ln: Ln[], lb: Lb[], valid: boolean[], track: Track, hit: (y: number) => boolean, hitStyle: LabelStyle,
+            what: string) => {
             if ((extPast || valid[k] === true) && !kz.extStop[k]) {
               if (live(ln[k])) ln[k].x2 = t;
               if (showLabels && labelRight && live(lb[k])) lb[k].x = t;
             }
             if (hit(live(ln[k]) ? ln[k].y1 : NaN) && valid[k] === true) {
+              // if use_alerts and i == 0: alert("Broke " + kz._title + " High" / " Low", alert.freq_once_per_bar)
+              if (cfg.use_alerts && k === 0) alertCalls.push({ time: bar.time, message: 'Broke ' + kz.title + what, freq: 'once_per_bar' });
               valid[k] = false;
               track.success += 1;
               track.hitLevel = true;
@@ -762,8 +777,8 @@ export function calculate(
               if (showLabels && labelRight && live(lb[0])) lb[0].style = hitStyle;
             } else if (tCo) valid[k] = false;
           };
-          side(kz.hiLine, kz.hiLabel, kz.hiValid, kz.hitHi, (y) => high > y, 'label_down');
-          side(kz.loLine, kz.loLabel, kz.loValid, kz.hitLo, (y) => low < y, 'label_up');
+          side(kz.hiLine, kz.hiLabel, kz.hiValid, kz.hitHi, (y) => high > y, 'label_down', ' High');
+          side(kz.loLine, kz.loLabel, kz.loValid, kz.hitLo, (y) => low < y, 'label_up', ' Low');
           if (showMidpoints && !inKz && !kz.extStop[k]) {
             const md = kz.mdLine[k];
             if (live(md)) md.x2 = t;
@@ -876,6 +891,8 @@ export function calculate(
               hl.trackHi.history[0] = true;
               if (live(hl.hiLabel[0])) hl.hiLabel[0].tooltip = dwmTip(d.period, 'High', hiY, nfo.pt, hl.trackHi);
             }
+            // if alert_HL: alert(str.format("Hit P{0}H", tf))
+            if (cfg.alert_HL) alertCalls.push({ time: bar.time, message: 'Hit P' + d.tf + 'H', freq: 'once_per_bar' });
           }
           if (!hl.hitLow && low < loY) {
             hl.hitLow = true;
@@ -885,6 +902,7 @@ export function calculate(
               hl.trackLo.history[0] = true;
               if (live(hl.loLabel[0])) hl.loLabel[0].tooltip = dwmTip(d.period, 'Low', loY, nfo.pt, hl.trackLo);
             }
+            if (cfg.alert_HL) alertCalls.push({ time: bar.time, message: 'Hit P' + d.tf + 'L', freq: 'once_per_bar' });
           }
         }
       });
@@ -942,9 +960,10 @@ export function calculate(
     const newDay = i > 0 && dow !== dowPrev;
     dowPrev = dow;
     if (cfg.dow_labels && isIntraday && newDay && !((dow === 1 || dow === 7) && cfg.dow_hide_wknd)) {
+      // ids: the original's plotchar() per day, char0 (Sunday) .. char6 (Saturday)
       markers.push({
         time: bar.time, position: cfg.dow_yloc === 'Top' ? 'top' : 'bottom', shape: 'square', color: NA_COLOR,
-        text: DAY_NAMES[dow - 1], textColor: chartFg,
+        text: DAY_NAMES[dow - 1], textColor: chartFg, id: `char${dow - 1}`,
       });
     }
 
@@ -1198,7 +1217,8 @@ export function calculate(
     labels: outLabels,
     tables,
     markers,
+    alertCalls,
   };
 }
 
-export const IctKillzonesPivotsTfo = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const IctKillzonesPivotsTfo = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

@@ -8,8 +8,8 @@
  * - a fast, a medium and an optional slow anchored average (EMA 35 / 65 / 200) with a fill;
  * - pivot highs and lows (dots), optional HH / LH / HL / LL marks, and the last pivot levels as extensions or as a
  *   fractal chaos channel;
- * - optional entry arrows: a trend break (both ribbon averages above, or below, the three other averages) and the
- *   break of the last pivot level inside a trend.
+ * - optional entry arrows (the original's four plotarrow outputs, `arrows` of the result): a trend break (both
+ *   ribbon averages above, or below, the three other averages) and the break of the last pivot level inside a trend.
  * Eleven average types: SMA, EMA, WMA, VWMA, SMMA, DEMA, TEMA, HullMA, ZEMA, TMA, SSMA.
  *
  * With an anchor timeframe in minutes above the chart timeframe (intraday charts only) every length is multiplied by
@@ -23,7 +23,7 @@
 
 import {
   ta, Series, color, timeframe, getSourceSeries,
-  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
+  type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType, type ArrowData,
 } from 'oakscriptjs';
 import type { BarColorData, MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
@@ -193,7 +193,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<PullbackTradingToolAltInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers' | 'barColors'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers' | 'barColors'> & { markers: MarkerData[]; barColors: BarColorData[]; arrows: ArrowData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -289,6 +289,7 @@ export function calculate(
   for (let k = 0; k < 16; k++) plots[`plot${k}`] = [];
   const barColors: BarColorData[] = [];
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   const ribbonFill: string[] = [];
 
   // valuewhen histories of the pivots (latest value last)
@@ -343,18 +344,18 @@ export function calculate(
     const higherLow = hasLo && lt(back(lows, 1), back(lows, 0)) ? pvtlo[i] : NaN;
     const lowerLow = hasLo && gt(back(lows, 1), back(lows, 0)) ? pvtlo[i] : NaN;
     // plotshape(..., offset = -pvtLenR, transp = 20): the mark is drawn pvtLenR bars back
-    const mark = (v: number, above: boolean, base: string, text: string) => {
+    const mark = (v: number, above: boolean, base: string, text: string, id: string) => {
       if (cfg.showHHLL && truthy(v) && i - R >= 0) {
         markers.push({
           time: time(i - R), position: above ? 'aboveBar' : 'belowBar', shape: above ? 'triangleUp' : 'triangleDown',
-          color: T(base, 20), text,
+          color: T(base, 20), text, id,
         });
       }
     };
-    mark(higherHigh, true, LIME, 'HH');
-    mark(lowerHigh, true, RED, 'LH');
-    mark(higherLow, false, LIME, 'HL');
-    mark(lowerLow, false, RED, 'LL');
+    mark(higherHigh, true, LIME, 'HH', 'shape0');
+    mark(lowerHigh, true, RED, 'LH', 'shape1');
+    mark(higherLow, false, LIME, 'HL', 'shape2');
+    mark(lowerLow, false, RED, 'LL', 'shape3');
 
     // Pivot dots, drawn pvtLenR bars back
     if (i - R >= 0) {
@@ -402,14 +403,14 @@ export function calculate(
     pullbackDnT = trDown && gt(prevLow, pvtlos) && lt(b.low, pvtlos) && (!cfg.closeBr || lt(b.close, pvtlos))
       ? (isNaN(pullbackDnT) ? 0 : pullbackDnT) + 1 : 0;
 
-    // plotarrow: the arrow height is not ported
-    const arrow = (on: boolean, up: boolean, c: string) => {
-      if (on) markers.push({ time: t, position: up ? 'belowBar' : 'aboveBar', shape: up ? 'arrowUp' : 'arrowDown', color: c });
+    // plotarrow(series, colorup / colordown, transp = 0): the series value (sign = direction)
+    const arrow = (on: boolean, value: number, c: string, id: string) => {
+      if (on) arrows.push({ time: t, id, value, color: c });
     };
-    arrow(cfg.showBreak && trUp && !prevUp, true, AQUA);
-    arrow(cfg.showBreak && trDown && !prevDown, false, BLUE);
-    arrow(cfg.showPB && pullbackUpT === 1, true, LIME);
-    arrow(cfg.showPB && pullbackDnT === 1, false, RED);
+    arrow(cfg.showBreak && trUp && !prevUp, 1, AQUA, 'arrow0');
+    arrow(cfg.showBreak && trDown && !prevDown, -1, BLUE, 'arrow1');
+    arrow(cfg.showPB && pullbackUpT === 1, pullbackUpT, LIME, 'arrow2');
+    arrow(cfg.showPB && pullbackDnT === 1, -pullbackDnT, RED, 'arrow3');
   }
   markers.sort((p, q) => p.time - q.time);
 
@@ -423,6 +424,7 @@ export function calculate(
       { plot1: 'plot3', plot2: 'plot4', options: { title: 'Anchored MA Fill', color: T(GRAY, 90) } },
     ],
     markers,
+    arrows,
     barColors,
   };
 }

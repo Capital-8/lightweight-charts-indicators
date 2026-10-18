@@ -3,6 +3,8 @@
  *
  * RSI of the close and an SMA of the RSI. DIP: the previous RSI is below the oversold level and the RSI rises.
  * RIP: the RSI and its SMA are above the overbought level and the RSI falls.
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): "Buy the Dip!" on a DIP bar and
+ * "Sell the Rip!" on a RIP bar.
  *
  * Reference: "Buy the Dip & Sell the Rip" by vvedding
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -10,7 +12,10 @@
  */
 
 import { ta, color, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData } from '../types';
+import type { AlertCall, MarkerData } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface BuyTheDipSellTheRipInputs {
   rsiLength: number;
@@ -53,7 +58,7 @@ const PINE_TEXT_COLOR = '#2962FF';
 export function calculate(
   bars: Bar[],
   inputs: Partial<BuyTheDipSellTheRipInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const close = new Series(bars, (b) => b.close);
   const rsiSeries = ta.rsi(close, cfg.rsiLength);
@@ -61,6 +66,7 @@ export function calculate(
   const rsiSma = ta.sma(rsiSeries, cfg.rsiSmaLength).toArray().map((v) => v ?? NaN);
 
   const markers: MarkerData[] = [];
+  const alertCalls: AlertCall[] = [];
   bars.forEach((b, i) => {
     const rsi1 = i > 0 ? rsi[i - 1] : NaN;
     const btd = lt(rsi1, cfg.oversold) && gt(rsi[i], rsi1);
@@ -73,14 +79,17 @@ export function calculate(
       markers.push({ time: b.time, position: 'aboveBar', shape: 'triangleDown', color: color.red, text: 'RIP',
         textColor: PINE_TEXT_COLOR, size: 'small' });
     }
+    // if btd: alert("Buy the Dip!", alert.freq_once_per_bar_close); if str: alert("Sell the Rip!", ...)
+    if (btd) alertCalls.push({ time: b.time, message: 'Buy the Dip!', freq: 'once_per_bar_close' });
+    if (str) alertCalls.push({ time: b.time, message: 'Sell the Rip!', freq: 'once_per_bar_close' });
   });
 
-  // alert("Buy the Dip!") / alert("Sell the Rip!") with alert.freq_once_per_bar_close: no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     markers,
+    alertCalls,
   };
 }
 
-export const BuyTheDipSellTheRip = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const BuyTheDipSellTheRip = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

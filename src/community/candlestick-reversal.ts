@@ -9,12 +9,14 @@
  *
  * Uses pivothigh/pivotlow(5,0) for trend direction context.
  * Optional SMA overlay.
+ * Alerts (alertcondition, `alerts` of the result): 'Long Signal' and 'Short Signal', true on the bars of each signal.
  *
  * Reference: "Candlestick Reversal System" by LonesomeTheBlue (community)
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface CandlestickReversalInputs {
   pivotLen: number;
@@ -83,7 +85,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<CandlestickReversalInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<CandlestickReversalInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const {
     pivotLen, showMA, maLen, maColor,
     enableWick, wickMultiplier, wickBodyPct,
@@ -94,6 +99,7 @@ export function calculate(bars: Bar[], inputs: Partial<CandlestickReversalInputs
 
   const n = bars.length;
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
 
   // --- Pivot high/low for trend context (left=pivotLen, right=0) ---
   const highSeries = new Series(bars, (b) => b.high);
@@ -241,6 +247,9 @@ export function calculate(bars: Bar[], inputs: Partial<CandlestickReversalInputs
       (enableDoji && Dshortsignal)
     );
 
+    longFlags.push(longsignal);
+    shortFlags.push(shortsignal);
+
     // Pine: plotshape(longsignal, color = color.blue, location = location.belowbar, style = shape.triangleup, size = size.small)
     if (longsignal) {
       markers.push({ time, position: 'belowBar', shape: 'triangleUp', color: '#2196F3' });
@@ -255,7 +264,15 @@ export function calculate(bars: Bar[], inputs: Partial<CandlestickReversalInputs
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0 },
     markers,
+    // alertcondition(longsignal, 'Long Signal') / alertcondition(shortsignal, 'Short Signal')
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
-export const CandlestickReversal = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Signal', message: 'Long Signal' },
+  { id: 'alert1', title: 'Short Signal', message: 'Short Signal' },
+];
+
+export const CandlestickReversal = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

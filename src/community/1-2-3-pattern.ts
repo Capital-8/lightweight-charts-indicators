@@ -8,10 +8,12 @@
  *
  * Drawings: the break shape (a label in the chosen style and colour) and a dashed line from pivot 2 to the break bar;
  * the "1", "2", "3" labels and the two lines of the pattern; optional HH / LH / HL / LL labels on the pivots. Lines
- * and texts use the chart foreground colour. At most 500 labels and 500 lines are kept. The alerts of the original
- * have no output.
+ * and texts use the chart foreground colour. At most 500 labels and 500 lines are kept.
  *
- * Chart context: `chart.fg_color` (lines and label texts).
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar close): "Bullish 1-2-3 Pattern Identified on: " /
+ * "Bearish 1-2-3 Pattern Identified on: " followed by the ticker, on the bar of each break.
+ *
+ * Chart context: `chart.fg_color` (lines and label texts), the ticker (alert messages).
  *
  * Reference: "1-2-3 Pattern (Expo)" by Zeiierman
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -22,7 +24,11 @@ import {
   ta, Series, callsite, line, label, resetDrawings, setDrawingBar, drawingOutputs,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import { foregroundColorOf, type ChartContext } from '../chart-context';
+import { foregroundColorOf, tickerOf, type ChartContext } from '../chart-context';
+import type { AlertCall } from '../types';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface Pattern123Inputs {
   /** Pivot period */
@@ -82,12 +88,18 @@ const SHAPES = {
   Diamond: 'diamond', XCross: 'xcross', Cross: 'cross', Flag: 'flag', Square: 'square',
 } as const;
 
-export function calculate(bars: Bar[], inputs: Partial<Pattern123Inputs> = {}, chart?: ChartContext): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<Pattern123Inputs> = {},
+  chart?: ChartContext,
+): IndicatorResult & { alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const prd = cfg.prd;
   const shape = SHAPES[cfg.visuell];
   const fg = foregroundColorOf(chart);
+  const ticker = tickerOf(chart);
+  const alertCalls: AlertCall[] = [];
 
   const pvtHi = ta.pivothigh(new Series(bars, (b) => b.high), prd, prd).toArray();
   const pvtLo = ta.pivotlow(new Series(bars, (b) => b.low), prd, prd).toArray();
@@ -148,6 +160,8 @@ export function calculate(bars: Bar[], inputs: Partial<Pattern123Inputs> = {}, c
           line.new(idx[2], pvts[2], idx[1], pvts[1], 'bar_index', 'none', fg);
           line.new(idx[1], pvts[1], idx[0], pvts[0], 'bar_index', 'none', fg);
         }
+        // alert("Bullish 1-2-3 Pattern Identified on: " + syminfo.ticker, alert.freq_once_per_bar_close)
+        alertCalls.push({ time: b.time as number, message: 'Bullish 1-2-3 Pattern Identified on: ' + ticker, freq: 'once_per_bar_close' });
         pattern = false;
       }
     }
@@ -165,6 +179,8 @@ export function calculate(bars: Bar[], inputs: Partial<Pattern123Inputs> = {}, c
           line.new(idx[2], pvts[2], idx[1], pvts[1], 'bar_index', 'none', fg);
           line.new(idx[1], pvts[1], idx[0], pvts[0], 'bar_index', 'none', fg);
         }
+        // alert("Bearish 1-2-3 Pattern Identified on: " + syminfo.ticker, alert.freq_once_per_bar_close)
+        alertCalls.push({ time: b.time as number, message: 'Bearish 1-2-3 Pattern Identified on: ' + ticker, freq: 'once_per_bar_close' });
         pattern = false;
       }
     }
@@ -180,6 +196,7 @@ export function calculate(bars: Bar[], inputs: Partial<Pattern123Inputs> = {}, c
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     ...drawingOutputs(bars),
+    alertCalls,
   };
 }
 
@@ -189,4 +206,5 @@ export const Pattern123 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  hasAlertFunction,
 };

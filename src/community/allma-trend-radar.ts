@@ -571,33 +571,34 @@ export function calculate(
   const upDownSlow = pair();
 
   const markers: MarkerData[] = [];
-  const buy = (i: number) => markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp',
+  // id: the plotshape of the original (shape0 .. shape11 in declaration order)
+  const buy = (i: number, id: string) => markers.push({ id, time: bars[i].time, position: 'belowBar', shape: 'triangleUp',
     color: color.green, text: 'Buy', textColor: color.blue });
-  const sell = (i: number) => markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown',
+  const sell = (i: number, id: string) => markers.push({ id, time: bars[i].time, position: 'aboveBar', shape: 'triangleDown',
     color: color.red, text: 'Sell', textColor: color.blue });
 
   const conn: number[][] = Array.from({ length: 9 }, () => new Array(n).fill(0));
   for (let i = 0; i < n; i++) {
     const [greater, less] = greaterLess(i, gt(maFast[i], maSlow[i]), lt(maFast[i], maSlow[i]), cfg.minBarsGreaterLess);
-    if (cfg.showGreaterLess && greater) buy(i);
-    if (cfg.showGreaterLess && less) sell(i);
+    if (cfg.showGreaterLess && greater) buy(i, 'shape0');
+    if (cfg.showGreaterLess && less) sell(i, 'shape1');
     const [up, down] = upDown(i, crossUp[i] === 1, crossDown[i] === 1, cfg.minBarsUpDown);
-    if (cfg.showUpDown && up) buy(i);
-    if (cfg.showUpDown && down) sell(i);
+    if (cfg.showUpDown && up) buy(i, 'shape2');
+    if (cfg.showUpDown && down) sell(i, 'shape3');
     const [greaterFast, lessFast] = greaterLessFast(i, gt(close[i], maFast[i]), lt(close[i], maFast[i]),
       cfg.minBarsGreaterLessFast);
-    if (cfg.showGreaterLessFast && greaterFast) buy(i);
-    if (cfg.showGreaterLessFast && lessFast) sell(i);
+    if (cfg.showGreaterLessFast && greaterFast) buy(i, 'shape4');
+    if (cfg.showGreaterLessFast && lessFast) sell(i, 'shape5');
     const [upFast, downFast] = upDownFast(i, crossUpFast[i] === 1, crossDownFast[i] === 1, cfg.minBarsUpDownFast);
-    if (cfg.showUpDownFast && upFast) buy(i);
-    if (cfg.showUpDownFast && downFast) sell(i);
+    if (cfg.showUpDownFast && upFast) buy(i, 'shape6');
+    if (cfg.showUpDownFast && downFast) sell(i, 'shape7');
     const [greaterSlow, lessSlow] = greaterLessSlow(i, gt(close[i], maSlow[i]), lt(close[i], maSlow[i]),
       cfg.minBarsGreaterLessSlow);
-    if (cfg.showGreaterLessSlow && greaterSlow) buy(i);
-    if (cfg.showGreaterLessSlow && lessSlow) sell(i);
+    if (cfg.showGreaterLessSlow && greaterSlow) buy(i, 'shape8');
+    if (cfg.showGreaterLessSlow && lessSlow) sell(i, 'shape9');
     const [upSlow, downSlow] = upDownSlow(i, crossUpSlow[i] === 1, crossDownSlow[i] === 1, cfg.minBarsUpDownSlow);
-    if (cfg.showUpDownSlow && upSlow) buy(i);
-    if (cfg.showUpDownSlow && downSlow) sell(i);
+    if (cfg.showUpDownSlow && upSlow) buy(i, 'shape10');
+    if (cfg.showUpDownSlow && downSlow) sell(i, 'shape11');
 
     const sig = (a: boolean, b: boolean) => (a ? 1 : b ? -1 : 0);
     const u = cfg.showUpDown && up;

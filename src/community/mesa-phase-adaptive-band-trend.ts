@@ -7,6 +7,7 @@
  * the position of alpha between slowLimit and fastLimit. A close above the upper band starts a bullish regime, a
  * close below the lower band a bearish one: the line, the fill and the bars take the regime colour and LONG / SHORT
  * markers show the regime changes.
+ * Alerts (alertcondition, `alerts` of the result): 'Long Signal' and 'Short Signal', true on the regime changes.
  *
  * Reference: "MESA Phase-Adaptive Band Trend [SchizoQuant]" by SchizoQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +16,13 @@
 
 import { ta, math, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long Signal', message: 'Phase-Responsive Band Trend Long Signal on {{ticker}}' },
+  { id: 'alert1', title: 'Short Signal', message: 'Phase-Responsive Band Trend Short Signal on {{ticker}}' },
+];
 
 export interface MesaPhaseAdaptiveBandTrendInputs {
   src: SourceType;
@@ -89,7 +97,7 @@ const ne = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) >
 export function calculate(
   bars: Bar[],
   inputs: Partial<MesaPhaseAdaptiveBandTrendInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -207,6 +215,8 @@ export function calculate(
     }],
     markers,
     barColors,
+    // alertcondition(longSignal, "Long Signal") / alertcondition(shortSignal, "Short Signal")
+    alerts: alertStates(alertConditions, bars, [longSignal, shortSignal]),
   };
 }
 
@@ -216,4 +226,5 @@ export const MesaPhaseAdaptiveBandTrend = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -6,6 +6,8 @@
  * 113 % levels (trap zones). A short trap is armed when the high reaches the 111 % high extension (disarmed by a new
  * pivot high); the close then crossing under the pivot high gives a short reversal arrow. A long trap is the mirror
  * on the low side. Breakout / breakdown arrows mark the close crossing above the pivot high / below the pivot low.
+ * Alerts (alertcondition, `alerts` of the result): '111% Liquidity Long' / '111% Liquidity Short' on the reversal
+ * arrows, 'Pivot High Breakout' / 'Pivot Low Breakdown' on the breakout / breakdown arrows.
  *
  * Reference: "Liquidity Trap & Reversal bot [Point algo]" by pointalgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, callsite, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LiquidityTrapReversalBotInputs {
   /** Pivot lookback (left and right bars) */
@@ -57,7 +60,7 @@ const le = (a: number, b: number) => ge(b, a);
 export function calculate(
   bars: Bar[],
   inputs: Partial<LiquidityTrapReversalBotInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -84,6 +87,7 @@ export function calculate(
   let swingRange = NaN;
   let shortArmed = false;
   let longArmed = false;
+  const flags: boolean[][] = [[], [], [], []];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     if (!Number.isNaN(ph[i])) {
@@ -121,6 +125,10 @@ export function calculate(
 
     const breakout = hasSwing && breakoutCross(b.close, lastPh);
     const breakdown = hasSwing && breakdownCross(b.close, lastPl);
+    flags[0].push(longSignal);
+    flags[1].push(shortSignal);
+    flags[2].push(breakout);
+    flags[3].push(breakdown);
 
     // plotshape (Pine default text colour: blue)
     if (longSignal) {
@@ -149,8 +157,17 @@ export function calculate(
       { plot1: 'plot3', plot2: 'plot4', options: { color: String(color.new(color.lime, 85)), title: 'Long Trap Zone' } },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '111% Liquidity Long', message: 'Liquidity swept at the 111% Low Extension. Bullish Reversal triggered.' },
+  { id: 'alert1', title: '111% Liquidity Short', message: 'Liquidity swept at the 111% High Extension. Bearish Reversal triggered.' },
+  { id: 'alert2', title: 'Pivot High Breakout', message: 'Close crossed ABOVE the Pivot High. Bullish Breakout confirmed.' },
+  { id: 'alert3', title: 'Pivot Low Breakdown', message: 'Close crossed BELOW the Pivot Low. Bearish Breakdown confirmed.' },
+];
 
 export const LiquidityTrapReversalBot = {
   calculate,
@@ -158,4 +175,5 @@ export const LiquidityTrapReversalBot = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -4,6 +4,8 @@
  * A moving average of the close (SMA, EMA, WMA or VWMA) and a target line `percentage` % above it:
  * target = MA * (1 + percentage / 100). The background is red when the chosen price (high by default) is above the
  * target, and green when the chosen price (high by default) is below the moving average.
+ * Alerts (alertcondition, `alerts` of the result): 'Price Above Target Price (Red)' and 'Price Below Moving Average
+ * (Green)', true on the bars of the red and of the green background.
  *
  * Reference: "MechArt Moving Average and % Above V1.1" by MechArt_
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +13,13 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Price Above Target Price (Red)', message: 'Price is above the target price' },
+  { id: 'alert1', title: 'Price Below Moving Average (Green)', message: 'Price is below the moving average' },
+];
 
 type MaType = 'SMA' | 'EMA' | 'WMA' | 'VWMA';
 type PriceType = 'close' | 'open' | 'high' | 'low';
@@ -65,7 +74,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<MechartMovingAverageAndAboveV11Inputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -86,10 +95,15 @@ export function calculate(
   const red = String(color.new(color.red, 90));
   const green = String(color.new(color.green, 90));
   const bgColors: BgColorData[] = [];
+  const aboveFlags: boolean[] = [], belowFlags: boolean[] = [];
   bars.forEach((b, i) => {
+    const conditionAbove = gt(price(b, cfg.priceTypeRed), target[i]);
+    const conditionBelow = lt(price(b, cfg.priceTypeGreen), ma[i]);
+    aboveFlags.push(conditionAbove);
+    belowFlags.push(conditionBelow);
     // bgcolor layers in Pine order (the later call is drawn on top)
-    if (gt(price(b, cfg.priceTypeRed), target[i])) bgColors.push({ time: b.time, color: red });
-    if (lt(price(b, cfg.priceTypeGreen), ma[i])) bgColors.push({ time: b.time, color: green });
+    if (conditionAbove) bgColors.push({ time: b.time, color: red });
+    if (conditionBelow) bgColors.push({ time: b.time, color: green });
   });
 
   return {
@@ -99,6 +113,8 @@ export function calculate(
       plot1: bars.map((b, i) => ({ time: b.time, value: target[i], color: color.red })),
     },
     bgColors,
+    // alertcondition(conditionAbove, ...) / alertcondition(conditionBelow, ...)
+    alerts: alertStates(alertConditions, bars, [aboveFlags, belowFlags]),
   };
 }
 
@@ -108,4 +124,5 @@ export const MechartMovingAverageAndAboveV11 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

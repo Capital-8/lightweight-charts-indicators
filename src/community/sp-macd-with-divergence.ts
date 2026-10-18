@@ -6,6 +6,8 @@
  * than the previous one (5 to 60 bars after the previous pivot low) with a lower price low; a bearish divergence is
  * a MACD pivot high lower than the previous one with a higher price high. The divergence lines join the pivots on
  * the pivot bars (offset -5) and Bull / Bear labels mark them.
+ * Alerts (alertcondition, `alerts` of the result): 'Regular Bullish Divergence' and 'Regular Bearish Divergence', true
+ * on the bar that confirms the divergence (5 bars after the pivot that the label marks).
  *
  * Reference: "SP - MACD with Divergence" by ca_sidnayak
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 import { ta, Series, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { barInterval, barTime } from '../bar-time';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SpMacdWithDivergenceInputs {
   fastLength: number;
@@ -67,7 +70,7 @@ type Point = { time: number; value: number; color?: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<SpMacdWithDivergenceInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -187,8 +190,16 @@ export function calculate(
       plot4: divPlot(phFound, bearCond, bearColor),
     },
     markers,
+    // alertcondition(bullCond, ...) / alertcondition(bearCond, ...)
+    alerts: alertStates(alertConditions, bars, [bullCond, bearCond]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Regular Bullish Divergence', message: 'MACD: Regular Bullish Divergence detected.' },
+  { id: 'alert1', title: 'Regular Bearish Divergence', message: 'MACD: Regular Bearish Divergence detected.' },
+];
 
 export const SpMacdWithDivergence = {
   calculate,
@@ -196,4 +207,5 @@ export const SpMacdWithDivergence = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

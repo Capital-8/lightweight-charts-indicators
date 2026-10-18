@@ -5,6 +5,8 @@
  * bearish when both are below. A buy (sell) triangle marks the first bar of a bullish (bearish) state. A signal line
  * under the lows (low - ATR(14) * offset) is green in the bullish state, red in the bearish state and grey before the
  * first state.
+ * Alerts (alertcondition, `alerts` of the result): 'Vulkan Profit Buy Signal' and 'Vulkan Profit Sell Signal', true on
+ * the bars of a buy / sell signal (whether or not the triangles are shown).
  *
  * Reference: "Vulkan Profit" by AlgoCollective
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VulkanProfitInputs {
   fastWmaPeriod: number;
@@ -77,7 +80,7 @@ const gt = (a: number, b: number) => a - b > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<VulkanProfitInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -95,6 +98,7 @@ export function calculate(
 
   const signalLine: { time: number; value: number; color: string }[] = [];
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   let prevBullish = false;
   let prevBearish = false;
   let signalState = 0;
@@ -110,6 +114,8 @@ export function calculate(
     const sell = bearish && !prevBearish;
     prevBullish = bullish;
     prevBearish = bearish;
+    buyFlags.push(buy);
+    sellFlags.push(sell);
     if (buy) signalState = 1;
     else if (sell) signalState = -1;
     else if (bullish && signalState !== 1) signalState = 1;
@@ -138,8 +144,16 @@ export function calculate(
       plot4: ma(slowEma, String(color.new('#FF7043', 0))),
     },
     markers,
+    // alertcondition(buy_signal, ...) / alertcondition(sell_signal, ...)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Vulkan Profit Buy Signal', message: 'Vulkan Profit: BUY Signal' },
+  { id: 'alert1', title: 'Vulkan Profit Sell Signal', message: 'Vulkan Profit: SELL Signal' },
+];
 
 export const VulkanProfit = {
   calculate,
@@ -147,4 +161,5 @@ export const VulkanProfit = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

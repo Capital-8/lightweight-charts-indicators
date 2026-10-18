@@ -7,6 +7,8 @@
  * reaches the last low + threshold in a downtrend, a DOWN signal when it falls to the last high - threshold in an
  * uptrend, with a minimum bar gap between two signals. The trigger level of the current trend is drawn as a line;
  * the signals are triangles.
+ * Alerts (alertcondition, `alerts` of the result): 'Early Pivot UP' / 'Early Pivot DOWN', true on the bars of the UP /
+ * DOWN signals (also with the arrows hidden).
  *
  * Last bar: with 'Alleen signalen op bar close' a signal needs a closed bar. The port reads the state of the last bar
  * from the optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
@@ -18,6 +20,7 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type EarlyPivotMethod = 'Percent' | 'ATR' | 'Points' | 'StdDev';
 
@@ -105,7 +108,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<EarlyPivotAlertV1aInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -133,6 +136,7 @@ export function calculate(
   const plot0 = [];
   const plot1 = [];
   const markers: MarkerData[] = [];
+  const longFlags: boolean[] = [], shortFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     // h = repaintSafe ? ta.highest(high, 1) : high (the same value), l likewise, c = close
@@ -162,6 +166,8 @@ export function calculate(
     const barConfirmed = cfg.confirmClose ? barIsConfirmed(i) : true;
     const longSignal = barConfirmed && gapOk && triggerUp;
     const shortSignal = barConfirmed && gapOk && triggerDown;
+    longFlags.push(longSignal);
+    shortFlags.push(shortSignal);
 
     if (longSignal) {
       dir = +1;
@@ -192,8 +198,16 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0, plot1 },
     markers,
+    // alertcondition(longSignal, "Early Pivot UP") / alertcondition(shortSignal, "Early Pivot DOWN")
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
+
+/** The original's alertconditions (the single-brace {ticker} is kept as the original writes it) */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Early Pivot UP', message: '[{ticker}] Early Pivot UP: koers draaide +drempel tegen downtrend in.' },
+  { id: 'alert1', title: 'Early Pivot DOWN', message: '[{ticker}] Early Pivot DOWN: koers draaide -drempel tegen uptrend in.' },
+];
 
 export const EarlyPivotAlertV1a = {
   calculate,
@@ -201,4 +215,5 @@ export const EarlyPivotAlertV1a = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

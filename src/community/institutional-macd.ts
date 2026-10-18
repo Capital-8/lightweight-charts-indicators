@@ -4,6 +4,8 @@
  * The classic MACD (fast EMA - slow EMA, EMA signal line, histogram = MACD - signal) with each series replaced by its
  * z-score over a lookback: (x - SMA(x)) / stdev(x). The z-scored histogram is drawn as columns coloured by sign and by
  * rising / falling, with the z-scored MACD and signal lines and +/- threshold lines.
+ * Alerts (alertcondition, `alerts` of the result): the z-scored histogram above the threshold, below minus the
+ * threshold, crossing over 0 and crossing under 0.
  *
  * Reference: "Institutional MACD (Z-Score Edition) [VolumeVigilante]" by VolumeVigilante
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +13,7 @@
  */
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface InstitutionalMacdInputs {
   fastLength: number;
@@ -71,8 +74,12 @@ export const metadata = {
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
+const lt = (a: number, b: number) => b - a > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<InstitutionalMacdInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<InstitutionalMacdInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const S = (a: number[]) => Series.fromArray(bars, a);
@@ -113,8 +120,24 @@ export function calculate(bars: Bar[], inputs: Partial<InstitutionalMacdInputs> 
       plot4: bars.map((_b, i) => ({ time: t(i), value: cfg.showZBands ? -cfg.zScoreThreshold : NaN })),
     },
     hlines: [{ value: 0, options: { title: 'Zero', color: ZERO_COLOR, linestyle: 'dashed' } }],
+    // alertcondition(zHist > zScoreThreshold, ...), (zHist < -zScoreThreshold, ...), (ta.crossover(zHist, 0), ...),
+    // (ta.crossunder(zHist, 0), ...)
+    alerts: alertStates(alertConditions, bars, [
+      zHist.map((z) => gt(z, cfg.zScoreThreshold)),
+      zHist.map((z) => lt(z, -cfg.zScoreThreshold)),
+      crossedOver(zHist, 0),
+      crossedUnder(zHist, 0),
+    ]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Z-Score > Threshold', message: 'Z-Score is above threshold (Overbought)' },
+  { id: 'alert1', title: 'Z-Score < Threshold', message: 'Z-Score is below threshold (Oversold)' },
+  { id: 'alert2', title: 'Z-Score Bull Cross', message: 'Z-Score crossed above 0' },
+  { id: 'alert3', title: 'Z-Score Bear Cross', message: 'Z-Score crossed below 0' },
+];
 
 export const InstitutionalMacd = {
   calculate,
@@ -122,4 +145,5 @@ export const InstitutionalMacd = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -5,6 +5,7 @@
  * with +DM / -DM the RMA of the positive high change and of the positive negated low change) and the ATR, in one
  * pane. The background is red when the RSI is between the two bounds, the ADX is under its threshold and the ATR is
  * under its threshold.
+ * Alert (alertcondition, `alerts` of the result): 'RSI, ADX, and ATR Condition Met', true on the bars of that condition.
  *
  * Reference: "RSI + ADX + ATR 15-01" by dipak11298
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +13,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface RsiAdxAtr180125Inputs {
   rsiLength: number;
@@ -71,7 +73,7 @@ const eq = (a: number, b: number) => Math.abs(a - b) <= EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<RsiAdxAtr180125Inputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -107,12 +109,13 @@ export function calculate(
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
   const bg = String(color.rgb(255, 59, 59, 73));
   const bgColors: BgColorData[] = [];
+  const condFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     // bgcolor((rsi > lower and rsi < upper) and adx < adxThreshold and atr < atrThreshold ? color.rgb(255, 59, 59, 73) : na)
-    if (gt(rsi[i], cfg.rsiLowerBound) && lt(rsi[i], cfg.rsiUpperBound) && lt(adx[i], cfg.adxThreshold)
-      && lt(atr[i], cfg.atrThreshold)) {
-      bgColors.push({ time: bars[i].time, color: bg });
-    }
+    const cond = gt(rsi[i], cfg.rsiLowerBound) && lt(rsi[i], cfg.rsiUpperBound) && lt(adx[i], cfg.adxThreshold)
+      && lt(atr[i], cfg.atrThreshold);
+    condFlags.push(cond);
+    if (cond) bgColors.push({ time: bars[i].time, color: bg });
   }
 
   return {
@@ -128,8 +131,19 @@ export function calculate(
       { value: cfg.adxThreshold, options: { title: 'ADX Threshold', color: color.gray, linestyle: 'dashed' } },
     ],
     bgColors,
+    // alertcondition(the background condition, "RSI, ADX, and ATR Condition Met")
+    alerts: alertStates(alertConditions, bars, [condFlags]),
   };
 }
+
+/** The original's alertcondition */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0',
+    title: 'RSI, ADX, and ATR Condition Met',
+    message: 'RSI is between custom bounds, ADX is below the threshold, and ATR is below the threshold.',
+  },
+];
 
 export const RsiAdxAtr180125 = {
   calculate,
@@ -137,4 +151,5 @@ export const RsiAdxAtr180125 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

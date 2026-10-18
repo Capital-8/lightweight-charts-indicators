@@ -6,6 +6,8 @@
  * undervalued colour in these zones, else a faded neutral colour; threshold lines, a gradient fill between the score
  * and zero, circles at the score in the zones, optional circles above / below the price bars and optional background
  * colours on the price pane. Presets replace the lookback and the threshold; colour presets replace the colours.
+ * Alerts (alertcondition, `alerts` of the result): the score crosses over the threshold / under minus the threshold,
+ * crosses over / under 0, and either threshold cross ('Any Extreme Valuation').
  *
  * Reference: "Relative Valuation Oscillator [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type RvoPreset = 'Default' | 'Fast Response' | 'Smooth Trend';
 export type RvoColorPreset = 'Classic' | 'Aqua' | 'Cosmic' | 'Cyber' | 'Neon' | 'Custom';
@@ -96,7 +99,7 @@ function presetColors(cfg: RelativeValuationOscillatorInputs): [string, string, 
 export function calculate(
   bars: Bar[],
   inputs: Partial<RelativeValuationOscillatorInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -145,20 +148,26 @@ export function calculate(
 
     if (!isNaN(shown)) {
       // plotshape(is_overvalued ? valuation_score : na, shape.circle, location.absolute, bearish, size.tiny)
-      if (isOver) markers.push({ time: t, position: 'atPriceMiddle', price: shown, shape: 'circle', color: bearish, size: 'tiny' });
-      if (isUnder) markers.push({ time: t, position: 'atPriceMiddle', price: shown, shape: 'circle', color: bullish, size: 'tiny' });
+      if (isOver) markers.push({ time: t, position: 'atPriceMiddle', price: shown, shape: 'circle', color: bearish, size: 'tiny', id: 'shape0' });
+      if (isUnder) markers.push({ time: t, position: 'atPriceMiddle', price: shown, shape: 'circle', color: bullish, size: 'tiny', id: 'shape1' });
       // plotshape(enableOverlaySignals and is_overvalued ? valuation_score : na, location.abovebar, force_overlay)
       if (cfg.enableOverlaySignals && isOver) {
-        markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: bearish, size: 'tiny', forceOverlay: true });
+        markers.push({ time: t, position: 'aboveBar', shape: 'circle', color: bearish, size: 'tiny', forceOverlay: true, id: 'shape2' });
       }
       if (cfg.enableOverlaySignals && isUnder) {
-        markers.push({ time: t, position: 'belowBar', shape: 'circle', color: bullish, size: 'tiny', forceOverlay: true });
+        markers.push({ time: t, position: 'belowBar', shape: 'circle', color: bullish, size: 'tiny', forceOverlay: true, id: 'shape3' });
       }
     }
     // bgcolor(enableBgSignals and is_overvalued ? color.new(bearish, bgTransparency) : na, force_overlay = true)
-    if (cfg.enableBgSignals && isOver) bgColors.push({ time: t, color: bgOver, forceOverlay: true });
-    if (cfg.enableBgSignals && isUnder) bgColors.push({ time: t, color: bgUnder, forceOverlay: true });
+    if (cfg.enableBgSignals && isOver) bgColors.push({ time: t, color: bgOver, forceOverlay: true, id: 'bgcolor0' });
+    if (cfg.enableBgSignals && isUnder) bgColors.push({ time: t, color: bgUnder, forceOverlay: true, id: 'bgcolor1' });
   }
+
+  // overvalued_cross = ta.crossover(valuation_score, threshold_mult); undervalued_cross = ta.crossunder(valuation_score,
+  // -threshold_mult); cross_above_zero / cross_below_zero = ta.crossover / ta.crossunder(valuation_score, 0)
+  const overCross = crossedOver(score, threshold);
+  const underCross = crossedUnder(score, -threshold);
+  const anyExtreme = overCross.map((f, i) => f || underCross[i]);
 
   const fillArr = <T>(x: T) => new Array<T>(n).fill(x);
   return {
@@ -176,8 +185,18 @@ export function calculate(
     ],
     markers,
     bgColors,
+    alerts: alertStates(alertConditions, bars, [overCross, underCross, crossedOver(score, 0), crossedUnder(score, 0), anyExtreme]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Overvalued Threshold Crossed', message: 'Relative Valuation Oscillator: OVERVALUED threshold crossed on {{exchange}}:{{ticker}} - {{interval}}. Price may be statistically stretched to the upside.' },
+  { id: 'alert1', title: 'Undervalued Threshold Crossed', message: 'Relative Valuation Oscillator: UNDERVALUED threshold crossed on {{exchange}}:{{ticker}} - {{interval}}. Price may be statistically stretched to the downside.' },
+  { id: 'alert2', title: 'Crossed Above Fair Value (0)', message: 'Relative Valuation Oscillator: Crossed ABOVE Fair Value (0) on {{exchange}}:{{ticker}} - {{interval}}. Transitioning to overvaluation zone.' },
+  { id: 'alert3', title: 'Crossed Below Fair Value (0)', message: 'Relative Valuation Oscillator: Crossed BELOW Fair Value (0) on {{exchange}}:{{ticker}} - {{interval}}. Transitioning to undervaluation zone.' },
+  { id: 'alert4', title: 'Any Extreme Valuation', message: 'Relative Valuation Oscillator: Extreme valuation detected! Check chart {{exchange}}:{{ticker}} - {{interval}}' },
+];
 
 export const RelativeValuationOscillator = {
   calculate,
@@ -185,4 +204,5 @@ export const RelativeValuationOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

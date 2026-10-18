@@ -8,6 +8,9 @@
  * within `maxSetupBars` bars of the setup. A reflection EMA (of the low) with a mirrored line at a percentage away,
  * a latent range inversion signal (the core / reflection EMA spread compresses while the setup is reclaimed),
  * legacy cross / overextension signals, a state background and data window values complete the display.
+ * Alerts (alertcondition, `alerts` of the result), in the original's order: setup armed (bull / bear overextension),
+ * EMA reclaim / loss of an armed setup, acceptance reversals, latent range inversions and the final buy / sell signals
+ * of the "Main Signal Mode" (with the long-only guard on the sells).
  *
  * Last bar: with 'Use confirmed bar close only' the reversal state machine and its signals run on a closed bar only.
  * The port reads the state of the last bar from the optional third argument (see src/chart-context.ts); without it
@@ -25,6 +28,7 @@ import {
 import type { MarkerData, BgColorData } from '../types';
 import { barInterval, barTime } from '../bar-time';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface UserDefinedRangeSelectorInputs {
   len: number;
@@ -242,7 +246,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<UserDefinedRangeSelectorInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -298,6 +302,9 @@ export function calculate(
   let bearReclaimed = false;
   let bullSetupBar = NaN;
   let bearSetupBar = NaN;
+  let lastBuyPrice = NaN;
+  /** One flag per bar for each alertcondition, in the original's order */
+  const flags: boolean[][] = Array.from({ length: 10 }, () => new Array(n).fill(false));
 
   const interval = barInterval(bars);
   const markers: MarkerData[] = [];
@@ -426,6 +433,15 @@ export function calculate(
       && !emaSlopeDown && reflectionCompression && lt(b.close, r);
 
     // Final signals (buySignal / sellSignal, signalMode, longOnlyProfitGuard) only feed alert conditions.
+    const reversalBuyForFinal = bullReversalRaw || (cfg.includeLRIInFinalSignals && bullLatentInversion);
+    const reversalSellForFinal = bearReversalRaw || (cfg.includeLRIInFinalSignals && bearLatentInversion);
+    const preBuySignal = cfg.signalMode === 'Reversal Only' ? reversalBuyForFinal
+      : cfg.signalMode === 'Legacy Only' ? legacyBuyRaw : reversalBuyForFinal || legacyBuyRaw;
+    const preSellSignal = cfg.signalMode === 'Reversal Only' ? reversalSellForFinal
+      : cfg.signalMode === 'Legacy Only' ? legacySellRaw : reversalSellForFinal || legacySellRaw;
+    const buySignal = canProcess && preBuySignal;
+    const sellSignal = canProcess && preSellSignal && (!cfg.longOnlyProfitGuard || isNaN(lastBuyPrice) || gt(b.close, lastBuyPrice));
+    if (buySignal) lastBuyPrice = b.close;
     // The reset after a reversal changes the state drawn below.
     if (bullReversalRaw || (cfg.includeLRIInFinalSignals && bullLatentInversion)) {
       bullArmed = false;
@@ -438,37 +454,49 @@ export function calculate(
       bearSetupBar = NaN;
     }
 
+    // alertcondition()s, read after the reset (end of the bar)
+    flags[0][i] = bullOverextended;
+    flags[1][i] = bearOverextended;
+    flags[2][i] = bullReclaimNow && bullArmed;
+    flags[3][i] = bearReclaimNow && bearArmed;
+    flags[4][i] = bullReversalRaw;
+    flags[5][i] = bearReversalRaw;
+    flags[6][i] = bullLatentInversion;
+    flags[7][i] = bearLatentInversion;
+    flags[8][i] = buySignal;
+    flags[9][i] = sellSignal;
+
     // Shapes
     const off = cfg.signalOffset;
     if (bullReversalRaw) {
-      pushShape(i, off, { position: 'belowBar', shape: 'triangleUp', color: cfg.bullColor, text: 'REV\nBUY', textColor: color.white, size: 'small' });
+      pushShape(i, off, { position: 'belowBar', shape: 'triangleUp', color: cfg.bullColor, text: 'REV\nBUY', textColor: color.white, size: 'small', id: 'shape0' });
     }
     if (bearReversalRaw) {
-      pushShape(i, off, { position: 'aboveBar', shape: 'triangleDown', color: cfg.bearColor, text: 'REV\nSELL', textColor: color.white, size: 'small' });
+      pushShape(i, off, { position: 'aboveBar', shape: 'triangleDown', color: cfg.bearColor, text: 'REV\nSELL', textColor: color.white, size: 'small', id: 'shape1' });
     }
     if (bullLatentInversion) {
-      pushShape(i, off, { position: 'belowBar', shape: 'diamond', color: cfg.lriBullColor, text: 'LRI', textColor: color.black, size: 'small' });
+      pushShape(i, off, { position: 'belowBar', shape: 'diamond', color: cfg.lriBullColor, text: 'LRI', textColor: color.black, size: 'small', id: 'shape2' });
     }
     if (bearLatentInversion) {
-      pushShape(i, off, { position: 'aboveBar', shape: 'diamond', color: cfg.lriBearColor, text: 'LRI', textColor: color.white, size: 'small' });
+      pushShape(i, off, { position: 'aboveBar', shape: 'diamond', color: cfg.lriBearColor, text: 'LRI', textColor: color.white, size: 'small', id: 'shape3' });
     }
     if (cfg.showLegacySignals && legacyBuyRaw && !bullReversalRaw) {
-      pushShape(i, off, { position: 'belowBar', shape: 'circle', color: cfg.legacyBuyCol, text: 'RANGE', textColor: color.white, size: 'tiny' });
+      pushShape(i, off, { position: 'belowBar', shape: 'circle', color: cfg.legacyBuyCol, text: 'RANGE', textColor: color.white, size: 'tiny', id: 'shape4' });
     }
     if (cfg.showLegacySignals && legacySellRaw && !bearReversalRaw) {
-      pushShape(i, off, { position: 'aboveBar', shape: 'circle', color: cfg.legacySellCol, text: 'RANGE', textColor: color.white, size: 'tiny' });
+      pushShape(i, off, { position: 'aboveBar', shape: 'circle', color: cfg.legacySellCol, text: 'RANGE', textColor: color.white, size: 'tiny', id: 'shape5' });
     }
     if (cfg.showSetupMarkers && bullOverextended) {
-      markers.push({ time: t(i), position: 'belowBar', shape: 'diamond', color: cfg.setupColor, text: 'EXT', textColor: color.black, size: 'tiny' });
+      markers.push({ time: t(i), position: 'belowBar', shape: 'diamond', color: cfg.setupColor, text: 'EXT', textColor: color.black, size: 'tiny', id: 'shape6' });
     }
     if (cfg.showSetupMarkers && bearOverextended) {
-      markers.push({ time: t(i), position: 'aboveBar', shape: 'diamond', color: cfg.setupColor, text: 'EXT', textColor: color.black, size: 'tiny' });
+      markers.push({ time: t(i), position: 'aboveBar', shape: 'diamond', color: cfg.setupColor, text: 'EXT', textColor: color.black, size: 'tiny', id: 'shape7' });
     }
     if (cfg.showReclaimMarkers && bullArmed && bullReclaimNow) {
-      markers.push({ time: t(i), position: 'belowBar', shape: 'labelUp', color: String(color.new(cfg.bullColor, 0)), text: 'RECLAIM', textColor: color.white, size: 'tiny' });
+      markers.push({ time: t(i), position: 'belowBar', shape: 'labelUp', color: String(color.new(cfg.bullColor, 0)), text: 'RECLAIM', textColor: color.white, size: 'tiny', id: 'shape8' });
     }
     if (cfg.showReclaimMarkers && bearArmed && bearReclaimNow) {
-      markers.push({ time: t(i), position: 'aboveBar', shape: 'labelDown', color: String(color.new(cfg.bearColor, 0)), text: 'LOSS', textColor: color.white, size: 'tiny' });
+      markers.push({ time: t(i), position: 'aboveBar', shape: 'labelDown', color: String(color.new(cfg.bearColor, 0)), text: 'LOSS', textColor: color.white, size: 'tiny', id: 'shape9' });
     }
 
     // Range state background
@@ -506,8 +534,29 @@ export function calculate(
     fills,
     markers,
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'User EMA Range Bullish Setup Armed', message: 'User EMA Range: bullish setup armed. Price is overextended below the EMA.' },
+  { id: 'alert1', title: 'User EMA Range Bearish Setup Armed', message: 'User EMA Range: bearish setup armed. Price is overextended above the EMA.' },
+  { id: 'alert2', title: 'User EMA Range Bullish EMA Reclaim', message: 'User EMA Range: bullish setup has reclaimed the EMA acceptance level.' },
+  { id: 'alert3', title: 'User EMA Range Bearish EMA Loss', message: 'User EMA Range: bearish setup has lost the EMA acceptance level.' },
+  {
+    id: 'alert4', title: 'User EMA Range Bullish Acceptance Reversal',
+    message: 'User EMA Range bullish reversal: overextension below EMA, reclaim, and accepted hold above EMA.',
+  },
+  {
+    id: 'alert5', title: 'User EMA Range Bearish Acceptance Reversal',
+    message: 'User EMA Range bearish reversal: overextension above EMA, loss, and accepted hold below EMA.',
+  },
+  { id: 'alert6', title: 'User EMA Range Bullish Latent Range Inversion', message: 'User EMA Range: bullish latent range inversion detected.' },
+  { id: 'alert7', title: 'User EMA Range Bearish Latent Range Inversion', message: 'User EMA Range: bearish latent range inversion detected.' },
+  { id: 'alert8', title: 'User EMA Range Final Buy Signal', message: 'User EMA Range final buy signal fired according to selected signal mode.' },
+  { id: 'alert9', title: 'User EMA Range Final Sell Signal', message: 'User EMA Range final sell signal fired according to selected signal mode.' },
+];
 
 export const UserDefinedRangeSelector = {
   calculate,
@@ -515,4 +564,5 @@ export const UserDefinedRangeSelector = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

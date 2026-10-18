@@ -237,12 +237,12 @@ export function calculate(bars: Bar[], inputs: Partial<IctKillzonesInputs> = {})
     ldncLabel(i, ldnClose);
     asiaLabel(i, asian);
 
-    // four bgcolor() calls, in this order (the later one on top)
+    // four bgcolor() calls, in this order (the later one on top); ids bgcolor0..bgcolor3
     const t = bars[i].time;
-    if (ny) bgColors.push({ time: t, color: cfg.nyCss });
-    if (ldnOpen) bgColors.push({ time: t, color: cfg.ldnoCss });
-    if (ldnClose) bgColors.push({ time: t, color: cfg.ldncCss });
-    if (asian) bgColors.push({ time: t, color: cfg.asiaCss });
+    if (ny) bgColors.push({ time: t, color: cfg.nyCss, id: 'bgcolor0' });
+    if (ldnOpen) bgColors.push({ time: t, color: cfg.ldnoCss, id: 'bgcolor1' });
+    if (ldnClose) bgColors.push({ time: t, color: cfg.ldncCss, id: 'bgcolor2' });
+    if (asian) bgColors.push({ time: t, color: cfg.asiaCss, id: 'bgcolor3' });
   }
   setDrawingBar(null);
 

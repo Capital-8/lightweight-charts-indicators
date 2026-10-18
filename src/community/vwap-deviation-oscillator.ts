@@ -7,6 +7,8 @@
  * units, in percent, or as a z-score over a window. Histogram columns take one of ten colours by the deviation zone
  * (multiples 0.5 / 1 / 2 / 2.8 of the standard deviation of the deviation, with a minimum, or fixed z levels).
  * Lines at +-1, 2 and 3 standard deviations; in line mode, a fill between the oscillator and zero.
+ * Alerts (alertcondition, `alerts` of the result): crosses of the oscillator over / under zero, over +1 sigma and under
+ * -1 sigma, a change of its sign and a change of its colour zone.
  *
  * The mode 'Rolling (Lookback: Days)' counts back from the current time (timenow). The port reads it from the optional
  * third argument (see src/chart-context.ts); without it, it is the clock of the computer.
@@ -18,6 +20,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import { nowOf, type ChartContext } from '../chart-context';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type VwapMode = '4 Hours' | 'Daily' | 'Weekly' | 'Rolling (Lookback: Bars)' | 'Rolling (Lookback: Days)';
 
@@ -135,7 +138,9 @@ function periodId(timeMs: number, mode: VwapMode): number {
   return NaN;
 }
 
-export function calculate(bars: Bar[], inputs: Partial<VwapDeviationOscillatorInputs> = {}, chart?: ChartContext): IndicatorResult {
+export function calculate(
+  bars: Bar[], inputs: Partial<VwapDeviationOscillatorInputs> = {}, chart?: ChartContext,
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -216,6 +221,8 @@ export function calculate(bars: Bar[], inputs: Partial<VwapDeviationOscillatorIn
   const fillColors: string[] = [];
   const histogram = cfg.plotType === 'Histogram';
   const val = (v: number) => (Number.isFinite(v) ? v : NaN);
+  const zone: number[] = [];
+  const s1: number[] = [];
 
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
@@ -229,6 +236,8 @@ export function calculate(bars: Bar[], inputs: Partial<VwapDeviationOscillatorIn
     const idx = ge(o, c4) ? 4 : ge(o, c3) ? 3 : ge(o, c2) ? 2 : ge(o, c1) ? 1 : ge(o, 0) ? 0
       : gt(o, -c1) ? 5 : gt(o, -c2) ? 6 : gt(o, -c3) ? 7 : gt(o, -c4) ? 8 : 9;
     const oscColor = histogram ? ZONE_COLORS[idx] : ge(o, 0) ? cfg.posCol : cfg.negCol;
+    zone.push(idx);
+    s1.push(s);
 
     plots.plot0.push({ time: t, value: val(o), color: oscColor });
     plots.plot1.push({ time: t, value: 0, color: String(color.new(color.white, 0)) });
@@ -247,11 +256,41 @@ export function calculate(bars: Bar[], inputs: Partial<VwapDeviationOscillatorIn
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
-    // display = plotType == "Histogram" ? display.none : display.all: FillData has no display option, so the fill is
-    // returned only in the line mode
-    fills: histogram ? [] : [{ plot1: 'plot0', plot2: 'plot1', options: { title: 'Plot Fill' }, colors: fillColors }],
+    // display = plotType == "Histogram" ? display.none : display.all: FillData has no display option, so in the
+    // histogram mode the fill is given with transparent colours (listed, not drawn)
+    fills: [{
+      plot1: 'plot0', plot2: 'plot1', options: { title: 'Plot Fill' },
+      colors: histogram ? new Array<string>(n).fill('transparent') : fillColors,
+    }],
+    alerts: alertStates(alertConditions, bars, alertFlags(osc, s1, zone)),
   };
 }
+
+/** The original's alertcondition() expressions, per bar (na is false) */
+function alertFlags(osc: number[], s1: number[], zone: number[]): boolean[][] {
+  const o = osc.map((v) => (Number.isFinite(v) ? v : NaN));
+  const sign = o.map((v) => Math.sign(v));
+  // ta.change(x) != 0: na (no previous value, or na operand) is false
+  const changed = (a: number[]) => a.map((v, i) => i > 0 && !isNaN(v) && !isNaN(a[i - 1]) && v !== a[i - 1]);
+  return [
+    crossedOver(o, 0),
+    crossedUnder(o, 0),
+    crossedOver(o, s1),
+    crossedUnder(o, s1.map((v) => -v)),
+    changed(sign),
+    changed(zone),
+  ];
+}
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'VWAP Deviation Bullish', message: 'VWAP Deviation crossed above 0 (Bullish) {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'VWAP Deviation Bearish', message: 'VWAP Deviation crossed below 0 (Bearish) {{exchange}}:{{ticker}}' },
+  { id: 'alert2', title: 'VWAP Deviation Overbought', message: 'VWAP Deviation crossed above +1σ {{exchange}}:{{ticker}}' },
+  { id: 'alert3', title: 'VWAP Deviation Oversold', message: 'VWAP Deviation crossed below -1σ {{exchange}}:{{ticker}}' },
+  { id: 'alert4', title: 'VWAP Deviation Polarity Change', message: 'VWAP Deviation polarity changed {{exchange}}:{{ticker}}' },
+  { id: 'alert5', title: 'VWAP Deviation Zone Change', message: 'VWAP Deviation zone changed {{exchange}}:{{ticker}}' },
+];
 
 export const VwapDeviationOscillator = {
   calculate,
@@ -259,4 +298,5 @@ export const VwapDeviationOscillator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

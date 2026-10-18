@@ -9,12 +9,15 @@
  * - Fills between EMA1-EMA2 and EMA2-EMA8
  * - 8 plotshape markers: longEma, shortEma, redCross, blueTriangle, redDiamond,
  *   bullCandle, bloodDiamond, yellowCross
+ * Alerts (alertcondition, `alerts` of the result): Red Diamond, Blood Diamond, YellowX, RedX, Longema and
+ * Bluetriangle, on every bar of the signal (also before the warmup the markers wait for).
  *
  * Reference: "VuManChu Cipher A" (overlay=true)
  */
 
 import { ta, Series, getSourceSeries, math, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface MarketCipherAInputs {
   wtChannelLen: number;
@@ -84,7 +87,10 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<MarketCipherAInputs> = {}): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<MarketCipherAInputs> = {},
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const {
     wtChannelLen, wtAverageLen, wtMALen,
     ema1Len, ema2Len, ema3Len, ema4Len, ema5Len, ema6Len, ema7Len, ema8Len,
@@ -153,88 +159,87 @@ export function calculate(bars: Bar[], inputs: Partial<MarketCipherAInputs> = {}
     { plot1: 'ema2', plot2: 'ema8', options: { color: 'rgba(54,58,69,0.15)' } },
   ];
 
-  // --- Markers ---
+  // --- Markers and alerts ---
   const markers: MarkerData[] = [];
+  const nz = (x: number | null | undefined) => x ?? NaN;
+  const flags: boolean[][] = [[], [], [], [], [], []];
 
-  for (let i = warmup + 1; i < n; i++) {
-    const e1 = ema1Arr[i];
-    const e2 = ema2Arr[i];
-    const e3 = ema3Arr[i];
-    const e8 = ema8Arr[i];
-    const pe1 = ema1Arr[i - 1];
-    const pe2 = ema2Arr[i - 1];
-    const pe3 = ema3Arr[i - 1];
-    const pe8 = ema8Arr[i - 1];
-    if (e1 == null || e2 == null || e3 == null || e8 == null) continue;
-    if (pe1 == null || pe2 == null || pe3 == null || pe8 == null) continue;
+  for (let i = 0; i < n; i++) {
+    const e1 = nz(ema1Arr[i]);
+    const e2 = nz(ema2Arr[i]);
+    const e3 = nz(ema3Arr[i]);
+    const e8 = nz(ema8Arr[i]);
+    const pe1 = i > 0 ? nz(ema1Arr[i - 1]) : NaN;
+    const pe2 = i > 0 ? nz(ema2Arr[i - 1]) : NaN;
+    const pe3 = i > 0 ? nz(ema3Arr[i - 1]) : NaN;
+    const pe8 = i > 0 ? nz(ema8Arr[i - 1]) : NaN;
 
-    const w1 = wt1Arr[i];
-    const w2 = wt2Arr[i];
-    const pw1 = wt1Arr[i - 1];
-    const pw2 = wt2Arr[i - 1];
-    const rsi = rsiArr[i];
-    const rsiMFI = rsiMFIArr[i];
+    const w1 = nz(wt1Arr[i]);
+    const w2 = nz(wt2Arr[i]);
+    const pw1 = i > 0 ? nz(wt1Arr[i - 1]) : NaN;
+    const pw2 = i > 0 ? nz(wt2Arr[i - 1]) : NaN;
+    const rsi = nz(rsiArr[i]);
+    const rsiMFI = nz(rsiMFIArr[i]);
 
-    // Pine crossover/crossunder helpers
+    // Pine crossover/crossunder helpers (na compares false)
     const crossoverE2E8 = pe2 <= pe8 && e2 > e8;   // longEma
     const crossoverE8E2 = pe8 <= pe2 && e8 > e2;   // shortEma
     const crossunderE1E2 = pe1 >= pe2 && e1 < e2;  // redCross
     const crossoverE2E3 = pe2 <= pe3 && e2 > e3;   // blueTriangle
 
     // WaveTrend cross conditions
-    let wtCross = false;
-    let wtCrossDown = false;
-    if (w1 != null && w2 != null && pw1 != null && pw2 != null) {
-      // Pine: cross(wt1, wt2) => either crossover or crossunder
-      wtCross = (pw1 <= pw2 && w1 > w2) || (pw1 >= pw2 && w1 < w2);
-      // Pine: wtCrossDown = wt2 - wt1 >= 0  (wt2 above wt1 = bearish)
-      wtCrossDown = (w2 - w1) >= 0;
-    }
+    // Pine: cross(wt1, wt2) => either crossover or crossunder
+    const wtCross = (pw1 <= pw2 && w1 > w2) || (pw1 >= pw2 && w1 < w2);
+    // Pine: wtCrossDown = wt2 - wt1 >= 0  (wt2 above wt1 = bearish)
+    const wtCrossDown = (w2 - w1) >= 0;
 
     // Pine signals
     const redDiamond = wtCross && wtCrossDown;
     const redCross = crossunderE1E2;
-    const yellowCross = redDiamond && w2 != null && w2 < 45 && w2 > -80 &&
-      rsi != null && rsi < 30 && rsi > 15 &&
-      rsiMFI != null && rsiMFI < -5;
+    const yellowCross = redDiamond && w2 < 45 && w2 > -80 && rsi < 30 && rsi > 15 && rsiMFI < -5;
     const bloodDiamond = redDiamond && redCross;
     const bullCandle = bars[i].open > e2 && bars[i].open > e8 &&
       (i > 0 && bars[i - 1].close > bars[i - 1].open) &&
       (bars[i].close > bars[i].open) &&
       !redDiamond && !redCross;
 
-    // Pine plotshape order (determines marker z-order / priority)
+    // alertcondition(redDiamond / bloodDiamond / yellowCross / redCross / longEma / blueTriangle != 0)
+    [redDiamond, bloodDiamond, yellowCross, redCross, crossoverE2E8, crossoverE2E3].forEach((f, k) => flags[k].push(f));
+
+    // The markers start after the warmup of every series
+    if (i <= warmup) continue;
+    // Pine plotshape order (determines marker z-order / priority); ids: shape<k> in that order
     // longEma: green circle aboveBar (transp=50)
     if (crossoverE2E8) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'circle', color: 'rgba(0,255,0,0.50)', text: '' });
+      markers.push({ time: bars[i].time, id: 'shape0', position: 'aboveBar', shape: 'circle', color: 'rgba(0,255,0,0.50)', text: '' });
     }
     // shortEma: red circle aboveBar (transp=50)
     if (crossoverE8E2) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'circle', color: 'rgba(255,0,0,0.50)', text: '' });
+      markers.push({ time: bars[i].time, id: 'shape1', position: 'aboveBar', shape: 'circle', color: 'rgba(255,0,0,0.50)', text: '' });
     }
     // redCross: red xcross aboveBar (transp=50)
     if (redCross) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'xcross', color: 'rgba(255,0,0,0.50)', text: '' });
+      markers.push({ time: bars[i].time, id: 'shape2', position: 'aboveBar', shape: 'xcross', color: 'rgba(255,0,0,0.50)', text: '' });
     }
     // blueTriangle: blue triangleUp belowBar (transp=50)
     if (crossoverE2E3) {
-      markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: 'rgba(0,100,255,0.50)', text: '' });
+      markers.push({ time: bars[i].time, id: 'shape3', position: 'belowBar', shape: 'triangleUp', color: 'rgba(0,100,255,0.50)', text: '' });
     }
     // redDiamond: red diamond aboveBar (transp=25)
     if (redDiamond) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'diamond', color: 'rgba(255,0,0,0.75)', text: '' });
+      markers.push({ time: bars[i].time, id: 'shape4', position: 'aboveBar', shape: 'diamond', color: 'rgba(255,0,0,0.75)', text: '' });
     }
     // bullCandle: yellow diamond aboveBar (transp=75)
     if (bullCandle) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'diamond', color: 'rgba(255,255,0,0.25)', text: '' });
+      markers.push({ time: bars[i].time, id: 'shape5', position: 'aboveBar', shape: 'diamond', color: 'rgba(255,255,0,0.25)', text: '' });
     }
     // bloodDiamond: red diamond aboveBar large (transp=15)
     if (bloodDiamond) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'diamond', color: 'rgba(255,0,0,0.85)', text: 'Blood' });
+      markers.push({ time: bars[i].time, id: 'shape6', position: 'aboveBar', shape: 'diamond', color: 'rgba(255,0,0,0.85)', text: 'Blood' });
     }
     // yellowCross: yellow xcross aboveBar (transp=25)
     if (yellowCross) {
-      markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'xcross', color: 'rgba(255,255,0,0.75)', text: '' });
+      markers.push({ time: bars[i].time, id: 'shape7', position: 'aboveBar', shape: 'xcross', color: 'rgba(255,255,0,0.75)', text: '' });
     }
   }
 
@@ -243,7 +248,18 @@ export function calculate(bars: Bar[], inputs: Partial<MarketCipherAInputs> = {}
     plots,
     fills,
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
-export const MarketCipherA = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Red Diamond', message: 'Red Diamond' },
+  { id: 'alert1', title: 'Blood Diamond', message: 'Blood Diamond' },
+  { id: 'alert2', title: 'YellowX', message: 'YellowX' },
+  { id: 'alert3', title: 'RedX', message: 'RedX' },
+  { id: 'alert4', title: 'Longema', message: 'Longema' },
+  { id: 'alert5', title: 'Bluetriangle', message: 'Bluetriangle' },
+];
+
+export const MarketCipherA = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

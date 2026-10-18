@@ -4,11 +4,13 @@
  * Non-overlay oscillator: ScalpLine = SMA(close, signalPeriod) - ssMA
  * where ssMA is a double-smoothed SMA clamped to close when price moves beyond percent band.
  * Fill between ScalpLine and zero: green when >= 0, red when < 0.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY ALARM!' / 'SELL ALARM!', ScalpLine crossing above / below 0.
  *
  * Reference: "Scalping Line Indicator" by KivancOzbilgic
  */
 
 import { ta, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ScalpingLineInputs {
   src: SourceType;
@@ -42,7 +44,10 @@ export const metadata = {
   overlay: false,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<ScalpingLineInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<ScalpingLineInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const { src, percent, mainPeriod, signalPeriod } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
@@ -85,6 +90,15 @@ export function calculate(bars: Bar[], inputs: Partial<ScalpingLineInputs> = {})
     scalpArr[i] = (sig != null && !isNaN(sig) && !isNaN(ss)) ? sig - ss : NaN;
   }
 
+  // The alerts use the original's series: while MA is na both band tests are false, so ssMA = close and ScalpLine =
+  // signalline - close from the first signal value on (the plots of the port start after the MA warm-up)
+  const alertScalp = scalpArr.map((v, i) => {
+    const sig = signalArr[i];
+    const ma = smaArr[i];
+    if (ma != null && !isNaN(ma)) return v;
+    return sig != null && !isNaN(sig) ? sig - (closeArr[i] ?? NaN) : NaN;
+  });
+
   const warmup = halfUp + halfDown;
 
   const plot0 = scalpArr.map((v, i) => ({
@@ -107,7 +121,15 @@ export function calculate(bars: Bar[], inputs: Partial<ScalpingLineInputs> = {})
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { 'plot0': plot0, 'plot1': plot1 },
     fills: [{ plot1: 'plot0', plot2: 'plot1', options: { color: 'rgba(0,128,0,0.2)' }, colors: fillColors }],
+    // alertcondition(crossover(ScalpLine, 0), "BUY ALARM!") / alertcondition(crossunder(ScalpLine, 0), "SELL ALARM!")
+    alerts: alertStates(alertConditions, bars, [crossedOver(alertScalp, 0), crossedUnder(alertScalp, 0)]),
   };
 }
 
-export const ScalpingLine = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'BUY ALARM!', message: 'SLI BUY Signal!' },
+  { id: 'alert1', title: 'SELL ALARM!', message: 'SLI SELL Signal!' },
+];
+
+export const ScalpingLine = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

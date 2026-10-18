@@ -13,8 +13,9 @@
  * the RMI is at or above "Overbought" and not falling; it ends when the moving average turns down or the RMI leaves
  * its zone (RMI mode), or on the first down bar after an up bar with "Exit Trade on 1st Opposite Renko Brick".
  * Shorts are the mirror; the short exit on the moving average never happens (the original tests a direction above 1).
- * Markers: an up arrow (BUY) and a down arrow (SELL) on the first bar of a trade, and an "Exit" cross when it ends.
- * The arrow height of the original (50 to 60 pixels) is not ported.
+ * Outputs: an up arrow (BUY, 'arrow0') and a down arrow (SELL, 'arrow1') on the first bar of a trade (the original's
+ * plotarrow, `arrows` of the result), and an "Exit" cross when it ends (markers 'shape0' / 'shape1'). The arrow height
+ * of the original (50 to 60 pixels) is not ported.
  *
  * Alerts: the four alertcondition() calls of the original, "Swing BUY Alert" / "Swing SELL Alert" (the arrows) and
  * "Swing BUY Exit Alert" / "Swing SELL Exit Alert" (the exit crosses).
@@ -28,6 +29,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import type { ArrowData } from 'oakscriptjs';
 import { securityStarts } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
 import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
@@ -127,7 +129,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<RenkoMovingAverageRmiAlertR3ByInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; arrows: ArrowData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const len = Math.trunc(cfg.maLen);
@@ -213,6 +215,7 @@ export function calculate(
   const maPlot: Array<{ time: number; value: number; color: string }> = [];
   const openPlot: Array<{ time: number; value: number; color: string }> = [];
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   const lime = String(color.new(LIME, 10));
   const red = String(color.new(RED, 10));
   const purple = String(color.new(PURPLE, 40));
@@ -259,13 +262,14 @@ export function calculate(
       : nz(ps) === 0 && short ? 1
       : gt(ps, 0) && has === -1 ? ps + 1 : 0;
 
-    if (eq(olong, 1)) markers.push({ time: t, position: 'belowBar', shape: 'arrowUp', color: arrowUp });
-    if (eq(oshort, 1)) markers.push({ time: t, position: 'aboveBar', shape: 'arrowDown', color: arrowDown });
+    // plotarrow(olong==1?1:na, "BUY Arrow", colorup=lime) / plotarrow(oshort==1?-1:na, "SELL Arrow", colordown=red)
+    if (eq(olong, 1)) arrows.push({ time: t, id: 'arrow0', value: 1, color: arrowUp });
+    if (eq(oshort, 1)) arrows.push({ time: t, id: 'arrow1', value: -1, color: arrowDown });
     if (gt(pl, 0) && olong === 0) {
-      markers.push({ time: t, position: 'belowBar', shape: 'xcross', color: GRAY, text: 'Exit\nBuy', textColor: '#2962FF' });
+      markers.push({ id: 'shape0', time: t, position: 'belowBar', shape: 'xcross', color: GRAY, text: 'Exit\nBuy', textColor: '#2962FF' });
     }
     if (gt(ps, 0) && oshort === 0) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'xcross', color: GRAY, text: 'Exit\nSell', textColor: '#2962FF' });
+      markers.push({ id: 'shape1', time: t, position: 'aboveBar', shape: 'xcross', color: GRAY, text: 'Exit\nSell', textColor: '#2962FF' });
     }
     flags[0][i] = eq(olong, 1);
     flags[1][i] = eq(oshort, 1);
@@ -277,6 +281,7 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0: maPlot, plot1: openPlot },
     markers,
+    arrows,
     alerts: alertStates(alertConditions, bars, flags),
   };
 }

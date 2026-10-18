@@ -29,8 +29,11 @@
  *
  * Chart context (optional third argument of calculate): the chart foreground colour (line colour of the 3D faces,
  * dark theme #DBDBDB without a context) and the visible range: the top faces start at the first visible bar
- * (`chart.left_visible_bar_time`; without a context, the first bar). The 4 alert conditions and the alert() calls of
- * the script have no output.
+ * (`chart.left_visible_bar_time`; without a context, the first bar).
+ *
+ * Alerts, each with its input of the "ALERTS" group: alertcondition (`alerts` of the result) 'Bullish Order Block' /
+ * 'Bearish Order Block' on the bar that adds an order block, 'Bullish OB Retest' / 'Bearish OB Retest' on the bar
+ * that logs a retest (of the bar before); the same events make the alert() calls (`alertCalls`, once per bar).
  *
  * Reference: "Order Blocks Volume Delta 3D | Flux Charts" by fluxchart
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -42,7 +45,11 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Box, type Label, type Polyline,
   type ChartPoint,
 } from 'oakscriptjs';
-import type { BoxData, LabelData, PolylineData } from '../types';
+import type { AlertCall, BoxData, LabelData, PolylineData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 import { foregroundColorOf, mintickOf, visibleRangeOf, type ChartContext } from '../chart-context';
 import { chartTimeframe } from '../anchor-period';
 
@@ -191,7 +198,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<OrderBlocksVolumeDelta3dFluxChartsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { boxes: BoxData[]; labels: LabelData[]; polylines: PolylineData[] } {
+): IndicatorResult & { boxes: BoxData[]; labels: LabelData[]; polylines: PolylineData[] }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   // request.security_lower_tf() with a timeframe above the chart timeframe stops the script (also when its branch
@@ -386,18 +394,24 @@ export function calculate(
   };
 
   /** A BOS of one side (bosIdx = the bar before, range from the swing of the bar before) */
-  const onBos = (i: number, fromIdx: number, isBull: boolean) => {
+  /** A BOS: true when it adds an order block (evNewBullOB / evNewBearOB of the original) */
+  const onBos = (i: number, fromIdx: number, isBull: boolean): boolean => {
     const bosIdx = i - 1;
     const toIdx = bosIdx;
     const v = pocVolume(i, fromIdx, toIdx);
-    if (isNaN(v.poc) || v.touches <= 0 || isNaN(fromIdx)) return;
+    if (isNaN(v.poc) || v.touches <= 0 || isNaN(fromIdx)) return false;
     const best = bestIndex(i, fromIdx, toIdx, v.poc, isBull);
     const gapLeg = !isNaN(best) ? hasGapBetween(i, best, bosIdx, isBull) : false;
-    if (isNaN(best) || gapLeg) return;
+    if (isNaN(best) || gapLeg) return false;
     const top = h[best];
     const bottom = l[best];
-    if (!obOverlapsActive(top, bottom)) addObFromPoc(i, best, top, bottom, isBull, v.totVol, v.bullVol, bosIdx);
+    if (obOverlapsActive(top, bottom)) return false;
+    addObFromPoc(i, best, top, bottom, isBull, v.totVol, v.bullVol, bosIdx);
+    return true;
   };
+  const newBullFlags: boolean[] = [], newBearFlags: boolean[] = [];
+  const bullRetestFlags: boolean[] = [], bearRetestFlags: boolean[] = [];
+  const alertCalls: AlertCall[] = [];
 
   // Draw engine
   resetDrawings(LIMITS);
@@ -578,13 +592,14 @@ export function calculate(
     const fromIdxBear = prevSlIdx;
     const fromIdxBull = prevShIdx;
 
+    let evNewBullOB = false, evNewBearOB = false, evBullRetest = false, evBearRetest = false;
     if (bosBear) {
-      onBos(i, fromIdxBear, false);
+      evNewBearOB = onBos(i, fromIdxBear, false);
       slPrice = NaN;
       slIdx = NaN;
     }
     if (bosBull) {
-      onBos(i, fromIdxBull, true);
+      evNewBullOB = onBos(i, fromIdxBull, true);
       shPrice = NaN;
       shIdx = NaN;
     }
@@ -616,11 +631,27 @@ export function calculate(
         const lastSideBar = ob.isBull ? lastBullRetestBar : lastBearRetestBar;
         if (isNaN(lastSideBar) || retestBar - lastSideBar >= 4) {
           obRetests.unshift({ barIndex: retestBar, isBull: ob.isBull, obLeftIndex: ob.leftIndex, obCreatedIndex: ob.createdIndex });
-          if (ob.isBull) lastBullRetestBar = retestBar;
-          else lastBearRetestBar = retestBar;
+          if (ob.isBull) {
+            evBullRetest = true;
+            lastBullRetestBar = retestBar;
+          } else {
+            evBearRetest = true;
+            lastBearRetestBar = retestBar;
+          }
         }
       }
     }
+
+    // ALERTS: alertcondition(alBullOB and evNewBullOB, ...) and the alert() calls of the same events
+    newBullFlags.push(cfg.alBullOB && evNewBullOB);
+    newBearFlags.push(cfg.alBearOB && evNewBearOB);
+    bullRetestFlags.push(cfg.alBullRetest && evBullRetest);
+    bearRetestFlags.push(cfg.alBearRetest && evBearRetest);
+    const t = bars[i].time;
+    if (cfg.alBullOB && evNewBullOB) alertCalls.push({ time: t, message: 'Bullish Order Block detected.', freq: 'once_per_bar' });
+    if (cfg.alBearOB && evNewBearOB) alertCalls.push({ time: t, message: 'Bearish Order Block detected.', freq: 'once_per_bar' });
+    if (cfg.alBullRetest && evBullRetest) alertCalls.push({ time: t, message: 'Bullish Order Block retest.', freq: 'once_per_bar' });
+    if (cfg.alBearRetest && evBearRetest) alertCalls.push({ time: t, message: 'Bearish Order Block retest.', freq: 'once_per_bar' });
 
     // DRAW ENGINE
     if (isNaN(leftVisIdx) && bars[i].time * toMs >= leftVisTime) leftVisIdx = i;
@@ -655,10 +686,22 @@ export function calculate(
     boxes: out.boxes ?? [],
     labels: out.labels ?? [],
     polylines: out.polylines ?? [],
+    alerts: alertStates(alertConditions, bars, [newBullFlags, newBearFlags, bullRetestFlags, bearRetestFlags]),
+    alertCalls,
   };
 }
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Order Block', message: 'New Bullish Order Block detected.' },
+  { id: 'alert1', title: 'Bearish Order Block', message: 'Bearish Order Block detected.' },
+  { id: 'alert2', title: 'Bullish OB Retest', message: 'Bullish Order Block retest.' },
+  { id: 'alert3', title: 'Bearish OB Retest', message: 'Bearish Order Block retest.' },
+];
+
 export const OrderBlocksVolumeDelta3dFluxCharts = {
+  alertConditions,
+  hasAlertFunction,
   calculate,
   metadata,
   defaultInputs,

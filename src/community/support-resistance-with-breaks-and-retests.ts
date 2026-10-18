@@ -18,7 +18,11 @@
  * are not extended on it and "Off: Candle Confirmation" gives no signal on it. Without it every bar is taken as
  * closed.
  *
- * Limit of the port: the 8 alert conditions and the alert() calls give no output.
+ * Alerts (alertcondition, `alerts` of the result): 'New Support Level' / 'New Resistance Level' (a new box),
+ * 'Support Breakout' / 'Resistance Breakout' (the bar after the breakout bar), 'Support Retest' / 'Resistance Retest'
+ * (a "Retest" label), 'Potential Support Retest' / 'Potential Resistance Retest' (a "Potential Retest" label); the
+ * retest conditions are false when "Retests" is off. The same 8 events make alert() calls (`alertCalls`, once per
+ * bar) with the title as message.
  *
  * Reference: "Breaks and Retests [HG]" by HoanGhetti
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -29,8 +33,12 @@ import {
   ta, color, Series, barInterval, barTime,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { BoxData, LabelData, LabelStyle, PineSize } from '../types';
+import type { AlertCall, BoxData, LabelData, LabelStyle, PineSize } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 export interface SupportResistanceWithBreaksAndRetestsInputs {
   /** Bars on each side of a pivot */
@@ -158,7 +166,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SupportResistanceWithBreaksAndRetestsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { boxes: BoxData[]; labels: LabelData[] } {
+): IndicatorResult & { boxes: BoxData[]; labels: LabelData[] } & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const bb = cfg.lookback;
@@ -236,6 +244,9 @@ export function calculate(
   let sinceNaR = NaN;
   const retestR = newRetest();
   const retestS = newRetest();
+  // the 8 conditions of the original, in its order
+  const flags: boolean[][] = alertConditions.map(() => new Array<boolean>(n).fill(false));
+  const alertCalls: AlertCall[] = [];
 
   for (let i = 0; i < n; i++) {
     const confirmed = i < n - 1 || lastConfirmed;
@@ -303,8 +314,9 @@ export function calculate(
 
     const retestEvent = (
       st: RetestState, active: boolean, y1: number[], y2: number[], col: string, style: LabelStyle, isPh: boolean,
-    ): void => {
-      if (!cfg.retest) return;
+    ): [boolean, boolean] => {
+      // [retValid, retEvent]: na (false) when the retests are off
+      if (!cfg.retest) return [false, false];
       let retEvent = active && !st.prevActive;
       st.prevActive = active;
       if (retEvent) st.eventY2 = y2[i];
@@ -341,9 +353,18 @@ export function calculate(
         if (old && !old.deleted) old.right = i - retSince;
         st.occurred = false;
       }
+      return [retValid, retEvent];
     };
-    retestEvent(retestR, r1 || r2 || r3 || r4, high, low, cfg.resistanceColor, 'label_upper_left', true);
-    retestEvent(retestS, s1 || s2 || s3 || s4, low, high, cfg.supportColor, 'label_lower_left', false);
+    const [rRetValid, rRetEvent] = retestEvent(retestR, r1 || r2 || r3 || r4, high, low, cfg.resistanceColor, 'label_upper_left', true);
+    const [sRetValid, sRetEvent] = retestEvent(retestS, s1 || s2 || s3 || s4, low, high, cfg.supportColor, 'label_lower_left', false);
+
+    // alertcondition(ta.change(pl)), (ta.change(ph)), (ta.barssince(na(sBreak)) == 1), (ta.barssince(na(rBreak)) == 1),
+    // (sRetValid), (sRetEvent), (rRetValid), (rRetEvent); AllAlerts(condition, message) makes the same alert() calls
+    const now = [chPl, chPh, sinceNaS === 1, sinceNaR === 1, sRetValid, sRetEvent, rRetValid, rRetEvent];
+    now.forEach((v, k) => {
+      flags[k][i] = v;
+      if (v) alertCalls.push({ time: bars[i].time, message: alertConditions[k].title, freq: 'once_per_bar' });
+    });
   }
 
   const interval = barInterval(bars);
@@ -359,8 +380,22 @@ export function calculate(
     labels: labels.items.map((lb) => ({
       time: X(lb.x), price: lb.y, text: lb.text, color: lb.color, textColor: lb.textColor, style: lb.style, size,
     })),
+    alerts: alertStates(alertConditions, bars, flags),
+    alertCalls,
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New Support Level', message: 'Alert Fired!' },
+  { id: 'alert1', title: 'New Resistance Level', message: 'Alert Fired!' },
+  { id: 'alert2', title: 'Support Breakout', message: 'Alert Fired!' },
+  { id: 'alert3', title: 'Resistance Breakout', message: 'Alert Fired!' },
+  { id: 'alert4', title: 'Support Retest', message: 'Alert Fired!' },
+  { id: 'alert5', title: 'Potential Support Retest', message: 'Alert Fired!' },
+  { id: 'alert6', title: 'Resistance Retest', message: 'Alert Fired!' },
+  { id: 'alert7', title: 'Potential Resistance Retest', message: 'Alert Fired!' },
+];
 
 export const SupportResistanceWithBreaksAndRetests = {
   calculate,
@@ -368,4 +403,6 @@ export const SupportResistanceWithBreaksAndRetests = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

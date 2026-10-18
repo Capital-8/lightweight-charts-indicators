@@ -24,7 +24,7 @@
  * it the chart timeframe is read from the bar spacing. A signal needs a closed bar: `lastBarConfirmed` of the
  * context says whether the last bar is closed (without a context it is).
  *
- * The 2 alert conditions of the script have no output.
+ * Alerts (alertcondition, `alerts` of the result): 'Buy alert' and 'Sell alert', true on the bars of each signal.
  *
  * Reference: "ITG Scalper Buy/Sell [Complector]" by Complector
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -38,6 +38,7 @@ import {
 import type { LabelData, MarkerData } from '../types';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ItgScalperInputs {
   /** Plot TEMA? */
@@ -148,7 +149,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<ItgScalperInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; labels: LabelData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; labels: LabelData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -181,6 +182,8 @@ export function calculate(
   let buyprice = 0;
   let sellprice = 0;
   let lastTran = false;
+  const longFlags: boolean[] = [];
+  const shortFlags: boolean[] = [];
   try {
     for (let i = 0; i < n; i++) {
       setDrawingBar(i, i === n - 1);
@@ -202,6 +205,8 @@ export function calculate(
       const confirmed = i < n - 1 || lastBarConfirmedOf(chart);
       const long = maUp && !lastTran && !tNon && fBuy && confirmed;
       const short = maDown && lastTran && !tNon && fSell && confirmed;
+      longFlags.push(long);
+      shortFlags.push(short);
       if (long) {
         buyprice = bar.close;
         lastTran = true;
@@ -251,7 +256,15 @@ export function calculate(
     plots: { plot0 },
     markers,
     labels,
+    // alertcondition(long, 'Buy alert') / alertcondition(short, 'Sell alert')
+    alerts: alertStates(alertConditions, bars, [longFlags, shortFlags]),
   };
 }
 
-export const ItgScalper = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy alert', message: 'Buy alert' },
+  { id: 'alert1', title: 'Sell alert', message: 'Sell alert' },
+];
+
+export const ItgScalper = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

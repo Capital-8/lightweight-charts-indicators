@@ -6,6 +6,8 @@
  * background) is drawn on the first bar where the angle is above the threshold, a "DOWN" signal (and a red
  * background) on the first bar where it is below minus the threshold. The angle is also plotted, with horizontal
  * lines at +- the threshold.
+ * Alerts (alertcondition, `alerts` of the result): 'MA Angling Up' / 'MA Angling Down' on the bars of an UP / DOWN
+ * signal.
  *
  * Reference: "MA Angle Alerts (SMA, EMA, VWMA, WMA)" by readysetfire
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type SmaAngleAlertsMAType = 'SMA' | 'EMA' | 'WMA' | 'VWMA';
 
@@ -60,7 +63,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<SmaAngleAlertsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { maType, maLength, angleThreshold, barsToCheck } = cfg;
   const n = bars.length;
@@ -83,6 +86,8 @@ export function calculate(
   // var bool lastAngleUp / lastAngleDown: updated on every confirmed (historical) bar
   let lastAngleUp = false;
   let lastAngleDown = false;
+  const upFlags: boolean[] = [];
+  const downFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const prev = i - barsToCheck >= 0 ? ma[i - barsToCheck] : NaN;
@@ -93,6 +98,8 @@ export function calculate(
     const angleDown = lt(slopeAngle, -angleThreshold);
     const angleUpAlert = angleUp && !lastAngleUp;
     const angleDownAlert = angleDown && !lastAngleDown;
+    upFlags.push(angleUpAlert);
+    downFlags.push(angleDownAlert);
     lastAngleUp = angleUp;
     lastAngleDown = angleDown;
 
@@ -119,8 +126,16 @@ export function calculate(
     ],
     bgColors,
     markers,
+    // alertcondition(angleUpAlert, "MA Angling Up") / alertcondition(angleDownAlert, "MA Angling Down")
+    alerts: alertStates(alertConditions, bars, [upFlags, downFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'MA Angling Up', message: 'MA is angling up beyond threshold.' },
+  { id: 'alert1', title: 'MA Angling Down', message: 'MA is angling down beyond threshold.' },
+];
 
 export const SmaAngleAlerts = {
   calculate,
@@ -128,4 +143,5 @@ export const SmaAngleAlerts = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

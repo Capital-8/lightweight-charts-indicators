@@ -5,12 +5,15 @@
  * Detects HH/HL/LH/LL patterns from consecutive fractals and plots markers.
  * Recent lines are colored purple, historical lines are gray.
  * Optional markers where the close crosses the most recent upper/lower trendline.
+ * Alerts (alertcondition, `alerts` of the result): 'New trendline formed' (a new fractal) and 'Upper/lower trendline
+ * crossed' (the close crosses one of the two most recent trendlines, whether the crosses are shown or not).
  *
  * Reference: "Auto Trendline [DojiEmoji]" (community, Pine v5)
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, LineDrawingData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface AutoTrendlineInputs {
   fractalPeriod: number;
@@ -85,7 +88,7 @@ export const metadata = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<AutoTrendlineInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[]; markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { lines: LineDrawingData[]; markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const { fractalPeriod: nPeriod, maxPairs } = cfg;
   const n = bars.length;
@@ -119,11 +122,13 @@ export function calculate(
   let yUpPrev = NaN;
   let yDnPrev = NaN;
 
-  const marker = (bar: number, text: string, above: boolean, color: string) => {
+  const newFlags: boolean[] = [], crossFlags: boolean[] = [];
+
+  const marker = (id: string, bar: number, text: string, above: boolean, color: string) => {
     if (bar < 0) return;
     // Pine: plotshape(..., style = shape.circle, size = size.tiny, color = na, textcolor = col): only the text
     markers.push({
-      time: bars[bar].time, position: above ? 'aboveBar' : 'belowBar', shape: 'circle',
+      id, time: bars[bar].time, position: above ? 'aboveBar' : 'belowBar', shape: 'circle',
       color: 'transparent', text, textColor: color, size: 'tiny',
     });
   };
@@ -134,6 +139,8 @@ export function calculate(
     const upfract = !Number.isNaN(ph);
     const downfract = !Number.isNaN(pl);
     const fractBar = t - nPeriod - 1;
+    // alertcondition(not na(ph) or not na(pl), "New trendline formed")
+    newFlags.push(upfract || downfract);
 
     if (downfract) {
       recentDn2 = recentDn1; iRecentDn2 = iRecentDn1;
@@ -152,28 +159,33 @@ export function calculate(
     const hl = downfract && recentDn1 > recentDn2;
     const ll = downfract && recentDn1 < recentDn2;
     // plotshape(..., offset = -n - 1)
-    if (cfg.showHH && hh) marker(fractBar, 'HH', true, cfg.colHH);
-    if (cfg.showLH && lh) marker(fractBar, 'LH', true, cfg.colLH);
-    if (cfg.showLL && ll) marker(fractBar, 'LL', false, cfg.colLL);
-    if (cfg.showHL && hl) marker(fractBar, 'HL', false, cfg.colHL);
+    if (cfg.showHH && hh) marker('shape0', fractBar, 'HH', true, cfg.colHH);
+    if (cfg.showLH && lh) marker('shape1', fractBar, 'LH', true, cfg.colLH);
+    if (cfg.showLL && ll) marker('shape2', fractBar, 'LL', false, cfg.colLL);
+    if (cfg.showHL && hl) marker('shape3', fractBar, 'HL', false, cfg.colHL);
 
     // Price of the line through the two most recent fractals at the current bar, then ta.cross(close, y)
     const mDn = (recentDn2 - recentDn1) / (iRecentDn2 - iRecentDn1);
     const yDn = mDn * t + recentDn1 - mDn * iRecentDn1;
     const mUp = (recentUp2 - recentUp1) / (iRecentUp2 - iRecentUp1);
     const yUp = mUp * t + recentUp1 - mUp * iRecentUp1;
-    if (cfg.showCrosses && t >= 1) {
+    let crossUpper = false, crossLower = false;
+    if (t >= 1) {
       const c = bars[t].close;
       const c1 = bars[t - 1].close;
       // ta.cross: na operands give false; exact comparisons (ta.cross does not use the 1e-10 tolerance)
       const cross = (y: number, y1: number) =>
         !Number.isNaN(y) && !Number.isNaN(y1) && ((c > y && c1 <= y1) || (c < y && c1 >= y1));
-      if (cross(yUp, yUpPrev)) {
-        markers.push({ time: bars[t].time, position: 'belowBar', shape: 'xcross', color: 'rgba(41,98,255,0.5)', size: 'small' });
-      }
-      if (cross(yDn, yDnPrev)) {
-        markers.push({ time: bars[t].time, position: 'aboveBar', shape: 'xcross', color: 'rgba(255,82,82,0.5)', size: 'small' });
-      }
+      crossUpper = cross(yUp, yUpPrev);
+      crossLower = cross(yDn, yDnPrev);
+    }
+    // alertcondition(cross_upper or cross_lower, "Upper/lower trendline crossed")
+    crossFlags.push(crossUpper || crossLower);
+    if (cfg.showCrosses && crossUpper) {
+      markers.push({ id: 'shape4', time: bars[t].time, position: 'belowBar', shape: 'xcross', color: 'rgba(41,98,255,0.5)', size: 'small' });
+    }
+    if (cfg.showCrosses && crossLower) {
+      markers.push({ id: 'shape5', time: bars[t].time, position: 'aboveBar', shape: 'xcross', color: 'rgba(255,82,82,0.5)', size: 'small' });
     }
     yUpPrev = yUp;
     yDnPrev = yDn;
@@ -209,7 +221,14 @@ export function calculate(
     plots: {},
     lines,
     markers,
+    alerts: alertStates(alertConditions, bars, [newFlags, crossFlags]),
   };
 }
 
-export const AutoTrendline = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'New trendline formed', message: 'New trendline formed' },
+  { id: 'alert1', title: 'Upper/lower trendline crossed', message: 'Upper/lower trendline crossed' },
+];
+
+export const AutoTrendline = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

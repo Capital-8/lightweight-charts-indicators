@@ -11,6 +11,13 @@
  * filtered by the Supertrend or the Hull trend), a checklist table and a strength table (sum of ten bull / bear
  * votes: PSAR, SSL exit, QQE + WAE, WAE, ADX, EMA 20 / 50, stochastic, RSI, CCI, Supertrend), optional pivot marks
  * and pivot support / resistance levels (lines and labels).
+ * The exit arrows are the original's plotarrow (`arrows` of the result, id arrow0); each marker has the id of its
+ * plotshape output (shape0 to shape10).
+ * Alerts (alertcondition, `alerts` of the result): the 20 conditions of the original (strength table, SSL / SSL2 /
+ * exit / baseline crossings, continuations, EMA and Hull crossings, QQE, the filtered Buy / Sell signals, sideways
+ * market, supertrend changes, support / resistance breaks). With "Remove Alerts & Signals" filters the conditions
+ * that start with `not sideways and` are false on the sideways bars, and their crossings skip those bars, as in the
+ * original (lazy `and` / `or`).
  *
  * Timeframe inputs (Hull, Supertrend, EMA 1 / 2): "" is the chart timeframe; a higher timeframe is built from the
  * chart bars (see anchor-period.ts); a lower timeframe needs data the chart bars do not have: the port throws.
@@ -27,10 +34,12 @@ import {
   ta, Series, color, str, math, callsite, getSourceSeries, timeframe, mapToChart, line, label,
   resetDrawings, setDrawingBar, drawingOutputs,
   type Bar, type IndicatorResult, type InputConfig, type PlotConfig, type SourceType, type Line, type Label,
+  type ArrowData,
 } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData, TableData, TableCellData, LabelData, LineDrawingData } from '../types';
 import { mintickOf, type ChartContext } from '../chart-context';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 type MaType =
   | 'ZLSMA' | 'SMA' | 'EMA' | 'DEMA' | 'TEMA' | 'LSMA' | 'WMA' | 'MF' | 'VAMA' | 'TMA' | 'HMA' | 'JMA' | 'Kijun v2'
@@ -481,8 +490,8 @@ export function calculate(
   inputs: Partial<SslHybridAdvancedInputs> = {},
   chart?: ChartContext,
 ): Omit<IndicatorResult, 'markers' | 'barColors' | 'bgColors' | 'tables' | 'labels' | 'lines'> & {
-  markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[]; tables: TableData[];
-  labels: LabelData[]; lines: LineDrawingData[];
+  markers: MarkerData[]; arrows: ArrowData[]; barColors: BarColorData[]; bgColors: BgColorData[]; tables: TableData[];
+  labels: LabelData[]; lines: LineDrawingData[]; alerts: AlertConditionState[];
 } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
@@ -878,9 +887,20 @@ export function calculate(
   const plotIds = Array.from({ length: 16 }, (_v, k) => `plot${k}`);
   const plots: Record<string, Point[]> = Object.fromEntries(plotIds.map((id) => [id, [] as Point[]]));
   const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
   const C = (c: string, t: number) => String(color.new(c, t));
+  // Per-bar values of the alertconditions
+  const sellAtrs: boolean[] = [];
+  const buyAtrs: boolean[] = [];
+  const qqeBuys: boolean[] = [];
+  const qqeSells: boolean[] = [];
+  const signalUps: boolean[] = [];
+  const signalDns: boolean[] = [];
+  const strengths: number[] = [];
+  const srOver: boolean[] = [];
+  const srUnder: boolean[] = [];
   const bullC = C(BULL, 0);
   const bearC = C(BEAR, 0);
   const grayC = C(GRAY, 0);
@@ -903,8 +923,8 @@ export function calculate(
     const colorSsl1 = gt(c, sslDown[i]) ? bullC : lt(c, sslDown[i]) ? bearC : 'transparent';
 
     // plotarrow(codiff, colorup = color.new(#00c3ff, 20), colordown = color.new(#ff0062, 20), title = 'Exit Arrows')
-    if (baseCrossLong[i]) markers.push({ time: t, position: 'belowBar', shape: 'arrowUp', color: C(BULL, 20) });
-    else if (baseCrossShort[i]) markers.push({ time: t, position: 'aboveBar', shape: 'arrowDown', color: C(BEAR, 20) });
+    if (baseCrossLong[i]) arrows.push({ time: t, id: 'arrow0', value: 1, color: C(BULL, 20) });
+    else if (baseCrossShort[i]) arrows.push({ time: t, id: 'arrow0', value: -1, color: C(BEAR, 20) });
 
     // SSL2 continuation
     const upperHalf = atrSlen[i] * cfg.atrCrit + c;
@@ -947,7 +967,7 @@ export function calculate(
     const adxcross = diCrossover[i] ? C(BLUE, 0) : diCrossunder(plus[i], minus[i]) ? C(RED, 0) : null;
     // plotshape(ta.cross(plus, minus) ? em200 : na, color = adxcross, location = location.absolute, style = shape.diamond)
     if (diCross[i] && !isNa(em200[i]) && adxcross) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: em200[i], shape: 'diamond', color: adxcross, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: em200[i], shape: 'diamond', color: adxcross, size: 'tiny', id: 'shape0' });
     }
 
     // Hull and Supertrend
@@ -961,8 +981,8 @@ export function calculate(
     plots.plot8.push({ time: t, value: cfg.showtrend ? supertrenddn : NaN, color: trendcolor });
 
     // MACD crossings: plotshape(ta.crossover(macd, signal) ? close : na, location.belowbar, shape.xcross)
-    if (macdUp[i] && bool(c)) markers.push({ time: t, position: 'belowBar', shape: 'xcross', color: C('#00FF00', 20), size: 'tiny' });
-    if (macdDn[i] && bool(c)) markers.push({ time: t, position: 'aboveBar', shape: 'xcross', color: C('#ff0000', 0), size: 'tiny' });
+    if (macdUp[i] && bool(c)) markers.push({ time: t, position: 'belowBar', shape: 'xcross', color: C('#00FF00', 20), size: 'tiny', id: 'shape1' });
+    if (macdDn[i] && bool(c)) markers.push({ time: t, position: 'aboveBar', shape: 'xcross', color: C('#ff0000', 0), size: 'tiny', id: 'shape2' });
 
     // bgcolor(adx < adxtreshold ? color_bars : na)
     const lowAdx = lt(adx[i], cfg.adxtreshold);
@@ -986,8 +1006,8 @@ export function calculate(
       color: cfg.showmtfma && bool(ma1[i]) ? color1 : C(PURPLE, 0),
     });
     plots.plot14.push({ time: t, value: cfg.showmtfma ? ma2[i] : NaN, color: color2 });
-    if (emaUp[i] && bool(c)) markers.push({ time: t, position: 'belowBar', shape: 'xcross', color: C('#00FF00', 20), size: 'tiny' });
-    if (emaDn[i] && bool(c)) markers.push({ time: t, position: 'aboveBar', shape: 'xcross', color: C('#ff0000', 50), size: 'tiny' });
+    if (emaUp[i] && bool(c)) markers.push({ time: t, position: 'belowBar', shape: 'xcross', color: C('#00FF00', 20), size: 'tiny', id: 'shape3' });
+    if (emaDn[i] && bool(c)) markers.push({ time: t, position: 'aboveBar', shape: 'xcross', color: C('#ff0000', 50), size: 'tiny', id: 'shape4' });
 
     // Table votes
     const rsiupdn = gt(rsiT[i], mr[i]) ? 1 : lt(rsiT[i], mr[i]) ? -1 : 0;
@@ -1025,8 +1045,8 @@ export function calculate(
     prevRed = qqeRedBar;
     plots.plot15.push({ time: t, value: cfg.showBaseline ? bbmc[i] : NaN, color: colorBar });
     if (cfg.showColorBar) barColors.push({ time: t, color: colorBar });
-    if (cfg.showqqedot && qqeGreenBar) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: C('#00ff00', 20), size: 'auto' });
-    if (cfg.showqqedot && qqeRedBar) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: C('#ff0000', 20), size: 'auto' });
+    if (cfg.showqqedot && qqeGreenBar) markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: C('#00ff00', 20), size: 'auto', id: 'shape5' });
+    if (cfg.showqqedot && qqeRedBar) markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: C('#ff0000', 20), size: 'auto', id: 'shape6' });
     const sslBuy = gt(c, upperk[i]) && gt(c, bbmc[i]);
     const sslSell = lt(c, lowerk[i]) && lt(c, bbmc[i]);
     const stratsslupsig = waeBuy && qqeBuy && sslBuy;
@@ -1056,25 +1076,32 @@ export function calculate(
     if (cfg.squeezesignalfilter && squeeze[i]) signaldn = ssldn[i];
     if (cfg.adxsignalfilter && lt(adx[i], cfg.adxtreshold)) signaldn = ssldn[i];
     if (signalup) {
-      markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: C(BULL, 50), text: 'Buy', textColor: C(WHITE, 0), size: 'tiny' });
+      markers.push({ time: t, position: 'belowBar', shape: 'labelUp', color: C(BULL, 50), text: 'Buy', textColor: C(WHITE, 0), size: 'tiny', id: 'shape7' });
     }
     if (signaldn) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: C(BEAR, 50), text: 'Sell', textColor: C(WHITE, 0), size: 'tiny' });
+      markers.push({ time: t, position: 'aboveBar', shape: 'labelDown', color: C(BEAR, 50), text: 'Sell', textColor: C(WHITE, 0), size: 'tiny', id: 'shape8' });
     }
     last = {
       exitsig, colorBar, colorPsar, qqecolor, qqedot, sttrend, adxcol, emacol, stocol, rsicol, ccicol, waecol,
       strength: psarn + exitsign + qqedotn + waen + adxcoln + emacoln + stobg + rsiupdn + ccibg + stval,
     };
+    sellAtrs.push(sellAtr);
+    buyAtrs.push(buyAtr);
+    qqeBuys.push(qqeBuy);
+    qqeSells.push(qqeSell);
+    signalUps.push(signalup);
+    signalDns.push(signaldn);
+    strengths.push(last.strength);
 
     // Pivot marks: plotshape(bool(ph) and showpp, text = 'H', ..., offset = -prd)
     const isPh = bool(ph[i]);
     const isPl = bool(pl[i]);
     if (cfg.showpp && i - prd >= 0) {
       if (isPh) {
-        markers.push({ time: bars[i - prd].time, position: 'aboveBar', shape: 'triangleDown', color: C(RED, 0), text: 'H', textColor: C(WHITE, 0), size: 'auto' });
+        markers.push({ time: bars[i - prd].time, position: 'aboveBar', shape: 'triangleDown', color: C(RED, 0), text: 'H', textColor: C(WHITE, 0), size: 'auto', id: 'shape9' });
       }
       if (isPl) {
-        markers.push({ time: bars[i - prd].time, position: 'belowBar', shape: 'triangleUp', color: C(LIME, 0), text: 'L', textColor: C(WHITE, 0), size: 'auto' });
+        markers.push({ time: bars[i - prd].time, position: 'belowBar', shape: 'triangleUp', color: C(LIME, 0), text: 'L', textColor: C(WHITE, 0), size: 'auto', id: 'shape10' });
       }
     }
 
@@ -1171,8 +1198,67 @@ export function calculate(
           lstyle, cfg.linewidth);
       }
     }
+
+    // f_crossed_over() / f_crossed_under(): the close crosses the middle of one of the support / resistance levels
+    let over = false;
+    let under = false;
+    for (let x = 0; x < srUp.length; x++) {
+      const mid = math.round_to_mintick((srUp[x] + srDn[x]) / 2, mintick) as number;
+      const c1 = prev(close, i);
+      if (le(c1, mid) && gt(c, mid)) over = true;
+      if (ge(c1, mid) && lt(c, mid)) under = true;
+    }
+    srOver.push(over);
+    srUnder.push(under);
   }
   setDrawingBar(null);
+
+  // ---- Alert conditions, in the original's order
+  // sideways = squeezesignalfilter and squeeze or adxsignalfilter and adx < adxtreshold
+  const sideways = bars.map((_b, i) => (cfg.squeezesignalfilter && squeeze[i]) || (cfg.adxsignalfilter && lt(adx[i], cfg.adxtreshold)));
+  // The ta.* calls on the right of `not sideways and` (and of `or`) only run on the bars where they are reached
+  const xSsl1 = callsite.crossover();
+  const xSsl2 = callsite.crossover();
+  const xExitSell = callsite.crossover();
+  const xExitBuy = callsite.crossover();
+  const xBaseBuy = callsite.crossover();
+  const xBaseSell = callsite.crossover();
+  const xEma = callsite.cross();
+  const xSsl = callsite.cross();
+  const xHma = callsite.cross();
+  const xMixEma = callsite.cross();
+  const xMixHma = callsite.cross();
+  const xMixSsl = callsite.cross();
+  const mixChange = changeSite();
+  const flags: boolean[][] = Array.from({ length: alertConditions.length }, () => []);
+  for (let i = 0; i < n; i++) {
+    const on = !sideways[i];
+    const c = close[i];
+    const strength = strengths[i];
+    [
+      gt(strength, cfg.strengthtreshold) || lt(strength, -1 * cfg.strengthtreshold),
+      on && xSsl1(c, sslDown[i]),
+      on && xSsl2(c, sslDown2[i]),
+      on && sellAtrs[i],
+      on && buyAtrs[i],
+      on && xExitSell(c, sslExit[i]),
+      on && xExitBuy(sslExit[i], c),
+      on && xBaseBuy(c, upperk[i]),
+      on && xBaseSell(lowerk[i], c),
+      on && xEma(ma1[i], ma2[i]),
+      (on && qqeBuys[i]) || (on && qqeSells[i]),
+      signalUps[i] || signalDns[i],
+      signalUps[i],
+      signalDns[i],
+      on && xSsl(c, sslExit[i]),
+      squeeze[i] || lt(adx[i], cfg.adxtreshold),
+      on && xHma(open[i], ma4[i]),
+      (on && xMixEma(ma1[i], ma2[i])) || (on && xMixHma(open[i], ma4[i])) || (on && xMixSsl(c, sslExit[i]))
+        || (on && bool(mixChange(direction[i]))),
+      srOver[i],
+      srUnder[i],
+    ].forEach((f, k) => flags[k].push(f));
+  }
 
   // ---- Tables (set on the last bar)
   const tables: TableData[] = [];
@@ -1246,13 +1332,42 @@ export function calculate(
     // fill(a, b, color = color.new(color.purple, 90), title = 'Bollinger Squeezed Area')
     fills: [{ plot1: 'plot11', plot2: 'plot12', options: { title: 'Bollinger Squeezed Area' }, colors: squeezeFill }],
     markers,
+    arrows,
     barColors,
     bgColors,
     tables,
     labels: drawn.labels ?? [],
     lines: drawn.lines ?? [],
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** Message of the MIXED alertcondition (the original's text with its line breaks) */
+const MIXED_MESSAGE = ['MIXED Signal:', 'SSL/Channel', ' EMA Crossover', ' HMA Entry/Exit ', ' SuperTrend Direction Changed'].join(String.fromCharCode(10));
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'TABLE:Strength Alert', message: 'Table UP/DN Signal Strength' },
+  { id: 'alert1', title: 'SSL Hybrid:SSL Cross Alert', message: 'SSL1 has crossed.' },
+  { id: 'alert2', title: 'SSL Hybrid:SSL2 Cross Alert', message: 'SSL2 has crossed.' },
+  { id: 'alert3', title: 'SSL Hybrid:Sell Continuation', message: 'Sell Continuation.' },
+  { id: 'alert4', title: 'SSL Hybrid:Buy Continuation', message: 'Buy Continuation.' },
+  { id: 'alert5', title: 'SSL Hybrid:Exit Sell', message: 'Exit Sell Alert.' },
+  { id: 'alert6', title: 'SSL Hybrid:Exit Buy', message: 'Exit Buy Alert.' },
+  { id: 'alert7', title: 'SSL Hybrid:Baseline Buy Entry', message: 'Base Buy Alert.' },
+  { id: 'alert8', title: 'SSL Hybrid:Baseline Sell Entry', message: 'Base Sell Alert.' },
+  { id: 'alert9', title: 'Advanced:EMA20/50 Signal', message: 'Advanced:EMA20/50  Up/Dn  Signal' },
+  { id: 'alert10', title: 'Advanced:QQE Crossover ', message: 'Advanced: QQE Crossing Zero' },
+  { id: 'alert11', title: 'FILTER:Buy/Sell Alert', message: 'FILTER:TREND FILTER Buy/Sell  Alert' },
+  { id: 'alert12', title: 'FILTER:Buy Alert', message: 'FILTER:TREND FILTER- Buy Alert' },
+  { id: 'alert13', title: 'FILTER:Sell Alert', message: 'FILTER:TREND FILTER- Sell Alert' },
+  { id: 'alert14', title: 'Advanced:SSL Buy Sell Alert', message: 'Advanced:SSL BUY / SELL / Alert.' },
+  { id: 'alert15', title: 'Advanced ADX:Volatile Sideways /Exit trade', message: 'Advanced:Low ADX / Dont Trade /Exit Trade' },
+  { id: 'alert16', title: 'Advanced: MTF/HMA Crossover', message: 'Advanced:MTF/HMA  Crossover Alert' },
+  { id: 'alert17', title: 'MIXED:SSL/Channel or EMA Cross or HMA Buy/sell or SuperTrend', message: MIXED_MESSAGE },
+  { id: 'alert18', title: 'S/R:Resistance Broken', message: 'Resistance Broken' },
+  { id: 'alert19', title: 'S/R:Support Broken', message: 'Support Broken' },
+];
 
 export const SslHybridAdvanced = {
   calculate,
@@ -1260,4 +1375,5 @@ export const SslHybridAdvanced = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -27,6 +27,9 @@
  * `session`) the labels are drawn on the future bar of the trading calendar; `lastBarConfirmed` false (the last bar
  * still open) shows the open bar of each other symbol on the last bar.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'MBUY' and 'SELL', true on the bars of the chart symbol's buy /
+ * sell signals (whether or not the signals are shown).
+ *
  * Reference: "MOST + Moving Average Screener" by KivancOzbilgic
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -36,6 +39,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { LabelData, MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { barTime } from '../bar-time';
 import { chartTimeframe, timeAfterLastBar } from '../anchor-period';
 import { symbolBarsOf, type ChartContext, type SymbolRequest } from '../chart-context';
@@ -313,7 +317,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<MOSTScreenerInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; labels: LabelData[] } {
+): IndicatorResult & { markers: MarkerData[]; labels: LabelData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const chartTf = chartTimeframe(bars, chart);
@@ -393,7 +397,15 @@ export function calculate(
     plots: { plot0, plot1 },
     markers,
     labels,
+    // alertcondition(cro, title = 'MBUY') / alertcondition(cru, title = 'SELL')
+    alerts: alertStates(alertConditions, bars, [cro, cru]),
   };
 }
 
-export const MOSTScreener = { calculate, metadata, defaultInputs, inputConfig, plotConfig, requiredSymbols };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'MBUY', message: 'BUY SIGNAL!' },
+  { id: 'alert1', title: 'SELL', message: 'SELL SIGNAL!' },
+];
+
+export const MOSTScreener = { calculate, metadata, defaultInputs, inputConfig, plotConfig, requiredSymbols, alertConditions };

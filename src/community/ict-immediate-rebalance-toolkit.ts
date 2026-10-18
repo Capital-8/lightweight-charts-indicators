@@ -577,7 +577,10 @@ export function calculate(
       const inSession = macroSites.map((s) => s.on && time.inSession(msTimes ? t : t * 1000, s.session, MACRO_TZ, barMs));
       const inMC = inSession.some((x) => x);
       // bgcolor(): one call per macro, the later call is drawn on top
-      for (let k = 0; k < macroSites.length; k++) if (inSession[k] && tfM) bgColors.push({ time: t, color: macroSites[k].css });
+      // one bgcolor() per macro, in the original's order: ids bgcolor0..bgcolor7
+      for (let k = 0; k < macroSites.length; k++) {
+        if (inSession[k] && tfM) bgColors.push({ time: t, color: macroSites[k].css, id: `bgcolor${k}` });
+      }
 
       // mcRender(): all the calls share the object `mc`; max, min, mid, sbT, xt and xb are kept per call
       for (let k = 0; k < macroSites.length; k++) {

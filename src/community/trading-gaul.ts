@@ -6,6 +6,9 @@
  * previous close stays beyond the previous stop. The direction turns long when the close goes above the previous
  * short stop and short when it goes below the previous long stop. The stop of the current direction is drawn, with a
  * circle and a Buy / Sell label when the direction changes, and a fill between the stop and ohlc4.
+ * Alerts (alertcondition, `alerts` of the result): 'CE Direction Change', 'CE Buy' and 'CE Sell'. With "Await Bar
+ * Confirmation" they are true on confirmed bars only (`barstate.isconfirmed`: the last bar only when the chart context
+ * says it is closed, `lastBarConfirmed`; true without a context).
  *
  * Reference: "Chandelier Exit" by investment20223
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +18,8 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
 
 export interface TradingGaulInputs {
   /** ATR period (also the length of the highest / lowest) */
@@ -27,7 +32,7 @@ export interface TradingGaulInputs {
   showLabels: boolean;
   /** Fill between ohlc4 and the stop of the current direction */
   highlightState: boolean;
-  /** Await bar confirmation (alerts only) */
+  /** Await bar confirmation (alerts only: the conditions are true on confirmed bars only) */
   awaitBarConfirmation: boolean;
 }
 
@@ -69,7 +74,8 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<TradingGaulInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+  chart?: ChartContext,
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -109,6 +115,8 @@ export function calculate(
   const longColors: string[] = [];
   const shortColors: string[] = [];
   const markers: MarkerData[] = [];
+  const lastConfirmed = lastBarConfirmedOf(chart);
+  const changeFlags: boolean[] = [], buyFlags: boolean[] = [], sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     const b = bars[i];
@@ -121,20 +129,26 @@ export function calculate(
     // buySignal = dir == 1 and dir[1] == -1 (dir[1] is na on the first bar)
     const buySignal = i > 0 && dir[i] === 1 && dir[i - 1] === -1;
     const sellSignal = i > 0 && dir[i] === -1 && dir[i - 1] === 1;
+    // await = awaitBarConfirmation ? barstate.isconfirmed : true
+    const awaitOk = !cfg.awaitBarConfirmation || i < n - 1 || lastConfirmed;
+    // alertcondition(dir != dir[1] and await) / (buySignal and await) / (sellSignal and await)
+    changeFlags.push(i > 0 && dir[i] !== dir[i - 1] && awaitOk);
+    buyFlags.push(buySignal && awaitOk);
+    sellFlags.push(sellSignal && awaitOk);
     if (buySignal && !isNaN(longStop[i])) {
       // plotshape(buySignal ? longStop : na, location.absolute, shape.circle, size.tiny)
-      markers.push({ time: t, position: 'atPriceMiddle', price: longStop[i], shape: 'circle', color: color.green, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: longStop[i], shape: 'circle', color: color.green, size: 'tiny', id: 'shape0' });
       // plotshape(buySignal and showLabels ? longStop : na, text = 'Buy', shape.labelup, textcolor = white)
       if (cfg.showLabels) {
         markers.push({ time: t, position: 'atPriceBottom', price: longStop[i], shape: 'labelUp', color: color.green,
-          size: 'tiny', text: 'Buy', textColor: color.white });
+          size: 'tiny', text: 'Buy', textColor: color.white, id: 'shape1' });
       }
     }
     if (sellSignal && !isNaN(shortStop[i])) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: shortStop[i], shape: 'circle', color: color.red, size: 'tiny' });
+      markers.push({ time: t, position: 'atPriceMiddle', price: shortStop[i], shape: 'circle', color: color.red, size: 'tiny', id: 'shape2' });
       if (cfg.showLabels) {
         markers.push({ time: t, position: 'atPriceTop', price: shortStop[i], shape: 'labelDown', color: color.red,
-          size: 'tiny', text: 'Sell', textColor: color.white });
+          size: 'tiny', text: 'Sell', textColor: color.white, id: 'shape3' });
       }
     }
   }
@@ -147,8 +161,16 @@ export function calculate(
       { plot1: 'plot2', plot2: 'plot1', options: { title: 'Short State Filling' }, colors: shortColors },
     ],
     markers,
+    alerts: alertStates(alertConditions, bars, [changeFlags, buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'CE Direction Change', message: 'Chandelier Exit has changed direction, {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'CE Buy', message: 'Chandelier Exit Buy, {{exchange}}:{{ticker}}' },
+  { id: 'alert2', title: 'CE Sell', message: 'Chandelier Exit Sell, {{exchange}}:{{ticker}}' },
+];
 
 export const TradingGaul = {
   calculate,
@@ -156,4 +178,5 @@ export const TradingGaul = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

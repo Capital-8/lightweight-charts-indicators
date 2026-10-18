@@ -5,6 +5,7 @@
  * above the high of the first candle. Bearish: a bullish candle, then a bearish candle with a higher high, then a bar
  * whose high is below the low of the first candle. The first candle of the pattern is coloured (barcolor with
  * offset -2: the colour of bar i is drawn on bar i - 2): yellow for bullish, magenta for bearish.
+ * Alerts (alertcondition, `alerts` of the result): 'Quasimodo Pattern', true on the third bar of either pattern.
  *
  * Reference: "Quasimodo Pattern" by anodrr2
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +13,12 @@
 
 import { color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Quasimodo Pattern', message: 'A Quasimodo Pattern has appeared!' },
+];
 
 export interface QuasimodoPatternInputs {}
 
@@ -36,16 +43,18 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   _inputs: Partial<QuasimodoPatternInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const bullColor = String(color.rgb(240, 243, 33));
   const bearColor = String(color.rgb(255, 0, 191));
   const barColors: BarColorData[] = [];
+  const flags: boolean[] = new Array(bars.length).fill(false);
   for (let i = 2; i < bars.length; i++) {
     const b = bars[i];
     const b1 = bars[i - 1];
     const b2 = bars[i - 2];
     const bullishQuasimodo = gt(b.low, b2.high) && gt(b1.close, b1.open) && lt(b2.close, b2.open) && gt(b2.low, b1.low);
     const bearishQuasimodo = lt(b.high, b2.low) && lt(b1.close, b1.open) && gt(b2.close, b2.open) && gt(b1.high, b2.high);
+    flags[i] = bullishQuasimodo || bearishQuasimodo;
     // barcolor(..., offset = -2): drawn on bar i - 2; the second barcolor call is drawn over the first one
     if (bearishQuasimodo) barColors.push({ time: b2.time, color: bearColor });
     else if (bullishQuasimodo) barColors.push({ time: b2.time, color: bullColor });
@@ -54,7 +63,9 @@ export function calculate(
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
     barColors,
+    // alertcondition(bullishQuasimodo or bearishQuasimodo, "Quasimodo Pattern"): on the bar of the condition
+    alerts: alertStates(alertConditions, bars, [flags]),
   };
 }
 
-export const QuasimodoPattern = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const QuasimodoPattern = { calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions };

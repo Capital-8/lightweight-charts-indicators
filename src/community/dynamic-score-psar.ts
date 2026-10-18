@@ -7,6 +7,8 @@
  * and score below the downtrend threshold. Columns, bands at +-600 / +-900 and bars are coloured by the trend (a
  * gradient on the value), with markers and background colours when the value crosses zero in a confirmed trend.
  * Presets replace the PSAR and score settings.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Reversal' / 'Bearish Reversal' (the signals), and
+ * 'Histogram Turned Bullish' / 'Bearish' / 'Neutral' (first bar of an uptrend / downtrend / neutral state).
  *
  * Reference: "Dynamic Score PSAR [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BarColorData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type DynamicScorePsarPreset = 'Default' | 'Fast Response' | 'Smooth Trend';
 
@@ -90,7 +93,8 @@ const PRESETS: Record<string, { start: number; inc: number; max: number; window:
 export function calculate(
   bars: Bar[],
   inputs: Partial<DynamicScorePsarInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[]; bgColors: BgColorData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -119,6 +123,8 @@ export function calculate(
   const markers: MarkerData[] = [];
   const barColors: BarColorData[] = [];
   const bgColors: BgColorData[] = [];
+  const flags: boolean[][] = [[], [], [], [], []];
+  let prevLong = false, prevShort = false; // long_condition[1] / short_condition[1] (false before the first bar)
 
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
@@ -135,6 +141,13 @@ export function calculate(
     const prev = i > 0 ? np[i - 1] : NaN;
     const bullishSignal = v > 0 && prev <= 0 && longCondition;
     const bearishSignal = v < 0 && prev >= 0 && shortCondition;
+    flags[0].push(bullishSignal);
+    flags[1].push(bearishSignal);
+    flags[2].push(longCondition && !prevLong);
+    flags[3].push(shortCondition && !prevShort);
+    flags[4].push(!longCondition && !shortCondition && (prevLong || prevShort));
+    prevLong = longCondition;
+    prevShort = shortCondition;
 
     const uptrendColor = color.from_gradient(v, 0, 400, bullFaded, cfg.bullishColor);
     const downtrendColor = color.from_gradient(v, -400, 0, cfg.bearishColor, bearFaded);
@@ -157,10 +170,11 @@ export function calculate(
     }
 
     if (cfg.colorBars) {
-      barColors.push({ time: t, color: longCondition ? cfg.bullishColor : shortCondition ? cfg.bearishColor : cfg.neutralColor });
+      barColors.push({ time: t, color: longCondition ? cfg.bullishColor : shortCondition ? cfg.bearishColor : cfg.neutralColor,
+        id: 'barcolor0' });
     }
-    if (bullishSignal) bgColors.push({ time: t, color: bullBg });
-    if (bearishSignal) bgColors.push({ time: t, color: bearBg });
+    if (bullishSignal) bgColors.push({ time: t, color: bullBg, id: 'bgcolor0' });
+    if (bearishSignal) bgColors.push({ time: t, color: bearBg, id: 'bgcolor1' });
   }
 
   return {
@@ -175,8 +189,18 @@ export function calculate(
     markers,
     barColors,
     bgColors,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Reversal', message: 'Dynamic Score PSAR crossed above zero line with bullish confirmation' },
+  { id: 'alert1', title: 'Bearish Reversal', message: 'Dynamic Score PSAR crossed below zero line with bearish confirmation' },
+  { id: 'alert2', title: 'Histogram Turned Bullish', message: 'Dynamic Score PSAR histogram turned bullish (green)' },
+  { id: 'alert3', title: 'Histogram Turned Bearish', message: 'Dynamic Score PSAR histogram turned bearish (red)' },
+  { id: 'alert4', title: 'Histogram Turned Neutral', message: 'Dynamic Score PSAR histogram turned neutral (grey)' },
+];
 
 export const DynamicScorePsar = {
   calculate,
@@ -184,4 +208,5 @@ export const DynamicScorePsar = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

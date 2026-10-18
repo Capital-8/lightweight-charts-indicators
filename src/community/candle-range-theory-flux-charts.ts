@@ -20,7 +20,11 @@
  * the zone of the entry (box), a "Buy" / "Sell" label and the dashed target lines with "TP" / "SL" labels (or two
  * boxes with the "Alternative" layout; an open trade ends 15 bars after the current bar); the backtesting table.
  * Zone boxes of older setups stay on the chart (up to 500 boxes), as in the original.
- * The four alert conditions and the alert() calls give no output.
+ * Alerts: the four alert conditions (`alerts` of the result: 'Buy Signal' and 'Sell Signal' on the entry bars of a
+ * long / short trade, 'Take-Profit Signal' and 'Stop-Loss Signal' on its exit bars) and the alert() calls of the same
+ * names (`alertCalls`, once per bar, each with its "... Signal" input on), as in the original only from the last closed
+ * bar of the history on (the bars before it are the initial run): the last bar, or the bar before it when the last bar
+ * is still open.
  *
  * Chart context (optional third argument):
  * - `chart.lastBarConfirmed`: the original works on closed bars only. When the last bar is still open, it is not
@@ -38,7 +42,8 @@ import {
   ta, str, color, timeframe, periodClose, Series, box, resetDrawings, setDrawingBar,
   type Box, type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
-import type { BoxData, LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TablePosition } from '../types';
+import type { AlertCall, BoxData, LabelData, LineDrawingData, MarkerData, TableData, TableCellData, TablePosition } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { chartTimeframe, hasCalendar, higherTimeframeBars, timeAfterLastBar, barsAfterLastBar } from '../anchor-period';
 import { lastBarConfirmedOf, mintickOf, type ChartContext } from '../chart-context';
 
@@ -261,7 +266,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<CandleRangeTheoryFluxChartsInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[] } {
+): IndicatorResult & { markers: MarkerData[]; lines: LineDrawingData[]; boxes: BoxData[]; labels: LabelData[]; tables: TableData[] }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -270,6 +276,9 @@ export function calculate(
   const labels: LabelData[] = [];
   const tables: TableData[] = [];
   const boxesOut: BoxData[] = [];
+  // buyAlertTick / sellAlertTick / tpAlertTick / slAlertTick and not initRun, per bar
+  const alertFlags: boolean[][] = [[], [], [], []];
+  const alertCalls: AlertCall[] = [];
   const result = () => ({
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {},
@@ -278,6 +287,8 @@ export function calculate(
     boxes: boxesOut,
     labels,
     tables,
+    alerts: alertStates(alertConditions, bars, alertFlags),
+    alertCalls,
   });
   if (n === 0) return result();
 
@@ -439,6 +450,8 @@ export function calculate(
     const time = b.time;
     const confirmed = i < last || lastConfirmed;
     const active = confirmed && i > last - MAX_DISTANCE_TO_LAST_BAR;
+    // buyAlertTick = false, sellAlertTick = false, tpAlertTick = false, slAlertTick = false on every bar
+    let buyAlertTick = false, sellAlertTick = false, tpAlertTick = false, slAlertTick = false;
     const bk = (k: number) => (i - k >= 0 ? bars[i - k] : null);
 
     // Fair value gaps
@@ -686,6 +699,7 @@ export function calculate(
         crt.entryPrice = b.close;
         if (crt.overlapDirection === 'Bull') {
           crt.entryType = 'Long';
+          buyAlertTick = true;
           if (fixed) {
             crt.slTarget = crt.entryPrice * (1 - slPercent / 100.0);
             crt.tpTarget = crt.entryPrice * (1 + tpPercent / 100.0);
@@ -695,6 +709,7 @@ export function calculate(
           }
         } else {
           crt.entryType = 'Short';
+          sellAlertTick = true;
           if (fixed) {
             crt.slTarget = crt.entryPrice * (1 + slPercent / 100.0);
             crt.tpTarget = crt.entryPrice * (1 - tpPercent / 100.0);
@@ -709,6 +724,8 @@ export function calculate(
         const long = crt.entryType === 'Long';
         const short = crt.entryType === 'Short';
         const exit = (price: number, state: State) => {
+          if (state === 'Take Profit') tpAlertTick = true;
+          else slAlertTick = true;
           crt.exitPrice = price;
           crt.exitTime = time;
           crt.state = state;
@@ -728,6 +745,17 @@ export function calculate(
         }
       }
     }
+
+    // if barstate.islastconfirmedhistory: initRun := false (var initRun = true): the last bar when it is closed, else
+    // the bar before it
+    const initRun = i < (lastConfirmed ? last : last - 1);
+    // alertcondition(<tick> and not initRun, "<name> Signal", ""); if not initRun: if <tick> and <enabled>: alert(...)
+    const ticks = [buyAlertTick, sellAlertTick, tpAlertTick, slAlertTick];
+    const enabled = [cfg.buyAlertEnabled, cfg.sellAlertEnabled, cfg.tpAlertEnabled, cfg.slAlertEnabled];
+    ticks.forEach((tick, k) => {
+      alertFlags[k].push(tick && !initRun);
+      if (tick && !initRun && enabled[k]) alertCalls.push({ time, message: alertConditions[k].title, freq: 'once_per_bar' });
+    });
 
     // Exit markers
     if (lastCRT !== null) {
@@ -866,10 +894,23 @@ export function calculate(
   return result();
 }
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Buy Signal', message: '' },
+  { id: 'alert1', title: 'Sell Signal', message: '' },
+  { id: 'alert2', title: 'Take-Profit Signal', message: '' },
+  { id: 'alert3', title: 'Stop-Loss Signal', message: '' },
+];
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
+
 export const CandleRangeTheoryFluxCharts = {
   calculate,
   metadata,
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

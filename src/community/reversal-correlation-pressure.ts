@@ -6,7 +6,8 @@
  * over `length` bars below -2 (long) / above 2 (short). Two rolling backtests (the last 250 outcomes of the signals of
  * 10 bars before, split by the pressure state of that bar: above 1 or not) keep the signal when the pressure state
  * of the current bar has the better win rate: mean reversion (pressure > 1 vs < 1) and trend following (signals
- * reversed, pressure > 1 vs <= 0). The sum of both gives arrows on the price pane and bar colours.
+ * reversed, pressure > 1 vs <= 0). The sum of both gives arrows on the price pane (the original's plotarrow with
+ * force_overlay, `arrows` of the result, id 'arrow0') and bar colours.
  *
  * Reference: "Reversal Correlation Pressure [OmegaTools]" by OmegaTools
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,7 +15,8 @@
  */
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BarColorData } from '../types';
+import type { BarColorData } from '../types';
+import type { ArrowData } from 'oakscriptjs';
 
 export interface ReversalCorrelationPressureInputs {
   /** Correlation / z-score length */
@@ -88,7 +90,7 @@ function backtester(close: number[], long: boolean[], short: boolean[], cond1: b
 export function calculate(
   bars: Bar[],
   inputs: Partial<ReversalCorrelationPressureInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): IndicatorResult & { arrows: ArrowData[]; barColors: BarColorData[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const lnt = cfg.length;
   const n = bars.length;
@@ -116,7 +118,7 @@ export function calculate(
   const bottom = String(color.new('#1100fc', 30));
   const top = String(color.new('#ee00ff', 0));
   const plot0 = [];
-  const markers: MarkerData[] = [];
+  const arrows: ArrowData[] = [];
   const barColors: BarColorData[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
@@ -126,10 +128,10 @@ export function calculate(
     const signal = signalmr[i] + signaltf[i];
     // plotarrow(signal, 'Filtered Signal', #2962ff, #e91e63, 0, 10, 15, force_overlay = true)
     if (signal > 0) {
-      markers.push({ time: t, position: 'belowBar', shape: 'arrowUp', color: UP, forceOverlay: true });
+      arrows.push({ time: t, id: 'arrow0', value: signal, color: UP });
       barColors.push({ time: t, color: UP });
     } else if (signal < 0) {
-      markers.push({ time: t, position: 'aboveBar', shape: 'arrowDown', color: DOWN, forceOverlay: true });
+      arrows.push({ time: t, id: 'arrow0', value: signal, color: DOWN });
       barColors.push({ time: t, color: DOWN });
     }
   }
@@ -137,7 +139,7 @@ export function calculate(
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: { plot0 },
-    markers,
+    arrows,
     barColors,
   };
 }

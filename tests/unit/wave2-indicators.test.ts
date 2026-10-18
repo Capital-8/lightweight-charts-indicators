@@ -292,11 +292,12 @@ describe('OptimizedTrendTracker', () => {
     }
   });
 
-  it('has fill between support and OTT', () => {
+  it('has the up / down trend fills between the hidden ohlc4 plot and OTT', () => {
     expect(result.fills).toBeDefined();
-    expect(result.fills.length).toBe(1);
-    expect(result.fills[0].plot1).toBe('plot0');
-    expect(result.fills[0].plot2).toBe('plot1');
+    expect(result.fills.map((f: any) => [f.plot1, f.plot2, f.options?.title])).toEqual([
+      ['plot2', 'plot1', 'UpTrend Highligter'],
+      ['plot2', 'plot1', 'DownTrend Highligter'],
+    ]);
   });
 });
 

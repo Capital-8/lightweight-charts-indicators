@@ -14,6 +14,11 @@
  * current time, with an optional stop loss. It draws entry / exit labels, early warning labels, a statistics label
  * after the last bar, a background colour and the entry / exit price as circles on the price pane.
  *
+ * Alerts: the alertconditions (`alerts` of the result) 'Long : Early Warning' / 'Short : Early Warning' on the
+ * crosses of the standard deviation line over / under 0 and 'Long : Trading Opportunity' / 'Short : Trading
+ * Opportunity' one bar later; with the backtest on, the alert() calls (`alertCalls`, once per bar) of the entries
+ * ("Long entry — <ticker id> | Price: <close>"), of the stop loss and of the early warnings, as the original.
+ *
  * Inputs whose effect a static plot setting cannot follow: "Style" (Cross / Line / StepLine) sets the style of the
  * 26 iteration plots; the plot configuration keeps the default (cross). The plots use display = all except the
  * status line.
@@ -32,9 +37,13 @@ import {
   drawingOutputs,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType, type Label,
 } from 'oakscriptjs';
-import type { BgColorData, LabelData, TableData } from '../types';
-import { mintickOf, nowOf, type ChartContext } from '../chart-context';
+import type { AlertCall, BgColorData, LabelData, TableData } from '../types';
+import { mintickOf, nowOf, tickeridOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { chartTimeframe } from '../anchor-period';
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
 
 type Indicator = 'Awesome Oscillator (AO)' | 'Logistic Dominance' | 'Rate of Change (ROC)'
   | 'Relative Strength Index (RSI)' | 'Stochastic (STOCH)';
@@ -166,7 +175,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<LogisticRsiStochRocAoByDgtInputs> = {},
   chart?: ChartContext,
-): IndicatorResult & { labels: LabelData[]; tables: TableData[]; bgColors: BgColorData[] } {
+): IndicatorResult & { labels: LabelData[]; tables: TableData[]; bgColors: BgColorData[]; alertCalls: AlertCall[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => (v === null || v === undefined ? NaN : v));
@@ -244,6 +254,12 @@ export function calculate(
   const longAlert = ta.crossover(sdS, 0).toArray().map(Boolean);
   const shortAlert = ta.crossunder(sdS, 0).toArray().map(Boolean);
   const hist = (x: boolean[], k: number, i: number) => (i - k >= 0 ? x[i - k] : false);
+  // alertcondition(longAlertCondition / longAlertCondition[1] / shortAlertCondition / shortAlertCondition[1])
+  const alerts = alertStates(alertConditions, bars, [
+    longAlert, longAlert.map((_, i) => hist(longAlert, 1, i)), shortAlert, shortAlert.map((_, i) => hist(shortAlert, 1, i)),
+  ]);
+  const alertCalls: AlertCall[] = [];
+  const tickerid = tickeridOf(chart);
 
   // ── Backtest framework ──
   resetDrawings({ label: 500 });
@@ -355,10 +371,20 @@ export function calculate(
           const exitS = dir === -1 && (longCond || slHit);
           if (exitL || exitS) fClose(slHit, cfg.lblInOutSL);
         }
+        const call = (what: string) => alertCalls.push({
+          time: b.time, message: what + ' — ' + tickerid + ' | Price: ' + str.tostring(b.close), freq: 'once_per_bar',
+        });
         if (dir === 0) {
-          if (longCond && canLong) fOpen(1, cfg.lblInOutSL);
-          if (shortCond && canShort) fOpen(-1, cfg.lblInOutSL);
+          if (longCond && canLong) {
+            fOpen(1, cfg.lblInOutSL);
+            call('Long entry');
+          }
+          if (shortCond && canShort) {
+            fOpen(-1, cfg.lblInOutSL);
+            call('Short entry');
+          }
         }
+        if (slHit) call('Stop loss');
       }
 
       // early warnings: the label of the bar before is deleted on every bar after the first
@@ -367,11 +393,13 @@ export function calculate(
           wLabel.value = label.new(i, b.low, '⚠️', 'bar_index', 'price', TEAL, 'none', '#FFFFFF', 'large', undefined,
             'Probable long entry — awaiting confirmation\nIf confirmed, trade executes at next bar open.', undefined, true);
           if (wLabelPrev) label.delete(wLabelPrev);
+          alertCalls.push({ time: b.time, message: 'Long early warning — ' + tickerid + ' | Price: ' + str.tostring(b.close), freq: 'once_per_bar' });
         }
         if (canShort && dir !== -1 && hist(shortAlert, 1, i) && !longAlert[i]) {
           wLabel.value = label.new(i, b.high, '⚠️', 'bar_index', 'price', RED, 'none', '#FFFFFF', 'large', undefined,
             'Probable short entry — awaiting confirmation\nIf confirmed, trade executes at next bar open.', undefined, true);
           if (wLabelPrev) label.delete(wLabelPrev);
+          alertCalls.push({ time: b.time, message: 'Short early warning — ' + tickerid + ' | Price: ' + str.tostring(b.close), freq: 'once_per_bar' });
         }
         // bool(ta.change(time)): na on the first bar, then true
         if (i > 0 && wLabelPrev) label.delete(wLabelPrev);
@@ -465,7 +493,19 @@ export function calculate(
     bgColors,
     labels: drawn.labels ?? [],
     tables: drawn.tables ?? [],
+    alerts,
+    alertCalls,
   };
 }
 
-export const LogisticRsiStochRocAoByDgt = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Long : Early Warning', message: 'LOGISTIC - Not Confirmed Probable Long Trade Opportunity\n{{exchange}}:{{ticker}}->\nPrice = {{close}},\nTime = {{time}}' },
+  { id: 'alert1', title: 'Long : Trading Opportunity', message: 'LOGISTIC - Probable Long Trade Opportunity\n{{exchange}}:{{ticker}}->\nPrice = {{close}},\nTime = {{time}}' },
+  { id: 'alert2', title: 'Short : Early Warning', message: 'LOGISTIC - Not Confirmed Probable Short Trade Opportunity\n{{exchange}}:{{ticker}}->\nPrice = {{close}},\nTime = {{time}}' },
+  { id: 'alert3', title: 'Short : Trading Opportunity', message: 'LOGISTIC - Probable Short Trade Opportunity\n{{exchange}}:{{ticker}}->\nPrice = {{close}},\nTime = {{time}}' },
+];
+
+export const LogisticRsiStochRocAoByDgt = {
+  calculate, metadata, defaultInputs, inputConfig, plotConfig, alertConditions, hasAlertFunction,
+};

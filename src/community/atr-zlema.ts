@@ -5,6 +5,8 @@
  * kept value by more than ATR * noise filter. An ATR trailing line (ZLEMA -/+ ATR * multiplier) follows the ZLEMA
  * and flips side when the ZLEMA crosses it; the trend (up / down) colours the trailing line, a gradient cloud
  * between the line and the ZLEMA, triangle signals on the flips and the price bars.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Trend' / 'Bearish Trend' on the flips up / down,
+ * 'Any Trend Change' on both.
  *
  * Reference: "ATR ZLEMA [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -12,6 +14,7 @@
 
 import { ta, getSourceSeries, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface ATRZLEMAInputs {
   /** Price source of the ZLEMA */
@@ -95,7 +98,7 @@ const COLOR_PRESETS: Record<string, [string, string]> = {
 export function calculate(
   bars: Bar[],
   inputs: Partial<ATRZLEMAInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   let { zlemaLength, atrLength, atrMultiplier, noiseFilter } = cfg;
@@ -167,22 +170,26 @@ export function calculate(
   const barColors: BarColorData[] = [];
   const bullGlow = String(color.new(bullColor, 50));
   const bearGlow = String(color.new(bearColor, 50));
+  const bullFlags: boolean[] = [], bearFlags: boolean[] = [], anyFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // bullSignal = trend == 1 and trend[1] == -1 (trend[1] is na on the first bar)
     const bullSignal = i > 0 && trendArr[i] === 1 && trendArr[i - 1] === -1;
     const bearSignal = i > 0 && trendArr[i] === -1 && trendArr[i - 1] === 1;
+    bullFlags.push(bullSignal);
+    bearFlags.push(bearSignal);
+    anyFlags.push(bullSignal || bearSignal);
     const price = zlemaATRArr[i];
     if (cfg.showShapes && !isNaN(price)) {
       // plotshape(showShapes and bullSignal ? zlemaATR : na, shape.triangleup, location.absolute, bullColor, size.tiny)
-      // then the glow: color.new(bullColor, 50), size.small (same for the bearish triangles)
+      // then the glow: color.new(bullColor, 50), size.small (same for the bearish triangles); ids: the four plotshapes
       if (bullSignal) {
-        markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'triangleUp', color: bullColor, size: 'tiny' });
-        markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'triangleUp', color: bullGlow, size: 'small' });
+        markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'triangleUp', color: bullColor, size: 'tiny', id: 'shape0' });
+        markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'triangleUp', color: bullGlow, size: 'small', id: 'shape1' });
       }
       if (bearSignal) {
-        markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'triangleDown', color: bearColor, size: 'tiny' });
-        markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'triangleDown', color: bearGlow, size: 'small' });
+        markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'triangleDown', color: bearColor, size: 'tiny', id: 'shape2' });
+        markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'triangleDown', color: bearGlow, size: 'small', id: 'shape3' });
       }
     }
     // barcolor(enableBarColoring ? color.new(trendColor, barTransparency) : na)
@@ -207,8 +214,20 @@ export function calculate(
     }],
     markers,
     barColors,
+    // alertcondition(bullSignal) / alertcondition(bearSignal) / alertcondition(bullSignal or bearSignal)
+    alerts: alertStates(alertConditions, bars, [bullFlags, bearFlags, anyFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Trend', message: 'ATR ZLEMA: BULLISH trend detected on {{exchange}}:{{ticker}} - {{interval}}' },
+  { id: 'alert1', title: 'Bearish Trend', message: 'ATR ZLEMA: BEARISH trend detected on {{exchange}}:{{ticker}} - {{interval}}' },
+  {
+    id: 'alert2', title: 'Any Trend Change',
+    message: 'ATR ZLEMA: Trend reversal detected! Check chart {{exchange}}:{{ticker}} - {{interval}}',
+  },
+];
 
 export const ATRZLEMA = {
   calculate,
@@ -216,4 +235,5 @@ export const ATRZLEMA = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

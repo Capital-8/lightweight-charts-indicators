@@ -19,7 +19,9 @@
  * Chart context (optional third argument): `chart.foregroundColor` (Pine `chart.fg_color`) colours the fast and
  * average %R lines, the middle line and the strategy texts. Without it #DBDBDB.
  *
- * Limits of the port: the alerts (6 alert conditions and 6 alert() calls with their inputs) give no output.
+ * Alerts: the 6 alertconditions of the original (`alerts` of the result: reversals, trend starts and line crosses) and
+ * its 6 alert() calls (`alertCalls`, once per bar close), each made when its "Alerts" input is on, with the message
+ * of its text input.
  *
  * Reference: "%R Trend Exhaustion [upslidedown]" by upslidedown
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -30,7 +32,8 @@ import {
   ta, color, Series, box, resetDrawings, setDrawingBar, varDrawing, drawingOutputs,
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type Box,
 } from 'oakscriptjs';
-import type { BoxData, MarkerData, MarkerPosition } from '../types';
+import type { AlertCall, BoxData, MarkerData, MarkerPosition } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 import { foregroundColorOf, type ChartContext } from '../chart-context';
 
 const MODE1 = '1 Oscillator Mode';
@@ -187,6 +190,19 @@ export const plotConfig: PlotConfig[] = [
   { id: 'plot5', title: '🔌Signal to TTS', color: '#808000', lineWidth: 1, display: 'data_window' },
 ];
 
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Arrow Down (Bearish Reversal)', message: 'Arrow Down: Overbought trend is exhausted' },
+  { id: 'alert1', title: 'Arrow Up (Bullish Reversal)', message: 'Arrow Up: Oversold trend is exhausted' },
+  { id: 'alert2', title: 'Overbought Trend Started', message: 'Warning: Possible overbought trend exhaustion' },
+  { id: 'alert3', title: 'Oversold Trend Started', message: 'Warning: Possible oversold trend exhaustion' },
+  { id: 'alert4', title: 'Bullish Crossover', message: 'Potential bullish crossover printed' },
+  { id: 'alert5', title: 'Bearish Crossover', message: 'Potential bearish crossover printed' },
+];
+
+/** The original makes alert() calls */
+export const hasAlertFunction = true;
+
 export const metadata = {
   title: '%R Trend Exhaustion [upslidedown]',
   shortTitle: '%R Trend Exhaustion [upslidedown]',
@@ -224,7 +240,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<RTrendExhaustionInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers' | 'boxes'> & { markers: MarkerData[]; boxes: BoxData[] } {
+): Omit<IndicatorResult, 'markers' | 'boxes'> & { markers: MarkerData[]; boxes: BoxData[] }
+  & { alerts: AlertConditionState[]; alertCalls: AlertCall[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => (v === null || v === undefined ? NaN : v));
@@ -330,6 +347,8 @@ export function calculate(
   const dotBig: Point[] = [];
   const signal: number[] = new Array(n).fill(NaN);
 
+  const flags: boolean[][] = [[], [], [], [], [], []];
+  const alertCalls: AlertCall[] = [];
   let prevOb = false;
   let prevOs = false;
   for (let i = 0; i < n; i++) {
@@ -358,6 +377,7 @@ export function calculate(
     prevOs = oversold;
     const crossBear = crossBearArr[i] === 1;
     const crossBull = crossBullArr[i] === 1;
+    [obReversal, osReversal, obTrendStart, osTrendStart, crossBull, crossBear].forEach((f, k) => flags[k].push(f));
 
     // plots
     if (mode === MODE1 && !useAverage) {
@@ -368,16 +388,18 @@ export function calculate(
 
     // plotshapes before the box block (they read the box top / bottom of the bar before)
     const tiny = { text: '', textColor: invisible, size: 'tiny' as const };
-    if (obReversal) shapeAt(t, topLoc, bearSignalLoc, { shape: 'triangleDown', color: bearcol, ...tiny });
-    if (osReversal) shapeAt(t, bottomLoc, bullSignalLoc, { shape: 'triangleUp', color: bullcol, ...tiny });
+    if (obReversal) shapeAt(t, topLoc, bearSignalLoc, { shape: 'triangleDown', color: bearcol, ...tiny, id: 'shape0' });
+    if (osReversal) shapeAt(t, bottomLoc, bullSignalLoc, { shape: 'triangleUp', color: bullcol, ...tiny, id: 'shape1' });
     if (cfg.drawBoxes && obReversal && !isNaN(obBoxTop)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: obBoxTop, shape: 'triangleDown', color: bearcol, ...tiny, forceOverlay: true });
+      markers.push({ time: t, position: 'atPriceMiddle', price: obBoxTop, shape: 'triangleDown', color: bearcol, ...tiny, forceOverlay: true,
+        id: 'shape2' });
     }
     if (cfg.drawBoxes && osReversal && !isNaN(osBoxBottom)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price: osBoxBottom, shape: 'triangleUp', color: bullcol, ...tiny, forceOverlay: true });
+      markers.push({ time: t, position: 'atPriceMiddle', price: osBoxBottom, shape: 'triangleUp', color: bullcol, ...tiny, forceOverlay: true,
+        id: 'shape3' });
     }
-    if (overbought) shapeAt(t, topLoc, bearSignalLoc, { shape: 'square', color: bearMedium, ...tiny });
-    if (oversold) shapeAt(t, bottomLoc, bullSignalLoc, { shape: 'square', color: bullMedium, ...tiny });
+    if (overbought) shapeAt(t, topLoc, bearSignalLoc, { shape: 'square', color: bearMedium, ...tiny, id: 'shape4' });
+    if (oversold) shapeAt(t, bottomLoc, bullSignalLoc, { shape: 'square', color: bullMedium, ...tiny, id: 'shape5' });
 
     if (cfg.drawBoxes) {
       // overbought box: started on the first OB bar, extended while the condition holds, frozen when it ends
@@ -429,8 +451,8 @@ export function calculate(
       }
     }
 
-    if (zeroLong && cfg.plotZeroCrosses) shapeAt(t, topLoc, bearSignalLoc, { shape: 'triangleUp', color: color.yellow, ...tiny });
-    if (zeroShort && cfg.plotZeroCrosses) shapeAt(t, bottomLoc, bullSignalLoc, { shape: 'triangleDown', color: color.yellow, ...tiny });
+    if (zeroLong && cfg.plotZeroCrosses) shapeAt(t, topLoc, bearSignalLoc, { shape: 'triangleUp', color: color.yellow, ...tiny, id: 'shape6' });
+    if (zeroShort && cfg.plotZeroCrosses) shapeAt(t, bottomLoc, bullSignalLoc, { shape: 'triangleDown', color: color.yellow, ...tiny, id: 'shape7' });
 
     // crossover dots
     const dot = !compact && cfg.plotCrosses && (crossBull || crossBear) ? finite(l) : NaN;
@@ -438,8 +460,19 @@ export function calculate(
     dotBig.push({ time: t, value: dot, color: crossBull ? bullLight : bearLight });
 
     // plotchar: trend start
-    if (obTrendStart) shapeAt(t, topLoc, bearSignalLoc, { shape: 'circle', color: 'transparent', text: '◡', textColor: bearcol });
-    if (osTrendStart) shapeAt(t, bottomLoc, bullSignalLoc, { shape: 'circle', color: 'transparent', text: '◠', textColor: bullcol });
+    if (obTrendStart) shapeAt(t, topLoc, bearSignalLoc, { shape: 'circle', color: 'transparent', text: '◡', textColor: bearcol, id: 'char8' });
+    if (osTrendStart) shapeAt(t, bottomLoc, bullSignalLoc, { shape: 'circle', color: 'transparent', text: '◠', textColor: bullcol, id: 'char9' });
+
+    // alert(message = <text input>, freq = alert.freq_once_per_bar_close) for each alert input that is on
+    const call = (on: boolean, cond: boolean, message: string) => {
+      if (on && cond) alertCalls.push({ time: t as number, message, freq: 'once_per_bar_close' });
+    };
+    call(cfg.bullStartOn, obTrendStart, cfg.bullStartTxt);
+    call(cfg.bearStartOn, osTrendStart, cfg.bearStartTxt);
+    call(cfg.bullReversalOn, obReversal, cfg.bullReversalTxt);
+    call(cfg.bearReversalOn, osReversal, cfg.bearReversalTxt);
+    call(cfg.bullCrossOn, crossBull, cfg.bullCrossTxt);
+    call(cfg.bearCrossOn, crossBear, cfg.bearCrossTxt);
 
     // strategy entries
     let startLongDeal = false;
@@ -476,11 +509,11 @@ export function calculate(
 
     if (cfg.plotStrategyEntry && startLongDeal) {
       markers.push({ time: t, position: 'belowBar', shape: 'triangleUp', color: bullcol, size: 'tiny', text: 'Long',
-        textColor: shortcol, forceOverlay: true });
+        textColor: shortcol, forceOverlay: true, id: 'shape10' });
     }
     if (cfg.plotStrategyEntry && startShortDeal) {
       markers.push({ time: t, position: 'aboveBar', shape: 'triangleDown', color: bearcol, size: 'tiny', text: 'Short',
-        textColor: shortcol, forceOverlay: true });
+        textColor: shortcol, forceOverlay: true, id: 'shape11' });
     }
   }
   setDrawingBar(null);
@@ -527,6 +560,8 @@ export function calculate(
     ],
     markers,
     boxes: drawingOutputs(bars).boxes ?? [],
+    alerts: alertStates(alertConditions, bars, flags),
+    alertCalls,
   };
 }
 
@@ -536,4 +571,6 @@ export const RTrendExhaustion = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
+  hasAlertFunction,
 };

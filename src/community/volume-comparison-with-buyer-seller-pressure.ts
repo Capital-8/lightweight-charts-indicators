@@ -6,6 +6,8 @@
  * of the volume over 3, 5, 10 and 20 bars and the volume are drawn as columns. When the volume is above one of the
  * SMAs, a colour layer is added to the background and a shape is drawn at the top of the pane (circle, label, arrow,
  * flag for the 3, 5, 10, 20-bar SMA).
+ * Alerts (alertcondition, `alerts` of the result): 'Strong Buy Signal' / 'Strong Sell Signal' when the buyer / seller
+ * pressure is at least 0.75, 'Neutral Market' on the other bars.
  *
  * Reference: "Volume Comparison with Buyer/Seller Pressure" by ask2maniish
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +15,7 @@
 
 import { taCore, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolumeComparisonWithBuyerSellerPressureInputs {
   smaLength3: number;
@@ -82,7 +85,7 @@ const ge = (a: number, b: number) => !isNaN(a) && !isNaN(b) && !(b - a > EPS);
 export function calculate(
   bars: Bar[],
   inputs: Partial<VolumeComparisonWithBuyerSellerPressureInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const volume = bars.map((b) => b.volume ?? NaN);
@@ -107,6 +110,7 @@ export function calculate(
   };
   const markers: MarkerData[] = [];
   const bgColors: BgColorData[] = [];
+  const buyFlags: boolean[] = [], sellFlags: boolean[] = [], neutralFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const t = b.time;
@@ -115,6 +119,9 @@ export function calculate(
     const sellerPressure = (b.open - b.close) / (b.high - b.low);
     const strongBuy = ge(buyerPressure, 0.75);
     const strongSell = ge(sellerPressure, 0.75);
+    buyFlags.push(strongBuy);
+    sellFlags.push(strongSell);
+    neutralFlags.push(!strongBuy && !strongSell);
 
     // bgcolor layers in the Pine order (a later layer is drawn on top)
     bgColors.push({ time: t, color: strongBuy ? buyBg : strongSell ? sellBg : neutralBg });
@@ -148,8 +155,17 @@ export function calculate(
     plots,
     markers,
     bgColors,
+    // alertcondition(strong_buy_signal) / alertcondition(strong_sell_signal) / alertcondition(neutral_signal)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags, neutralFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Strong Buy Signal', message: 'A strong buy signal has been detected (Buyer Pressure >= 0.75).' },
+  { id: 'alert1', title: 'Strong Sell Signal', message: 'A strong sell signal has been detected (Seller Pressure >= 0.75).' },
+  { id: 'alert2', title: 'Neutral Market', message: 'Market is neutral, with no strong buyer or seller dominance.' },
+];
 
 export const VolumeComparisonWithBuyerSellerPressure = {
   calculate,
@@ -157,4 +173,5 @@ export const VolumeComparisonWithBuyerSellerPressure = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

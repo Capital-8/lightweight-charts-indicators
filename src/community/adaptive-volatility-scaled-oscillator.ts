@@ -146,7 +146,9 @@ export function calculate(
   const bgColors: BgColorData[] = [];
   for (let i = 0; i < n; i++) {
     // bgcolor(z > 2 ? color.new(z_color, 80) : na) / bgcolor(z < -2 ? color.new(z_color, 80) : na)
-    if (gt(z[i], 2) || gt(-2, z[i])) bgColors.push({ time: bars[i].time, color: String(color.new(zColor[i], 80)) });
+    // ('High Volatility' = bgcolor0, 'Low Volatility' = bgcolor1)
+    if (gt(z[i], 2)) bgColors.push({ id: 'bgcolor0', time: bars[i].time, color: String(color.new(zColor[i], 80)) });
+    else if (gt(-2, z[i])) bgColors.push({ id: 'bgcolor1', time: bars[i].time, color: String(color.new(zColor[i], 80)) });
   }
 
   return {

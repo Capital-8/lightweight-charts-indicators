@@ -3,6 +3,8 @@
  *
  * Volume columns with an SMA of the volume. The ratio volume / SMA sets the column colour: the second ratio colour
  * above surge level 2, the first ratio colour above surge level 1, else the up / down volume colour (close > open).
+ * Alerts (alertcondition, `alerts` of the result): 'Volume Surge Trigger1' when the ratio is above surge level 1 and
+ * 'Volume Surge Trigger2' when it is above surge level 2.
  *
  * Reference: "Volume Surge Detector[SpeculationLab]" by SpeculationLab
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -10,6 +12,7 @@
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface VolumeSurgeDetectorInputs {
   /** SMA length of the volume */
@@ -75,16 +78,23 @@ export const metadata = {
 const EPS = 1e-10;
 const gt = (a: number, b: number) => a - b > EPS;
 
-export function calculate(bars: Bar[], inputs: Partial<VolumeSurgeDetectorInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[],
+  inputs: Partial<VolumeSurgeDetectorInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const volume = bars.map((b) => b.volume ?? NaN);
   const ma = ta.sma(Series.fromArray(bars, volume), cfg.maLength).toArray().map((v) => v ?? NaN);
 
+  const alert1Flags: boolean[] = [];
+  const alert2Flags: boolean[] = [];
   const plot0 = bars.map((b, i) => {
     // A plain division: x / 0 is +-infinity (0 / 0 NaN); the comparisons use the infinite value
     const ratio = volume[i] / ma[i];
     const alert1 = gt(ratio, cfg.trigger1);
     const alert2 = gt(ratio, cfg.trigger2);
+    alert1Flags.push(alert1);
+    alert2Flags.push(alert2);
     const c = alert2 ? cfg.color2 : alert1 ? cfg.color1 : gt(b.close, b.open) ? cfg.volColor1 : cfg.volColor2;
     return { time: b.time, value: volume[i], color: c };
   });
@@ -93,8 +103,16 @@ export function calculate(bars: Bar[], inputs: Partial<VolumeSurgeDetectorInputs
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay, format: metadata.format },
     plots: { plot0, plot1 },
+    // alertcondition(alert1, "Volume Surge Trigger1") / alertcondition(alert2, "Volume Surge Trigger2")
+    alerts: alertStates(alertConditions, bars, [alert1Flags, alert2Flags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Volume Surge Trigger1', message: 'Volume Surge Level 1 Detected 📊（成交量放量 Level 1 )' },
+  { id: 'alert1', title: 'Volume Surge Trigger2', message: 'Volume Surge Level 2 Detected 🚀(成交量放量 Level 2) ' },
+];
 
 export const VolumeSurgeDetector = {
   calculate,
@@ -102,4 +120,5 @@ export const VolumeSurgeDetector = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

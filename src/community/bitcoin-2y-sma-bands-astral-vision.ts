@@ -125,8 +125,9 @@ export function calculate(
     const flat = gt(r, multTop) ? negCol : lt(r, 1.0) ? posCol : gray;
     finalCol[i] = cfg.usegrad ? color.from_gradient(r, 1.0, multTop, posCol, negCol) : flat;
     // bgcolor(ratio < 1.0 ? color.new(pos_col, 50) : na, force_overlay = true), then the top layer
-    if (lt(r, 1.0)) bgColors.push({ time: t, color: posBg, forceOverlay: true });
-    if (gt(r, multTop)) bgColors.push({ time: t, color: negBg, forceOverlay: true });
+    // id: the original's bgcolor() call (bgcolor0 / bgcolor1)
+    if (lt(r, 1.0)) bgColors.push({ time: t, color: posBg, forceOverlay: true, id: 'bgcolor0' });
+    if (gt(r, multTop)) bgColors.push({ time: t, color: negBg, forceOverlay: true, id: 'bgcolor1' });
     if (cfg.showCandle) {
       const b = bars[i];
       candles.push({ time: t, open: b.open, high: b.high, low: b.low, close: b.close, color: finalCol[i],

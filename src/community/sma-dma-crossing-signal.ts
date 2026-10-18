@@ -6,6 +6,8 @@
  * DMA + ATR * buffer and a rising fast DMA, plus either a pending bullish DMA crossover (still aligned) or an earlier
  * SELL (recovery, not on a bearish DMA crossover bar). While bullish, a bearish DMA crossover or `confirmBars` closes
  * below the fast DMA with the last close below the fast DMA - ATR * buffer give a SELL.
+ * Alerts (alertcondition, `alerts` of the result): 'BUY indication' / 'SELL indication' on the bars of a BUY / SELL
+ * signal (also when the labels are hidden).
  *
  * Last bar: the signal state is updated on a closed bar only. The port reads the state of the last bar from the
  * optional third argument (see src/chart-context.ts); without it every bar is taken as closed.
@@ -17,6 +19,7 @@
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { MarkerData } from '../types';
 import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface SmaDmaCrossingSignalInputs {
   len30: number;
@@ -96,7 +99,7 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<SmaDmaCrossingSignalInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   // barstate.isconfirmed: every bar is closed, except the last one when the chart context says that it is still open
   const lastBarOpen = !lastBarConfirmedOf(chart);
   const barIsConfirmed = (index: number) => !(lastBarOpen && index === bars.length - 1);
@@ -199,8 +202,22 @@ export function calculate(
       plot5: line(cfg.showDMAs, slow, color.fuchsia),
     },
     markers,
+    // alertcondition(buySignal, "BUY indication") / alertcondition(sellSignal, "SELL indication")
+    alerts: alertStates(alertConditions, bars, [buySignal, sellSignal]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  {
+    id: 'alert0', title: 'BUY indication',
+    message: '{{ticker}} | {{interval}} | BUY indication confirmed at candle close. Review trend/recovery conditions. Close: {{close}}',
+  },
+  {
+    id: 'alert1', title: 'SELL indication',
+    message: '{{ticker}} | {{interval}} | SELL indication confirmed at candle close. Review price weakness/trend conditions. Close: {{close}}',
+  },
+];
 
 export const SmaDmaCrossingSignal = {
   calculate,
@@ -208,4 +225,5 @@ export const SmaDmaCrossingSignal = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

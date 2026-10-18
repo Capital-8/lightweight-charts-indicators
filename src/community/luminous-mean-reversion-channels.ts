@@ -5,6 +5,7 @@
  * source is more than one step away from it. When the mean level changes, half the step is kept as the channel
  * half width; the bands are the mean level +/- 2 * that width. Gradient fills between each band and the mean level.
  * BUY when the source crosses over the lower band, SELL when it crosses under the upper band.
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish Mean Reversion' (BUY) and 'Bearish Mean Reversion' (SELL).
  *
  * Reference: "Luminous Mean Reversion Channels [Pineify]" by Pineify
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -13,6 +14,7 @@
 
 import { ta, color, getSourceSeries, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface LuminousMeanReversionChannelsInputs {
   /** ATR length of the step */
@@ -60,7 +62,7 @@ const ne = (a: number, b: number) => !isNaN(a) && !isNaN(b) && Math.abs(a - b) >
 export function calculate(
   bars: Bar[],
   inputs: Partial<LuminousMeanReversionChannelsInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const src = getSourceSeries(bars, cfg.src).toArray().map((v) => v ?? NaN);
@@ -86,13 +88,16 @@ export function calculate(
   }
 
   const markers: MarkerData[] = [];
+  const buyFlags: boolean[] = new Array(n).fill(false), sellFlags: boolean[] = new Array(n).fill(false);
   for (let i = 1; i < n; i++) {
     // buy_signal = ta.crossover(src, lower_band); sell_signal = ta.crossunder(src, upper_band): exact comparisons
-    if (src[i] > lower[i] && src[i - 1] <= lower[i - 1]) {
+    buyFlags[i] = src[i] > lower[i] && src[i - 1] <= lower[i - 1];
+    sellFlags[i] = src[i] < upper[i] && src[i - 1] >= upper[i - 1];
+    if (buyFlags[i]) {
       markers.push({ time: bars[i].time, position: 'belowBar', shape: 'labelUp', color: GREEN, text: 'BUY',
         textColor: color.white, size: 'small' });
     }
-    if (src[i] < upper[i] && src[i - 1] >= upper[i - 1]) {
+    if (sellFlags[i]) {
       markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'labelDown', color: RED, text: 'SELL',
         textColor: color.white, size: 'small' });
     }
@@ -123,8 +128,16 @@ export function calculate(
       },
     ],
     markers,
+    // alertcondition(buy_signal, ...) / alertcondition(sell_signal, ...)
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish Mean Reversion', message: 'Price crossed back above the lower mean reversion band.' },
+  { id: 'alert1', title: 'Bearish Mean Reversion', message: 'Price crossed back below the upper mean reversion band.' },
+];
 
 export const LuminousMeanReversionChannels = {
   calculate,
@@ -132,4 +145,5 @@ export const LuminousMeanReversionChannels = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

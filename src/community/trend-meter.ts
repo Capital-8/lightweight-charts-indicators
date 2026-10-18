@@ -10,6 +10,10 @@
  * Small dots at the top mark positive / negative pressure: RSI 14 oversold / overbought with the Wave Trend beyond
  * -60 / 60 and its delta pointing up / down.
  *
+ * Alerts (alertcondition, `alerts` of the result): the original's 38 conditions (pressure, the three meters turning
+ * green / red / no longer aligned / rapid change, Wave Trend cross with the meters, trend bar MA crosses and their
+ * combinations with the meters), true on the bars where the original's expression is true.
+ *
  * Reference: "Trend Meter" by Lij_MC
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
  */
@@ -17,6 +21,7 @@
 import {
   ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type HLineConfig, type FillConfig, type Bar,
 } from 'oakscriptjs';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type TrendMeterSource =
   | 'MACD Crossover - 12, 26, 9'
@@ -146,7 +151,9 @@ const on = (x: number) => !isNaN(x) && x !== 0;
 
 type Point = { time: number; value: number; color?: string };
 
-export function calculate(bars: Bar[], inputs: Partial<TrendMeterInputs> = {}): IndicatorResult {
+export function calculate(
+  bars: Bar[], inputs: Partial<TrendMeterInputs> = {},
+): IndicatorResult & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => (v === null || v === undefined ? NaN : v));
@@ -282,35 +289,33 @@ export function calculate(bars: Bar[], inputs: Partial<TrendMeterInputs> = {}): 
   const tbRed = String(color.new(RED, 20));
   const posPressure = String(color.new(TEAL, 25));
   const negPressure = String(color.new('#DC143C', 32));
+  // BackgroundColorChangePositive = TrendBars3Positive and not TrendBars3Positive[1] (na [1] on bar 0 is false)
+  const chPos = bars.map((_b, i) => pos3[i] && !(i > 0 && pos3[i - 1]));
+  const chNeg = bars.map((_b, i) => neg3[i] && !(i > 0 && neg3[i - 1]));
   // plot transp = 20 / 18 on an opaque colour
-  const signalColor = (i: number): string => {
-    // BackgroundColorChangePositive = TrendBars3Positive and not TrendBars3Positive[1] (na [1] on bar 0 is false)
-    const chPos = pos3[i] && !(i > 0 && pos3[i - 1]);
-    const chNeg = neg3[i] && !(i > 0 && neg3[i - 1]);
-    return chPos ? String(color.new(TEAL, 20)) : chNeg ? String(color.new(RED, 20)) : 'transparent';
-  };
+  const signalColor = (i: number): string =>
+    (chPos[i] ? String(color.new(TEAL, 20)) : chNeg[i] ? String(color.new(RED, 20)) : 'transparent');
+  // OSIndicatorsYellowPointingUp = (RSI14OS or RSI14OS[1]) and WTVOS and YellowWavePointingUp
+  const osUp = bars.map((_b, i) =>
+    (lt(rsi14[i], 30) || lt(prev(rsi14, i), 30)) && lt(wt1[i], -60) && gt(yellowWave[i], prev(yellowWave, i)));
+  // OBIndicatorsYellowPointingDown = (RSI14OB or RSI14OB[1]) and WTVOB and not YellowWavePointingUp
+  const obDown = bars.map((_b, i) =>
+    (gt(rsi14[i], 70) || gt(prev(rsi14, i), 70)) && gt(wt1[i], 60) && !gt(yellowWave[i], prev(yellowWave, i)));
+  // PositiveWaveTrendCross = WTCross and WTCrossUp (wt2 - wt1 <= 0), NegativeWaveTrendCross = WTCross and WTCrossDown
+  const wtPos = bars.map((_b, i) => on(wtCross[i]) && le(wt2[i] - wt1[i], 0));
+  const wtNeg = bars.map((_b, i) => on(wtCross[i]) && ge(wt2[i] - wt1[i], 0));
   const meter = (src: TrendMeterSource, value: number) => P((i) => {
     const c = meterColor(src, i);
     return { time: t(i), value, color: c === null ? 'transparent' : String(color.new(c, 18)) };
   });
 
   const plots: Record<string, Point[]> = {
-    plot0: P((i) => {
-      // OSIndicatorsYellowPointingUp = (RSI14OS or RSI14OS[1]) and WTVOS and YellowWavePointingUp
-      const os = (lt(rsi14[i], 30) || lt(prev(rsi14, i), 30)) && lt(wt1[i], -60) && gt(yellowWave[i], prev(yellowWave, i));
-      return { time: t(i), value: cfg.posNegPressure && os ? 138.5 : NaN, color: posPressure };
-    }),
-    plot1: P((i) => {
-      // OBIndicatorsYellowPointingDown = (RSI14OB or RSI14OB[1]) and WTVOB and not YellowWavePointingUp
-      const ob = (gt(rsi14[i], 70) || gt(prev(rsi14, i), 70)) && gt(wt1[i], 60) && !gt(yellowWave[i], prev(yellowWave, i));
-      return { time: t(i), value: cfg.posNegPressure && ob ? 138.5 : NaN, color: negPressure };
-    }),
+    plot0: P((i) => ({ time: t(i), value: cfg.posNegPressure && osUp[i] ? 138.5 : NaN, color: posPressure })),
+    plot1: P((i) => ({ time: t(i), value: cfg.posNegPressure && obDown[i] ? 138.5 : NaN, color: negPressure })),
     plot2: P((i) => ({ time: t(i), value: cfg.tmSetups ? 134.5 : NaN, color: signalColor(i) })),
     plot3: P((i) => {
-      // WTCrossUp = wt2 - wt1 <= 0, WTCrossDown = wt2 - wt1 >= 0
-      const cross = on(wtCross[i]);
-      const up = cross && le(wt2[i] - wt1[i], 0) && pos3[i];
-      const down = cross && ge(wt2[i] - wt1[i], 0) && neg3[i];
+      const up = wtPos[i] && pos3[i];
+      const down = wtNeg[i] && neg3[i];
       return { time: t(i), value: cfg.tmSetupsAndWt && (up || down) ? 134.5 : NaN, color: signalColor(i) };
     }),
     plot4: meter(cfg.trendBar1, 128.5),
@@ -328,6 +333,48 @@ export function calculate(bars: Bar[], inputs: Partial<TrendMeterInputs> = {}): 
   const fillColors = bars.map((_b, i) => (pos3[i] ? fillGreen : neg3[i] ? fillRed : 'transparent'));
   const hlineColor = String(color.new('#FFFFFF', 100));
 
+  // Alert conditions, as the original computes them (na history is false)
+  const at = (a: boolean[], i: number, k: number) => i - k >= 0 && a[i - k];
+  const crossUp = (a: number[], b: number[], i: number) => gt(a[i], b[i]) && le(prev(a, i), prev(b, i));
+  const crossDown = (a: number[], b: number[], i: number) => lt(a[i], b[i]) && ge(prev(a, i), prev(b, i));
+  const flags: boolean[][] = alertConditions.map(() => new Array<boolean>(n).fill(false));
+  for (let i = 0; i < n; i++) {
+    const p = pos3[i], q = neg3[i];
+    const bgPos = chPos[i], bgNeg = chNeg[i];
+    const wtP = wtPos[i] && p, wtN = wtNeg[i] && q;
+    // TrendMetersNoLongerAlign = ((not P or not N) and P[1]) or ((not P or not N) and N[1])
+    const notBoth = !p || !q;
+    const noLonger = (notBoth && at(pos3, i, 1)) || (notBoth && at(neg3, i, 1));
+    // RapidColorChangePositive / Negative = P and (N[1] or N[2]) / N and (P[1] or P[2])
+    const rapidPos = p && (at(neg3, i, 1) || at(neg3, i, 2));
+    const rapidNeg = q && (at(pos3, i, 1) || at(pos3, i, 2));
+    // TB1MACrossUp = crossover(MA1, MA2), TB2MACrossUp = crossover(MA3, MA4), ...
+    const tb1Up = crossUp(ma1, ma2, i), tb1Down = crossDown(ma1, ma2, i);
+    const tb2Up = crossUp(ma3, ma4, i), tb2Down = crossDown(ma3, ma4, i);
+    const tb1Green = gt(ma1[i], ma2[i]), tb1Red = lt(ma1[i], ma2[i]);
+    const tb2Green = gt(ma3[i], ma4[i]), tb2Red = lt(ma3[i], ma4[i]);
+    const tb12Green = tb1Green && tb2Green && (tb1Up || tb2Up);
+    const tb12Red = tb1Red && tb2Red && (tb1Down || tb2Down);
+    const v = [
+      obDown[i] || osUp[i],
+      bgPos, bgNeg, bgPos || bgNeg,
+      wtP, wtN, wtP || wtN,
+      noLonger,
+      rapidPos, rapidNeg, rapidPos || rapidNeg,
+      tb1Up, tb1Down, tb1Up || tb1Down,
+      tb2Up, tb2Down, tb2Up || tb2Down,
+      tb12Green, tb12Red, tb12Green || tb12Red,
+      tb12Green && p, tb12Red && q, (tb12Green && p) || (tb12Red && q),
+      tb1Green && p, tb1Red && q, (tb1Green && p) || (tb1Red && q),
+      tb2Green && p, tb2Red && q, (tb2Green && p) || (tb2Red && q),
+      bgPos && tb1Green, bgNeg && tb1Red, (bgPos && tb1Green) || (bgNeg && tb1Red),
+      bgPos && tb2Green, bgNeg && tb2Red, (bgPos && tb2Green) || (bgNeg && tb2Red),
+      bgPos && tb1Green && tb2Green, bgNeg && tb1Red && tb2Red,
+      (bgPos && tb1Green && tb2Green) || (bgNeg && tb1Red && tb2Red),
+    ];
+    for (let k = 0; k < v.length; k++) flags[k][i] = v[k];
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots,
@@ -339,8 +386,51 @@ export function calculate(bars: Bar[], inputs: Partial<TrendMeterInputs> = {}): 
       { plot1: 'hline_tma', plot2: 'hline_tmb', colors: fillColors,
         options: { title: 'Trend Meter Background Highlight - 3 Trend Meter Conditions Met' } },
     ],
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions, in its declaration order */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: ' -   Pos / Neg Pressure', message: 'Pos / Neg Pressure - Trend Meter' },
+  { id: 'alert1', title: ' --  3 TMs Turn Green', message: 'All 3 Trend Meters Turn  Green - Trend Meter' },
+  { id: 'alert2', title: ' --  3 TMs Turn Red', message: 'All 3 Trend Meters Turn  Red - Trend Meter' },
+  { id: 'alert3', title: ' -- 3 TMs Change to Same Color', message: 'All 3 Trend Meters Change to Same Color - Trend Meter' },
+  { id: 'alert4', title: '--- 3 TMs Turn Green & WaveTrend X', message: 'Green - Wave Trend Signal - Aligns with 3 Trend Meters - Trend Meter' },
+  { id: 'alert5', title: '--- 3 TMs Turn Red & WaveTrend X', message: 'Red - Wave Trend Signal - Aligns with 3 Trend Meters - Trend Meter' },
+  { id: 'alert6', title: '--- 3 TMs Change to Same Color & WT X', message: 'Red / Green - Wave Trend Signal - Aligns with 3 Trend Meters - Trend Meter' },
+  { id: 'alert7', title: '---- 3 Trend Meters No Longer Align', message: '3 Trend Meters No Longer Align - Trend Meter' },
+  { id: 'alert8', title: 'All 3 TMs Rapid Change Red to Green', message: 'All 3 Trend Meters Rapid Change Red to Green - Trend Meter' },
+  { id: 'alert9', title: 'All 3 TMs Rapid Change Green to Red', message: 'All 3 Trend Meters Rapid Change Green to Red - Trend Meter' },
+  { id: 'alert10', title: 'All 3 TMs Rapid Change to Same Color', message: 'All 3 Trend Meters Rapid Change to Same Color - Trend Meter' },
+  { id: 'alert11', title: 'TB 1 Turns Green', message: 'Trend Bar 1 - Turns Green - Trend Meter' },
+  { id: 'alert12', title: 'TB 1 Turns Red', message: 'Trend Bar 1 - Turns Red - Trend Meter' },
+  { id: 'alert13', title: 'TB 1 Color Change', message: 'Trend Bar 1 - Color Change - Trend Meter' },
+  { id: 'alert14', title: 'TB 2 Turns Green', message: 'Trend Bar 2 - Turns Green - Trend Meter' },
+  { id: 'alert15', title: 'TB 2 Turns Red', message: 'Trend Bar 2 - Turns Red - Trend Meter' },
+  { id: 'alert16', title: 'TB 2 Color Change', message: 'Trend Bar 2 - Color Change - Trend Meter' },
+  { id: 'alert17', title: 'TBs 1+2 Turn Green', message: 'Trend Bars 1+2 - Turn Green - Trend Meter' },
+  { id: 'alert18', title: 'TBs 1+2 Turn Red', message: 'Trend Bars 1+2 - Turn Red - Trend Meter' },
+  { id: 'alert19', title: 'TBs 1+2 Change to Same Color', message: 'Trend Bars 1+2 - Change to Same Color - MAs Crossing - Trend Meter' },
+  { id: 'alert20', title: 'TBs 1+2 Turn Green with 3 TMs', message: 'Trend Bars 1+2 - Turn Green with 3 TMs - Trend Meter' },
+  { id: 'alert21', title: 'TBs 1+2 Turn Red with 3 TMs', message: 'Trend Bars 1+2 - Turn Red with 3 TMs- Trend Meter' },
+  { id: 'alert22', title: 'TBs 1+2 Change to Same Color with 3 TMs', message: 'Trend Bars 1+2 - Change to Same Color with 3 TMs - Trend Meter' },
+  { id: 'alert23', title: 'TB 1 Turns Green with 3 TMs', message: 'Trend Bar 1 - Turn Green with 3 TMs - Trend Meter' },
+  { id: 'alert24', title: 'TB 1 Turns Red with 3 TMs', message: 'Trend Bar 1 - Turn Red with 3 TMs- Trend Meter' },
+  { id: 'alert25', title: 'TB 1 Change to Same Color with 3 TMs', message: 'Trend Bar 1 - Change to Same Color with 3 TMs - Trend Meter' },
+  { id: 'alert26', title: 'TB 2 Turns Green with 3 TMs', message: 'Trend Bar 2 - Turn Green with 3 TMs - Trend Meter' },
+  { id: 'alert27', title: 'TB 2 Turns Red with 3 TMs', message: 'Trend Bar 2 - Turn Red with 3 TMs- Trend Meter' },
+  { id: 'alert28', title: 'TB 2 Change to Same Color with 3 TMs', message: 'Trend Bar 2 - Change to Same Color with 3 TMs - Trend Meter' },
+  { id: 'alert29', title: '3 TMs Turn Green with TB 1', message: 'All 3 Trend Meters Turn  Green with TB 1 - Trend Meter' },
+  { id: 'alert30', title: '3 TMs Turn Red with TB 1', message: 'All 3 Trend Meters Turn  Red with TB 1 - Trend Meter' },
+  { id: 'alert31', title: '3 TMs Change Color with TB 1', message: 'All 3 Trend Meters Change Color with TB 1 - Trend Meter' },
+  { id: 'alert32', title: '3 TMs Turn Green with TB 2', message: 'All 3 Trend Meters Turn  Green with TB 2 - Trend Meter' },
+  { id: 'alert33', title: '3 TMs Turn Red with TB 2', message: 'All 3 Trend Meters Turn  Red with TB 2 - Trend Meter' },
+  { id: 'alert34', title: '3 TMs Change Color with TB 2', message: 'All 3 Trend Meters Change Color with TB 2 - Trend Meter' },
+  { id: 'alert35', title: '3 TMs Turn Green with TBs 1+2', message: 'All 3 Trend Meters Turn  Green with Trend Bar 1+2 - Trend Meter' },
+  { id: 'alert36', title: '3 TMs Turn Red with TBs 1+2', message: 'All 3 Trend Meters Turn  Red with Trend Bar 1+2 - Trend Meter' },
+  { id: 'alert37', title: '3 TMs Change Color with TBs 1+2', message: 'All 3 Trend Meters Change Color with Trend Bar 1+2 - Trend Meter' },
+];
 
 export const TrendMeter = {
   calculate,
@@ -350,4 +440,5 @@ export const TrendMeter = {
   plotConfig,
   hlineConfig,
   fillConfig,
+  alertConditions,
 };

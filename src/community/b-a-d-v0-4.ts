@@ -13,6 +13,7 @@
  * Signals: a DI cross sets a pending bull / bear signal; it fires (a circle on the T3 line) when the long-term
  * Xtrender is on the same side of 0 and the previous signal was of the other type. Pending signals colour the
  * background.
+ * Alert (alertcondition, `alerts` of the result): 'Signal Confirmed', true on the bars of a bull or a bear signal.
  *
  * Reference: "B + A + D v1" by wepritz84
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -20,6 +21,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { MarkerData, BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface BadV04Inputs {
   shortL1: number;
@@ -116,7 +118,7 @@ const nz = (v: number, r = 0) => (Number.isFinite(v) ? v : r);
 export function calculate(
   bars: Bar[],
   inputs: Partial<BadV04Inputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -220,6 +222,7 @@ export function calculate(
   let pendingBull = false;
   let pendingBear = false;
   let lastSignalType = 0;
+  const stateFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const t = bars[i].time;
     // ta.crossover / ta.crossunder compare exactly
@@ -245,13 +248,15 @@ export function calculate(
     }
     const price = maShortX[i];
     if (bullRev && !isNaN(price)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'circle', color: String(color.rgb(255, 255, 255)), size: 'tiny' });
+      markers.push({ id: 'shape0', time: t, position: 'atPriceMiddle', price, shape: 'circle', color: String(color.rgb(255, 255, 255)), size: 'tiny' });
     }
     if (bearRev && !isNaN(price)) {
-      markers.push({ time: t, position: 'atPriceMiddle', price, shape: 'circle', color: String(color.rgb(5, 0, 0)), size: 'tiny' });
+      markers.push({ id: 'shape1', time: t, position: 'atPriceMiddle', price, shape: 'circle', color: String(color.rgb(5, 0, 0)), size: 'tiny' });
     }
-    if (pendingBull && !bullRev) bgColors.push({ time: t, color: pendingBullCol });
-    if (pendingBear && !bearRev) bgColors.push({ time: t, color: pendingBearCol });
+    if (pendingBull && !bullRev) bgColors.push({ id: 'bgcolor0', time: t, color: pendingBullCol });
+    if (pendingBear && !bearRev) bgColors.push({ id: 'bgcolor1', time: t, color: pendingBearCol });
+    // stateChange = bullReversalCondition or bearReversalCondition
+    stateFlags.push(bullRev || bearRev);
   }
 
   const fin = (v: number) => (Number.isFinite(v) ? v : NaN);
@@ -282,8 +287,15 @@ export function calculate(
     hlines: [{ value: cfg.adxThreshold, options: { title: 'ADX Threshold', color: color.gray, linestyle: 'dashed', linewidth: 1 } }],
     markers,
     bgColors,
+    // alertcondition(stateChange, "Signal Confirmed")
+    alerts: alertStates(alertConditions, bars, [stateFlags]),
   };
 }
+
+/** The original's alertcondition */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Signal Confirmed', message: 'HISTOGRAM CONFIRMED: {{ticker}} - {{interval}}' },
+];
 
 /**
  * hsv_to_rgb(h, s, v) of the script: comparisons with na are false (the last branch), color.rgb takes int() of the
@@ -311,4 +323,5 @@ export const BadV04 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

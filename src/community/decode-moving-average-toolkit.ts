@@ -5,6 +5,8 @@
  * EMA k and SMA k (green when the EMA is above the SMA, else red). Five crossover alerts, each with a selectable
  * fast and slow MA among the ten: when an alert is enabled, a crossover of the fast MA over the slow MA draws a green
  * triangle below the bar and a crossunder a red triangle above the bar (if its symbols are shown).
+ * Alerts (alertcondition, `alerts` of the result): 'Alert k Bullish Cross' / 'Alert k Bearish Cross' (k = 1..5), true
+ * on the bars of the crossover / crossunder of alert k when it is enabled (whether its symbols are shown or not).
  *
  * Reference: "DECODE Moving Average Toolkit" by decodejar
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +17,7 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { MarkerData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type DecodeMaName = 'EMA 1' | 'EMA 2' | 'EMA 3' | 'EMA 4' | 'EMA 5' | 'SMA 1' | 'SMA 2' | 'SMA 3' | 'SMA 4' | 'SMA 5';
 
@@ -136,7 +139,7 @@ const gt = (a: number, b: number) => a - b > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<DecodeMovingAverageToolkitInputs> = {},
-): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } {
+): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -192,7 +195,12 @@ export function calculate(
   const markers: MarkerData[] = [];
   const bullColor = String(color.new(color.green, 0));
   const bearColor = String(color.new(color.red, 0));
+  // alertcondition(alertK_bullish_trigger) / alertcondition(alertK_bearish_trigger), in this order for k = 1..5
+  const flags: boolean[][] = [];
   for (const a of alerts) {
+    const bullFlags = new Array<boolean>(n).fill(false);
+    const bearFlags = new Array<boolean>(n).fill(false);
+    flags.push(bullFlags, bearFlags);
     let prevF = NaN;
     let prevS = NaN;
     for (let i = 0; i < n; i++) {
@@ -203,15 +211,18 @@ export function calculate(
       const bear = f < s && prevF >= prevS;
       prevF = f;
       prevS = s;
-      if (!a.enable || !a.show) continue;
+      if (!a.enable) continue;
+      bullFlags[i] = bull;
+      bearFlags[i] = bear;
+      if (!a.show) continue;
       // plotshape(bull and show, location.belowbar, color.new(color.green, 0), shape.triangleup, size.small, text = "Ak ▲")
       if (bull) {
-        markers.push({ time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: bullColor, size: 'small',
+        markers.push({ id: `shape${2 * (a.k - 1)}`, time: bars[i].time, position: 'belowBar', shape: 'triangleUp', color: bullColor, size: 'small',
           text: `A${a.k} ▲`, textColor: color.blue });
       }
       // plotshape(bear and show, location.abovebar, color.new(color.red, 0), shape.triangledown, size.small, text = "Ak ▼")
       if (bear) {
-        markers.push({ time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: bearColor, size: 'small',
+        markers.push({ id: `shape${2 * (a.k - 1) + 1}`, time: bars[i].time, position: 'aboveBar', shape: 'triangleDown', color: bearColor, size: 'small',
           text: `A${a.k} ▼`, textColor: color.blue });
       }
     }
@@ -223,8 +234,15 @@ export function calculate(
     plots,
     fills,
     markers,
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [1, 2, 3, 4, 5].flatMap((k) => [
+  { id: `alert${2 * (k - 1)}`, title: `Alert ${k} Bullish Cross`, message: `{{ticker}}: Configured Fast MA crossed above Configured Slow MA (Alert ${k})` },
+  { id: `alert${2 * (k - 1) + 1}`, title: `Alert ${k} Bearish Cross`, message: `{{ticker}}: Configured Fast MA crossed below Configured Slow MA (Alert ${k})` },
+]);
 
 export const DecodeMovingAverageToolkit = {
   calculate,
@@ -232,4 +250,5 @@ export const DecodeMovingAverageToolkit = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

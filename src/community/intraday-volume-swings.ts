@@ -9,19 +9,29 @@
  * and the session of the symbol from the optional third argument (see src/chart-context.ts) and uses the trading
  * day of the exchange, as the original. Without them a new day is a change of the UTC date.
  *
+ * Alerts (alert() calls, `alertCalls` of the result, once per bar): "Pushing up into yesterday's swing high region",
+ * "Pushing down into yesterday's swing low region", "Pushing up into current swing high region" and "Pushing down
+ * into current swing low region". With "Must close in region to trigger alert?" the bar before must open outside the
+ * region and close inside it; without it the bar opens outside and its high / low reaches the region.
+ *
  * Reference: "Intraday Volume Swings" by rumpypumpydumpy
  */
 
 import { ta, Series, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
-import type { MarkerData, BgColorData, LabelData } from '../types';
+import type { AlertCall, MarkerData, BgColorData, LabelData } from '../types';
 import type { ChartContext } from '../chart-context';
 import { periodChanges } from '../anchor-period';
+
+/** The original calls alert() */
+export const hasAlertFunction = true;
 
 export interface IntradayVolumeSwingsInputs {
   markSwings: boolean;
   markNewDay: boolean;
   markGreaterSwings: boolean;
   plotCurrent: boolean;
+  /** Must close in region to trigger alert? (only the alert() calls) */
+  regionMustClose: boolean;
 }
 
 export const defaultInputs: IntradayVolumeSwingsInputs = {
@@ -29,6 +39,7 @@ export const defaultInputs: IntradayVolumeSwingsInputs = {
   markNewDay: true,
   markGreaterSwings: true,
   plotCurrent: false,
+  regionMustClose: true,
 };
 
 export const inputConfig: InputConfig[] = [
@@ -36,6 +47,7 @@ export const inputConfig: InputConfig[] = [
   { id: 'markNewDay', type: 'bool', title: 'Mark first bar of a new day?', defval: true },
   { id: 'markGreaterSwings', type: 'bool', title: 'Mark daily lower/higher swings?', defval: true },
   { id: 'plotCurrent', type: 'bool', title: 'Display levels as they form?', defval: false },
+  { id: 'regionMustClose', type: 'bool', title: 'Must close in region to trigger alert?', defval: true },
 ];
 
 export const plotConfig: PlotConfig[] = [
@@ -55,8 +67,8 @@ export const metadata = {
   overlay: true,
 };
 
-export function calculate(bars: Bar[], inputs: Partial<IntradayVolumeSwingsInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; labels: LabelData[] } {
-  const { markSwings, markNewDay, markGreaterSwings, plotCurrent } = { ...defaultInputs, ...inputs };
+export function calculate(bars: Bar[], inputs: Partial<IntradayVolumeSwingsInputs> = {}, chart?: ChartContext): Omit<IndicatorResult, 'markers'> & { markers: MarkerData[]; bgColors: BgColorData[]; labels: LabelData[]; alertCalls: AlertCall[] } {
+  const { markSwings, markNewDay, markGreaterSwings, plotCurrent, regionMustClose } = { ...defaultInputs, ...inputs };
   const n = bars.length;
 
   // Pre-compute highest(high,3) and lowest(low,3)
@@ -309,6 +321,26 @@ export function calculate(bars: Bar[], inputs: Partial<IntradayVolumeSwingsInput
     }
   }
 
+  // alert() calls: a region entered from below (high regions) or from above (low regions); na compares false
+  const alertCalls: AlertCall[] = [];
+  for (let i = 0; i < n; i++) {
+    const b = bars[i];
+    const p = i > 0 ? bars[i - 1] : undefined;
+    const open1 = p ? p.open : NaN;
+    const close1 = p ? p.close : NaN;
+    const intoHigh = (bottom: number) => (regionMustClose
+      ? open1 < bottom && close1 >= bottom
+      : b.open < bottom && b.high >= bottom);
+    const intoLow = (top: number) => (regionMustClose
+      ? open1 > top && close1 <= top
+      : b.open > top && b.low <= top);
+    const call = (message: string) => alertCalls.push({ time: b.time, message, freq: 'once_per_bar' });
+    if (intoHigh(prevSwingHighBot[i])) call("Pushing up into yesterday's swing high region");
+    if (intoLow(prevSwingLowTop[i])) call("Pushing down into yesterday's swing low region");
+    if (intoHigh(dailySwingHighBot[i])) call('Pushing up into current swing high region');
+    if (intoLow(dailySwingLowTop[i])) call('Pushing down into current swing low region');
+  }
+
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -324,7 +356,8 @@ export function calculate(bars: Bar[], inputs: Partial<IntradayVolumeSwingsInput
     markers,
     bgColors,
     labels,
+    alertCalls,
   };
 }
 
-export const IntradayVolumeSwings = { calculate, metadata, defaultInputs, inputConfig, plotConfig };
+export const IntradayVolumeSwings = { calculate, metadata, defaultInputs, inputConfig, plotConfig, hasAlertFunction };

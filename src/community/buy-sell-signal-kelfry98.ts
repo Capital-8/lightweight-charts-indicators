@@ -8,6 +8,8 @@
  * target, the stop and the entries cancelled by an opposite signal; labels mark the intermediate targets when they
  * are reached. While a position is open, lines show the entry, the stop and the targets, and a table gives the
  * status of the position.
+ * Alerts (alertcondition, `alerts` of the result): BUY / SELL signal, final take profit, stop loss and entry
+ * invalidated, true on the bars of the matching shapes.
  *
  * Reference: "Buy Sell Signal" by kelfry98
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -18,6 +20,16 @@ import {
   type IndicatorResult, type InputConfig, type PlotConfig, type Bar,
 } from 'oakscriptjs';
 import type { MarkerData, LabelData, LineDrawingData, TableData, TableCellData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: '🟢 BUY Signal', message: '📈 BUY on {{ticker}} | Price: {{close}}' },
+  { id: 'alert1', title: '🔴 SELL Signal', message: '📉 SELL on {{ticker}} | Price: {{close}}' },
+  { id: 'alert2', title: '🎯 Final Take Profit', message: '✅ Final TP hit on {{ticker}} | Price: {{close}}' },
+  { id: 'alert3', title: '❌ Stop Loss', message: '🛑 SL triggered on {{ticker}} | Price: {{close}}' },
+  { id: 'alert4', title: '⚠️ Entry Invalidated', message: '⚠️ Previous entry invalidated on {{ticker}} | New signal detected' },
+];
 
 export interface BuySellSignalKelfry98Inputs {
   emaFastLen: number;
@@ -129,7 +141,7 @@ export function calculate(
   inputs: Partial<BuySellSignalKelfry98Inputs> = {},
 ): Omit<IndicatorResult, 'markers' | 'labels' | 'lines' | 'tables'> & {
   markers: MarkerData[]; labels: LabelData[]; lines: LineDrawingData[]; tables: TableData[];
-} {
+} & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -177,6 +189,7 @@ export function calculate(
   const invTextColor = String(color.rgb(97, 100, 107));
   const markers: MarkerData[] = [];
   let prevBullTrend = false;
+  const flags: boolean[][] = [[], [], [], [], []];
 
   for (let i = 0; i < n; i++) {
     const { open, high, low, close, time } = bars[i];
@@ -265,6 +278,13 @@ export function calculate(
       positionType = 'SHORT';
       showSellSignal = true;
     }
+
+    // alertcondition(showBuySignal) / (showSellSignal) / (tpFinalHit) / (slHit) / (invalidated)
+    flags[0].push(showBuySignal);
+    flags[1].push(showSellSignal);
+    flags[2].push(tpFinalHit);
+    flags[3].push(slHit);
+    flags[4].push(invalidated);
 
     // Shapes
     if (showBuySignal) {
@@ -387,6 +407,7 @@ export function calculate(
       time1: T(l.x1), price1: l.y1, time2: T(l.x2), price2: l.y2, color: l.color, width: l.width, style: l.style,
     })),
     tables: n > 0 ? [table] : [],
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
 
@@ -396,4 +417,5 @@ export const BuySellSignalKelfry98 = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

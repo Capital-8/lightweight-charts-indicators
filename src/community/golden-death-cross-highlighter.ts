@@ -4,6 +4,7 @@
  * A fast and a slow SMA of the close. A golden cross (fast crosses above slow) starts the golden state, a death cross
  * (fast crosses below slow) starts the death state. The background is yellow in the golden state when the close is
  * above both MAs and red in the death state when the close is below both MAs (transparency from the inputs).
+ * Alerts (alertcondition, `alerts` of the result): 'Golden Cross' and 'Death Cross', on the bars of the crosses.
  *
  * Reference: "Golden/Death Cross Highlighter" by dripvesting
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -11,6 +12,7 @@
 
 import { ta, Series, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar } from 'oakscriptjs';
 import type { BgColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type GoldenDeathCrossHighlighterLineStyle = 'Solid' | 'Dashed' | 'Dotted';
 
@@ -82,7 +84,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<GoldenDeathCrossHighlighterInputs> = {},
-): IndicatorResult & { bgColors: BgColorData[] } {
+): IndicatorResult & { bgColors: BgColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
   const close = Series.fromArray(bars, bars.map((b) => b.close));
@@ -112,7 +114,6 @@ export function calculate(
     else if (bearishCondition) bgColors.push({ time: b.time, color: deathColor });
   });
 
-  // alertcondition(goldenCross, "Golden Cross") and alertcondition(deathCross, "Death Cross"): no output
   return {
     metadata: { title: metadata.title, shorttitle: metadata.shortTitle, overlay: metadata.overlay },
     plots: {
@@ -120,8 +121,16 @@ export function calculate(
       plot1: bars.map((b, i) => ({ time: b.time, value: slowMA[i], color: cfg.slowMAColor })),
     },
     bgColors,
+    // alertcondition(goldenCross, "Golden Cross") / alertcondition(deathCross, "Death Cross")
+    alerts: alertStates(alertConditions, bars, [goldenCross.map((v) => !!v), deathCross.map((v) => !!v)]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Golden Cross', message: 'Golden Cross Detected!' },
+  { id: 'alert1', title: 'Death Cross', message: 'Death Cross Detected!' },
+];
 
 export const GoldenDeathCrossHighlighter = {
   calculate,
@@ -129,4 +138,5 @@ export const GoldenDeathCrossHighlighter = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

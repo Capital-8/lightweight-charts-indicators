@@ -7,6 +7,8 @@
  * The centre and the four bands are smoothed with an EMA. The outer bands get five gradient zones towards the
  * centre (fills of decreasing opacity); the inner bands are filled together. Bars are green when the close and the
  * previous close are above the smoothed centre, red otherwise.
+ * Alerts (alertcondition, `alerts` of the result): 'Price Crosses Upper Outer Band' / 'Price Crosses Lower Outer Band',
+ * the source crossing over the smoothed upper outer band / under the smoothed lower outer band.
  *
  * Reference: "Quantile Regression Bands [BackQuant]" by BackQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -17,6 +19,13 @@ import {
   ta, Series, getSourceSeries, color, callsite, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType,
 } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, crossedOver, crossedUnder, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Price Crosses Upper Outer Band', message: '{{exchange}}:{{ticker}} Crossed above the upper outer quantile band.' },
+  { id: 'alert1', title: 'Price Crosses Lower Outer Band', message: '{{exchange}}:{{ticker}} Crossed below the lower outer quantile band.' },
+];
 
 export interface QuantileRegressionBandsInputs {
   /** Price source of the regression */
@@ -118,7 +127,7 @@ const gt = (a: number, b: number) => a - b > 1e-10;
 export function calculate(
   bars: Bar[],
   inputs: Partial<QuantileRegressionBandsInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const { length } = cfg;
@@ -236,6 +245,8 @@ export function calculate(
     plots,
     fills,
     barColors,
+    // alertcondition(ta.crossover(src, upper_outer_sm)) / alertcondition(ta.crossunder(src, lower_outer_sm))
+    alerts: alertStates(alertConditions, bars, [crossedOver(src, upperOuterSm), crossedUnder(src, lowerOuterSm)]),
   };
 }
 
@@ -245,4 +256,5 @@ export const QuantileRegressionBands = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

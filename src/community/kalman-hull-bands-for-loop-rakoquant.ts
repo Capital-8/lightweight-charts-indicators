@@ -7,6 +7,9 @@
  * when the close crosses over the upper band and bear when it crosses under the lower band. The active rail
  * (the upper band in a bear regime, the lower band in a bull regime) is drawn in neon colours, the other rail
  * faint; the baseline and the optional candle paint take the regime colour.
+ * Alerts (alertcondition, `alerts` of the result): 'RakoQuant Bull Breakout' / 'RakoQuant Bear Breakout' on the bars
+ * where the close crosses over the upper band / under the lower band, confirmed bars only (an unconfirmed last bar:
+ * `lastBarConfirmed` of the optional chart context, third argument).
  *
  * Reference: "RakoQuant | Kalman Hull Bands For Loop" by RakoQuant
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -15,6 +18,8 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData, PlotCandleData } from '../types';
+import { lastBarConfirmedOf, type ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface KalmanHullBandsForLoopRakoquantInputs {
   src: SourceType;
@@ -86,7 +91,9 @@ type Point = { time: number; value: number; color: string };
 export function calculate(
   bars: Bar[],
   inputs: Partial<KalmanHullBandsForLoopRakoquantInputs> = {},
-): IndicatorResult & { barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]> } {
+  chart?: ChartContext,
+): IndicatorResult & { barColors: BarColorData[]; plotCandles: Record<string, PlotCandleData[]> }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -140,6 +147,8 @@ export function calculate(
   // ta.crossover / ta.crossunder: exact comparisons with the last bar where both values were not na
   let prevUp: [number, number] | null = null;
   let prevLo: [number, number] | null = null;
+  const buyFlags: boolean[] = [];
+  const sellFlags: boolean[] = [];
   for (let i = 0; i < n; i++) {
     const b = bars[i];
     const upper = baseline[i] + cfg.mult * sd[i];
@@ -156,6 +165,10 @@ export function calculate(
     }
     if (bullBreak) state = 1;
     else if (bearBreak) state = -1;
+    // buyAlert = barstate.isconfirmed and bullBreak; sellAlert = barstate.isconfirmed and bearBreak
+    const confirmed = i < n - 1 || lastBarConfirmedOf(chart);
+    buyFlags.push(confirmed && bullBreak);
+    sellFlags.push(confirmed && bearBreak);
 
     const activeCol = state === 1 ? BULL_COL : state === -1 ? BEAR_COL : NEUT_COL;
     plot0.push({ time: b.time, value: state === -1 ? upper : NaN, color: BEAR_COL });
@@ -176,8 +189,15 @@ export function calculate(
     plots: { plot0, plot1, plot2, plot3, plot4 },
     barColors,
     plotCandles: { candles },
+    alerts: alertStates(alertConditions, bars, [buyFlags, sellFlags]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RakoQuant Bull Breakout', message: 'RakoQuant Kalman Hull Rail Bands turned BULL {{exchange}}:{{ticker}} (close={{close}})' },
+  { id: 'alert1', title: 'RakoQuant Bear Breakout', message: 'RakoQuant Kalman Hull Rail Bands turned BEAR {{exchange}}:{{ticker}} (close={{close}})' },
+];
 
 export const KalmanHullBandsForLoopRakoquant = {
   calculate,
@@ -185,4 +205,5 @@ export const KalmanHullBandsForLoopRakoquant = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

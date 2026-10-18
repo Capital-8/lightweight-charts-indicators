@@ -13,6 +13,9 @@
  * each side, whose edge follows the close into the gap. The dashboard shows the number of gaps and the percentage of
  * mitigated gaps. At most 500 boxes and 500 lines are kept.
  *
+ * Alerts (alertcondition, `alerts` of the result): 'Bullish FVG' / 'Bearish FVG' on the bars where a new gap is
+ * counted, 'Bullish FVG Mitigation' / 'Bearish FVG Mitigation' on the bars where a gap of that side is mitigated.
+ *
  * Timeframe: the higher-timeframe bars are built from the chart bars with the calendar rule of the period
  * helper (see anchor-period.ts for its limits). The values of a higher-timeframe bar appear on the chart bar that
  * completes it: on symbols that trade every day, a bar whose close reaches the end of the period, else the first bar
@@ -40,6 +43,7 @@ import {
 import type { BoxData, LineDrawingData, TableData, TableCellData } from '../types';
 import { chartTimeframe, higherTimeframeBars } from '../anchor-period';
 import type { ChartContext } from '../chart-context';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export interface FairValueGapLuxalgoInputs {
   /** Smallest gap size, in percent */
@@ -143,7 +147,8 @@ export function calculate(
   bars: Bar[],
   inputs: Partial<FairValueGapLuxalgoInputs> = {},
   chart?: ChartContext,
-): Omit<IndicatorResult, 'boxes' | 'lines' | 'tables'> & { boxes: BoxData[]; lines: LineDrawingData[]; tables: TableData[] } {
+): Omit<IndicatorResult, 'boxes' | 'lines' | 'tables'> & { boxes: BoxData[]; lines: LineDrawingData[]; tables: TableData[] }
+  & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const last = n - 1;
@@ -203,8 +208,11 @@ export function calculate(
   const plot1: number[] = [];
   const plot2: number[] = [];
   const plot3: number[] = [];
+  // alertcondition(bull_count > bull_count[1]) / bear_count / bull_mitigated / bear_mitigated (na on bar 0: false)
+  const flags: boolean[][] = [[], [], [], []];
 
   for (let i = 0; i < n; i++) {
+    const before = [bullCount, bearCount, bullMitigated, bearMitigated];
     setDrawingBar(i, i === last);
     const close = bars[i].close;
     const time = bars[i].time;
@@ -273,6 +281,7 @@ export function calculate(
     plot1.push(minBull);
     plot2.push(maxBear);
     plot3.push(minBear);
+    [bullCount, bearCount, bullMitigated, bearMitigated].forEach((v, k) => flags[k].push(i > 0 && v > before[k]));
   }
 
   // Dashboard: the table exists also when it is not shown (no cell)
@@ -317,8 +326,17 @@ export function calculate(
     boxes: drawings.boxes ?? [],
     lines: drawings.lines ?? [],
     tables: n > 0 ? [table] : [],
+    alerts: alertStates(alertConditions, bars, flags),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'Bullish FVG', message: 'Bullish FVG detected' },
+  { id: 'alert1', title: 'Bearish FVG', message: 'Bearish FVG detected' },
+  { id: 'alert2', title: 'Bullish FVG Mitigation', message: 'Bullish FVG mitigated' },
+  { id: 'alert3', title: 'Bearish FVG Mitigation', message: 'Bearish FVG mitigated' },
+];
 
 export const FairValueGapLuxalgo = {
   calculate,
@@ -326,4 +344,5 @@ export const FairValueGapLuxalgo = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };

@@ -6,6 +6,8 @@
  * sensitivity. ATR bands around this value push a trailing trend line: it falls to the upper band when the band is
  * below it and rises to the lower band when the band is above it. The trend is bullish after a rise of the line and
  * bearish after a fall; it colours the line, a gradient fill between the line and hl2, and optionally the bars.
+ * Alerts (alertcondition, `alerts` of the result): 'RSI Trend Bullish' / 'RSI Trend Bearish', true on the bar where
+ * the trend turns bullish / bearish (both are off until the line first rises or falls).
  *
  * Reference: "RSI Trend Navigator [QuantAlgo]" by QuantAlgo
  * Licence: Mozilla Public License 2.0, as the original Pine script (https://mozilla.org/MPL/2.0/).
@@ -14,6 +16,7 @@
 
 import { ta, Series, getSourceSeries, color, type IndicatorResult, type InputConfig, type PlotConfig, type Bar, type SourceType } from 'oakscriptjs';
 import type { BarColorData } from '../types';
+import { alertStates, type AlertConditionDecl, type AlertConditionState } from '../alert-states';
 
 export type RSITrendNavigatorPreset = 'Classic' | 'Aqua' | 'Cosmic' | 'Custom';
 
@@ -92,7 +95,7 @@ const lt = (a: number, b: number) => b - a > EPS;
 export function calculate(
   bars: Bar[],
   inputs: Partial<RSITrendNavigatorInputs> = {},
-): IndicatorResult & { barColors: BarColorData[] } {
+): IndicatorResult & { barColors: BarColorData[] } & { alerts: AlertConditionState[] } {
   const cfg = { ...defaultInputs, ...inputs };
   const n = bars.length;
   const A = (s: Series) => s.toArray().map((v) => v ?? NaN);
@@ -117,6 +120,10 @@ export function calculate(
   let adaptiveTrend = NaN; // var float adaptiveTrend = source (bar 0), then the update below on every bar
   let line = NaN; // var float trendLine = rsiTrendValue
   let isBullish = false;
+  let isBearish = false;
+  // alertcondition(isBullish and not isBullish[1]) / alertcondition(isBearish and not isBearish[1])
+  const bullTurn: boolean[] = new Array(n).fill(false);
+  const bearTurn: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
     const s = src[i];
     const normalizedRSI = (smoothedRSI[i] - 50) / 50;
@@ -137,8 +144,12 @@ export function calculate(
     trendLine[i] = line;
 
     const prevLine = i > 0 ? trendLine[i - 1] : NaN;
-    if (gt(line, prevLine)) isBullish = true;
-    else if (lt(line, prevLine)) isBullish = false;
+    const wasBullish = isBullish;
+    const wasBearish = isBearish;
+    if (gt(line, prevLine)) { isBullish = true; isBearish = false; }
+    else if (lt(line, prevLine)) { isBullish = false; isBearish = true; }
+    bullTurn[i] = isBullish && !wasBullish;
+    bearTurn[i] = isBearish && !wasBearish;
     currentTrend[i] = isBullish ? bullCol : bearCol;
   }
 
@@ -168,8 +179,15 @@ export function calculate(
       },
     }],
     barColors,
+    alerts: alertStates(alertConditions, bars, [bullTurn, bearTurn]),
   };
 }
+
+/** The original's alertconditions */
+export const alertConditions: AlertConditionDecl[] = [
+  { id: 'alert0', title: 'RSI Trend Bullish', message: 'RSI Trend Bullish Signal {{exchange}}:{{ticker}}' },
+  { id: 'alert1', title: 'RSI Trend Bearish', message: 'RSI Trend Bearish Signal {{exchange}}:{{ticker}}' },
+];
 
 export const RSITrendNavigator = {
   calculate,
@@ -177,4 +195,5 @@ export const RSITrendNavigator = {
   defaultInputs,
   inputConfig,
   plotConfig,
+  alertConditions,
 };
