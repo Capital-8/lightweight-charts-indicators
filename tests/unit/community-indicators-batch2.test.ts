@@ -58,7 +58,6 @@ import {
   FibonacciLevels,
   FibonacciZone,
   FollowLine,
-  ForexSessions,
   FXSniperT3CCI,
   HalfTrend,
   HawkEyeVolume,
@@ -86,7 +85,6 @@ import {
   MAShift,
   MatrixSeries,
   MavilimW,
-  MFIRSIBollingerBands,
   ModifiedHeikinAshi,
   MultipleMA,
   MurreysOscillator,
@@ -133,7 +131,6 @@ import {
   SuperSupertrend,
   SupertrendChannels,
   SwingTradeSignals,
-  TDIHLCTrix,
   TDMacd,
   ThreeMovingAverages,
   TillsonT3,
@@ -154,7 +151,6 @@ import {
   VolumeColoredBars,
   VolumeFlowV3,
   VolumeLinRegTrend,
-  VWMACDSZO,
   VWMACDV2,
   WaddahAttarExplosion,
   WeisWaveVolume,
@@ -965,20 +961,6 @@ describe('FollowLine', () => {
   });
 });
 
-describe('ForexSessions', () => {
-  const result = ForexSessions.calculate(bars);
-
-  it('returns correct shape', () => {
-    assertShape(result, ['plot0'], false);
-  });
-
-  it('produces finite values after warmup', () => {
-    const vals = validValues(result);
-    expect(vals.length).toBeGreaterThan(0);
-    vals.forEach((v: number) => expect(isFinite(v)).toBe(true));
-  });
-});
-
 describe('FXSniperT3CCI', () => {
   const result = FXSniperT3CCI.calculate(bars);
 
@@ -1355,20 +1337,6 @@ describe('MavilimW', () => {
 
   it('returns correct shape', () => {
     assertShape(result, ['plot0'], true);
-  });
-
-  it('produces finite values after warmup', () => {
-    const vals = validValues(result);
-    expect(vals.length).toBeGreaterThan(0);
-    vals.forEach((v: number) => expect(isFinite(v)).toBe(true));
-  });
-});
-
-describe('MFIRSIBollingerBands', () => {
-  const result = MFIRSIBollingerBands.calculate(bars);
-
-  it('returns correct shape', () => {
-    assertShape(result, ['plot0', 'plot1', 'plot2', 'plot3'], false);
   });
 
   it('produces finite values after warmup', () => {
@@ -2036,20 +2004,6 @@ describe('SwingTradeSignals', () => {
   });
 });
 
-describe('TDIHLCTrix', () => {
-  const result = TDIHLCTrix.calculate(bars);
-
-  it('returns correct shape', () => {
-    assertShape(result, ['plot0', 'plot1', 'plot2', 'plot3', 'plot4'], false);
-  });
-
-  it('produces finite values after warmup', () => {
-    const vals = validValues(result);
-    expect(vals.length).toBeGreaterThan(0);
-    vals.forEach((v: number) => expect(isFinite(v)).toBe(true));
-  });
-});
-
 describe('TDMacd', () => {
   const result = TDMacd.calculate(bars);
 
@@ -2322,20 +2276,6 @@ describe('VolumeLinRegTrend', () => {
 
   it('returns correct shape', () => {
     assertShape(result, ['plot0', 'plot1'], false);
-  });
-
-  it('produces finite values after warmup', () => {
-    const vals = validValues(result);
-    expect(vals.length).toBeGreaterThan(0);
-    vals.forEach((v: number) => expect(isFinite(v)).toBe(true));
-  });
-});
-
-describe('VWMACDSZO', () => {
-  const result = VWMACDSZO.calculate(bars);
-
-  it('returns correct shape', () => {
-    assertShape(result, ['plot0', 'plot1', 'plot2', 'plot3'], false);
   });
 
   it('produces finite values after warmup', () => {

@@ -126,22 +126,6 @@ describe('Predictive Channels', () => {
   });
 });
 
-import { VolumeBarBreakout } from '../../src/community/volume-bar-breakout';
-describe('Volume Bar Breakout', () => {
-  it('should return valid result structure', () => {
-    const result = VolumeBarBreakout.calculate(bars);
-    expect(result).toBeDefined();
-    expect(result.plots).toBeDefined();
-    expect(result.metadata.overlay).toBe(true);
-  });
-  it('should produce price-level values', () => {
-    const result = VolumeBarBreakout.calculate(bars);
-    const keys = Object.keys(result.plots);
-    expect(keys.length).toBeGreaterThanOrEqual(2);
-    const vals = result.plots[keys[0]].filter((v: any) => !isNaN(v.value));
-    expect(vals.length).toBeGreaterThan(0);
-  });
-});
 
 // --- Batch B ---
 

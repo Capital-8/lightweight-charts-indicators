@@ -1035,9 +1035,6 @@ export { FibonacciZone, calculate as calculateFibonacciZone } from './community/
 export type { FibonacciZoneInputs } from './community/fibonacci-zone';
 
 // ForexSessions
-import * as forexSessionsIndicator from './community/forex-sessions';
-export { ForexSessions, calculate as calculateForexSessions } from './community/forex-sessions';
-export type { ForexSessionsInputs } from './community/forex-sessions';
 
 // FXSniperT3CCI
 import * as fxSniperT3CciIndicator from './community/fx-sniper-t3-cci';
@@ -1155,9 +1152,6 @@ export { MatrixSeries, calculate as calculateMatrixSeries } from './community/ma
 export type { MatrixSeriesInputs } from './community/matrix-series';
 
 // MFIRSIBollingerBands
-import * as mfiRsiBbIndicator from './community/mfi-rsi-bb';
-export { MFIRSIBollingerBands, calculate as calculateMFIRSIBollingerBands } from './community/mfi-rsi-bb';
-export type { MFIRSIBollingerBandsInputs } from './community/mfi-rsi-bb';
 
 // ModifiedHeikinAshi
 import * as modifiedHeikinAshiIndicator from './community/modified-heikin-ashi';
@@ -1360,9 +1354,6 @@ export { SwingTradeSignals, calculate as calculateSwingTradeSignals } from './co
 export type { SwingTradeSignalsInputs } from './community/swing-trade-signals';
 
 // TDIHLCTrix
-import * as tdiHlcTrixIndicator from './community/tdi-hlc-trix';
-export { TDIHLCTrix, calculate as calculateTDIHLCTrix } from './community/tdi-hlc-trix';
-export type { TDIHLCTrixInputs } from './community/tdi-hlc-trix';
 
 // TDMacd
 import * as tdMacdIndicator from './community/td-macd';
@@ -1450,9 +1441,6 @@ export { VolumeLinRegTrend, calculate as calculateVolumeLinRegTrend } from './co
 export type { VolumeLinRegTrendInputs } from './community/volume-linreg-trend';
 
 // VWMACDSZO
-import * as vwmacdSzoIndicator from './community/vwmacd-szo';
-export { VWMACDSZO, calculate as calculateVWMACDSZO } from './community/vwmacd-szo';
-export type { VWMACDSZOInputs } from './community/vwmacd-szo';
 
 // VWMACDV2
 import * as vwMacdV2Indicator from './community/vw-macd-v2';
@@ -1638,7 +1626,6 @@ import * as heatmapVolumeIndicator from './community/heatmap-volume';
 import * as betterVolumeIndicator from './community/better-volume';
 import * as volumeDivergenceIndicator from './community/volume-divergence';
 import * as predictiveChannelsIndicator from './community/predictive-channels';
-import * as volumeBarBreakoutIndicator from './community/volume-bar-breakout';
 import * as redkMomentumBarsIndicator from './community/redk-momentum-bars';
 import * as vumanChuSwingIndicator from './community/vumanchu-swing';
 import * as tweezersKangarooTailIndicator from './community/tweezers-kangaroo-tail';
@@ -1696,14 +1683,12 @@ import * as supportResistanceChannelsIndicator from './community/support-resista
 import * as autoTrendlineIndicator from './community/auto-trendline';
 import * as liquiditySweepsIndicator from './community/liquidity-sweeps';
 import * as priceVolumeProfileIndicator from './community/price-volume-profile';
-import * as idealEntryPointIndicator from './community/ideal-entry-point';
 
 export { AutoFiboIndicators } from './community/auto-fibo-indicators';
 export { HeatmapVolume } from './community/heatmap-volume';
 export { BetterVolume } from './community/better-volume';
 export { VolumeDivergence } from './community/volume-divergence';
 export { PredictiveChannels } from './community/predictive-channels';
-export { VolumeBarBreakout } from './community/volume-bar-breakout';
 export { RedKMomentumBars } from './community/redk-momentum-bars';
 export { VuManChuSwing } from './community/vumanchu-swing';
 export { TweezersKangarooTail } from './community/tweezers-kangaroo-tail';
@@ -1726,7 +1711,6 @@ export type { HeatmapVolumeInputs } from './community/heatmap-volume';
 export type { BetterVolumeInputs } from './community/better-volume';
 export type { VolumeDivergenceInputs } from './community/volume-divergence';
 export type { PredictiveChannelsInputs } from './community/predictive-channels';
-export type { VolumeBarBreakoutInputs } from './community/volume-bar-breakout';
 export type { RedKMomentumBarsInputs } from './community/redk-momentum-bars';
 export type { VuManChuSwingInputs } from './community/vumanchu-swing';
 export type { TweezersKangarooTailInputs } from './community/tweezers-kangaroo-tail';
@@ -9855,19 +9839,6 @@ const registryPart1: IndicatorRegistryEntry[] = [
     calculate: fibonacciZoneIndicator.calculate,
   },
   {
-    id: 'forex-sessions',
-    group: 'community',
-    name: 'Forex Sessions',
-    shortName: 'FXSessions',
-    category: 'Oscillators',
-    overlay: false,
-    metadata: forexSessionsIndicator.metadata,
-    inputConfig: forexSessionsIndicator.inputConfig as InputConfig[],
-    plotConfig: forexSessionsIndicator.plotConfig as PlotConfig[],
-    defaultInputs: { ...forexSessionsIndicator.defaultInputs },
-    calculate: forexSessionsIndicator.calculate,
-  },
-  {
     id: 'fx-sniper-t3-cci',
     group: 'community',
     name: 'FX Sniper T3-CCI',
@@ -10165,19 +10136,6 @@ const registryPart1: IndicatorRegistryEntry[] = [
     plotConfig: matrixSeriesIndicator.plotConfig as PlotConfig[],
     defaultInputs: { ...matrixSeriesIndicator.defaultInputs },
     calculate: matrixSeriesIndicator.calculate,
-  },
-  {
-    id: 'mfi-rsi-bb',
-    group: 'community',
-    name: 'MFI/RSI Bollinger Bands',
-    shortName: 'MFIRSBB',
-    category: 'Oscillators',
-    overlay: false,
-    metadata: mfiRsiBbIndicator.metadata,
-    inputConfig: mfiRsiBbIndicator.inputConfig as InputConfig[],
-    plotConfig: mfiRsiBbIndicator.plotConfig as PlotConfig[],
-    defaultInputs: { ...mfiRsiBbIndicator.defaultInputs },
-    calculate: mfiRsiBbIndicator.calculate,
   },
   {
     id: 'modified-heikin-ashi',
@@ -10706,19 +10664,6 @@ const registryPart2: IndicatorRegistryEntry[] = [
     calculate: swingTradeSignalsIndicator.calculate,
   },
   {
-    id: 'tdi-hlc-trix',
-    group: 'community',
-    name: 'Traders Dynamic Index',
-    shortName: 'TDI',
-    category: 'Oscillators',
-    overlay: false,
-    metadata: tdiHlcTrixIndicator.metadata,
-    inputConfig: tdiHlcTrixIndicator.inputConfig as InputConfig[],
-    plotConfig: tdiHlcTrixIndicator.plotConfig as PlotConfig[],
-    defaultInputs: { ...tdiHlcTrixIndicator.defaultInputs },
-    calculate: tdiHlcTrixIndicator.calculate,
-  },
-  {
     id: 'td-macd',
     group: 'community',
     name: 'Tom DeMark MACD',
@@ -10938,19 +10883,6 @@ const registryPart2: IndicatorRegistryEntry[] = [
     plotConfig: volumeLinregTrendIndicator.plotConfig as PlotConfig[],
     defaultInputs: { ...volumeLinregTrendIndicator.defaultInputs },
     calculate: volumeLinregTrendIndicator.calculate,
-  },
-  {
-    id: 'vwmacd-szo',
-    group: 'community',
-    name: 'VWMACD & SZO',
-    shortName: 'VWMACDSZO',
-    category: 'Momentum',
-    overlay: false,
-    metadata: vwmacdSzoIndicator.metadata,
-    inputConfig: vwmacdSzoIndicator.inputConfig as InputConfig[],
-    plotConfig: vwmacdSzoIndicator.plotConfig as PlotConfig[],
-    defaultInputs: { ...vwmacdSzoIndicator.defaultInputs },
-    calculate: vwmacdSzoIndicator.calculate,
   },
   {
     id: 'vw-macd-v2',
@@ -11703,19 +11635,6 @@ const registryPart2: IndicatorRegistryEntry[] = [
     calculate: predictiveChannelsIndicator.calculate,
   },
   {
-    id: 'volume-bar-breakout',
-    group: 'community',
-    name: 'Volume Bar Breakout',
-    shortName: 'VolBreak',
-    category: 'Volume',
-    overlay: true,
-    metadata: volumeBarBreakoutIndicator.metadata,
-    inputConfig: volumeBarBreakoutIndicator.inputConfig as InputConfig[],
-    plotConfig: volumeBarBreakoutIndicator.plotConfig as PlotConfig[],
-    defaultInputs: { ...volumeBarBreakoutIndicator.defaultInputs },
-    calculate: volumeBarBreakoutIndicator.calculate,
-  },
-  {
     id: 'redk-momentum-bars',
     group: 'community',
     name: 'RedK Momentum Bars',
@@ -12458,19 +12377,6 @@ const registryPart2: IndicatorRegistryEntry[] = [
     plotConfig: priceVolumeProfileIndicator.plotConfig as PlotConfig[],
     defaultInputs: { ...priceVolumeProfileIndicator.defaultInputs },
     calculate: priceVolumeProfileIndicator.calculate,
-  },
-  {
-    id: 'ideal-entry-point',
-    group: 'community',
-    name: 'Ideal Entry Point',
-    shortName: 'IEP',
-    category: 'Trend',
-    overlay: true,
-    metadata: idealEntryPointIndicator.metadata,
-    inputConfig: idealEntryPointIndicator.inputConfig as InputConfig[],
-    plotConfig: idealEntryPointIndicator.plotConfig as PlotConfig[],
-    defaultInputs: { ...idealEntryPointIndicator.defaultInputs },
-    calculate: idealEntryPointIndicator.calculate,
   },
   {
     id: 'trend-filter',

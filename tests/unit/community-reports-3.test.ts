@@ -1,13 +1,10 @@
 /**
  * Community ports re-ported from their originals (reports batch 3): outputs (plot ids / titles, marker ids, fills),
  * the main series recomputed from the original's formulas on a seeded walk, and the alert conditions.
- * forex-sessions and mfi-rsi-bb are not re-ported: the spec original is another script than the one they port.
  */
 import { describe, expect, it } from 'vitest';
 import type { Bar } from 'oakscriptjs';
-import * as fx from '../../src/community/forex-sessions';
 import * as gli from '../../src/community/global-liquidity-index';
-import * as mfi from '../../src/community/mfi-rsi-bb';
 import * as mlst from '../../src/community/ml-adaptive-supertrend';
 import { makeBars } from './community-top100.helpers';
 import { fixtureContext } from './community-other-symbols.helpers';
@@ -73,19 +70,6 @@ function atr(list: Bar[], len: number): number[] {
     : Math.max(b.high - b.low, Math.abs(b.high - list[i - 1].close), Math.abs(b.low - list[i - 1].close))));
   return rma(tr, len);
 }
-
-describe('forex-sessions', () => {
-  it('is not re-ported: the spec original (CM_Forex-Sessions-Highlight_V1) is another script than the port', () => {
-    expect(fx.metadata.title).not.toBe('CM_Forex-Sessions-Highlight_V1');
-    expect((fx as Record<string, unknown>).alertConditions).toBeUndefined();
-  });
-});
-
-describe('mfi-rsi-bb', () => {
-  it('is not re-ported: the spec original (RSI/MFI with Volatility Bands [LazyBear]) is another script', () => {
-    expect(mfi.metadata.title).not.toBe('RSI/MFI with Volatility Bands [LazyBear]');
-  });
-});
 
 describe('global-liquidity-index', () => {
   const list = makeBars(1500, 86400);
